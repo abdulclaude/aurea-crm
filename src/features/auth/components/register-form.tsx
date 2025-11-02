@@ -95,6 +95,12 @@ const RegisterForm = () => {
                     type="button"
                     disabled={isPending}
                   >
+                    <Image
+                      src="/logos/github.svg"
+                      height={16}
+                      width={16}
+                      alt="github"
+                    />
                     Continue with Github
                   </Button>
 
@@ -104,6 +110,12 @@ const RegisterForm = () => {
                     type="button"
                     disabled={isPending}
                   >
+                    <Image
+                      src="/logos/google.svg"
+                      height={16}
+                      width={16}
+                      alt="google"
+                    />
                     Continue with Google
                   </Button>
                 </div>
