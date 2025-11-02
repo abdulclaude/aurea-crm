@@ -7,7 +7,12 @@ const Client = () => {
   const trpc = useTRPC();
   const { data: users } = useSuspenseQuery(trpc.getUsers.queryOptions());
 
-  return <div> Client component - {JSON.stringify(users)} </div>;
+  return (
+    <div>
+      {" "}
+      Client component - {users ? JSON.stringify(users) : "No users..."}{" "}
+    </div>
+  );
 };
 
 export default Client;
