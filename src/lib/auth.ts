@@ -3,6 +3,16 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 
 import prisma from "./db";
 
+import {
+  polar,
+  checkout,
+  portal,
+  usage,
+  webhooks,
+} from "@polar-sh/better-auth";
+import { Polar } from "@polar-sh/sdk";
+import { polarClient } from "@/lib/polar";
+
 export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
@@ -10,4 +20,23 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql", // or "mysql", "postgresql", ...etc
   }),
+  plugins: [
+    polar({
+      client: polarClient,
+      createCustomerOnSignUp: true,
+      use: [
+        checkout({
+          products: [
+            {
+              productId: "ea5b8430-6bb7-4cb1-a353-0effb982f539",
+              slug: "pro", // Custom slug for easy reference in Checkout URL, e.g. /checkout/Aurea-CRM
+            },
+          ],
+          successUrl: process.env.POLAR_SUCCESS_URL,
+          authenticatedUsersOnly: true,
+        }),
+        portal(),
+      ],
+    }),
+  ],
 });
