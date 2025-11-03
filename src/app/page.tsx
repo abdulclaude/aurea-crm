@@ -21,13 +21,28 @@ const Page = () => {
     })
   );
 
+  const testAI = useMutation(
+    trpc.testAI.mutationOptions({
+      onSuccess: ({ message }) => {
+        toast.success(`Success: ${message}`);
+      },
+    })
+  );
+
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       Protected server component {JSON.stringify(data)}{" "}
-      <Button disabled={create.isPending} onClick={() => create.mutate()}>
-        {" "}
-        Create workflow
-      </Button>
+      <div className="flex gap-2">
+        <Button disabled={create.isPending} onClick={() => create.mutate()}>
+          {" "}
+          Create workflow
+        </Button>
+
+        <Button disabled={testAI.isPending} onClick={() => testAI.mutate()}>
+          {" "}
+          Test AI
+        </Button>
+      </div>
     </div>
   );
 };
