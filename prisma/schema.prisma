@@ -67,3 +67,8 @@ model Verification {
 
   @@map("verification")
 }
+
+model Workflows {
+  id String @id @default(cuid())
+  name String
+}
