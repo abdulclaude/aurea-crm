@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 
 const Login = async () => {
-  // await requireUnauth();
+  await requireUnauth();
 
   return <LoginForm />;
 };
