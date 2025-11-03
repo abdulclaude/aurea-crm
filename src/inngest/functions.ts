@@ -6,6 +6,10 @@ import { inngest } from "./client";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 
+// Sentry
+
+import * as Sentry from "@sentry/nextjs";
+
 const google = createGoogleGenerativeAI();
 
 export const execute = inngest.createFunction(
@@ -16,6 +20,11 @@ export const execute = inngest.createFunction(
       model: google("gemini-2.5-flash"),
       system: "You are a helpful assistant.",
       prompt: "What is 2 + 2?",
+      experimental_telemetry: {
+        isEnabled: true,
+        recordInputs: true,
+        recordOutputs: true,
+      },
     });
 
     return steps;

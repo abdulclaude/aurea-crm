@@ -7,6 +7,8 @@ import { caller } from "@/trpc/server";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import * as Sentry from "@sentry/nextjs";
+
 const Page = () => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -24,6 +26,10 @@ const Page = () => {
   const testAI = useMutation(
     trpc.testAI.mutationOptions({
       onSuccess: ({ message }) => {
+        Sentry.logger.info("User queued a successful workflow.", {
+          log_source: "queue_workflow",
+        });
+
         toast.success(`Success: ${message}`);
       },
     })
