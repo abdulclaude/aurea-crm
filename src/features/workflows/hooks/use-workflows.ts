@@ -20,8 +20,8 @@ export const useSuspenseWorkflows = () => {
 // hook to create a new workflow
 
 export const useCreateWorkflow = () => {
-  const queryClient = useQueryClient();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
   return useMutation(
     trpc.workflows.create.mutationOptions({
@@ -32,6 +32,29 @@ export const useCreateWorkflow = () => {
       },
       onError: (error) => {
         toast.error(`Failed to create workflow: ${error.message}`);
+      },
+    })
+  );
+};
+
+// hook to remove a workflow
+
+export const useRemoveWorkflow = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    trpc.workflows.remove.mutationOptions({
+      onSuccess: (data) => {
+        toast.success(`Workflow ${data.name} removed.`);
+
+        // checking the WHOLE cache and finding the difference without the id
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+
+        // below is a better option, you're getting the actual item you want to invalidate from the cache
+        // queryClient.invalidateQueries(
+        //   trpc.workflows.getOne.queryFilter({ id: data.id })
+        // );
       },
     })
   );
