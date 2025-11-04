@@ -10,10 +10,18 @@ import WorkflowsList, {
 } from "@/features/workflows/components/workflows";
 import { prefetchWorkflows } from "@/features/workflows/server/prefetch";
 
-const Page = async () => {
+import { type SearchParams } from "nuqs/server";
+import { workflowsParamsLoader } from "@/features/workflows/server/params-loader";
+
+type Props = {
+  searchParams: Promise<SearchParams>;
+};
+
+const Page: React.FC<Props> = async ({ searchParams }) => {
   await requireAuth();
 
-  prefetchWorkflows();
+  const params = await workflowsParamsLoader(searchParams);
+  prefetchWorkflows(params);
 
   return (
     <WorkflowsContainer>
