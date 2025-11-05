@@ -202,11 +202,11 @@ export const LoadingView: React.FC<StateViewProps> = ({ message }) => {
 
 export const ErrorView: React.FC<StateViewProps> = ({ message }) => {
   return (
-    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-2">
+    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-1.5">
       <AlertTriangleIcon className="size-6 text-primary" />
-      <p className="text-sm text-muted-foreground font-semibold">
+      <div className="text-sm text-muted-foreground font-semibold">
         {!!message && <p className="text-sm text-primary">{message}</p>}
-      </p>
+      </div>
     </div>
   );
 };
