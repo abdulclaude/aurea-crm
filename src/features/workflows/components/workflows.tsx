@@ -16,7 +16,7 @@ import {
   EntitySearch,
   ErrorView,
   LoadingView,
-} from "@/components/entity-components";
+} from "@/components/react-flow/entity-components";
 
 import {
   useCreateWorkflow,
