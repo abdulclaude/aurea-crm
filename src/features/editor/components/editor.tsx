@@ -51,6 +51,8 @@ const initialNodes = [
 import { BaseEdge } from "@xyflow/react";
 import { nodeComponents } from "@/config/node-components";
 import { AddNodeButton } from "./add-node-button";
+import { useSetAtom } from "jotai";
+import { editorAtom } from "../store/atoms";
 
 export function CustomEdge({
   id,
@@ -111,6 +113,8 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
     []
   );
 
+  const setEditor = useSetAtom(editorAtom);
+
   return (
     <div className="size-full">
       <ReactFlow
@@ -121,7 +125,13 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         nodeTypes={nodeComponents}
+        onInit={setEditor}
         fitView
+        snapGrid={[10, 10]}
+        snapToGrid
+        panOnScroll
+        panOnDrag={false}
+        selectionOnDrag
         proOptions={{
           hideAttribution: true,
         }}

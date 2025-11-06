@@ -113,7 +113,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         side="right"
         className="w-full sm:max-w-md overflow-y-auto border-none"
       >
-        <SheetHeader className="px-8 pt-8">
+        <SheetHeader className="px-8 py-8 pt-12">
           <SheetTitle>What triggers this workflow?</SheetTitle>
 
           <SheetDescription>
@@ -130,7 +130,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
             return (
               <Button
                 key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/40 transition duration-250"
+                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
                 onClick={() => handleNodeSelect(nodeType)}
                 variant="ghost"
               >
@@ -162,7 +162,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
         <Separator />
 
-        <SheetHeader className="px-8">
+        <SheetHeader className="px-8 py-8">
           <SheetTitle>What triggers this workflow?</SheetTitle>
 
           <SheetDescription>
@@ -179,7 +179,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
             return (
               <Button
                 key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/40 transition duration-250"
+                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
                 onClick={() => handleNodeSelect(nodeType)}
                 variant="ghost"
               >
