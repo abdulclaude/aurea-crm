@@ -37,6 +37,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
 const formSchema = z.object({
+  variableName: z
+    .string()
+    .min(1, { message: "Variable name is required. " })
+    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
+      message:
+        "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
+    }),
   endpoint: z.url({ message: "Please enter a valid URL." }),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
   body: z.string().optional(),
@@ -60,6 +67,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      variableName: defaultValues.variableName || "",
       endpoint: defaultValues.endpoint || "",
       method: defaultValues.method || "GET",
       body: defaultValues.body || "",
@@ -71,6 +79,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        variableName: defaultValues.variableName || "",
         endpoint: defaultValues.endpoint || "",
         method: defaultValues.method || "GET",
         body: defaultValues.body || "",
@@ -103,6 +112,31 @@ export const HttpRequestDialog: React.FC<Props> = ({
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 mt-4 px-8"
           >
+            {/* variable name */}
+
+            <FormField
+              control={form.control}
+              name="variableName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel> Variable Name </FormLabel>
+                  <FormControl>
+                    <Input placeholder="myApiCall" {...field} />
+                  </FormControl>
+
+                  <FormDescription className="text-xs mt-2 leading-5">
+                    Use this name to reference the result in other nodes: <br />
+                    <span className="text-primary font-medium tracking-wide">
+                      {`{{${field.value || "myApiCall"}.httpResponse.data}}`}
+                    </span>{" "}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Method */}
+
             <FormField
               control={form.control}
               name="method"

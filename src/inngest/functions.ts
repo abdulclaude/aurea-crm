@@ -1,6 +1,6 @@
 import { getExecutor } from "@/features/executions/lib/executor-registry";
 import { inngest } from "./client";
-import { NodeType } from "@/generated/prisma/enums";
+import type { NodeType } from "@/generated/prisma/enums";
 import prisma from "@/lib/db";
 import { topologicalSort } from "./utils";
 import { NonRetriableError } from "inngest";
