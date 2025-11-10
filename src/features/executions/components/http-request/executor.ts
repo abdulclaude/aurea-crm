@@ -1,12 +1,19 @@
+import Handlebars from "handlebars";
+
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 
 import ky, { type Options as KyOptions } from "ky";
 
+Handlebars.registerHelper("json", (context) => {
+  const jsonString = JSON.stringify(context, null, 2);
+  return new Handlebars.SafeString(jsonString);
+});
+
 type HttpRequestData = {
-  variableName?: string;
-  endpoint?: string;
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  variableName: string;
+  endpoint: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: string;
 };
 
@@ -32,14 +39,25 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
     );
   }
 
+  if (!data.variableName) {
+    // TODO: publish 'error' state for http req
+
+    throw new NonRetriableError("HTTP Request Node: No method configured.");
+  }
+
   const result = await step.run("http-request", async () => {
-    const endpoint = data.endpoint!;
+    const endpoint = Handlebars.compile(data.endpoint)(context);
     const method = data.method || "GET";
+
+    console.log("ENDPOINT:", { endpoint });
 
     const options: KyOptions = { method };
 
     if (["POST", "PUT", "PATCH"].includes(method)) {
-      options.body = data.body;
+      const resolved = Handlebars.compile(data.body || "{}")(context);
+      JSON.parse(resolved);
+
+      options.body = resolved;
 
       options.headers = {
         "Content-Type": "application/json",
@@ -60,19 +78,12 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
       },
     };
 
-    if (data.variableName) {
-      return {
-        ...context,
-        [data.variableName]: responsePayload,
-      };
-    }
-
-    // fall back to direct httpResponse for backwards compatability
-
     return {
       ...context,
-      ...responsePayload,
+      [data.variableName]: responsePayload,
     };
+
+    // fall back to direct httpResponse for backwards compatability
   });
 
   // TODO: publish success state for http request
