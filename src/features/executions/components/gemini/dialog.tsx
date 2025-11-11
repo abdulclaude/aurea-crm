@@ -36,6 +36,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
+export const AVAILABLE_MODELS = ["gemini-2.5-flash"] as const;
+
 const formSchema = z.object({
   variableName: z
     .string()
@@ -44,21 +46,21 @@ const formSchema = z.object({
       message:
         "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
     }),
-  endpoint: z.url({ message: "Please enter a valid URL." }),
-  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
-  body: z.string().optional(),
+  model: z.enum(AVAILABLE_MODELS),
+  systemPrompt: z.string().optional(),
+  userPrompt: z.string().min(1, "User prompt is required."),
 });
 
-export type HttpRequestFormValues = z.infer<typeof formSchema>;
+export type GeminiFormValues = z.infer<typeof formSchema>;
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: z.infer<typeof formSchema>) => void;
-  defaultValues?: Partial<HttpRequestFormValues>;
+  defaultValues?: Partial<GeminiFormValues>;
 }
 
-export const HttpRequestDialog: React.FC<Props> = ({
+export const GeminiDialog: React.FC<Props> = ({
   open,
   onOpenChange,
   onSubmit,
@@ -68,9 +70,9 @@ export const HttpRequestDialog: React.FC<Props> = ({
     resolver: zodResolver(formSchema),
     defaultValues: {
       variableName: defaultValues.variableName || "",
-      endpoint: defaultValues.endpoint || "",
-      method: defaultValues.method || "GET",
-      body: defaultValues.body || "",
+      model: defaultValues.model || AVAILABLE_MODELS[0],
+      systemPrompt: defaultValues.systemPrompt || "",
+      userPrompt: defaultValues.userPrompt || "",
     },
   });
 
@@ -80,15 +82,12 @@ export const HttpRequestDialog: React.FC<Props> = ({
     if (open) {
       form.reset({
         variableName: defaultValues.variableName || "",
-        endpoint: defaultValues.endpoint || "",
-        method: defaultValues.method || "GET",
-        body: defaultValues.body || "",
+        model: defaultValues.model || AVAILABLE_MODELS[0],
+        systemPrompt: defaultValues.systemPrompt || "",
+        userPrompt: defaultValues.userPrompt || "",
       });
     }
   }, [open, defaultValues, form]);
-
-  const watchMethod = form.watch("method");
-  const showBodyField = ["POST", "PUT", "PATCH"].includes(watchMethod);
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);
@@ -99,9 +98,9 @@ export const HttpRequestDialog: React.FC<Props> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="px-0">
         <DialogHeader className="px-8">
-          <DialogTitle> HTTP Request </DialogTitle>
+          <DialogTitle> Gemini Configuration </DialogTitle>
           <DialogDescription>
-            Configure settings for the HTTP Request node.
+            Configure the AI model and prompts for this node.
           </DialogDescription>
         </DialogHeader>
 
@@ -127,7 +126,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
                     <span className="text-primary font-medium tracking-wide">
-                      {`{{${field.value || "myApiCall"}.httpResponse.data}}`}
+                      {`{{${field.value || "myApiCall"}.text}}`}
                     </span>{" "}
                   </FormDescription>
                   <FormMessage />
@@ -135,63 +134,56 @@ export const HttpRequestDialog: React.FC<Props> = ({
               )}
             />
 
-            {/* Method */}
-
             <FormField
               control={form.control}
-              name="method"
+              name="model"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel> Method </FormLabel>
+                  <FormLabel> Model </FormLabel>
+
                   <Select
                     onValueChange={field.onChange}
                     defaultValue={field.value}
                   >
                     <FormControl>
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select a method" />
+                        <SelectValue placeholder="Select a model" />
                       </SelectTrigger>
                     </FormControl>
 
                     <SelectContent>
-                      <SelectItem value="GET"> GET </SelectItem>
-                      <SelectItem value="POST"> POST </SelectItem>
-                      <SelectItem value="PUT"> PUT </SelectItem>
-                      <SelectItem value="PATCH"> PATCH </SelectItem>
-                      <SelectItem value="DELETE"> DELETE </SelectItem>
+                      {AVAILABLE_MODELS.map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
 
-                  <FormDescription className="text-xs mt-2">
-                    The{" "}
-                    <span className="text-primary font-medium">
-                      {" "}
-                      HTTP method{" "}
-                    </span>{" "}
-                    to use for this request
+                  <FormDescription className="text-xs leading-5">
+                    The Google Gemini model to use for completion.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            {/* endpoint */}
-
             <FormField
               control={form.control}
-              name="endpoint"
+              name="systemPrompt"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel> Endpoint URL </FormLabel>
+                  <FormLabel> System prompt (optional) </FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder="https://api.example.com/users/{{httpResponse.data.id}}"
+                    <Textarea
+                      placeholder={"You are a helpful assistant."}
+                      className="min-h-[80px] font-mono text-sm"
                       {...field}
                     />
                   </FormControl>
 
                   <FormDescription className="text-xs mt-2 leading-5">
-                    Static URL or use{" "}
+                    Sets the behaviour of the assistant. <br /> Use{" "}
                     <span className="text-primary font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
@@ -207,40 +199,38 @@ export const HttpRequestDialog: React.FC<Props> = ({
               )}
             />
 
-            {showBodyField && (
-              <FormField
-                control={form.control}
-                name="body"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel> Body </FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder={
-                          '{\n "userId": "{{httpResponse.data.id}}"\n "name": "{{httpResponse.data.name}}",\n "items": "{{httpResponse.data.items}}"\n}'
-                        }
-                        className="min-h-[120px] font-mono text-sm"
-                        {...field}
-                      />
-                    </FormControl>
+            <FormField
+              control={form.control}
+              name="userPrompt"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel> User prompt </FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder={
+                        "Summarize this text: {{json httpResponse.data}}"
+                      }
+                      className="min-h-[120px] font-mono text-sm"
+                      {...field}
+                    />
+                  </FormControl>
 
-                    <FormDescription className="text-xs mt-2 leading-5">
-                      JSON with template variabes. <br /> Use{" "}
-                      <span className="text-primary font-medium tracking-wide">
-                        {"{{variables}}"}
-                      </span>{" "}
-                      for simple values.
-                      <br /> Alternatively, use{" "}
-                      <span className="text-primary font-medium tracking-wide">
-                        {"{{json variable}}"}
-                      </span>{" "}
-                      to stringify objects.
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            )}
+                  <FormDescription className="text-xs mt-2 leading-5">
+                    The prompt to send to the AI. <br /> Use{" "}
+                    <span className="text-primary font-medium tracking-wide">
+                      {"{{variables}}"}
+                    </span>{" "}
+                    for simple values.
+                    <br /> Alternatively, use{" "}
+                    <span className="text-primary font-medium tracking-wide">
+                      {"{{json variable}}"}
+                    </span>{" "}
+                    to stringify objects.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <DialogFooter className="mt-4">
               <Button type="submit"> Save </Button>

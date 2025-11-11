@@ -12,9 +12,9 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type HttpRequestData = {
-  variableName: string;
-  endpoint: string;
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  variableName?: string;
+  endpoint?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: string;
 };
 
@@ -29,34 +29,36 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
 
   await publish(httpRequestChannel().status({ nodeId, status: "loading" }));
 
-  if (!data.endpoint) {
-    // TODO: publish 'error' state for http req
-
-    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
-
-    throw new NonRetriableError("HTTP Request Node: No endpoint configured.");
-  }
-
-  if (!data.variableName) {
-    // TODO: publish 'error' state for http req
-
-    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
-
-    throw new NonRetriableError(
-      "HTTP Request Node: No variable name configured."
-    );
-  }
-
-  if (!data.variableName) {
-    // TODO: publish 'error' state for http req
-
-    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
-
-    throw new NonRetriableError("HTTP Request Node: No method configured.");
-  }
-
   try {
     const result = await step.run("http-request", async () => {
+      if (!data.endpoint) {
+        // TODO: publish 'error' state for http req
+
+        await publish(httpRequestChannel().status({ nodeId, status: "error" }));
+
+        throw new NonRetriableError(
+          "HTTP Request Node: No endpoint configured."
+        );
+      }
+
+      if (!data.variableName) {
+        // TODO: publish 'error' state for http req
+
+        await publish(httpRequestChannel().status({ nodeId, status: "error" }));
+
+        throw new NonRetriableError(
+          "HTTP Request Node: No variable name configured."
+        );
+      }
+
+      if (!data.variableName) {
+        // TODO: publish 'error' state for http req
+
+        await publish(httpRequestChannel().status({ nodeId, status: "error" }));
+
+        throw new NonRetriableError("HTTP Request Node: No method configured.");
+      }
+
       const endpoint = Handlebars.compile(data.endpoint)(context);
       const method = data.method || "GET";
 
