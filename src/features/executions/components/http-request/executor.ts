@@ -4,6 +4,7 @@ import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 
 import ky, { type Options as KyOptions } from "ky";
+import { httpRequestChannel } from "@/inngest/channels/http-request";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -22,17 +23,24 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
   nodeId,
   context,
   step,
+  publish,
 }) => {
   // TODO: publish loading state for http request
 
+  await publish(httpRequestChannel().status({ nodeId, status: "loading" }));
+
   if (!data.endpoint) {
     // TODO: publish 'error' state for http req
+
+    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
 
     throw new NonRetriableError("HTTP Request Node: No endpoint configured.");
   }
 
   if (!data.variableName) {
     // TODO: publish 'error' state for http req
+
+    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
 
     throw new NonRetriableError(
       "HTTP Request Node: No variable name configured."
@@ -42,51 +50,60 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
   if (!data.variableName) {
     // TODO: publish 'error' state for http req
 
+    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
+
     throw new NonRetriableError("HTTP Request Node: No method configured.");
   }
 
-  const result = await step.run("http-request", async () => {
-    const endpoint = Handlebars.compile(data.endpoint)(context);
-    const method = data.method || "GET";
+  try {
+    const result = await step.run("http-request", async () => {
+      const endpoint = Handlebars.compile(data.endpoint)(context);
+      const method = data.method || "GET";
 
-    console.log("ENDPOINT:", { endpoint });
+      console.log("ENDPOINT:", { endpoint });
 
-    const options: KyOptions = { method };
+      const options: KyOptions = { method };
 
-    if (["POST", "PUT", "PATCH"].includes(method)) {
-      const resolved = Handlebars.compile(data.body || "{}")(context);
-      JSON.parse(resolved);
+      if (["POST", "PUT", "PATCH"].includes(method)) {
+        const resolved = Handlebars.compile(data.body || "{}")(context);
+        JSON.parse(resolved);
 
-      options.body = resolved;
+        options.body = resolved;
 
-      options.headers = {
-        "Content-Type": "application/json",
+        options.headers = {
+          "Content-Type": "application/json",
+        };
+      }
+
+      const response = await ky(endpoint, options);
+      const contentType = response.headers.get("content-type");
+      const responseData = contentType?.includes("application/json")
+        ? await response.json().catch(() => response.text())
+        : await response.text();
+
+      const responsePayload = {
+        httpResponse: {
+          status: response.status,
+          statusText: response.statusText,
+          data: responseData,
+        },
       };
-    }
 
-    const response = await ky(endpoint, options);
-    const contentType = response.headers.get("content-type");
-    const responseData = contentType?.includes("application/json")
-      ? await response.json().catch(() => response.text())
-      : await response.text();
+      return {
+        ...context,
+        [data.variableName]: responsePayload,
+      };
 
-    const responsePayload = {
-      httpResponse: {
-        status: response.status,
-        statusText: response.statusText,
-        data: responseData,
-      },
-    };
+      // fall back to direct httpResponse for backwards compatability
+    });
 
-    return {
-      ...context,
-      [data.variableName]: responsePayload,
-    };
+    await publish(httpRequestChannel().status({ nodeId, status: "success" }));
 
-    // fall back to direct httpResponse for backwards compatability
-  });
+    return result;
+  } catch (error) {
+    await publish(httpRequestChannel().status({ nodeId, status: "error" }));
+    throw error;
+  }
 
   // TODO: publish success state for http request
-
-  return result;
 };

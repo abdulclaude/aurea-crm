@@ -25,7 +25,7 @@ export const BaseNode = forwardRef<HTMLDivElement, BaseNodeProps>(
       {props.children}
 
       {status === "error" && (
-        <XCircleIcon className="size-2.5 absolute -right-0.5 -top-4 text-red-500 stroke-[2.5]" />
+        <XCircleIcon className="size-2.5 absolute -right-0.5 -top-4 text-red-500 stroke-[2]" />
       )}
 
       {status === "success" && (
