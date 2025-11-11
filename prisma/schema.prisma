@@ -86,6 +86,7 @@ model Workflows {
 enum NodeType {
   INITIAL
   MANUAL_TRIGGER
+  GOOGLE_FORM_TRIGGER
   HTTP_REQUEST
 }
 

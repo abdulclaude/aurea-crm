@@ -76,7 +76,7 @@ export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
           >
             <BaseNodeContent>
               {typeof Icon === "string" ? (
-                <Image src={Icon} alt={name} width={12} height={12} />
+                <Image src={Icon} alt={name} width={10} height={10} />
               ) : (
                 <Icon className="size-3 text-gray-400" />
               )}

@@ -9,7 +9,8 @@
     "lint": "biome check",
     "format": "biome format --write",
     "inngest:dev": "inngest-cli dev",
-    "dev:all": "mprocs"
+    "dev:all": "mprocs",
+    "ngrok:dev": "ngrok http --url=decoctive-debi-grayly.ngrok-free.dev 3000"
   },
   "dependencies": {
     "@ai-sdk/google": "^2.0.26",
