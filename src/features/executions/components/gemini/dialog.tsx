@@ -35,6 +35,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
+import { CredentialType } from "@/generated/prisma/enums";
+import Image from "next/image";
 
 export const AVAILABLE_MODELS = ["gemini-2.5-flash"] as const;
 
@@ -47,6 +50,7 @@ const formSchema = z.object({
         "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
     }),
   model: z.enum(AVAILABLE_MODELS),
+  credentialId: z.string().min(1, "Credential is required."),
   systemPrompt: z.string().optional(),
   userPrompt: z.string().min(1, "User prompt is required."),
 });
@@ -66,11 +70,16 @@ export const GeminiDialog: React.FC<Props> = ({
   onSubmit,
   defaultValues = {},
 }) => {
+  const { data: credentials, isLoading } = useCredentialsByType(
+    CredentialType.GEMINI
+  );
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       variableName: defaultValues.variableName || "",
       model: defaultValues.model || AVAILABLE_MODELS[0],
+      credentialId: defaultValues.credentialId || "",
       systemPrompt: defaultValues.systemPrompt || "",
       userPrompt: defaultValues.userPrompt || "",
     },
@@ -83,6 +92,7 @@ export const GeminiDialog: React.FC<Props> = ({
       form.reset({
         variableName: defaultValues.variableName || "",
         model: defaultValues.model || AVAILABLE_MODELS[0],
+        credentialId: defaultValues.credentialId || "",
         systemPrompt: defaultValues.systemPrompt || "",
         userPrompt: defaultValues.userPrompt || "",
       });
@@ -162,6 +172,46 @@ export const GeminiDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs leading-5">
                     The Google Gemini model to use for completion.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="credentialId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel> Gemini Credential </FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    disabled={isLoading}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a credential" />
+                      </SelectTrigger>
+                    </FormControl>
+
+                    <SelectContent>
+                      {credentials?.map((credential) => (
+                        <SelectItem key={credential.id} value={credential.id}>
+                          <Image
+                            src="/logos/gemini.svg"
+                            alt="Gemini"
+                            width={16}
+                            height={16}
+                          />
+                          {credential.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  xecu
+                  <FormDescription className="text-xs leading-5">
+                    The API key for your Google Gemini.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
