@@ -7,7 +7,8 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 
 import { geminiChannel } from "@/inngest/channels/gemini";
-import { AVAILABLE_MODELS } from "./dialog";
+import type { AVAILABLE_MODELS } from "./dialog";
+import prisma from "@/lib/db";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -16,6 +17,7 @@ Handlebars.registerHelper("json", (context) => {
 
 type GeminiData = {
   variableName?: string;
+  credentialId?: string;
   model?: (typeof AVAILABLE_MODELS)[number];
   systemPrompt?: string;
   userPrompt?: string;
@@ -31,25 +33,19 @@ export const geminiExecutor: NodeExecutor<GeminiData> = async ({
   await publish(geminiChannel().status({ nodeId, status: "loading" }));
 
   try {
-    const systemPrompt = data.systemPrompt
-      ? Handlebars.compile(data.systemPrompt)(context)
-      : "You are a helpful assistant.";
-
-    const userPrompt = Handlebars.compile(data.userPrompt)(context);
-
-    const credentialValue = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-
-    // fetch credential that user selected
-
-    const google = createGoogleGenerativeAI({
-      apiKey: credentialValue,
-    });
-
     if (!data.variableName) {
       await publish(geminiChannel().status({ nodeId, status: "error" }));
 
       throw new NonRetriableError(
         "Gemini Node error: No variable name has been set."
+      );
+    }
+
+    if (!data.credentialId) {
+      await publish(geminiChannel().status({ nodeId, status: "error" }));
+
+      throw new NonRetriableError(
+        "Gemini Node error: No Credential ID has been set."
       );
     }
 
@@ -60,6 +56,32 @@ export const geminiExecutor: NodeExecutor<GeminiData> = async ({
         "Gemini Node error: No user prompt has been set."
       );
     }
+
+    // fetch credential that user selected
+
+    const credential = await step.run("get-credential", () => {
+      return prisma.credential.findUnique({
+        where: {
+          id: data.credentialId,
+        },
+      });
+    });
+
+    if (!credential) {
+      await publish(geminiChannel().status({ nodeId, status: "error" }));
+
+      throw new NonRetriableError("Gemini Node error: Credential not found.");
+    }
+
+    const systemPrompt = data.systemPrompt
+      ? Handlebars.compile(data.systemPrompt)(context)
+      : "You are a helpful assistant.";
+
+    const userPrompt = Handlebars.compile(data.userPrompt)(context);
+
+    const google = createGoogleGenerativeAI({
+      apiKey: credential.value,
+    });
 
     const { steps } = await step.ai.wrap("gemini-generate-text", generateText, {
       model: google(data.model || "gemini-2.5-flash"),
