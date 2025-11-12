@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { CopyIcon } from "lucide-react";
+import { ChevronRight, CopyIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { generateGoogleFormScript } from "./utils";
@@ -83,11 +83,23 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
           <h4 className="font-medium text-sm"> Setup instructions </h4>
           <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
             <li> Open your Google Form </li>
-            <li> Click on the three dots menu &gt; App Scripts </li>
+            <li className="flex items-center gap-1">
+              {" "}
+              Click on the three dots menu <ChevronRight className="size-3" />{" "}
+              App Scripts{" "}
+            </li>
             <li> Copy and paste the script below </li>
             <li> Replace WEBHOOK_URL with your webhook URL above</li>
-            <li> Save and click "Trigger" &gt; Add Trigger </li>
-            <li> Choose: From form &gt; On Form Submit &gt; Save </li>
+            <li className="flex items-center gap-1">
+              {" "}
+              Save and click "Trigger" <ChevronRight className="size-3" /> Add
+              Trigger{" "}
+            </li>
+            <li className="flex items-center gap-1">
+              {" "}
+              Choose: From form <ChevronRight className="size-3" /> On Form
+              Submit <ChevronRight className="size-3" /> Save{" "}
+            </li>
           </ol>
         </div>
 

@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { CopyIcon } from "lucide-react";
+import { ChevronRight, CopyIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 
@@ -82,7 +82,10 @@ export const StripeTriggerDialog: React.FC<Props> = ({
           <h4 className="font-medium text-sm"> Setup instructions </h4>
           <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
             <li> Open your Stripe Dashboard </li>
-            <li> Go to Developers &gt; Webhooks </li>
+            <li className="flex gap-1 items-center">
+              {" "}
+              Go to Developers <ChevronRight className="size-3" /> Webhooks{" "}
+            </li>
             <li>
               {" "}
               Click{" "}
