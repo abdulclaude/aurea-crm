@@ -136,7 +136,7 @@ export const GeminiDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
                     <span className="text-primary font-medium tracking-wide">
-                      {`{{${field.value || "myApiCall"}.text}}`}
+                      {`{{${field.value || "myApiCall"}.aiResponse}}`}
                     </span>{" "}
                   </FormDescription>
                   <FormMessage />
@@ -209,7 +209,6 @@ export const GeminiDialog: React.FC<Props> = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  xecu
                   <FormDescription className="text-xs leading-5">
                     The API key for your Google Gemini.
                   </FormDescription>

@@ -61,6 +61,18 @@ const executionNodes: NodeTypeOption[] = [
     description: "Use Google Gemini to generate text",
     icon: "/logos/gemini.svg",
   },
+  {
+    type: NodeType.DISCORD,
+    label: "Discord",
+    description: "Send a message to Discord",
+    icon: "/logos/discord.svg",
+  },
+  {
+    type: NodeType.SLACK,
+    label: "Slack",
+    description: "Send a message to Slack",
+    icon: "/logos/slack.svg",
+  },
 ];
 
 interface NodeSelectorProps {
@@ -181,7 +193,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         <Separator />
 
         <SheetHeader className="px-8 py-8">
-          <SheetTitle>What triggers this workflow?</SheetTitle>
+          <SheetTitle>What executes this workflow?</SheetTitle>
 
           <SheetDescription>
             A trigger is a step that starts your workflow.
