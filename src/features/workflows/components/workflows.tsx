@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import { useRouter } from "next/navigation";
 
 import { WorkflowIcon } from "lucide-react";
@@ -17,7 +16,7 @@ import {
   EntitySearch,
   ErrorView,
   LoadingView,
-} from "@/components/entity-components";
+} from "@/components/react-flow/entity-components";
 
 import {
   useCreateWorkflow,
@@ -29,7 +28,7 @@ import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useWorkflowsParams } from "../hooks/use-workflows-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
-import { type Workflows } from "@/generated/prisma/client";
+import type { Workflows } from "@/generated/prisma/client";
 
 const WorkflowsList = () => {
   const workflows = useSuspenseWorkflows();

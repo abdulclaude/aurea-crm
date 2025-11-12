@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+
 import { ErrorBoundary } from "react-error-boundary";
 
 import { HydrateClient } from "@/trpc/server";
@@ -12,9 +13,8 @@ import WorkflowsList, {
 } from "@/features/workflows/components/workflows";
 import { prefetchWorkflows } from "@/features/workflows/server/prefetch";
 
-import { type SearchParams } from "nuqs/server";
+import type { SearchParams } from "nuqs/server";
 import { workflowsParamsLoader } from "@/features/workflows/server/params-loader";
-import { ErrorView } from "@/components/entity-components";
 
 type Props = {
   searchParams: Promise<SearchParams>;

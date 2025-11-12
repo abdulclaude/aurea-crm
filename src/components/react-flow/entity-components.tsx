@@ -1,4 +1,6 @@
-import React, { ReactNode } from "react";
+import type { ReactNode } from "react";
+import Link from "next/link";
+
 import {
   AlertTriangleIcon,
   LinkIcon,
@@ -9,10 +11,12 @@ import {
   SearchIcon,
   TrashIcon,
 } from "lucide-react";
-import Link from "next/link";
 
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { cn } from "@/lib/utils";
+
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+
 import {
   Empty,
   EmptyContent,
@@ -20,15 +24,15 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "./ui/empty";
-import { cn } from "@/lib/utils";
-import { Card, CardContent, CardDescription, CardTitle } from "./ui/card";
+} from "../ui/empty";
+
+import { Card, CardContent, CardDescription, CardTitle } from "../ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+} from "../ui/dropdown-menu";
 
 type EntityHeaderProps = {
   title: string;
@@ -185,10 +189,12 @@ interface StateViewProps {
 
 export const LoadingView: React.FC<StateViewProps> = ({ message }) => {
   return (
-    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-4">
+    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-3">
       <Loader2Icon className="size-6 animate-spin text-primary" />
       <div className="text-sm text-muted-foreground">
-        {!!message && <p className="text-sm text-primary">{message}</p>}
+        {!!message && (
+          <p className="text-sm text-primary font-semibold">{message}</p>
+        )}
       </div>
     </div>
   );
@@ -196,11 +202,11 @@ export const LoadingView: React.FC<StateViewProps> = ({ message }) => {
 
 export const ErrorView: React.FC<StateViewProps> = ({ message }) => {
   return (
-    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-2">
+    <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-1.5">
       <AlertTriangleIcon className="size-6 text-primary" />
-      <p className="text-sm text-muted-foreground font-semibold">
+      <div className="text-sm text-muted-foreground font-semibold">
         {!!message && <p className="text-sm text-primary">{message}</p>}
-      </p>
+      </div>
     </div>
   );
 };
