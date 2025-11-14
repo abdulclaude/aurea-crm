@@ -15,15 +15,17 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { NodeType } from "@/generated/prisma/enums";
+import { IntegrationProvider, NodeType } from "@/generated/prisma/enums";
 import { Separator } from "./ui/separator";
 import { Button } from "./ui/button";
+import { useSuspenseIntegrationProviders } from "@/features/integrations/hooks/use-integrations";
 
 export type NodeTypeOption = {
   type: NodeType;
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }> | string;
+  requiresIntegration?: IntegrationProvider;
 };
 
 const triggerNodes: NodeTypeOption[] = [
@@ -39,6 +41,13 @@ const triggerNodes: NodeTypeOption[] = [
     label: "Google Form Submission",
     description: "Runs the flow when a Google Form is submitted.",
     icon: "/logos/googleform.svg",
+  },
+  {
+    type: NodeType.GOOGLE_CALENDAR_TRIGGER,
+    label: "Google Calendar Event",
+    description: "Runs the flow when a calendar event is created or updated.",
+    icon: "/logos/googlecalendar.svg",
+    requiresIntegration: IntegrationProvider.GOOGLE_CALENDAR,
   },
   {
     type: NodeType.STRIPE_TRIGGER,
@@ -73,6 +82,13 @@ const executionNodes: NodeTypeOption[] = [
     description: "Send a message to Slack",
     icon: "/logos/slack.svg",
   },
+  {
+    type: NodeType.GOOGLE_CALENDAR_EXECUTION,
+    label: "Google Calendar",
+    description: "Create or update events on your connected Google Calendar.",
+    icon: "/logos/googlecalendar.svg",
+    requiresIntegration: IntegrationProvider.GOOGLE_CALENDAR,
+  },
 ];
 
 interface NodeSelectorProps {
@@ -87,6 +103,11 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   children,
 }) => {
   const { setNodes, getNodes, screenToFlowPosition } = useReactFlow();
+  const { data: connectedProviders } = useSuspenseIntegrationProviders();
+  const connectedProviderSet = React.useMemo(
+    () => new Set(connectedProviders || []),
+    [connectedProviders]
+  );
 
   const handleNodeSelect = useCallback(
     (selection: NodeTypeOption) => {
@@ -135,6 +156,15 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     [setNodes, getNodes, onOpenChange, screenToFlowPosition]
   );
 
+  const getIntegrationLabel = (provider?: IntegrationProvider) => {
+    switch (provider) {
+      case IntegrationProvider.GOOGLE_CALENDAR:
+        return "Google Calendar";
+      default:
+        return "this integration";
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger asChild>{children}</SheetTrigger>
@@ -156,13 +186,17 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         <div>
           {triggerNodes.map((nodeType) => {
             const Icon = nodeType.icon;
+            const isIntegrationSatisfied =
+              !nodeType.requiresIntegration ||
+              connectedProviderSet.has(nodeType.requiresIntegration);
 
             return (
               <Button
                 key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
+                className="w-full justify-start h-auto py-5 px-4 rounded-none border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
                 onClick={() => handleNodeSelect(nodeType)}
                 variant="ghost"
+                disabled={!isIntegrationSatisfied}
               >
                 <div className="flex items-center gap-6 w-full overflow-hidden">
                   {typeof Icon === "string" ? (
@@ -183,6 +217,13 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                     <span className="text-xs text-muted-foreground">
                       {nodeType.description}
                     </span>
+                    {!isIntegrationSatisfied && (
+                      <span className="text-[11px] text-amber-600 mt-1">
+                        Connect{" "}
+                        {getIntegrationLabel(nodeType.requiresIntegration)} in
+                        Integrations to use this trigger.
+                      </span>
+                    )}
                   </div>
                 </div>
               </Button>
@@ -205,13 +246,17 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         <div>
           {executionNodes.map((nodeType) => {
             const Icon = nodeType.icon;
+            const isIntegrationSatisfied =
+              !nodeType.requiresIntegration ||
+              connectedProviderSet.has(nodeType.requiresIntegration);
 
             return (
               <Button
                 key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none cursor-pointer border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
+                className="w-full justify-start h-auto py-5 px-4 rounded-none border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
                 onClick={() => handleNodeSelect(nodeType)}
                 variant="ghost"
+                disabled={!isIntegrationSatisfied}
               >
                 <div className="flex items-center gap-6 w-full overflow-hidden">
                   {typeof Icon === "string" ? (
@@ -232,6 +277,13 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                     <span className="text-xs text-muted-foreground">
                       {nodeType.description}
                     </span>
+                    {!isIntegrationSatisfied && (
+                      <span className="text-[11px] text-amber-600 mt-1">
+                        Connect{" "}
+                        {getIntegrationLabel(nodeType.requiresIntegration)} in
+                        Integrations to use this action.
+                      </span>
+                    )}
                   </div>
                 </div>
               </Button>

@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -9,18 +10,24 @@ datasource db {
 }
 
 model User {
-  id            String    @id
+  id            String       @id
   name          String
   email         String
-  emailVerified Boolean   @default(false)
+  emailVerified Boolean      @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @default(now()) @updatedAt
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @default(now()) @updatedAt
   sessions      Session[]
   accounts      Account[]
-  workflows      Workflows[]
-  credentials Credential[]
+  workflows     Workflows[]
+  credentials   Credential[]
+  integrations  Integration[]
+  webhooks      Webhook[]
+  googleCalendarSubscriptions GoogleCalendarSubscription[]
 
+  members     Member[]
+  invitations Invitation[]
+  subaccounts Subaccount[]
   @@unique([email])
   @@map("user")
 }
@@ -35,6 +42,8 @@ model Session {
   userAgent String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  activeOrganizationId String?
 
   @@unique([token])
   @@map("session")
@@ -70,45 +79,125 @@ model Verification {
   @@map("verification")
 }
 
+enum IntegrationProvider {
+  GOOGLE_CALENDAR
+}
+
+model Integration {
+  id        String @id @default(cuid())
+  provider  IntegrationProvider
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  scopes       String[]
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider], name: "userId_provider")
+}
+
+model GoogleCalendarSubscription {
+  id           String   @id @default(cuid())
+  userId       String
+  workflowId   String
+  nodeId       String
+  calendarId   String
+  calendarName String?
+  listenFor    String[]
+  channelId    String
+  resourceId   String
+  webhookToken String
+  syncToken    String?
+  expiresAt    DateTime?
+  lastSyncedAt DateTime?
+  timezone     String?
+  variableName String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId])
+  @@index([workflowId])
+  @@index([channelId])
+}
+
 enum CredentialType {
   ANTHROPIC
   GEMINI
   OPENAI
 }
 
+enum WebhookProvider {
+  SLACK
+  DISCORD
+  STRIPE
+  CUSTOM
+}
+
 model Credential {
-  id String @id @default(cuid())
-  name String
-  value String
-  type CredentialType
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String         @id @default(cuid())
+  name      String
+  value     String
+  type      CredentialType
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   Node Node[]
 
 }
 
+model Webhook {
+  id          String          @id @default(cuid())
+  name        String
+  provider    WebhookProvider
+  url         String
+  signingSecret String?
+  description String?
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model Workflows {
-  id String @id @default(cuid())
+  id   String @id @default(cuid())
   name String
+  description String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId String
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  archived   Boolean @default(false)
+  isTemplate Boolean @default(false)
 
-  nodes Node[]
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  nodes       Node[]
   connections Connection[]
+  executions  Execution[]
+  googleCalendarSubscriptions GoogleCalendarSubscription[]
 }
 
 enum NodeType {
   INITIAL
   MANUAL_TRIGGER
   GOOGLE_FORM_TRIGGER
+  GOOGLE_CALENDAR_TRIGGER
+  GOOGLE_CALENDAR_EXECUTION
   STRIPE_TRIGGER
   HTTP_REQUEST
   GEMINI
@@ -124,19 +213,21 @@ model Node {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name String
-  type NodeType
+  name     String
+  type     NodeType
   position Json
-  data Json @default("{}")
+  data     Json     @default("{}")
 
   outputConnections Connection[] @relation("FromNode")
-  inputConnections Connection[] @relation("ToNode")
+  inputConnections  Connection[] @relation("ToNode")
 
   workflowId String
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   credentialId String?
-  credential Credential? @relation(fields: [credentialId], references: [id])
+  credential   Credential? @relation(fields: [credentialId], references: [id])
+
+  googleCalendarSubscription GoogleCalendarSubscription?
 }
 
 model Connection {
@@ -146,16 +237,114 @@ model Connection {
   updatedAt DateTime @updatedAt
 
   fromNodeId String
-  fromNode Node @relation("FromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  fromNode   Node   @relation("FromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
 
   toNodeId String
-  toNode Node @relation("ToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+  toNode   Node   @relation("ToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
 
   fromOutput String @default("main")
-  toInput String @default("main")
+  toInput    String @default("main")
 
   workflowId String
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@unique([fromNodeId, toNodeId, fromOutput, toInput])
+}
+
+enum ExecutionStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model Execution {
+  id String @id @default(cuid())
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  status     ExecutionStatus @default(RUNNING)
+  error      String?         @db.Text
+  errorStack String?         @db.Text
+
+  inngestEventId String @unique
+
+  output Json?
+
+  workflowId String
+  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+model Organization {
+  id          String       @id
+  name        String
+  slug        String
+  logo        String?
+  createdAt   DateTime
+  metadata    String?
+  members     Member[]
+  invitations Invitation[]
+  subaccounts Subaccount[]  
+
+  @@unique([slug])
+  @@map("organization")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String
+  createdAt      DateTime
+
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String
+  expiresAt      DateTime
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@map("invitation")
+}
+
+model Subaccount {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  logo        String?
+  slug String?
+
+  // Basic company profile
+  companyName     String
+  website         String?
+  billingEmail    String?
+  phone           String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String?
+  timezone        String?      @default("UTC")
+  industry        String?
+
+  // Admin/creator
+  createdByUserId String?
+  createdBy       User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@map("subaccount")
+  @@index([organizationId])
 }

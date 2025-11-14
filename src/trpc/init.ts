@@ -1,7 +1,6 @@
 import { auth } from "@/lib/auth";
 import { polarClient } from "@/lib/polar";
 import { initTRPC, TRPCError } from "@trpc/server";
-import { CarTaxiFront } from "lucide-react";
 import { headers } from "next/headers";
 import { cache } from "react";
 
@@ -42,7 +41,8 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
     });
   }
 
-  return next({ ctx: { ...ctx, auth: session } });
+  const orgId = session.session.activeOrganizationId;
+  return next({ ctx: { ...ctx, auth: session, orgId } });
 });
 
 export const premiumProcedure = protectedProcedure.use(

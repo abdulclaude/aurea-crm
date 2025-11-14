@@ -6,7 +6,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   return (
     <>
       <AppHeader />
-      <main className="flex-1"> {children} </main>
+      <main className="flex-1 bg-[#1A2326] text-white"> {children} </main>
     </>
   );
 };

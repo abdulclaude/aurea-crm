@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 
 import prisma from "./db";
@@ -14,13 +15,34 @@ import { Polar } from "@polar-sh/sdk";
 import { polarClient } from "@/lib/polar";
 
 export const auth = betterAuth({
-  emailAndPassword: {
-    enabled: true,
-  },
   database: prismaAdapter(prisma, {
     provider: "postgresql", // or "mysql", "postgresql", ...etc
   }),
+  emailAndPassword: {
+    enabled: true,
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      accessType: "offline",
+      prompt: "select_account consent",
+      scopes: [
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/calendar",
+      ],
+    },
+  },
+  account: {
+    accountLinking: {
+      enabled: true,
+      allowDifferentEmails: true,
+    },
+  },
   plugins: [
+    organization(),
     polar({
       client: polarClient,
       createCustomerOnSignUp: true,

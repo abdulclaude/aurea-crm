@@ -7,10 +7,10 @@ import {
   Loader2Icon,
   MoreVerticalIcon,
   PackageOpenIcon,
-  PlusIcon,
   SearchIcon,
-  TrashIcon,
 } from "lucide-react";
+
+import { IconAddKeyframe } from "central-icons/IconAddKeyframe";
 
 import { cn } from "@/lib/utils";
 
@@ -37,7 +37,7 @@ import {
 type EntityHeaderProps = {
   title: string;
   description?: string;
-  newButtonLabel: string;
+  newButtonLabel?: string;
   disabled?: boolean;
   isCreating?: boolean;
 } & (
@@ -56,28 +56,37 @@ export const EntityHeader: React.FC<EntityHeaderProps> = ({
   isCreating,
 }) => {
   return (
-    <div className="flex flex-row items-center justify-between gap-x-4">
+    <div className="flex flex-row items-end justify-between gap-x-4">
       <div className="flex flex-col">
-        <h1 className="text-lg md:text-xl font-semibold"> {title} </h1>
+        <h1 className="text-base md:text-lg font-semibold"> {title} </h1>
 
         {description && (
-          <p className="text-xs md:text-sm text-muted-foreground">
+          <p className="text-xs md:text-xs text-white/50 tracking-wide">
             {description}
           </p>
         )}
       </div>
 
       {onNew && !newButtonHref && (
-        <Button disabled={isCreating || disabled} size="sm" onClick={onNew}>
-          <PlusIcon className="size-4" />
+        <Button
+          disabled={isCreating || disabled}
+          size="sm"
+          onClick={onNew}
+          className="bg-[#202E32] hover:bg-[#202E32] hover:brightness-110  hover:text-white! transition duration-150 gap-2 text-xs"
+        >
+          <IconAddKeyframe className="size-3" />
           {newButtonLabel}
         </Button>
       )}
 
       {newButtonHref && !onNew && (
-        <Button size="sm" asChild>
-          <Link href={newButtonHref} prefetch>
-            <LinkIcon className="size-4" />
+        <Button
+          size="sm"
+          className="bg-[#202E32] hover:bg-[#202E32] hover:brightness-110  hover:text-white! transition duration-150 text-xs"
+          asChild
+        >
+          <Link href={newButtonHref} prefetch className="gap-2">
+            <LinkIcon className="size-2.5" />
             {newButtonLabel}
           </Link>
         </Button>
@@ -100,13 +109,12 @@ export const EntityContainer: React.FC<EntityContainerProps> = ({
   pagination,
 }) => {
   return (
-    <div className="p-4 md:px-10 md:py-6 h-full">
+    <div className="p-4 md:px-10 md:py-6 h-full bg-[#1A2326] ">
       <div className="mx-auto max-w-7xl w-full flex flex-col gap-y-8 h-full">
-        {search}
-
         <div className="flex flex-col gap-y-4 h-full">
           {" "}
           {header}
+          {search}
           {children}
         </div>
         {pagination}
@@ -119,18 +127,20 @@ interface EntitySearchProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  className?: string;
 }
 
 export const EntitySearch: React.FC<EntitySearchProps> = ({
   value,
   onChange,
   placeholder = "Search",
+  className,
 }) => {
   return (
-    <div className="relative">
-      <SearchIcon className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+    <div className={cn("relative w-full h-max", className)}>
+      <SearchIcon className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-white/50" />
       <Input
-        className="max-w-full bg-background shadow-none border-border pl-8 placeholder:text-muted-foreground/60"
+        className="w-full bg-[#1A2326] shadow-none border border-white/5 pl-8 placeholder:text-white/50 rounded-sm"
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -154,29 +164,35 @@ export const EntityPagination: React.FC<EntityPaginationProps> = ({
 }) => {
   return (
     <div className="flex items-center justify-between gap-x-2 w-full">
-      <div className="flex-1 text-sm text-muted-foreground">
-        Page {page} / {totalPages || 1}{" "}
-      </div>
+      {totalPages !== 1 && (
+        <>
+          <div className=" text-sm text-muted-foreground bg-[#202E32] w-max rounded-xl px-4 py-2">
+            <span className="text-white"> {page} </span> / {totalPages || 1}{" "}
+          </div>
 
-      <div className="flex items-center justify-end space-x-2 py-4">
-        <Button
-          disabled={page === 1 || disabled}
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(Math.max(1, page - 1))}
-        >
-          Previous
-        </Button>
+          <div className="flex items-center justify-end space-x-2 py-4">
+            <Button
+              disabled={page === 1 || disabled}
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange(Math.max(1, page - 1))}
+              className="bg-[#202E32]  hover:bg-[#202E32]! hover:text-white! transition duration-150 border-none"
+            >
+              Previous
+            </Button>
 
-        <Button
-          disabled={page === totalPages || totalPages === 0 || disabled}
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-        >
-          Next
-        </Button>
-      </div>
+            <Button
+              disabled={page === totalPages || totalPages === 0 || disabled}
+              variant="outline"
+              size="sm"
+              onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+              className="bg-[#202E32] hover:bg-[#202E32]! hover:brightness-110 hover:text-white! transition duration-150 border-none"
+            >
+              Next
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -203,9 +219,9 @@ export const LoadingView: React.FC<StateViewProps> = ({ message }) => {
 export const ErrorView: React.FC<StateViewProps> = ({ message }) => {
   return (
     <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-1.5">
-      <AlertTriangleIcon className="size-6 text-primary" />
+      <AlertTriangleIcon className="size-6 text-white" />
       <div className="text-sm text-muted-foreground font-semibold">
-        {!!message && <p className="text-sm text-primary">{message}</p>}
+        {!!message && <p className="text-sm text-white">{message}</p>}
       </div>
     </div>
   );
@@ -282,6 +298,7 @@ interface EntityItemProps {
   subtitle?: ReactNode;
   image?: ReactNode;
   actions?: ReactNode;
+  menuItems?: ReactNode;
   onRemove?: () => void | Promise<void>;
   isRemoving?: boolean;
   className?: string;
@@ -293,6 +310,7 @@ export const EntityItem: React.FC<EntityItemProps> = ({
   subtitle,
   image,
   actions,
+  menuItems,
   onRemove,
   isRemoving,
   className,
@@ -314,19 +332,20 @@ export const EntityItem: React.FC<EntityItemProps> = ({
     <Link href={href} prefetch>
       <Card
         className={cn(
-          "p-4 shadow-none hover:shadow cursor-pointer",
+          "p-1.5 shadow-none hover:shadow cursor-pointer bg-[#1A2326] border-white/5 text-white rounded-sm",
+          "transition duration-150",
           isRemoving && "opacity-50 cursor-not-allowed",
           className
         )}
       >
-        <CardContent className="flex flex-row items-center justify-between p-0">
+        <CardContent className="flex flex-row items-center justify-between  hover:bg-[#1A2326] rounded-sm hover:brightness-110 p-3">
           <div className="flex items-center gap-3">
             {image}{" "}
-            <div>
-              <CardTitle className="text-base font-medium"> {title} </CardTitle>
+            <div className="space-y-1">
+              <CardTitle className="text-sm font-medium"> {title} </CardTitle>
 
               {!!subtitle && (
-                <CardDescription className="text-xs">
+                <CardDescription className="text-xs text-white/50">
                   {subtitle}
                 </CardDescription>
               )}
@@ -343,6 +362,7 @@ export const EntityItem: React.FC<EntityItemProps> = ({
                       size="icon"
                       variant="ghost"
                       onClick={(e) => e.stopPropagation()}
+                      className="hover:bg-[#1A2326]! hover:brightness-90 hover:text-white transition duration-150"
                     >
                       <MoreVerticalIcon className="size-4" />
                     </Button>
@@ -351,9 +371,13 @@ export const EntityItem: React.FC<EntityItemProps> = ({
                   <DropdownMenuContent
                     align="end"
                     onClick={(e) => e.stopPropagation()}
+                    className="bg-[#1A2326] text-white border-white/5 transition duration-150"
                   >
-                    <DropdownMenuItem onClick={handleRemove}>
-                      <TrashIcon className="size-4" />
+                    {menuItems}
+                    <DropdownMenuItem
+                      onClick={handleRemove}
+                      className="bg-[#1A2326] hover:bg-[#202E32]! hover:text-white! transition duration-150 w-full"
+                    >
                       Delete
                     </DropdownMenuItem>
                   </DropdownMenuContent>

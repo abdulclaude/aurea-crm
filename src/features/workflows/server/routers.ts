@@ -1,8 +1,8 @@
 import { PAGINATION } from "@/config/constants";
 import { NodeType } from "@/generated/prisma/enums";
-import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import {
   createTRPCRouter,
   premiumProcedure,
@@ -11,6 +11,10 @@ import {
 import type { Node, Edge } from "@xyflow/react";
 import { generateSlug } from "random-word-slugs";
 import z from "zod";
+import {
+  removeGoogleCalendarWorkflowSubscriptions,
+  syncGoogleCalendarWorkflowSubscriptions,
+} from "@/features/google-calendar/server/subscriptions";
 
 export const workflowsRouter = createTRPCRouter({
   execute: protectedProcedure
@@ -22,6 +26,13 @@ export const workflowsRouter = createTRPCRouter({
           userId: ctx.auth.user.id,
         },
       });
+
+      if (workflow.isTemplate) {
+        throw new Error("Templates cannot be executed.");
+      }
+      if (workflow.archived) {
+        throw new Error("Archived workflows cannot be executed.");
+      }
 
       await sendWorkflowExecution({
         workflowId: input.id,
@@ -44,9 +55,34 @@ export const workflowsRouter = createTRPCRouter({
       },
     });
   }),
+  updateArchived: protectedProcedure
+    .input(z.object({ id: z.string(), archived: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const workflow = await prisma.workflows.update({
+        where: {
+          id: input.id,
+          userId: ctx.auth.user.id,
+        },
+        data: {
+          archived: input.archived,
+        },
+      });
+
+      if (workflow.archived) {
+        await removeGoogleCalendarWorkflowSubscriptions(workflow.id);
+      } else {
+        await syncGoogleCalendarWorkflowSubscriptions({
+          workflowId: workflow.id,
+          userId: ctx.auth.user.id,
+        });
+      }
+
+      return workflow;
+    }),
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
-    .mutation(({ ctx, input }) => {
+    .mutation(async ({ ctx, input }) => {
+      await removeGoogleCalendarWorkflowSubscriptions(input.id);
       return prisma.workflows.delete({
         where: {
           id: input.id,
@@ -101,7 +137,7 @@ export const workflowsRouter = createTRPCRouter({
 
       // transaction to ensure consistency
 
-      return await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
         // delete all existing nodes and connections (cascade deletes connections when node is deleted)
 
         await tx.node.deleteMany({
@@ -148,6 +184,17 @@ export const workflowsRouter = createTRPCRouter({
 
         return workflow;
       });
+
+      if (workflow.isTemplate || workflow.archived) {
+        await removeGoogleCalendarWorkflowSubscriptions(id);
+      } else {
+        await syncGoogleCalendarWorkflowSubscriptions({
+          workflowId: id,
+          userId: ctx.auth.user.id,
+        });
+      }
+
+      return result;
     }),
 
   getOne: protectedProcedure
@@ -208,6 +255,8 @@ export const workflowsRouter = createTRPCRouter({
           take: pageSize,
           where: {
             userId: ctx.auth.user.id,
+            isTemplate: false,
+            archived: false,
             name: {
               contains: search,
               mode: "insensitive",
@@ -220,6 +269,8 @@ export const workflowsRouter = createTRPCRouter({
         prisma.workflows.count({
           where: {
             userId: ctx.auth.user.id,
+            isTemplate: false,
+            archived: false,
             name: {
               contains: search,
               mode: "insensitive",
@@ -241,5 +292,282 @@ export const workflowsRouter = createTRPCRouter({
         hasNextPage,
         hasPreviousPage,
       };
+    }),
+  getArchived: protectedProcedure
+    .input(
+      z.object({
+        page: z.number().default(PAGINATION.DEFAULT_PAGE),
+        pageSize: z
+          .number()
+          .min(PAGINATION.MIN_PAGE_SIZE)
+          .max(PAGINATION.MAX_PAGE_SIZE)
+          .default(PAGINATION.DEFAULT_PAGE_SIZE),
+        search: z.string().default(""),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { page, pageSize, search } = input;
+
+      const [items, totalCount] = await Promise.all([
+        prisma.workflows.findMany({
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          where: {
+            userId: ctx.auth.user.id,
+            isTemplate: false,
+            archived: true,
+            name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+        }),
+        prisma.workflows.count({
+          where: {
+            userId: ctx.auth.user.id,
+            isTemplate: false,
+            archived: true,
+            name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+        }),
+      ]);
+
+      const totalPages = Math.ceil(totalCount / pageSize);
+      const hasNextPage = page < totalPages;
+      const hasPreviousPage = page > 1;
+
+      return {
+        items,
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        hasNextPage,
+        hasPreviousPage,
+      };
+    }),
+  getTemplates: protectedProcedure
+    .input(
+      z.object({
+        page: z.number().default(PAGINATION.DEFAULT_PAGE),
+        pageSize: z
+          .number()
+          .min(PAGINATION.MIN_PAGE_SIZE)
+          .max(PAGINATION.MAX_PAGE_SIZE)
+          .default(PAGINATION.DEFAULT_PAGE_SIZE),
+        search: z.string().default(""),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const { page, pageSize, search } = input;
+
+      const [items, totalCount] = await Promise.all([
+        prisma.workflows.findMany({
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          where: {
+            userId: ctx.auth.user.id,
+            isTemplate: true,
+            name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          include: {
+            nodes: {
+              select: { type: true },
+            },
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+        }),
+        prisma.workflows.count({
+          where: {
+            userId: ctx.auth.user.id,
+            isTemplate: true,
+            name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+        }),
+      ]);
+
+      const totalPages = Math.ceil(totalCount / pageSize);
+      const hasNextPage = page < totalPages;
+      const hasPreviousPage = page > 1;
+
+      return {
+        items,
+        page,
+        pageSize,
+        totalCount,
+        totalPages,
+        hasNextPage,
+        hasPreviousPage,
+      };
+    }),
+  updateTemplateMeta: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().min(1).optional(),
+        description: z.string().max(2000).optional().nullable(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const template = await prisma.workflows.findFirstOrThrow({
+        where: { id: input.id, userId: ctx.auth.user.id, isTemplate: true },
+      });
+      const data: Record<string, unknown> = {};
+      if (input.name !== undefined) data.name = input.name;
+      if (input.description !== undefined) data.description = input.description;
+      return prisma.workflows.update({
+        where: { id: template.id },
+        data,
+      });
+    }),
+  createTemplateFromWorkflow: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const base = await prisma.workflows.findUniqueOrThrow({
+        where: {
+          id: input.id,
+          userId: ctx.auth.user.id,
+        },
+        include: { nodes: true, connections: true },
+      });
+
+      return await prisma.$transaction(async (tx) => {
+        const template = await tx.workflows.create({
+          data: {
+            name: input.name ?? `${base.name} Template`,
+            userId: ctx.auth.user.id,
+            isTemplate: true,
+          },
+        });
+
+        const oldToNewNodeId = new Map<string, string>();
+
+        // clone nodes
+        for (const node of base.nodes) {
+          const created = await tx.node.create({
+            data: {
+              workflowId: template.id,
+              name: node.name,
+              type: node.type,
+              position: node.position as Prisma.InputJsonValue,
+              data: node.data as Prisma.InputJsonValue,
+            },
+          });
+          oldToNewNodeId.set(node.id, created.id);
+        }
+
+        // clone connections
+        for (const connection of base.connections) {
+          const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
+          const toNodeId = oldToNewNodeId.get(connection.toNodeId);
+          if (!fromNodeId || !toNodeId) {
+            continue;
+          }
+          await tx.connection.create({
+            data: {
+              workflowId: template.id,
+              fromNodeId,
+              toNodeId,
+              fromOutput: connection.fromOutput,
+              toInput: connection.toInput,
+            },
+          });
+        }
+
+        return template;
+      });
+    }),
+  createWorkflowFromTemplate: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const base = await prisma.workflows.findUniqueOrThrow({
+        where: {
+          id: input.id,
+          userId: ctx.auth.user.id,
+        },
+        include: { nodes: true, connections: true },
+      });
+
+      if (!base.isTemplate) {
+        throw new Error("Selected item is not a template.");
+      }
+
+      const workflow = await prisma.$transaction(async (tx) => {
+        const workflow = await tx.workflows.create({
+          data: {
+            name: input.name ?? generateSlug(3),
+            userId: ctx.auth.user.id,
+            isTemplate: false,
+            archived: false,
+          },
+        });
+
+        const oldToNewNodeId = new Map<string, string>();
+
+        // clone nodes
+        for (const node of base.nodes) {
+          const created = await tx.node.create({
+            data: {
+              workflowId: workflow.id,
+              name: node.name,
+              type: node.type,
+              position: node.position as Prisma.InputJsonValue,
+              data: node.data as Prisma.InputJsonValue,
+            },
+          });
+          oldToNewNodeId.set(node.id, created.id);
+        }
+
+        // clone connections
+        for (const connection of base.connections) {
+          const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
+          const toNodeId = oldToNewNodeId.get(connection.toNodeId);
+          if (!fromNodeId || !toNodeId) {
+            continue;
+          }
+          await tx.connection.create({
+            data: {
+              workflowId: workflow.id,
+              fromNodeId,
+              toNodeId,
+              fromOutput: connection.fromOutput,
+              toInput: connection.toInput,
+            },
+          });
+        }
+
+        return workflow;
+      });
+
+      await syncGoogleCalendarWorkflowSubscriptions({
+        workflowId: workflow.id,
+        userId: ctx.auth.user.id,
+      });
+
+      return workflow;
     }),
 });
