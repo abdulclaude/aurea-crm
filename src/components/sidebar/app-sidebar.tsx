@@ -25,10 +25,23 @@ import { IconPlugin2 as IntegrationsIcon } from "central-icons/IconPlugin2";
 import { IconHistory as ExecutionsIcon } from "central-icons/IconHistory";
 import { IconPeopleAdd as CredentialsIcon } from "central-icons/IconPeopleAdd";
 import { IconPayment as WorkflowsIcon } from "central-icons/IconPayment";
+import { IconHomeRoof as HomeIcon } from "central-icons/IconHomeRoof";
 
 import { cn } from "@/lib/utils";
+import { useTRPC } from "@/trpc/client";
+import { useSuspenseQuery } from "@tanstack/react-query";
 
 const menuItems = [
+  {
+    title: "General",
+    items: [
+      {
+        title: "Home",
+        icon: HomeIcon,
+        url: "/dashboard",
+      },
+    ],
+  },
   {
     title: "Automations",
     items: [
@@ -79,6 +92,30 @@ const menuItems = [
 
 const AppSidebar = () => {
   const pathname = usePathname();
+  const trpc = useTRPC();
+
+  const { data: active } = useSuspenseQuery(
+    trpc.organizations.getActive.queryOptions()
+  );
+
+  const { data: orgs } = useSuspenseQuery(
+    trpc.organizations.getMyOrganizations.queryOptions()
+  );
+
+  const activeOrg =
+    orgs?.find((o) => o.id === active?.activeOrganizationId) ?? orgs?.[0];
+
+  const canManageClients = activeOrg?.role === "owner";
+
+  const activeClient = active?.activeSubaccount ?? null;
+
+  const visibleMenuItems = menuItems.filter((group) => {
+    if (group.title === "Clients") {
+      if (!canManageClients) return false;
+      if (activeClient) return false;
+    }
+    return true;
+  });
 
   return (
     <Sidebar collapsible="icon">
@@ -92,15 +129,34 @@ const AppSidebar = () => {
         </SidebarMenuItem>
       </SidebarHeader>
 
-      <SidebarContent className="bg-[#1A2326] text-white flex flex-col gap-0">
-        {menuItems.map((group) => (
-          <SidebarGroup key={group.title}>
-            <SidebarGroupLabel className="text-white/50 text-xs">
+      <SidebarContent className="bg-[#1A2326] text-white flex flex-col pt-4">
+        {/* {activeClient && (
+          <div className="mx-3 mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-amber-100/70">
+              Client workspace
+            </p>
+            <p className="text-sm font-semibold text-white">
+              {activeClient.companyName}
+            </p>
+          </div>
+        )} */}
+
+        {visibleMenuItems.map((group) => (
+          <SidebarGroup key={group.title} className="">
+            <SidebarGroupLabel
+              className={cn(
+                "text-white/30 text-[11px]",
+                canManageClients &&
+                  activeClient &&
+                  group.title === "Clients" &&
+                  "text-amber-200"
+              )}
+            >
               {group.title}
             </SidebarGroupLabel>
 
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton

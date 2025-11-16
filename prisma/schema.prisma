@@ -24,6 +24,7 @@ model User {
   integrations  Integration[]
   webhooks      Webhook[]
   googleCalendarSubscriptions GoogleCalendarSubscription[]
+  gmailSubscriptions          GmailSubscription[]
 
   members     Member[]
   invitations Invitation[]
@@ -44,6 +45,7 @@ model Session {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   activeOrganizationId String?
+  activeSubaccountId   String?
 
   @@unique([token])
   @@map("session")
@@ -81,6 +83,10 @@ model Verification {
 
 enum IntegrationProvider {
   GOOGLE_CALENDAR
+  GMAIL
+  GOOGLE
+  TELEGRAM
+  WHATSAPP
 }
 
 model Integration {
@@ -129,10 +135,73 @@ model GoogleCalendarSubscription {
   @@index([channelId])
 }
 
+model GmailSubscription {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  emailAddress String
+  labelIds     String[]
+  topicName    String
+  historyId    String?
+  expiresAt    DateTime?
+  lastSyncedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([emailAddress])
+}
+
+model GmailTriggerState {
+  id              String   @id @default(cuid())
+  nodeId          String   @unique
+  workflowId      String
+  lastMessageId   String?
+  lastTriggeredAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+}
+
+model TelegramTriggerState {
+  id              String   @id @default(cuid())
+  nodeId          String   @unique
+  workflowId      String
+  lastUpdateId    String?
+  lastTriggeredAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+}
+
+model WhatsAppTriggerState {
+  id              String   @id @default(cuid())
+  nodeId          String   @unique
+  workflowId      String
+  lastMessageId   String?
+  lastTriggeredAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+}
+
 enum CredentialType {
   ANTHROPIC
   GEMINI
   OPENAI
+  TELEGRAM_BOT
 }
 
 enum WebhookProvider {
@@ -147,14 +216,19 @@ model Credential {
   name      String
   value     String
   type      CredentialType
+  metadata  Json?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  subaccountId String?
+  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+
   Node Node[]
 
+  @@index([subaccountId])
 }
 
 model Webhook {
@@ -170,6 +244,11 @@ model Webhook {
 
   userId String
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subaccountId String?
+  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+
+  @@index([subaccountId])
 }
 
 model Workflows {
@@ -186,10 +265,17 @@ model Workflows {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  subaccountId String?
+  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+
   nodes       Node[]
   connections Connection[]
   executions  Execution[]
   googleCalendarSubscriptions GoogleCalendarSubscription[]
+  gmailTriggerStates          GmailTriggerState[]
+  telegramTriggerStates       TelegramTriggerState[]
+  whatsappTriggerStates       WhatsAppTriggerState[]
+  @@index([subaccountId])
 }
 
 enum NodeType {
@@ -198,6 +284,12 @@ enum NodeType {
   GOOGLE_FORM_TRIGGER
   GOOGLE_CALENDAR_TRIGGER
   GOOGLE_CALENDAR_EXECUTION
+  GMAIL_TRIGGER
+  GMAIL_EXECUTION
+  TELEGRAM_TRIGGER
+  TELEGRAM_EXECUTION
+  WHATSAPP_TRIGGER
+  WHATSAPP_EXECUTION
   STRIPE_TRIGGER
   HTTP_REQUEST
   GEMINI
@@ -228,6 +320,9 @@ model Node {
   credential   Credential? @relation(fields: [credentialId], references: [id])
 
   googleCalendarSubscription GoogleCalendarSubscription?
+  gmailTriggerState          GmailTriggerState?
+  telegramTriggerState       TelegramTriggerState?
+  whatsappTriggerState       WhatsAppTriggerState?
 }
 
 model Connection {
@@ -273,6 +368,11 @@ model Execution {
 
   workflowId String
   workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  subaccountId String?
+  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+
+  @@index([subaccountId])
 }
 
 model Organization {
@@ -344,6 +444,11 @@ model Subaccount {
 
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
+
+  workflows   Workflows[]
+  credentials Credential[]
+  webhooks    Webhook[]
+  executions  Execution[]
 
   @@map("subaccount")
   @@index([organizationId])

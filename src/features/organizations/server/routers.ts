@@ -1,5 +1,6 @@
 import prisma from "@/lib/db";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 export const organizationsRouter = createTRPCRouter({
@@ -108,7 +109,18 @@ export const organizationsRouter = createTRPCRouter({
    * Return the active organization id from the session.
    */
   getActive: protectedProcedure.query(async ({ ctx }) => {
-    return { activeOrganizationId: ctx.orgId ?? null };
+    return {
+      activeOrganizationId: ctx.orgId ?? null,
+      activeSubaccountId: ctx.subaccountId ?? null,
+      activeSubaccount: ctx.subaccount
+        ? {
+            id: ctx.subaccount.id,
+            companyName: ctx.subaccount.companyName,
+            logo: ctx.subaccount.logo,
+            slug: ctx.subaccount.slug,
+          }
+        : null,
+    };
   }),
   /**
    * Organizations where the current user is a member.
@@ -142,6 +154,66 @@ export const organizationsRouter = createTRPCRouter({
           .subaccounts?.[0] ?? null,
     }));
   }),
+  /**
+   * Toggle the active subaccount (client) context for the current session.
+   */
+  setActiveSubaccount: protectedProcedure
+    .input(
+      z.object({
+        subaccountId: z.string().cuid().nullable().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No active organization found.",
+        });
+      }
+
+      const sessionToken = ctx.auth.session.token;
+
+      if (!input.subaccountId) {
+        await prisma.session.update({
+          where: { token: sessionToken },
+          data: { activeSubaccountId: null },
+        });
+
+        return {
+          activeSubaccountId: null,
+          activeSubaccount: null,
+        };
+      }
+
+      const subaccount = await prisma.subaccount.findFirst({
+        where: {
+          id: input.subaccountId,
+          organizationId: ctx.orgId,
+        },
+      });
+
+      if (!subaccount) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Subaccount not found for this organization.",
+        });
+      }
+
+      await prisma.session.update({
+        where: { token: sessionToken },
+        data: { activeSubaccountId: subaccount.id },
+      });
+
+      return {
+        activeSubaccountId: subaccount.id,
+        activeSubaccount: {
+          id: subaccount.id,
+          companyName: subaccount.companyName,
+          logo: subaccount.logo,
+          slug: subaccount.slug,
+        },
+      };
+    }),
 
   /**
    * Create a subaccount (client) under the active or provided organization.
@@ -168,8 +240,18 @@ export const organizationsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const organizationId = input.organizationId ?? ctx.orgId;
       if (!organizationId) {
-        throw new Error("No active organization.");
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No active organization found.",
+        });
       }
+
+      const slugBase = input.companyName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+      const slugSuffix = crypto.randomUUID().slice(0, 6);
+      const slug = `${slugBase}-${slugSuffix}`;
 
       const sub = await prisma.subaccount.create({
         data: {
@@ -188,6 +270,7 @@ export const organizationsRouter = createTRPCRouter({
           timezone: input.timezone || undefined,
           industry: input.industry || null,
           createdByUserId: ctx.auth.user.id,
+          slug,
         },
       });
       return sub;
@@ -198,10 +281,27 @@ export const organizationsRouter = createTRPCRouter({
    * Uses Subaccount.createdByUserId to identify ownership.
    */
   getClients: protectedProcedure.query(async ({ ctx }) => {
+    if (!ctx.orgId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "No active organization found.",
+      });
+    }
+
+    const membership = await prisma.member.findFirst({
+      where: {
+        organizationId: ctx.orgId,
+        userId: ctx.auth.user.id,
+      },
+    });
+
+    if (!membership || membership.role !== "owner") {
+      return [];
+    }
+
     const subaccounts = await prisma.subaccount.findMany({
       where: {
-        organizationId: ctx.orgId ?? "",
-        createdByUserId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
       },
       include: {
         organization: {
@@ -215,13 +315,15 @@ export const organizationsRouter = createTRPCRouter({
 
     return subaccounts.map((s) => ({
       id: s.organizationId,
+      subaccountId: s.id,
       name: s.companyName || s.organization.name,
-      slug: s.organization.slug,
+      slug: s.slug ?? s.organization.slug,
       logo: s.logo ?? s.organization.logo,
       profile: s,
       pendingInvites: (s.organization.invitations || []).filter(
         (inv) => inv.status !== "accepted" && inv.status !== "declined"
       ).length,
+      isActive: ctx.subaccountId === s.id,
     }));
   }),
 

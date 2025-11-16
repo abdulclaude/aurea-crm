@@ -1,4 +1,5 @@
 import { auth } from "@/lib/auth";
+import prisma from "@/lib/db";
 import { polarClient } from "@/lib/polar";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { headers } from "next/headers";
@@ -41,8 +42,64 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
     });
   }
 
-  const orgId = session.session.activeOrganizationId;
-  return next({ ctx: { ...ctx, auth: session, orgId } });
+  const sessionRecord = await prisma.session.findUnique({
+    where: { token: session.session.token },
+    select: {
+      activeOrganizationId: true,
+      activeSubaccountId: true,
+    },
+  });
+
+  let orgId =
+    sessionRecord?.activeOrganizationId ??
+    session.session.activeOrganizationId ??
+    null;
+  const activeSubaccountId = sessionRecord?.activeSubaccountId ?? null;
+
+  if (!orgId) {
+    const fallbackMembership = await prisma.member.findFirst({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (fallbackMembership) {
+      orgId = fallbackMembership.organizationId;
+      await prisma.session.update({
+        where: { token: session.session.token },
+        data: { activeOrganizationId: orgId },
+      });
+    }
+  }
+
+  let activeSubaccount: Awaited<
+    ReturnType<typeof prisma.subaccount.findFirst>
+  > | null = null;
+
+  if (activeSubaccountId && orgId) {
+    activeSubaccount = await prisma.subaccount.findFirst({
+      where: {
+        id: activeSubaccountId,
+        organizationId: orgId,
+      },
+    });
+
+    if (!activeSubaccount) {
+      await prisma.session.update({
+        where: { token: session.session.token },
+        data: { activeSubaccountId: null },
+      });
+    }
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      auth: session,
+      orgId,
+      subaccountId: activeSubaccount?.id ?? null,
+      subaccount: activeSubaccount,
+    },
+  });
 });
 
 export const premiumProcedure = protectedProcedure.use(

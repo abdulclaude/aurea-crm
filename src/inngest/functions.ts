@@ -9,21 +9,39 @@ import { httpRequestChannel } from "./channels/http-request";
 import { manualTriggerChannel } from "./channels/manual-trigger";
 import { googleFormTriggerChannel } from "./channels/google-form-trigger";
 import { googleCalendarTriggerChannel } from "./channels/google-calendar-trigger";
+import { gmailTriggerChannel } from "./channels/gmail-trigger";
+import { telegramTriggerChannel } from "./channels/telegram-trigger";
+import { whatsappTriggerChannel } from "./channels/whatsapp-trigger";
 import { stripeTriggerChannel } from "./channels/stripe-trigger";
 import { geminiChannel } from "./channels/gemini";
 import { discordChannel } from "./channels/discord";
 import { slackChannel } from "./channels/slack";
 import { googleCalendarChannel } from "./channels/google-calendar";
+import { gmailChannel } from "./channels/gmail";
+import { telegramChannel } from "./channels/telegram";
+import { whatsappChannel } from "./channels/whatsapp";
 import {
   processGoogleCalendarSubscription,
   renewExpiringGoogleCalendarSubscriptions,
 } from "@/features/google-calendar/server/subscriptions";
+import {
+  processGmailNotification,
+  renewGmailSubscriptions,
+} from "@/features/gmail/server/subscriptions";
+import {
+  processTelegramUpdate,
+  type TelegramUpdate,
+} from "@/features/telegram/server/updates";
+import {
+  processWhatsAppUpdate,
+  type WhatsAppEntryChange,
+} from "@/features/whatsapp/server/updates";
 
 export const executeWorkflow = inngest.createFunction(
   {
     id: "execute-workflow",
     retries: 0,
-    onFailure: async ({ event, step }) => {
+    onFailure: async ({ event }) => {
       return prisma.execution.update({
         where: {
           inngestEventId: event.data.event.id,
@@ -43,11 +61,17 @@ export const executeWorkflow = inngest.createFunction(
       manualTriggerChannel(),
       googleFormTriggerChannel(),
       googleCalendarTriggerChannel(),
+      gmailTriggerChannel(),
+      telegramTriggerChannel(),
+      whatsappTriggerChannel(),
       stripeTriggerChannel(),
       geminiChannel(),
       discordChannel(),
       slackChannel(),
       googleCalendarChannel(),
+      gmailChannel(),
+      telegramChannel(),
+      whatsappChannel(),
     ],
   },
   async ({ event, step, publish }) => {
@@ -63,10 +87,22 @@ export const executeWorkflow = inngest.createFunction(
     }
 
     await step.run("create-execution", async () => {
+      const workflowMeta = await prisma.workflows.findUnique({
+        where: { id: workflowId },
+        select: {
+          subaccountId: true,
+        },
+      });
+
+      if (!workflowMeta) {
+        throw new NonRetriableError("Workflow not found.");
+      }
+
       return prisma.execution.create({
         data: {
           workflowId,
           inngestEventId,
+          subaccountId: workflowMeta.subaccountId,
         },
       });
     });
@@ -147,5 +183,75 @@ export const renewGoogleCalendarSubscriptions = inngest.createFunction(
   async () => {
     const renewed = await renewExpiringGoogleCalendarSubscriptions();
     return { renewed };
+  }
+);
+
+export const handleGmailNotification = inngest.createFunction(
+  { id: "gmail-notification", retries: 3 },
+  { event: "gmail/subscription.notification" },
+  async ({ event }) => {
+    const subscriptionId = event.data.subscriptionId as string | undefined;
+    if (!subscriptionId) {
+      return { skipped: true };
+    }
+
+    await processGmailNotification({
+      subscriptionId,
+      historyId: event.data.historyId as string | undefined,
+    });
+    return { subscriptionId };
+  }
+);
+
+export const renewGmailSubscriptionWatches = inngest.createFunction(
+  { id: "gmail-renewal", retries: 0 },
+  { cron: "0 * * * *" },
+  async () => {
+    const renewed = await renewGmailSubscriptions();
+    return { renewed };
+  }
+);
+
+export const handleTelegramUpdate = inngest.createFunction(
+  { id: "telegram-update", retries: 0 },
+  { event: "telegram/update" },
+  async ({ event }) => {
+    const credentialId = event.data.credentialId as string | undefined;
+    const userId = event.data.userId as string | undefined;
+    const update = event.data.update as TelegramUpdate | undefined;
+
+    if (!credentialId || !userId || !update) {
+      return { skipped: true };
+    }
+
+    await processTelegramUpdate({
+      credentialId,
+      userId,
+      update,
+    });
+
+    return { credentialId };
+  }
+);
+
+export const handleWhatsAppUpdate = inngest.createFunction(
+  { id: "whatsapp-update", retries: 0 },
+  { event: "whatsapp/update" },
+  async ({ event }) => {
+    const integrationId = event.data.integrationId as string | undefined;
+    const userId = event.data.userId as string | undefined;
+    const payload = event.data.payload as WhatsAppEntryChange | undefined;
+
+    if (!integrationId || !userId || !payload) {
+      return { skipped: true };
+    }
+
+    await processWhatsAppUpdate({
+      integrationId,
+      userId,
+      payload,
+    });
+
+    return { integrationId };
   }
 );

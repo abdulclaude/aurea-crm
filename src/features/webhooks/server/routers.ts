@@ -10,6 +10,14 @@ import {
 } from "@/trpc/init";
 import z from "zod";
 
+const webhookScopeWhere = (ctx: {
+  auth: { user: { id: string } };
+  subaccountId?: string | null;
+}) => ({
+  userId: ctx.auth.user.id,
+  subaccountId: ctx.subaccountId ?? null,
+});
+
 const webhookSchema = z.object({
   name: z.string().min(1, "Name is required"),
   provider: z.enum(WebhookProvider),
@@ -38,6 +46,7 @@ export const webhooksRouter = createTRPCRouter({
               ? encrypt(input.signingSecret)
               : undefined,
             userId: ctx.auth.user.id,
+            subaccountId: ctx.subaccountId ?? null,
           },
         })
         .then(serializeWebhook);
@@ -46,9 +55,15 @@ export const webhooksRouter = createTRPCRouter({
     .input(webhookSchema.extend({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...rest } = input;
+      await prisma.webhook.findFirstOrThrow({
+        where: {
+          id,
+          ...webhookScopeWhere(ctx),
+        },
+      });
       return prisma.webhook
         .update({
-          where: { id, userId: ctx.auth.user.id },
+          where: { id },
           data: {
             name: rest.name,
             provider: rest.provider,
@@ -64,8 +79,11 @@ export const webhooksRouter = createTRPCRouter({
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await prisma.webhook.findFirstOrThrow({
+        where: { id: input.id, ...webhookScopeWhere(ctx) },
+      });
       return prisma.webhook.delete({
-        where: { id: input.id, userId: ctx.auth.user.id },
+        where: { id: input.id },
       });
     }),
   getOne: protectedProcedure
@@ -73,7 +91,7 @@ export const webhooksRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       return prisma.webhook
         .findFirstOrThrow({
-          where: { id: input.id, userId: ctx.auth.user.id },
+          where: { id: input.id, ...webhookScopeWhere(ctx) },
         })
         .then(serializeWebhook);
     }),
@@ -91,13 +109,14 @@ export const webhooksRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const { page, pageSize, search } = input;
+      const scope = webhookScopeWhere(ctx);
 
       const [items, totalCount] = await Promise.all([
         prisma.webhook.findMany({
           skip: (page - 1) * pageSize,
           take: pageSize,
           where: {
-            userId: ctx.auth.user.id,
+            ...scope,
             name: {
               contains: search,
               mode: "insensitive",
@@ -107,7 +126,7 @@ export const webhooksRouter = createTRPCRouter({
         }),
         prisma.webhook.count({
           where: {
-            userId: ctx.auth.user.id,
+            ...scope,
             name: {
               contains: search,
               mode: "insensitive",
@@ -132,7 +151,10 @@ export const webhooksRouter = createTRPCRouter({
     .input(z.object({ provider: z.enum(WebhookProvider) }))
     .query(async ({ ctx, input }) => {
       const items = await prisma.webhook.findMany({
-        where: { provider: input.provider, userId: ctx.auth.user.id },
+        where: {
+          provider: input.provider,
+          ...webhookScopeWhere(ctx),
+        },
         orderBy: { updatedAt: "desc" },
       });
 

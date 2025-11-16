@@ -10,16 +10,25 @@ import {
 import type { Node, Edge } from "@xyflow/react";
 import z from "zod";
 
+const executionScopeWhere = (ctx: {
+  auth: { user: { id: string } };
+  subaccountId?: string | null;
+}) => ({
+  workflow: {
+    userId: ctx.auth.user.id,
+    subaccountId: ctx.subaccountId ?? null,
+  },
+  subaccountId: ctx.subaccountId ?? null,
+});
+
 export const executionsRouter = createTRPCRouter({
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      return prisma.execution.findUniqueOrThrow({
+      return prisma.execution.findFirstOrThrow({
         where: {
           id: input.id,
-          workflow: {
-            userId: ctx.auth.user.id,
-          },
+          ...executionScopeWhere(ctx),
         },
         include: {
           workflow: {
@@ -34,11 +43,7 @@ export const executionsRouter = createTRPCRouter({
   // Fetch all executions without pagination for timeline view
   getAll: protectedProcedure.query(async ({ ctx }) => {
     return prisma.execution.findMany({
-      where: {
-        workflow: {
-          userId: ctx.auth.user.id,
-        },
-      },
+      where: executionScopeWhere(ctx),
       orderBy: {
         startedAt: "desc",
       },
@@ -71,11 +76,7 @@ export const executionsRouter = createTRPCRouter({
         prisma.execution.findMany({
           skip: (page - 1) * pageSize,
           take: pageSize,
-          where: {
-            workflow: {
-              userId: ctx.auth.user.id,
-            },
-          },
+          where: executionScopeWhere(ctx),
           orderBy: {
             startedAt: "desc",
           },
@@ -89,11 +90,7 @@ export const executionsRouter = createTRPCRouter({
           },
         }),
         prisma.execution.count({
-          where: {
-            workflow: {
-              userId: ctx.auth.user.id,
-            },
-          },
+          where: executionScopeWhere(ctx),
         }),
       ]);
 
