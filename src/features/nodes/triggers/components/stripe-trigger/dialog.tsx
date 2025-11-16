@@ -89,7 +89,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
             <li>
               {" "}
               Click{" "}
-              <span className="text-primary font-medium">
+              <span className="text-white font-medium">
                 'Add destination'
               </span>{" "}
             </li>
@@ -106,7 +106,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
           <ul className="text-sm text-muted-foreground space-y-6">
             <li className="flex flex-col gap-1">
               {" "}
-              <code className="text-primary rounded-sm  font-medium w-max">
+              <code className="text-white rounded-sm  font-medium w-max">
                 {"{{stripe.amount}}"}
               </code>{" "}
               <p>Payment amount</p>
@@ -114,7 +114,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
 
             <li className="flex flex-col gap-1">
               {" "}
-              <code className="text-primary rounded-sm  font-medium w-max">
+              <code className="text-white rounded-sm  font-medium w-max">
                 {"{{stripe.currency}}"}
               </code>{" "}
               <p>Payment currency</p>
@@ -122,7 +122,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
 
             <li className="flex flex-col gap-1">
               {" "}
-              <code className="text-primary rounded-sm  font-medium w-max">
+              <code className="text-white rounded-sm  font-medium w-max">
                 {"{{stripe.eventType}}"}
               </code>{" "}
               <p>Event type (e.g. payment_intent.succeeded)</p>
@@ -130,7 +130,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
 
             <li className="flex flex-col gap-1">
               {" "}
-              <code className="text-primary rounded-sm  font-medium w-max">
+              <code className="text-white rounded-sm  font-medium w-max">
                 {"{{stripe.customerId}}"}
               </code>{" "}
               <p>Customer ID</p>
@@ -138,7 +138,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
 
             <li className="flex flex-col gap-1">
               {" "}
-              <code className="text-primary rounded-sm  font-medium w-max">
+              <code className="text-white rounded-sm  font-medium w-max">
                 {"{{json stripe}}"}
               </code>{" "}
               <p> Full event data in JSON format </p>

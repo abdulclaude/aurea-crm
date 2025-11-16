@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MoreHorizontalIcon, MousePointerIcon } from "lucide-react";
+import { GlobeIcon, MoreHorizontalIcon, MousePointerIcon } from "lucide-react";
 
 import {
   EmptyView,
@@ -64,12 +64,18 @@ import type { Workflows } from "@/generated/prisma/client";
 import { NodeType } from "@/generated/prisma/enums";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import Image from "next/image";
 
-type WorkflowEntity = Workflows & {
-  archived?: boolean | null;
-  isTemplate?: boolean | null;
-  description?: string | null;
-  nodes?: { type: NodeType }[];
+type WorkflowNodePreview = {
+  id?: string;
+  type?: NodeType;
+  createdAt?: string | Date | null;
+  position?: Record<string, unknown> | null;
+};
+
+type WorkflowEntity = Omit<Workflows, "nodes"> & {
+  nodes?: WorkflowNodePreview[];
 };
 
 export const WorkflowsTabs = () => {
@@ -198,7 +204,7 @@ export const WorkflowsPagination = () => {
     return <ArchivedWorkflowsPagination />;
   }
   if (view === "templates") {
-    return <TemplatesPagination />;
+    return null;
   }
   return <AllWorkflowsPagination />;
 };
@@ -266,11 +272,35 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
   };
 
   const archived = data.archived ?? false;
+  const templated = data.isTemplate ?? false;
+  const { firstNode, lastNode } = getWorkflowPreviewNodes(data.nodes);
+  const lastIconType = lastNode?.type ?? firstNode?.type;
+
+  const statusBadges =
+    archived || templated ? (
+      <div className="flex items-center gap-1">
+        {archived && (
+          <Badge className="bg-sky-800 rounded-sm h-6 text-[10px] uppercase tracking-wide text-sky-200 border border-white/5 px-2">
+            Archived
+          </Badge>
+        )}
+        {templated && (
+          <Badge className="bg-teal-700 rounded-sm h-6 text-[10px] uppercase tracking-wide text-teal-200 border border-white/5 px-2">
+            Templated
+          </Badge>
+        )}
+      </div>
+    ) : null;
 
   return (
     <EntityItem
       href={`/workflows/${data.id}`}
-      title={data.name}
+      title={
+        <div className="flex items-center gap-2">
+          <span>{data.name}</span>
+          {statusBadges}
+        </div>
+      }
       subtitle={
         <>
           Created {formatDistanceToNow(data.createdAt, { addSuffix: true })}{" "}
@@ -281,8 +311,9 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
         </>
       }
       image={
-        <div className="size-8 flex items-center justify-center">
-          <IconPayment className="size-4 text-white fill-white" />
+        <div className="flex items-center gap-1.5">
+          <NodePreviewIcon type={firstNode?.type} />
+          <NodePreviewIcon type={lastIconType} />
         </div>
       }
       menuItems={
@@ -318,7 +349,13 @@ export const ArchivedWorkflowsList = () => {
       items={workflows.data.items}
       getKey={(workflow) => workflow.id}
       renderItem={(workflow) => <WorkflowItem data={workflow} />}
-      emptyView={<ErrorView message="No archived workflows." />}
+      emptyView={
+        <EmptyView
+          title="No archived workflows"
+          label="workflow"
+          message="No archived workflows have been found. Get started by creating archiving a workflow."
+        />
+      }
     />
   );
 };
@@ -346,20 +383,13 @@ export const TemplatesList = () => {
       items={templates.data.items as WorkflowEntity[]}
       getKey={(t) => t.id}
       renderItem={(t) => <TemplateCard data={t} />}
-      emptyView={<ErrorView message="No templates found." />}
-    />
-  );
-};
-
-export const TemplatesPagination = () => {
-  const templates = useSuspenseTemplates();
-  const [params, setParams] = useWorkflowsParams();
-  return (
-    <EntityPagination
-      disabled={templates.isFetching}
-      totalPages={templates.data.totalPages}
-      page={templates.data.page}
-      onPageChange={(page) => setParams({ ...params, page })}
+      emptyView={
+        <EmptyView
+          title="No templates"
+          label="template"
+          message="No templates have been found. Get started by templating an existing workflow."
+        />
+      }
     />
   );
 };
@@ -393,25 +423,39 @@ export const TemplateItem = ({ data }: { data: WorkflowEntity }) => {
         </div>
       }
       actions={
-        <Button
-          size="sm"
-          variant="outline"
-          className="bg-[#202E32] border-white/10 hover:bg-[#202E32] hover:brightness-110"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            createFromTemplate.mutate(
-              { id: data.id },
-              {
-                onSuccess: (d) => {
-                  router.push(`/workflows/${d.id}`);
-                },
-              }
-            );
-          }}
-        >
-          Use template
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-[#202E32] border-white/10 hover:bg-[#202E32] hover:brightness-110"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              createFromTemplate.mutate(
+                { id: data.id },
+                {
+                  onSuccess: (d) => {
+                    router.push(`/workflows/${d.id}`);
+                  },
+                }
+              );
+            }}
+          >
+            Use template
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-white/80 hover:text-white hover:bg-white/10"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              router.push(`/workflows/${data.id}`);
+            }}
+          >
+            View template
+          </Button>
+        </div>
       }
       onRemove={handleRemove}
       isRemoving={removeWorkflow.isPending}
@@ -420,26 +464,179 @@ export const TemplateItem = ({ data }: { data: WorkflowEntity }) => {
 };
 
 // New card for templates grid
-const getTriggerIcon = (nodes?: { type: NodeType }[]) => {
+const getTriggerIcon = (nodes?: WorkflowNodePreview[]) => {
   const triggerPriority: NodeType[] = [
     NodeType.STRIPE_TRIGGER,
     NodeType.GOOGLE_FORM_TRIGGER,
     NodeType.MANUAL_TRIGGER,
   ];
   const type =
-    nodes?.find((n) => triggerPriority.includes(n.type))?.type ??
-    NodeType.MANUAL_TRIGGER;
+    nodes
+      ?.map((node) => node.type)
+      .find(
+        (nodeType): nodeType is NodeType =>
+          !!nodeType && triggerPriority.includes(nodeType)
+      ) ?? NodeType.MANUAL_TRIGGER;
   switch (type) {
     case NodeType.STRIPE_TRIGGER:
-      return <img src="/logos/stripe.svg" alt="Stripe" className="size-5" />;
+      return (
+        <Image
+          src="/logos/stripe.svg"
+          alt="Stripe"
+          width={20}
+          height={20}
+          className="size-5"
+        />
+      );
     case NodeType.GOOGLE_FORM_TRIGGER:
       return (
-        <img src="/logos/googleform.svg" alt="Google Form" className="size-5" />
+        <Image
+          src="/logos/googleform.svg"
+          alt="Google Form"
+          width={20}
+          height={20}
+          className="size-5"
+        />
       );
     case NodeType.MANUAL_TRIGGER:
     default:
       return <MousePointerIcon className="size-4 text-white" />;
   }
+};
+
+type NodeIconDescriptor =
+  | {
+      icon: React.ComponentType<{ className?: string }>;
+      alt: string;
+    }
+  | {
+      image: string;
+      alt: string;
+    };
+
+const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
+  [NodeType.MANUAL_TRIGGER]: { icon: MousePointerIcon, alt: "Manual trigger" },
+  [NodeType.GOOGLE_FORM_TRIGGER]: {
+    image: "/logos/googleform.svg",
+    alt: "Google Forms",
+  },
+  [NodeType.GOOGLE_CALENDAR_TRIGGER]: {
+    image: "/logos/googlecalendar.svg",
+    alt: "Google Calendar",
+  },
+  [NodeType.STRIPE_TRIGGER]: { image: "/logos/stripe.svg", alt: "Stripe" },
+  [NodeType.HTTP_REQUEST]: { icon: GlobeIcon, alt: "HTTP Request" },
+  [NodeType.GEMINI]: { image: "/logos/gemini.svg", alt: "Gemini" },
+  [NodeType.ANTHROPIC]: { image: "/logos/anthropic.svg", alt: "Anthropic" },
+  [NodeType.OPENAI]: { image: "/logos/openai.svg", alt: "OpenAI" },
+  [NodeType.DISCORD]: { image: "/logos/discord.svg", alt: "Discord" },
+  [NodeType.SLACK]: { image: "/logos/slack.svg", alt: "Slack" },
+  [NodeType.GOOGLE_CALENDAR_EXECUTION]: {
+    image: "/logos/googlecalendar.svg",
+    alt: "Google Calendar",
+  },
+  [NodeType.INITIAL]: { icon: IconPayment, alt: "Initial" },
+};
+
+const renderNodeIconGraphic = (type: NodeType) => {
+  const descriptor = nodeIconDescriptors[type];
+
+  if (!descriptor) {
+    return <IconPayment className="size-4 text-white" />;
+  }
+
+  if ("icon" in descriptor) {
+    const IconComp = descriptor.icon;
+    return <IconComp className="size-4 text-white" />;
+  }
+
+  return (
+    <Image
+      src={descriptor.image}
+      alt={descriptor.alt}
+      width={16}
+      height={16}
+      className="size-4 object-contain"
+    />
+  );
+};
+
+const NodePreviewIcon = ({ type }: { type?: NodeType }) => {
+  if (!type) {
+    return (
+      <div className="size-8 rounded-sm bg-[#202E32] border border-white/10 flex items-center justify-center">
+        <IconPayment className="size-4 text-white fill-white" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="size-8 rounded-sm bg-[#202E32] border border-white/10 flex items-center justify-center -mx-1 last:border-l-0 last:rounded-l-none first:border-r-none first:rounded-r-none">
+      {renderNodeIconGraphic(type)}
+    </div>
+  );
+};
+
+const toTimestamp = (value?: string | Date | null) => {
+  if (!value) {
+    return 0;
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
+};
+
+const toPositionX = (position: WorkflowNodePreview["position"]) => {
+  if (!position || typeof position !== "object") {
+    return 0;
+  }
+
+  const maybePosition = position as { x?: number | string | null };
+  if (typeof maybePosition.x === "number") {
+    return maybePosition.x;
+  }
+  if (
+    typeof maybePosition.x === "string" &&
+    !Number.isNaN(Number(maybePosition.x))
+  ) {
+    return Number(maybePosition.x);
+  }
+  return 0;
+};
+
+const getWorkflowPreviewNodes = (nodes?: WorkflowNodePreview[]) => {
+  if (!nodes || nodes.length === 0) {
+    return {
+      firstNode: undefined,
+      lastNode: undefined,
+    };
+  }
+
+  const filteredNodes = nodes
+    .filter((node) => node.type && node.type !== NodeType.INITIAL)
+    .sort((a, b) => {
+      const timeDiff = toTimestamp(a.createdAt) - toTimestamp(b.createdAt);
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+
+      return toPositionX(a.position) - toPositionX(b.position);
+    });
+
+  if (filteredNodes.length === 0) {
+    return {
+      firstNode: undefined,
+      lastNode: undefined,
+    };
+  }
+
+  const firstNode = filteredNodes[0];
+  const lastNode = filteredNodes[filteredNodes.length - 1];
+
+  return {
+    firstNode,
+    lastNode,
+  };
 };
 
 export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
@@ -479,23 +676,33 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
           </div>
 
           <div className="flex items-center justify-between mt-4">
-            <Button
-              size="sm"
-              variant="outline"
-              className="bg-[#202E32] text-white hover:text-white text-xs border-none hover:bg-[#202E32] hover:brightness-110"
-              onClick={() =>
-                createFromTemplate.mutate(
-                  { id: data.id },
-                  {
-                    onSuccess: (d) => {
-                      router.push(`/workflows/${d.id}`);
-                    },
-                  }
-                )
-              }
-            >
-              Use template
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-[#202E32] text-white hover:text-white text-xs border-none hover:bg-[#202E32] hover:brightness-110"
+                onClick={() =>
+                  createFromTemplate.mutate(
+                    { id: data.id },
+                    {
+                      onSuccess: (d) => {
+                        router.push(`/workflows/${d.id}`);
+                      },
+                    }
+                  )
+                }
+              >
+                Use template
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-white/80 hover:text-white hover:bg-white/10 text-xs"
+                onClick={() => router.push(`/workflows/${data.id}`)}
+              >
+                View template
+              </Button>
+            </div>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

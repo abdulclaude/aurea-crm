@@ -1,7 +1,5 @@
 "use client";
 
-import "@xyflow/react/dist/style.css";
-
 import { useCallback, useMemo, useState } from "react";
 
 import {
@@ -129,9 +127,8 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
           hideAttribution: true,
         }}
       >
-        <Background />
-        <Controls />
-        <MiniMap />
+        <Background className="bg-[#1A2326]!" />
+        <Controls showInteractive={false} />
         <Panel position="top-right">
           <AddNodeButton />
         </Panel>

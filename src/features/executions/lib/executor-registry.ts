@@ -9,6 +9,12 @@ import { discordExecutor } from "@/features/nodes/executions/components/discord/
 import { slackExecutor } from "@/features/nodes/executions/components/slack/executor";
 import { googleCalendarTriggerExecutor } from "@/features/nodes/triggers/components/google-calendar-trigger/executor";
 import { googleCalendarActionExecutor } from "@/features/nodes/executions/components/google-calendar/executor";
+import { gmailTriggerExecutor } from "@/features/nodes/triggers/components/gmail-trigger/executor";
+import { gmailExecutor } from "@/features/nodes/executions/components/gmail/executor";
+import { telegramTriggerExecutor } from "@/features/nodes/triggers/components/telegram-trigger/executor";
+import { telegramExecutionExecutor } from "@/features/nodes/executions/components/telegram/executor";
+import { whatsappTriggerExecutor } from "@/features/nodes/triggers/components/whatsapp-trigger/executor";
+import { whatsappExecutionExecutor } from "@/features/nodes/executions/components/whatsapp/executor";
 
 export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.MANUAL_TRIGGER]: manualTriggerExecutor,
@@ -17,6 +23,12 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.GOOGLE_FORM_TRIGGER]: googleFormTriggerExecutor,
   [NodeType.GOOGLE_CALENDAR_TRIGGER]: googleCalendarTriggerExecutor,
   [NodeType.GOOGLE_CALENDAR_EXECUTION]: googleCalendarActionExecutor,
+  [NodeType.GMAIL_TRIGGER]: gmailTriggerExecutor,
+  [NodeType.GMAIL_EXECUTION]: gmailExecutor,
+  [NodeType.TELEGRAM_TRIGGER]: telegramTriggerExecutor,
+  [NodeType.TELEGRAM_EXECUTION]: telegramExecutionExecutor,
+  [NodeType.WHATSAPP_TRIGGER]: whatsappTriggerExecutor,
+  [NodeType.WHATSAPP_EXECUTION]: whatsappExecutionExecutor,
   [NodeType.STRIPE_TRIGGER]: stripeTriggerExecutor,
   [NodeType.GEMINI]: geminiExecutor,
   [NodeType.ANTHROPIC]: geminiExecutor,

@@ -9,10 +9,7 @@ import type {
   Node as PrismaNode,
   GmailSubscription as PrismaGmailSubscription,
 } from "@/generated/prisma/client";
-import {
-  fetchGmailMessages,
-  type GmailTriggerConfig,
-} from "./messages";
+import { fetchGmailMessages, type GmailTriggerConfig } from "./messages";
 import { fetchGmailProfile } from "./profile";
 
 const WATCH_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
@@ -151,6 +148,15 @@ export async function processGmailNotification({
     },
   });
 
+  console.log(
+    "[Gmail] Nodes eligible for trigger",
+    subscriptionId,
+    nodes.map((node) => ({
+      id: node.id,
+      workflowId: node.workflowId,
+    }))
+  );
+
   if (nodes.length === 0) {
     await stopGmailWatchForUser(subscription.userId);
     return;
@@ -223,6 +229,14 @@ async function maybeTriggerWorkflowFromNode({
   });
 
   const latestId = payload.messages[0]?.id;
+  console.log(
+    "[Gmail] Latest message for node",
+    node.id,
+    "latestId:",
+    latestId,
+    "messageCount:",
+    payload.messages.length
+  );
   if (!latestId) {
     return;
   }
@@ -230,6 +244,15 @@ async function maybeTriggerWorkflowFromNode({
   const state = await prisma.gmailTriggerState.findUnique({
     where: { nodeId: node.id },
   });
+
+  if (state) {
+    console.log(
+      "[Gmail] Last seen message for node",
+      node.id,
+      "is",
+      state.lastMessageId
+    );
+  }
 
   if (state?.lastMessageId === latestId) {
     return;
@@ -518,4 +541,3 @@ function getGmailTopicName() {
   }
   return topic;
 }
-

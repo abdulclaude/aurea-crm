@@ -3,9 +3,13 @@
 import { createId } from "@paralleldrive/cuid2";
 import { useReactFlow } from "@xyflow/react";
 
-import { GlobeIcon, MousePointerIcon } from "lucide-react";
-import React, { useCallback } from "react";
+import { IconWorld as HttpRequestIcon } from "central-icons/IconWorld";
+import React, { useCallback, useMemo } from "react";
+import Image from "next/image";
 import { toast } from "sonner";
+
+import { IconCursorClick as ManualTriggerIcon } from "central-icons/IconCursorClick";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   Sheet,
@@ -16,7 +20,6 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { IntegrationProvider, NodeType } from "@/generated/prisma/enums";
-import { Separator } from "./ui/separator";
 import { Button } from "./ui/button";
 import { useSuspenseIntegrationProviders } from "@/features/integrations/hooks/use-integrations";
 
@@ -34,7 +37,7 @@ const triggerNodes: NodeTypeOption[] = [
     label: "Trigger manually",
     description:
       "Runs the flow on clicking a button. Good for getting started quickly.",
-    icon: MousePointerIcon,
+    icon: ManualTriggerIcon,
   },
   {
     type: NodeType.GOOGLE_FORM_TRIGGER,
@@ -55,6 +58,27 @@ const triggerNodes: NodeTypeOption[] = [
     description: "Runs the flow when a Stripe event is captured.",
     icon: "/logos/stripe.svg",
   },
+  {
+    type: NodeType.GMAIL_TRIGGER,
+    label: "Gmail (new email)",
+    description:
+      "Listens for new messages in a label or query and exposes them to the workflow.",
+    icon: "/logos/google.svg",
+    requiresIntegration: IntegrationProvider.GMAIL,
+  },
+  {
+    type: NodeType.TELEGRAM_TRIGGER,
+    label: "Telegram (new message)",
+    description: "Runs whenever your Telegram bot receives a new message.",
+    icon: "/logos/telegram.svg",
+  },
+  {
+    type: NodeType.WHATSAPP_TRIGGER,
+    label: "WhatsApp (new message)",
+    description: "Runs whenever your WhatsApp business number gets a message.",
+    icon: "/logos/whatsapp.svg",
+    requiresIntegration: IntegrationProvider.WHATSAPP,
+  },
 ];
 
 const executionNodes: NodeTypeOption[] = [
@@ -62,7 +86,7 @@ const executionNodes: NodeTypeOption[] = [
     type: NodeType.HTTP_REQUEST,
     label: "HTTP Request",
     description: "Makes a HTTP request",
-    icon: GlobeIcon,
+    icon: HttpRequestIcon,
   },
   {
     type: NodeType.GEMINI,
@@ -89,6 +113,27 @@ const executionNodes: NodeTypeOption[] = [
     icon: "/logos/googlecalendar.svg",
     requiresIntegration: IntegrationProvider.GOOGLE_CALENDAR,
   },
+  {
+    type: NodeType.GMAIL_EXECUTION,
+    label: "Gmail",
+    description: "Send personalized emails via your connected Gmail account.",
+    icon: "/logos/google.svg",
+    requiresIntegration: IntegrationProvider.GMAIL,
+  },
+  {
+    type: NodeType.TELEGRAM_EXECUTION,
+    label: "Telegram message",
+    description: "Send a message via your Telegram bot.",
+    icon: "/logos/telegram.svg",
+  },
+  {
+    type: NodeType.WHATSAPP_EXECUTION,
+    label: "WhatsApp message",
+    description:
+      "Send a WhatsApp message through your connected business number.",
+    icon: "/logos/whatsapp.svg",
+    requiresIntegration: IntegrationProvider.WHATSAPP,
+  },
 ];
 
 interface NodeSelectorProps {
@@ -107,6 +152,27 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   const connectedProviderSet = React.useMemo(
     () => new Set(connectedProviders || []),
     [connectedProviders]
+  );
+
+  const communicationTypes = useMemo(
+    () =>
+      new Set<NodeType>([
+        NodeType.DISCORD,
+        NodeType.SLACK,
+        NodeType.TELEGRAM_EXECUTION,
+        NodeType.WHATSAPP_EXECUTION,
+      ]),
+    []
+  );
+
+  const communicationNodes = useMemo(
+    () => executionNodes.filter((node) => communicationTypes.has(node.type)),
+    [communicationTypes]
+  );
+
+  const actionNodes = useMemo(
+    () => executionNodes.filter((node) => !communicationTypes.has(node.type)),
+    [communicationTypes]
   );
 
   const handleNodeSelect = useCallback(
@@ -160,9 +226,67 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     switch (provider) {
       case IntegrationProvider.GOOGLE_CALENDAR:
         return "Google Calendar";
+      case IntegrationProvider.GMAIL:
+        return "Gmail";
       default:
         return "this integration";
     }
+  };
+
+  const renderNodeButtons = (
+    nodes: NodeTypeOption[],
+    emptyText: string,
+    category: "trigger" | "execution" | "communication"
+  ) => {
+    if (!nodes.length) {
+      return <p className="px-8 py-6 text-xs text-white/40">{emptyText}</p>;
+    }
+
+    return nodes.map((nodeType) => {
+      const Icon = nodeType.icon;
+      const isIntegrationSatisfied =
+        !nodeType.requiresIntegration ||
+        connectedProviderSet.has(nodeType.requiresIntegration);
+
+      return (
+        <Button
+          key={`${category}-${nodeType.type}`}
+          className="w-full justify-start h-max py-5 px-8 bg-[#202E32] brightness-120 border border-[#375159]/25 text-white/50 hover:border-[#375159]/50  hover:bg-[#202E32] hover:brightness-140 hover:text-white transition duration-250 rounded-sm"
+          onClick={() => handleNodeSelect(nodeType)}
+          variant="ghost"
+          disabled={!isIntegrationSatisfied}
+        >
+          <div className="flex items-center gap-6 w-full overflow-hidden">
+            {typeof Icon === "string" ? (
+              <Image
+                src={Icon}
+                alt={nodeType.label}
+                width={20}
+                height={20}
+                className="size-5 object-contain rounded-sm mt-1"
+              />
+            ) : (
+              <Icon className="size-5 text-white " />
+            )}
+
+            <div className="flex flex-col items-start text-left gap-0.5 max-w-[220px]">
+              <h1 className="font-medium text-sm">{nodeType.label}</h1>
+
+              <p className="text-[11px] text-white/40 font-normal w-full whitespace-normal wrap-break-word">
+                {nodeType.description}
+              </p>
+
+              {!isIntegrationSatisfied && (
+                <p className="text-[10px] text-amber-200 font-normal wrap-break-word">
+                  Connect {getIntegrationLabel(nodeType.requiresIntegration)} in
+                  Integrations to use this node.
+                </p>
+              )}
+            </div>
+          </div>
+        </Button>
+      );
+    });
   };
 
   return (
@@ -171,125 +295,73 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md overflow-y-auto border-none"
+        className="w-full sm:max-w-md overflow-y-auto border-none bg-[#202E32] text-white"
       >
-        <SheetHeader className="px-8 py-8 pt-12">
-          <SheetTitle>What triggers this workflow?</SheetTitle>
-
+        <SheetHeader className="px-8 pt-12 gap-1">
+          <SheetTitle>Add a node</SheetTitle>
           <SheetDescription>
-            A trigger is a step that starts your workflow.
+            Choose from triggers, executions, or communication nodes.
           </SheetDescription>
         </SheetHeader>
 
-        <Separator />
+        <Tabs defaultValue="triggers" className="px-8">
+          <TabsList className="bg-[#202E32] brightness-120 text-white/50 mb-2 w-max">
+            <TabsTrigger
+              className="data-[state=active]:bg-[#202E32] data-[state=active]:brightness-130 px-4"
+              value="triggers"
+            >
+              Triggers
+            </TabsTrigger>
+            <TabsTrigger
+              className="data-[state=active]:bg-[#202E32] data-[state=active]:brightness-130 px-4"
+              value="executions"
+            >
+              Executions
+            </TabsTrigger>
+            <TabsTrigger
+              className="data-[state=active]:bg-[#202E32] data-[state=active]:brightness-130 px-4"
+              value="communication"
+            >
+              Communication
+            </TabsTrigger>
+          </TabsList>
 
-        <div>
-          {triggerNodes.map((nodeType) => {
-            const Icon = nodeType.icon;
-            const isIntegrationSatisfied =
-              !nodeType.requiresIntegration ||
-              connectedProviderSet.has(nodeType.requiresIntegration);
+          <TabsContent value="triggers" className="focus-visible:outline-none">
+            <div className="flex flex-col gap-2">
+              {renderNodeButtons(
+                triggerNodes,
+                "No trigger nodes available.",
+                "trigger"
+              )}
+            </div>
+          </TabsContent>
 
-            return (
-              <Button
-                key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
-                onClick={() => handleNodeSelect(nodeType)}
-                variant="ghost"
-                disabled={!isIntegrationSatisfied}
-              >
-                <div className="flex items-center gap-6 w-full overflow-hidden">
-                  {typeof Icon === "string" ? (
-                    <img
-                      src={Icon}
-                      alt={nodeType.label}
-                      className="size-5 object-contain rounded-sm"
-                    />
-                  ) : (
-                    <Icon className="size-5" />
-                  )}
+          <TabsContent
+            value="executions"
+            className="focus-visible:outline-none"
+          >
+            <div className="flex flex-col gap-2">
+              {renderNodeButtons(
+                actionNodes,
+                "No execution nodes available.",
+                "execution"
+              )}
+            </div>
+          </TabsContent>
 
-                  <div className="flex flex-col items-start text-left gap-0.5">
-                    <span className="font-medium text-sm">
-                      {nodeType.label}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {nodeType.description}
-                    </span>
-                    {!isIntegrationSatisfied && (
-                      <span className="text-[11px] text-amber-600 mt-1">
-                        Connect{" "}
-                        {getIntegrationLabel(nodeType.requiresIntegration)} in
-                        Integrations to use this trigger.
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </Button>
-            );
-          })}
-        </div>
-
-        <Separator />
-
-        <SheetHeader className="px-8 py-8">
-          <SheetTitle>What executes this workflow?</SheetTitle>
-
-          <SheetDescription>
-            A trigger is a step that starts your workflow.
-          </SheetDescription>
-        </SheetHeader>
-
-        <Separator />
-
-        <div>
-          {executionNodes.map((nodeType) => {
-            const Icon = nodeType.icon;
-            const isIntegrationSatisfied =
-              !nodeType.requiresIntegration ||
-              connectedProviderSet.has(nodeType.requiresIntegration);
-
-            return (
-              <Button
-                key={nodeType.type}
-                className="w-full justify-start h-auto py-5 px-4 rounded-none border-l-2 border-transparent hover:border-l-primary hover:bg-accent/25 transition duration-250"
-                onClick={() => handleNodeSelect(nodeType)}
-                variant="ghost"
-                disabled={!isIntegrationSatisfied}
-              >
-                <div className="flex items-center gap-6 w-full overflow-hidden">
-                  {typeof Icon === "string" ? (
-                    <img
-                      src={Icon}
-                      alt={nodeType.label}
-                      className="size-5 object-contain rounded-sm"
-                    />
-                  ) : (
-                    <Icon className="size-5" />
-                  )}
-
-                  <div className="flex flex-col items-start text-left gap-0.5">
-                    <span className="font-medium text-sm">
-                      {nodeType.label}
-                    </span>
-
-                    <span className="text-xs text-muted-foreground">
-                      {nodeType.description}
-                    </span>
-                    {!isIntegrationSatisfied && (
-                      <span className="text-[11px] text-amber-600 mt-1">
-                        Connect{" "}
-                        {getIntegrationLabel(nodeType.requiresIntegration)} in
-                        Integrations to use this action.
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </Button>
-            );
-          })}
-        </div>
+          <TabsContent
+            value="communication"
+            className="focus-visible:outline-none"
+          >
+            <div className="flex flex-col gap-2">
+              {renderNodeButtons(
+                communicationNodes,
+                "No communication nodes available.",
+                "communication"
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
       </SheetContent>
     </Sheet>
   );

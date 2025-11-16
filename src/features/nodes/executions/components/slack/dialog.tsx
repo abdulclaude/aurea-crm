@@ -146,7 +146,7 @@ export const SlackDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.text}}`}
                     </span>{" "}
                   </FormDescription>
@@ -191,7 +191,11 @@ export const SlackDialog: React.FC<Props> = ({
                   </Select>
                   <FormDescription className="flex items-center justify-between text-xs">
                     Reuse any Slack webhook you've saved.
-                    <Button asChild variant="link" className="px-0 text-xs h-auto">
+                    <Button
+                      asChild
+                      variant="link"
+                      className="px-0 text-xs h-auto"
+                    >
                       <Link href="/webhooks" prefetch>
                         Manage webhooks
                       </Link>
@@ -219,35 +223,35 @@ export const SlackDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5 flex flex-col gap-1">
                     Get this from Slack:
                     <span className="flex items-center gap-1 flex-wrap">
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Tools
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Workflows
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         New
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Build a workflow
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Choose an event
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         From a webhook
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Make the key "content"
                       </span>{" "}
                       <ChevronRight className="size-3" />{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         Copy web request URL
                       </span>{" "}
                     </span>
@@ -273,12 +277,12 @@ export const SlackDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     The message you want to send to the Slack server. <br /> Use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.

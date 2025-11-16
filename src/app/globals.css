@@ -1,3 +1,4 @@
+@import "@xyflow/react/dist/style.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -209,7 +210,26 @@
   }
 }
 
-/* React Flow node selection styles */
-.react-flow__node.selected #base-node {
-  @apply ring-3 ring-muted-foreground/25 shadow-lg;
+.react-flow__controls button {
+  background-color: #202e32;
+  color: white;
+
+  border-bottom: none;
+}
+
+.react-flow__controls button:hover {
+  background-color: #1a2326;
+  color: white;
+}
+
+.react-flow__controls button:first-child {
+  border-radius: 5px 5px 0 0;
+}
+
+.react-flow__controls button:last-child {
+  border-radius: 0 0 5px 5px;
+}
+
+.react-flow__controls button path {
+  fill: var(--text-color);
 }

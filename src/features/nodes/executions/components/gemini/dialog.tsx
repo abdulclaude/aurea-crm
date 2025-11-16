@@ -135,7 +135,7 @@ export const GeminiDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.aiResponse}}`}
                     </span>{" "}
                   </FormDescription>
@@ -233,12 +233,12 @@ export const GeminiDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Sets the behaviour of the assistant. <br /> Use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.
@@ -266,12 +266,12 @@ export const GeminiDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     The prompt to send to the AI. <br /> Use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.
