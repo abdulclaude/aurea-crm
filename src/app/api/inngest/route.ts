@@ -4,6 +4,10 @@ import {
   executeWorkflow,
   handleGoogleCalendarNotification,
   renewGoogleCalendarSubscriptions,
+  handleGmailNotification,
+  renewGmailSubscriptionWatches,
+  handleTelegramUpdate,
+  handleWhatsAppUpdate,
 } from "@/inngest/functions";
 
 // Create an API that serves zero functions
@@ -13,5 +17,9 @@ export const { GET, POST, PUT } = serve({
     executeWorkflow,
     handleGoogleCalendarNotification,
     renewGoogleCalendarSubscriptions,
+    handleGmailNotification,
+    renewGmailSubscriptionWatches,
+    handleTelegramUpdate,
+    handleWhatsAppUpdate,
   ],
 });

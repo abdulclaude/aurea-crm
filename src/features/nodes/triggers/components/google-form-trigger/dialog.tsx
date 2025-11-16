@@ -136,7 +136,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
           <ul className="text-sm text-muted-foreground space-y-4">
             <li>
               {" "}
-              <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
+              <code className="bg-background px-1 py-0.5 rounded text-white font-medium">
                 {"{{googleForm.respondentEmail}}"}
               </code>{" "}
               - Respondent's email
@@ -144,7 +144,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
             <li>
               {" "}
-              <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
+              <code className="bg-background px-1 py-0.5 rounded text-white font-medium">
                 {"{{googleForm.responses['Question Name']}}"}
               </code>{" "}
               - Access specific answer
@@ -152,7 +152,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
             <li>
               {" "}
-              <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
+              <code className="bg-background px-1 py-0.5 rounded text-white font-medium">
                 {"{{json googleForm.responses}}"}
               </code>{" "}
               - Access all responses as JSON

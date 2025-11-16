@@ -184,6 +184,9 @@ export const useUpdateWorkflowArchived = () => {
         queryClient.invalidateQueries(
           trpc.workflows.getArchived.queryOptions({})
         );
+        queryClient.invalidateQueries(
+          trpc.workflows.getOne.queryOptions({ id: data.id })
+        );
       },
       onError: (error) => {
         toast.error(`Failed to update workflow: ${error.message}`);

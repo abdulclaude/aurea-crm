@@ -15,7 +15,7 @@ export const PlaceholderNode = forwardRef<HTMLDivElement, PlaceholderNodeProps>(
     return (
       <BaseNode
         ref={ref}
-        className="w-auto h-auto border-dashed border-gray-300 bg-card p-4 text-center text-gray-300 shadow-none hover:border-gray-400 hover:text-gray-400 transition duration-250"
+        className="w-auto h-auto border-dotted border-white/5 bg-[#202E32] p-4 text-center text-white/25 shadow-none hover:border-white/10 hover:text-white transition duration-250"
         onClick={onClick}
       >
         {children}

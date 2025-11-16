@@ -151,7 +151,7 @@ export const DiscordDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.text}}`}
                     </span>{" "}
                   </FormDescription>
@@ -225,15 +225,15 @@ export const DiscordDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5 flex gap-1">
                     Get this from Discord: <br />
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       Channel Settings
                     </span>{" "}
                     <ChevronRight className="size-3" />{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       Integrations
                     </span>{" "}
                     <ChevronRight className="size-3" />{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       Webhooks
                     </span>{" "}
                   </FormDescription>
@@ -259,12 +259,12 @@ export const DiscordDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     The message you want to send to the Discord server. <br />{" "}
                     Use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.

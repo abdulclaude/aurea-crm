@@ -1,7 +1,9 @@
 "use client";
 
 import { NodeToolbar, Position } from "@xyflow/react";
-import { SettingsIcon, TrashIcon } from "lucide-react";
+import { SettingsIcon } from "lucide-react";
+
+import { IconRemoveKeyframe as TrashIcon } from "central-icons/IconRemoveKeyframe";
 
 import type { ReactNode } from "react";
 import { Button } from "./ui/button";
@@ -26,12 +28,12 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
   return (
     <>
       {showToolbar && (
-        <NodeToolbar className="bg-primary text-white border rounded-xl">
+        <NodeToolbar className="bg-[#202E32] text-white border border-white/5 rounded-sm">
           <Button
             size="sm"
             variant="ghost"
             onClick={onSettings}
-            className="hover:bg-primary hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-l-xl px-8"
+            className="hover:bg-[#202E32] hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-l-sm  px-8"
           >
             <SettingsIcon className="size-4" />
           </Button>
@@ -40,7 +42,7 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
             size="sm"
             variant="ghost"
             onClick={onDelete}
-            className="hover:bg-primary hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-r-xl px-8"
+            className="hover:bg-[#202E32] hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-r-sm  px-8"
           >
             <TrashIcon className="size-4" />
           </Button>
@@ -54,12 +56,10 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
           isVisible
           className="max-w-[200px] text-center space-y-1"
         >
-          <p className="font-semibold text-sm">{name}</p>
+          <p className="font-semibold text-sm text-white">{name}</p>
 
           {description && (
-            <p className="text-muted-foreground truncate text-xs">
-              {description}
-            </p>
+            <p className="text-white/50 truncate text-xs">{description}</p>
           )}
         </NodeToolbar>
       )}

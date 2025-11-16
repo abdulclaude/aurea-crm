@@ -3,12 +3,14 @@
 import {
   EntityContainer,
   EntityHeader,
-  EmptyView,
 } from "@/components/react-flow/entity-components";
 import { Button } from "@/components/ui/button";
 import {
   useSuspenseIntegrations,
   useSyncGoogleCalendarIntegration,
+  useSyncGmailIntegration,
+  useSyncGoogleIntegration,
+  useSyncWhatsAppIntegration,
 } from "../hooks/use-integrations";
 import {
   Card,
@@ -18,9 +20,16 @@ import {
 } from "@/components/ui/card";
 
 import Image from "next/image";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
+import { IntegrationProvider } from "@/generated/prisma/enums";
+import {
+  GMAIL_SCOPES,
+  GOOGLE_CALENDAR_SCOPES,
+  GOOGLE_FULL_SCOPES,
+  WHATSAPP_SCOPES,
+} from "@/features/integrations/constants";
 
 export const IntegrationsContainer = ({
   children,
@@ -41,22 +50,58 @@ export const IntegrationsContainer = ({
   );
 };
 
-const integrationsCatalog = [
+type IntegrationCatalogItem = {
+  id: string;
+  provider: IntegrationProvider;
+  title: string;
+  description: string;
+  icon: string;
+  scopes: string[];
+  authProvider: "google" | "facebook";
+};
+
+const integrationsCatalog: IntegrationCatalogItem[] = [
   {
     id: "google-calendar",
+    provider: IntegrationProvider.GOOGLE_CALENDAR,
     title: "Google Calendar",
     description:
       "Stream calendar events directly into your workflows and let workflows create or update events automatically.",
     icon: "/logos/googlecalendar.svg",
+    scopes: GOOGLE_CALENDAR_SCOPES,
+    authProvider: "google",
   },
-];
-
-const GOOGLE_CALENDAR_SCOPES = [
-  "openid",
-  "email",
-  "profile",
-  "https://www.googleapis.com/auth/calendar",
-];
+  {
+    id: "gmail",
+    provider: IntegrationProvider.GMAIL,
+    title: "Gmail",
+    description:
+      "Read incoming messages and send automated replies directly from your workflows.",
+    icon: "/logos/google.svg",
+    scopes: GMAIL_SCOPES,
+    authProvider: "google",
+  },
+  {
+    id: "google-workspace",
+    provider: IntegrationProvider.GOOGLE,
+    title: "Google Workspace",
+    description:
+      "Grant all Google permissions at once to unlock Gmail, Calendar, and future Google-powered nodes.",
+    icon: "/logos/google.svg",
+    scopes: GOOGLE_FULL_SCOPES,
+    authProvider: "google",
+  },
+  {
+    id: "whatsapp",
+    provider: IntegrationProvider.WHATSAPP,
+    title: "WhatsApp",
+    description:
+      "Receive and send messages via WhatsApp Cloud API using your connected business number.",
+    icon: "/logos/whatsapp.svg",
+    scopes: WHATSAPP_SCOPES,
+    authProvider: "facebook",
+  },
+] as const;
 
 export const IntegrationsList = () => {
   const integrations = useSuspenseIntegrations();
@@ -64,27 +109,101 @@ export const IntegrationsList = () => {
     mutate: syncGoogleCalendarMutate,
     isPending: isSyncingGoogleCalendar,
   } = useSyncGoogleCalendarIntegration();
-  const [isConnectingGoogleCalendar, setIsConnectingGoogleCalendar] =
-    useState(false);
+  const { mutate: syncGmailMutate, isPending: isSyncingGmail } =
+    useSyncGmailIntegration();
+  const { mutate: syncGoogleWorkspaceMutate, isPending: isSyncingGoogle } =
+    useSyncGoogleIntegration();
+  const { mutate: syncWhatsAppMutate, isPending: isSyncingWhatsApp } =
+    useSyncWhatsAppIntegration();
+  const [connectingProvider, setConnectingProvider] =
+    useState<IntegrationProvider | null>(null);
   const refetchIntegrations = integrations.refetch;
 
   useEffect(() => {
     syncGoogleCalendarMutate(undefined, {
       onSettled: () => refetchIntegrations(),
     });
-  }, [syncGoogleCalendarMutate, refetchIntegrations]);
+    syncGmailMutate(undefined, {
+      onSettled: () => refetchIntegrations(),
+    });
+    syncGoogleWorkspaceMutate(undefined, {
+      onSettled: () => refetchIntegrations(),
+    });
+  }, [
+    syncGoogleCalendarMutate,
+    syncGmailMutate,
+    syncGoogleWorkspaceMutate,
+    refetchIntegrations,
+  ]);
 
-  const handleConnectGoogleCalendar = async () => {
+  type SyncHandler = ReturnType<
+    typeof useSyncGoogleCalendarIntegration
+  >["mutate"];
+
+  const syncByProvider = useMemo<
+    Partial<Record<IntegrationProvider, SyncHandler>>
+  >(
+    () => ({
+      [IntegrationProvider.GOOGLE_CALENDAR]: syncGoogleCalendarMutate,
+      [IntegrationProvider.GMAIL]: syncGmailMutate,
+      [IntegrationProvider.GOOGLE]: syncGoogleWorkspaceMutate,
+      [IntegrationProvider.WHATSAPP]: syncWhatsAppMutate,
+    }),
+    [
+      syncGoogleCalendarMutate,
+      syncGmailMutate,
+      syncGoogleWorkspaceMutate,
+      syncWhatsAppMutate,
+    ]
+  );
+
+  const syncLoadingByProvider: Record<
+    IntegrationProvider,
+    boolean | undefined
+  > = {
+    [IntegrationProvider.GOOGLE_CALENDAR]: isSyncingGoogleCalendar,
+    [IntegrationProvider.GMAIL]: isSyncingGmail,
+    [IntegrationProvider.GOOGLE]: isSyncingGoogle,
+    [IntegrationProvider.WHATSAPP]: isSyncingWhatsApp,
+    [IntegrationProvider.TELEGRAM]: undefined,
+  };
+
+  const handleConnect = async (
+    provider: IntegrationProvider,
+    authProvider: "google" | "facebook",
+    scopes: string[],
+    label: string
+  ) => {
     try {
-      setIsConnectingGoogleCalendar(true);
+      setConnectingProvider(provider);
       await authClient.linkSocial({
-        provider: "google",
-        scopes: GOOGLE_CALENDAR_SCOPES,
+        provider: authProvider,
+        scopes,
+      });
+      const syncFn = syncByProvider[provider];
+      syncFn?.(undefined, {
+        onSuccess: (
+          result:
+            | { connected: boolean; missingScopes?: boolean }
+            | { connected?: undefined; missingScopes?: undefined }
+        ) => {
+          if (result?.missingScopes) {
+            toast.error(
+              `${label} requires additional permissions. Please reconnect and allow the requested scopes.`
+            );
+          } else if (result?.connected) {
+            toast.success(`${label} connected.`);
+          }
+        },
+        onError: () => {
+          toast.error(`Failed to sync ${label}. Please try again.`);
+        },
+        onSettled: () => refetchIntegrations(),
       });
     } catch (_error) {
-      toast.error("Failed to connect Google Calendar. Please try again.");
+      toast.error("Failed to connect Google. Please try again.");
     } finally {
-      setIsConnectingGoogleCalendar(false);
+      setConnectingProvider(null);
     }
   };
 
@@ -93,7 +212,9 @@ export const IntegrationsList = () => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       {integrationsCatalog.map((integration) => {
-        const isConnected = connected.has("GOOGLE_CALENDAR");
+        const isConnected = connected.has(integration.provider);
+        const isSyncing = syncLoadingByProvider[integration.provider] ?? false;
+        const isConnecting = connectingProvider === integration.provider;
         return (
           <Card
             key={integration.id}
@@ -120,17 +241,18 @@ export const IntegrationsList = () => {
 
               <Button
                 variant={isConnected ? "outline" : "default"}
-                disabled={
-                  isSyncingGoogleCalendar ||
-                  isConnectingGoogleCalendar ||
-                  isConnected
-                }
+                disabled={isSyncing || isConnecting || isConnected}
                 onClick={() => {
                   if (isConnected) {
-                    toast.info("Google Calendar is already connected.");
+                    toast.info(`${integration.title} is already connected.`);
                     return;
                   }
-                  handleConnectGoogleCalendar();
+                  handleConnect(
+                    integration.provider,
+                    integration.authProvider,
+                    integration.scopes,
+                    integration.title
+                  );
                 }}
                 className="w-full bg-[#202E32] hover:bg-[#202E32]! hover:brightness-110 text-xs py-2! h-max! font-medium border-none hover:text-white"
               >
@@ -140,14 +262,6 @@ export const IntegrationsList = () => {
           </Card>
         );
       })}
-
-      {integrationsCatalog.length === 0 && (
-        <EmptyView
-          title="No integrations yet"
-          label="integration"
-          message="We are working on the first integration. Check back soon."
-        />
-      )}
     </div>
   );
 };

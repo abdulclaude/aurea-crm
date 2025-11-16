@@ -126,7 +126,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.httpResponse.data}}`}
                     </span>{" "}
                   </FormDescription>
@@ -164,7 +164,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2">
                     The{" "}
-                    <span className="text-primary font-medium">
+                    <span className="text-white font-medium">
                       {" "}
                       HTTP method{" "}
                     </span>{" "}
@@ -192,12 +192,12 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Static URL or use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-primary font-medium tracking-wide">
+                    <span className="text-white font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.
@@ -226,12 +226,12 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                     <FormDescription className="text-xs mt-2 leading-5">
                       JSON with template variabes. <br /> Use{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         {"{{variables}}"}
                       </span>{" "}
                       for simple values.
                       <br /> Alternatively, use{" "}
-                      <span className="text-primary font-medium tracking-wide">
+                      <span className="text-white font-medium tracking-wide">
                         {"{{json variable}}"}
                       </span>{" "}
                       to stringify objects.

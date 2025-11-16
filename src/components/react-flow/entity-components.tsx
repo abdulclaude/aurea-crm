@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { IconAddKeyframe } from "central-icons/IconAddKeyframe";
+import { IconExplosion } from "central-icons/IconExplosion";
 
 import { cn } from "@/lib/utils";
 
@@ -219,7 +220,7 @@ export const LoadingView: React.FC<StateViewProps> = ({ message }) => {
 export const ErrorView: React.FC<StateViewProps> = ({ message }) => {
   return (
     <div className="flex justify-center items-center h-full flex-1 flex-col gap-y-1.5">
-      <AlertTriangleIcon className="size-6 text-white" />
+      <IconExplosion className="size-6 text-white" />
       <div className="text-sm text-muted-foreground font-semibold">
         {!!message && <p className="text-sm text-white">{message}</p>}
       </div>
@@ -242,19 +243,31 @@ export const EmptyView: React.FC<EmptyViewProps> = ({
   title,
 }) => {
   return (
-    <Empty className="border border-dashed bg-white ">
+    <Empty className="border border-dashed border-white/5 bg-[#202E32] ">
       <EmptyHeader>
-        <EmptyMedia variant="icon" className="bg-white">
-          <PackageOpenIcon />
+        <EmptyMedia
+          variant="icon"
+          className="bg-[#202E32] brightness-120 text-white p-6 "
+        >
+          <PackageOpenIcon className="stroke-1" />
         </EmptyMedia>
 
         <EmptyTitle>{title}</EmptyTitle>
 
-        {!!message && <EmptyDescription>{message}</EmptyDescription>}
+        {!!message && (
+          <EmptyDescription className="text-xs text-white/50">
+            {message}
+          </EmptyDescription>
+        )}
 
         {!!onNew && (
           <EmptyContent className="mt-2">
-            <Button onClick={onNew}>Add {label}</Button>
+            <Button
+              onClick={onNew}
+              className="bg-[#202E32] brightness-120 hover:bg-[#202E32] hover:brightness-130  hover:text-white! transition duration-150 text-xs px-5"
+            >
+              Add {label}
+            </Button>
           </EmptyContent>
         )}
       </EmptyHeader>
@@ -294,7 +307,7 @@ export function EntityList<T>({
 
 interface EntityItemProps {
   href: string;
-  title: string;
+  title: ReactNode;
   subtitle?: ReactNode;
   image?: ReactNode;
   actions?: ReactNode;

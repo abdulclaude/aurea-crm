@@ -65,6 +65,11 @@ const credentialTypeOptions = [
     label: "Anthropic",
     logo: "/logos/anthropic.svg",
   },
+  {
+    value: CredentialType.TELEGRAM_BOT,
+    label: "Telegram Bot",
+    logo: "/logos/telegram.svg",
+  },
 ];
 
 interface CredentialFormProps {
@@ -92,6 +97,14 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
       value: "",
     },
   });
+
+  const selectedType = form.watch("type");
+  const valueLabel =
+    selectedType === CredentialType.TELEGRAM_BOT ? "Bot token" : "API Key";
+  const valuePlaceholder =
+    selectedType === CredentialType.TELEGRAM_BOT
+      ? "123456789:ABC..."
+      : "AIza...";
 
   const onSubmit = async (values: FormValues) => {
     if (isEdit && initialData?.id) {
@@ -192,10 +205,14 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
                 name="value"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>API Key</FormLabel>
+                    <FormLabel>{valueLabel}</FormLabel>
 
                     <FormControl>
-                      <Input type="password" placeholder="AIza..." {...field} />
+                      <Input
+                        type="password"
+                        placeholder={valuePlaceholder}
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
