@@ -259,7 +259,7 @@ function convertFromHandlebars(text: string, variables: VariableItem[]): any {
     const paragraphContent: any[] = [];
     const regex = /\{\{([^}]+)\}\}/g;
     let lastIndex = 0;
-    let match;
+    let match: RegExpExecArray | null = null;
 
     // biome-ignore lint/suspicious/noAssignInExpressions: regex matching pattern
     while ((match = regex.exec(line)) !== null) {
