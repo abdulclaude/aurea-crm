@@ -12,8 +12,8 @@ export const BaseNode = forwardRef<HTMLDivElement, BaseNodeProps>(
     <div
       ref={ref}
       className={cn(
-        "relative rounded-sm border border-white/5 bg-[#202E32] text-card-foreground",
-        "hover:border-white/10 transition duration-150",
+        "relative rounded-sm border border-black/10 bg-background text-primary",
+        "hover:border-primary transition duration-150",
         status === "loading" && "border-none",
         status === "success" && "border-none",
         status === "error" && "border-none",
@@ -72,7 +72,7 @@ export const BaseNodeHeaderTitle = forwardRef<
   <h3
     ref={ref}
     data-slot="base-node-title"
-    className={cn("user-select-none flex-1 font-semibold", className)}
+    className={cn("user-select-none flex-1 ", className)}
     {...props}
   />
 ));

@@ -1,21 +1,20 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-
 import { useEffect } from "react";
-
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
-
+import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import Link from "next/link";
+
+import {
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   Form,
   FormControl,
@@ -25,9 +24,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { ChevronRight } from "lucide-react";
 import {
@@ -37,9 +34,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import { WebhookProvider } from "@/generated/prisma/enums";
 import { useWebhooksByProvider } from "@/features/webhooks/hooks/use-webhooks";
-import Link from "next/link";
 
 const formSchema = z.object({
   variableName: z
@@ -61,6 +59,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: z.infer<typeof formSchema>) => void;
   defaultValues?: Partial<SlackFormValues>;
+  variables: VariableItem[];
 }
 
 export const SlackDialog: React.FC<Props> = ({
@@ -68,6 +67,7 @@ export const SlackDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -93,7 +93,7 @@ export const SlackDialog: React.FC<Props> = ({
         webhookId: defaultValues.webhookId || undefined,
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.content, defaultValues.webhookUrl, defaultValues.webhookId, form]);
 
   const handleSavedWebhookChange = (value: string) => {
     if (value === "custom") {
@@ -117,21 +117,21 @@ export const SlackDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle> Slack Configuration </DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Slack Configuration</SheetTitle>
+          <SheetDescription>
             Configure the Slack webhook settings for this node.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             {/* variable name */}
             <FormField
@@ -213,10 +213,13 @@ export const SlackDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel> Web Request URL </FormLabel>
                   <FormControl>
-                    <Input
+                    <VariableInput
                       placeholder="https://hooks.slack.com/triggers/..."
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
                       disabled={isUsingSavedWebhook}
-                      {...field}
+                      className="h-13"
                     />
                   </FormControl>
 
@@ -268,10 +271,11 @@ export const SlackDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel> Message content </FormLabel>
                   <FormControl>
-                    <Textarea
+                    <VariableInput
                       placeholder="Summary: {{gemini.text}}"
-                      className="min-h-[80px] text-sm"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
                     />
                   </FormControl>
 
@@ -292,12 +296,17 @@ export const SlackDialog: React.FC<Props> = ({
               )}
             />
 
-            <DialogFooter className="mt-4">
-              <Button type="submit"> Save </Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

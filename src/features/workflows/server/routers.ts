@@ -16,7 +16,8 @@ import {
   syncGoogleCalendarWorkflowSubscriptions,
 } from "@/features/google-calendar/server/subscriptions";
 import { syncGmailWorkflowSubscriptions } from "@/features/gmail/server/subscriptions";
-import { WorkflowsWhereInput } from "@/generated/prisma/models";
+import type { WorkflowsWhereInput } from "@/generated/prisma/models";
+import { createNotification } from "@/lib/notifications";
 
 const nodePreviewSelect = {
   id: true,
@@ -39,7 +40,7 @@ const findWorkflowForCtx = (
     subaccountId?: string | null;
   },
   workflowId: string,
-  extra?: Prisma.WorkflowsWhereInput
+  extra?: WorkflowsWhereInput
 ) =>
   prisma.workflows.findFirstOrThrow({
     where: {
@@ -68,12 +69,43 @@ export const workflowsRouter = createTRPCRouter({
 
       return workflow;
     }),
-  create: premiumProcedure.mutation(({ ctx }) => {
-    return prisma.workflows.create({
+  create: premiumProcedure.mutation(async ({ ctx }) => {
+    const workflow = await prisma.workflows.create({
       data: {
         name: generateSlug(3),
         userId: ctx.auth.user.id,
         subaccountId: ctx.subaccountId ?? null,
+        nodes: {
+          create: {
+            type: NodeType.INITIAL,
+            position: { x: 0, y: 0 },
+            name: NodeType.INITIAL,
+          },
+        },
+      },
+    });
+
+    // Send notification
+    await createNotification({
+      type: "WORKFLOW_CREATED",
+      title: "Workflow created",
+      message: `${ctx.auth.user.name} created a new workflow: ${workflow.name}`,
+      actorId: ctx.auth.user.id,
+      entityType: "workflow",
+      entityId: workflow.id,
+      organizationId: ctx.orgId ?? undefined,
+      subaccountId: ctx.subaccountId ?? undefined,
+    });
+
+    return workflow;
+  }),
+  createBundle: premiumProcedure.mutation(({ ctx }) => {
+    return prisma.workflows.create({
+      data: {
+        name: `${generateSlug(3)}-bundle`,
+        userId: ctx.auth.user.id,
+        subaccountId: ctx.subaccountId ?? null,
+        isBundle: true,
         nodes: {
           create: {
             type: NodeType.INITIAL,
@@ -123,13 +155,25 @@ export const workflowsRouter = createTRPCRouter({
 
       await syncGmailWorkflowSubscriptions({ userId: ctx.auth.user.id });
 
+      // Send notification
+      await createNotification({
+        type: "WORKFLOW_DELETED",
+        title: "Workflow deleted",
+        message: `${ctx.auth.user.name} deleted workflow: ${workflow.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "workflow",
+        entityId: workflow.id,
+        organizationId: ctx.orgId ?? undefined,
+        subaccountId: ctx.subaccountId ?? undefined,
+      });
+
       return workflow;
     }),
   updateName: protectedProcedure
     .input(z.object({ id: z.string(), name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await findWorkflowForCtx(ctx, input.id);
-      return prisma.workflows.update({
+      const workflow = await prisma.workflows.update({
         where: {
           id: input.id,
         },
@@ -137,6 +181,20 @@ export const workflowsRouter = createTRPCRouter({
           name: input.name,
         },
       });
+
+      // Send notification
+      await createNotification({
+        type: "WORKFLOW_UPDATED",
+        title: "Workflow updated",
+        message: `${ctx.auth.user.name} renamed workflow to: ${workflow.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "workflow",
+        entityId: workflow.id,
+        organizationId: ctx.orgId ?? undefined,
+        subaccountId: ctx.subaccountId ?? undefined,
+      });
+
+      return workflow;
     }),
   update: protectedProcedure
     .input(
@@ -254,13 +312,13 @@ export const workflowsRouter = createTRPCRouter({
       }));
 
       // transform server connections to react-flow compatible edges
-
+      // Map default "main" handles to actual node handle IDs
       const edges: Edge[] = workflow.connections.map((connection) => ({
         id: connection.id,
         source: connection.fromNodeId,
         target: connection.toNodeId,
-        sourceHandle: connection.fromOutput,
-        targetHandle: connection.toInput,
+        sourceHandle: connection.fromOutput === "main" ? "source-1" : connection.fromOutput,
+        targetHandle: connection.toInput === "main" ? "target-1" : connection.toInput,
       }));
 
       return {
@@ -268,6 +326,7 @@ export const workflowsRouter = createTRPCRouter({
         name: workflow.name,
         archived: workflow.archived,
         isTemplate: workflow.isTemplate,
+        isBundle: workflow.isBundle,
         nodes,
         edges,
       };
@@ -282,10 +341,11 @@ export const workflowsRouter = createTRPCRouter({
           .max(PAGINATION.MAX_PAGE_SIZE)
           .default(PAGINATION.DEFAULT_PAGE_SIZE),
         search: z.string().default(""),
+        isBundle: z.boolean().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const { page, pageSize, search } = input;
+      const { page, pageSize, search, isBundle } = input;
 
       const ownerWhere = workflowScopeWhere(ctx);
       const where: WorkflowsWhereInput = {
@@ -294,6 +354,7 @@ export const workflowsRouter = createTRPCRouter({
           contains: search,
           mode: "insensitive",
         },
+        ...(isBundle !== undefined ? { isBundle } : {}),
       };
 
       const [items, totalCount] = await Promise.all([
@@ -601,5 +662,128 @@ export const workflowsRouter = createTRPCRouter({
       });
 
       return workflow;
+    }),
+
+  // Bundle Workflow Management
+  listBundles: protectedProcedure.query(async ({ ctx }) => {
+    return prisma.workflows.findMany({
+      where: {
+        ...workflowScopeWhere(ctx),
+        isBundle: true,
+        archived: false,
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        bundleInputs: true,
+        bundleOutputs: true,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+  }),
+
+  getBundleById: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ input, ctx }) => {
+      const bundle = await prisma.workflows.findFirst({
+        where: {
+          id: input.id,
+          ...workflowScopeWhere(ctx),
+          isBundle: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          bundleInputs: true,
+          bundleOutputs: true,
+        },
+      });
+
+      if (!bundle) {
+        throw new Error("Bundle workflow not found");
+      }
+
+      return bundle;
+    }),
+
+  getParentWorkflows: protectedProcedure
+    .input(z.object({ bundleId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      // Find all workflows that contain a BUNDLE_WORKFLOW node pointing to this bundleId
+      const workflows = await prisma.workflows.findMany({
+        where: {
+          ...workflowScopeWhere(ctx),
+          isBundle: false,
+          archived: false,
+        },
+        include: {
+          nodes: {
+            orderBy: { position: "asc" },
+          },
+          connections: true,
+        },
+      });
+
+      // Filter workflows that have BUNDLE_WORKFLOW nodes referencing this bundle
+      const parentWorkflows = workflows.filter((wf) =>
+        wf.nodes.some((node) => {
+          if (node.type !== NodeType.BUNDLE_WORKFLOW) return false;
+          const data = node.data as Record<string, any>;
+          return data?.bundleWorkflowId === input.bundleId;
+        })
+      );
+
+      return parentWorkflows;
+    }),
+
+  updateBundleConfig: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        bundleInputs: z.array(
+          z.object({
+            name: z.string(),
+            type: z.string(),
+            description: z.string().optional(),
+            defaultValue: z.unknown().optional(),
+          })
+        ),
+        bundleOutputs: z.array(
+          z.object({
+            name: z.string(),
+            variablePath: z.string(),
+          })
+        ),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const scoped = await findWorkflowForCtx(ctx, input.id, {
+        isBundle: true,
+      });
+
+      return prisma.workflows.update({
+        where: { id: scoped.id },
+        data: {
+          bundleInputs: input.bundleInputs as Prisma.InputJsonValue,
+          bundleOutputs: input.bundleOutputs as Prisma.InputJsonValue,
+        },
+      });
+    }),
+
+  toggleBundle: protectedProcedure
+    .input(z.object({ id: z.string(), isBundle: z.boolean() }))
+    .mutation(async ({ input, ctx }) => {
+      const scoped = await findWorkflowForCtx(ctx, input.id);
+
+      return prisma.workflows.update({
+        where: { id: scoped.id },
+        data: {
+          isBundle: input.isBundle,
+        },
+      });
     }),
 });

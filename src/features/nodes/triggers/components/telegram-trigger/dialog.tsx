@@ -7,13 +7,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/select";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
 import { CredentialType } from "@/generated/prisma/enums";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 const formSchema = z.object({
   variableName: z
@@ -55,6 +57,7 @@ interface TelegramTriggerDialogProps {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: TelegramTriggerFormValues) => void;
   defaultValues?: Partial<TelegramTriggerFormValues>;
+  variables: VariableItem[];
 }
 
 export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
@@ -62,6 +65,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const form = useForm<TelegramTriggerFormValues>({
     resolver: zodResolver(formSchema),
@@ -83,7 +87,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
         chatId: defaultValues.chatId || "",
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.credentialId, defaultValues.chatId, form]);
 
   const handleSubmit = (values: TelegramTriggerFormValues) => {
     onSubmit(values);
@@ -91,22 +95,22 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Telegram trigger</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Telegram trigger</SheetTitle>
+          <SheetDescription>
             Runs whenever your Telegram bot receives a new message. Optionally
             filter by chat ID.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -174,9 +178,12 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
                 <FormItem>
                   <FormLabel>Chat ID (optional)</FormLabel>
                   <FormControl>
-                    <Input
-                      placeholder="Provide to only trigger on a specific chat"
-                      {...field}
+                    <VariableInput
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      placeholder="Provide to only trigger on a specific chat or @"
+                      className="h-13"
+                      variables={variables}
                     />
                   </FormControl>
                   <FormDescription className="text-xs">
@@ -190,12 +197,14 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
               )}
             />
 
-            <DialogFooter className="mt-4">
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button type="submit" className="brightness-120! hover:brightness-130! w-full py-5">
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

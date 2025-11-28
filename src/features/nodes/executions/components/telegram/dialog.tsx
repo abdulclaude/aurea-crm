@@ -7,13 +7,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
@@ -25,7 +25,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -35,6 +34,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
 import { CredentialType } from "@/generated/prisma/enums";
 
@@ -60,13 +61,14 @@ interface TelegramExecutionDialogProps {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: TelegramExecutionFormValues) => void;
   defaultValues?: Partial<TelegramExecutionFormValues>;
+  variables: VariableItem[];
 }
 
 export const TelegramExecutionDialog: React.FC<
   TelegramExecutionDialogProps
-> = ({ open, onOpenChange, onSubmit, defaultValues = {} }) => {
+> = ({ open, onOpenChange, onSubmit, defaultValues = {}, variables }) => {
   const form = useForm<TelegramExecutionFormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       variableName: defaultValues.variableName || "telegramMessage",
       credentialId: defaultValues.credentialId || "",
@@ -91,7 +93,7 @@ export const TelegramExecutionDialog: React.FC<
         disableNotification: defaultValues.disableNotification ?? false,
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.credentialId, defaultValues.chatId, defaultValues.text, defaultValues.parseMode, defaultValues.disableNotification, form]);
 
   const handleSubmit = (values: TelegramExecutionFormValues) => {
     onSubmit(values);
@@ -99,21 +101,21 @@ export const TelegramExecutionDialog: React.FC<
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Telegram action</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Telegram action</SheetTitle>
+          <SheetDescription>
             Send a message via the selected Telegram bot.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -183,7 +185,13 @@ export const TelegramExecutionDialog: React.FC<
                 <FormItem>
                   <FormLabel>Chat ID</FormLabel>
                   <FormControl>
-                    <Input placeholder="123456789" {...field} />
+                    <VariableInput
+                      placeholder="123456789"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
+                    />
                   </FormControl>
                   <FormDescription className="text-xs">
                     Provide the target chat ID (e.g.{" "}
@@ -203,13 +211,14 @@ export const TelegramExecutionDialog: React.FC<
                 <FormItem>
                   <FormLabel>Message body</FormLabel>
                   <FormControl>
-                    <Textarea
-                      className="min-h-[80px] text-sm"
+                    <VariableInput
                       placeholder="Hello {{telegramTrigger.message.from.username}}!"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs">
+                  <FormDescription className="text-xs mt-2 leading-5">
                     Supports templating via{" "}
                     <span className="text-white font-medium tracking-wide">
                       {"{{variables}}"}
@@ -273,12 +282,17 @@ export const TelegramExecutionDialog: React.FC<
               )}
             />
 
-            <DialogFooter className="mt-4">
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

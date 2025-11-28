@@ -28,12 +28,12 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
   return (
     <>
       {showToolbar && (
-        <NodeToolbar className="bg-[#202E32] text-white border border-white/5 rounded-sm">
+        <NodeToolbar className="bg-background text-primary border border-black/10 rounded-sm">
           <Button
             size="sm"
             variant="ghost"
             onClick={onSettings}
-            className="hover:bg-[#202E32] hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-l-sm  px-8"
+            className="hover:bg-primary-foreground/40 hover:text-primary transition duration-150 rounded-none rounded-l-sm  px-8"
           >
             <SettingsIcon className="size-4" />
           </Button>
@@ -42,7 +42,7 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
             size="sm"
             variant="ghost"
             onClick={onDelete}
-            className="hover:bg-[#202E32] hover:brightness-120 transition duration-150 hover:text-white rounded-none rounded-r-sm  px-8"
+            className="hover:bg-primary-foreground/40 hover:text-primary transition duration-150 rounded-none rounded-r-sm  px-8"
           >
             <TrashIcon className="size-4" />
           </Button>
@@ -54,12 +54,12 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
         <NodeToolbar
           position={Position.Bottom}
           isVisible
-          className="max-w-[200px] text-center space-y-1"
+          className="max-w-[150px] text-center space-y-1"
         >
-          <p className="font-semibold text-sm text-white">{name}</p>
+          <p className=" text-xs font-medium text-primary">{name}</p>
 
           {description && (
-            <p className="text-white/50 truncate text-xs">{description}</p>
+            <p className="text-primary/60 truncate text-xs">{description}</p>
           )}
         </NodeToolbar>
       )}

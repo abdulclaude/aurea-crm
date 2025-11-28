@@ -7,8 +7,11 @@ import {
   handleGmailNotification,
   renewGmailSubscriptionWatches,
   handleTelegramUpdate,
-  handleWhatsAppUpdate,
 } from "@/inngest/functions";
+import {
+  syncEmbeddingsDaily,
+  reindexSubaccount,
+} from "@/inngest/channels/embedding-sync";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -20,6 +23,7 @@ export const { GET, POST, PUT } = serve({
     handleGmailNotification,
     renewGmailSubscriptionWatches,
     handleTelegramUpdate,
-    handleWhatsAppUpdate,
+    syncEmbeddingsDaily,
+    reindexSubaccount,
   ],
 });

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { toast } from "sonner";
 
@@ -38,6 +38,8 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 const LoginForm = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/";
 
   const form = useForm({
     resolver: zodResolver(loginSchema),
@@ -52,11 +54,11 @@ const LoginForm = () => {
       {
         email: values.email,
         password: values.password,
-        callbackURL: "/",
+        callbackURL: callbackUrl,
       },
       {
         onSuccess: () => {
-          router.push("/");
+          router.push(callbackUrl);
         },
         onError: (ctx) => {
           toast.error(ctx.error.message);

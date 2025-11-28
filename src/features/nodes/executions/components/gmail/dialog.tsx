@@ -6,13 +6,13 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
@@ -24,7 +24,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -33,10 +32,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 const emailListSchema = z
   .string()
-  .optional()
   .transform((value) => value?.trim() || "")
   .refine(
     (value) =>
@@ -60,8 +60,8 @@ const formSchema = z.object({
     .string()
     .min(1, "At least one recipient is required.")
     .transform((value) => value.trim()),
-  cc: emailListSchema,
-  bcc: emailListSchema,
+  cc: emailListSchema.default(""),
+  bcc: emailListSchema.default(""),
   subject: z.string().min(1, "Subject is required."),
   body: z.string().min(1, "Body content is required."),
   bodyFormat: z.enum(["text/plain", "text/html"]).default("text/plain"),
@@ -76,6 +76,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: GmailExecutionFormValues) => void;
   defaultValues?: Partial<GmailExecutionFormValues>;
+  variables: VariableItem[];
 }
 
 export const GmailExecutionDialog: React.FC<Props> = ({
@@ -83,9 +84,10 @@ export const GmailExecutionDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues,
+  variables,
 }) => {
   const form = useForm<GmailExecutionFormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       variableName: defaultValues?.variableName || "gmailMessage",
       to: defaultValues?.to || "",
@@ -113,7 +115,7 @@ export const GmailExecutionDialog: React.FC<Props> = ({
         replyTo: defaultValues?.replyTo || "",
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues?.variableName, defaultValues?.to, defaultValues?.cc, defaultValues?.bcc, defaultValues?.subject, defaultValues?.body, defaultValues?.bodyFormat, defaultValues?.fromName, defaultValues?.replyTo, form]);
 
   const handleSubmit = (values: GmailExecutionFormValues) => {
     onSubmit(values);
@@ -121,21 +123,21 @@ export const GmailExecutionDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Send Gmail</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Send Gmail</SheetTitle>
+          <SheetDescription>
             Personalize and send an email using your connected Gmail account.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -165,9 +167,12 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>To</FormLabel>
                   <FormControl>
-                    <Input
+                    <VariableInput
                       placeholder="alice@example.com, bob@example.com"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
                     />
                   </FormControl>
                   <FormDescription className="text-xs">
@@ -186,7 +191,13 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>Cc</FormLabel>
                     <FormControl>
-                      <Input placeholder="optional" {...field} />
+                      <VariableInput
+                        placeholder="optional"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -200,7 +211,13 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>Bcc</FormLabel>
                     <FormControl>
-                      <Input placeholder="optional" {...field} />
+                      <VariableInput
+                        placeholder="optional"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -215,9 +232,12 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Subject</FormLabel>
                   <FormControl>
-                    <Input
+                    <VariableInput
                       placeholder="Weekly summary for {{customer.name}}"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
                     />
                   </FormControl>
                   <FormMessage />
@@ -265,10 +285,11 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Body</FormLabel>
                   <FormControl>
-                    <Textarea
+                    <VariableInput
                       placeholder="Hello {{customer.firstName}}, thanks for your order..."
-                      className="min-h-[120px] text-sm"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
                     />
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
@@ -288,7 +309,13 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>From name</FormLabel>
                     <FormControl>
-                      <Input placeholder="Acme Automations" {...field} />
+                      <VariableInput
+                        placeholder="Acme Automations"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormDescription className="text-xs">
                       Optional display name shown to recipients.
@@ -305,7 +332,13 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>Reply-to</FormLabel>
                     <FormControl>
-                      <Input placeholder="helpdesk@example.com" {...field} />
+                      <VariableInput
+                        placeholder="helpdesk@example.com"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormDescription className="text-xs">
                       Override the reply-to address if needed.
@@ -316,12 +349,17 @@ export const GmailExecutionDialog: React.FC<Props> = ({
               />
             </div>
 
-            <DialogFooter className="mt-4">
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

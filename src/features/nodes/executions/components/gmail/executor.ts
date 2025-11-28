@@ -23,9 +23,60 @@ const compileTemplate = (
   template: string | undefined,
   context: Record<string, unknown>
 ) => {
-  if (!template) return undefined;
-  return Handlebars.compile(template)(context).trim();
+  if (!template) {
+    console.log("[compileTemplate] Template is empty/undefined");
+    return undefined;
+  }
+
+  console.log("[compileTemplate] Input template:", template.substring(0, 100));
+
+  // First, try to resolve {{variable}} syntax (without Handlebars)
+  let resolved = template;
+  const matches = template.match(/\{\{(.+?)\}\}/g);
+
+  console.log("[compileTemplate] Matches found:", matches);
+
+  if (matches) {
+    for (const match of matches) {
+      const path = match.slice(2, -2).trim();
+      console.log("[compileTemplate] Resolving path:", path);
+
+      // Try to get value from context.variables first, then root context
+      let value = getNestedValue(context.variables as Record<string, unknown>, path);
+      if (value === undefined) {
+        value = getNestedValue(context, path);
+      }
+
+      console.log("[compileTemplate] Resolved value:", value);
+
+      // Replace with the resolved value
+      if (value !== undefined) {
+        resolved = resolved.replace(match, String(value));
+        console.log("[compileTemplate] After replacement:", resolved.substring(0, 100));
+      }
+    }
+  }
+
+  // Then apply Handlebars for any remaining template logic
+  try {
+    const result = Handlebars.compile(resolved)(context).trim();
+    console.log("[compileTemplate] Final result:", result.substring(0, 100));
+    return result;
+  } catch (error) {
+    console.log("[compileTemplate] Handlebars error, returning resolved:", error);
+    return resolved.trim();
+  }
 };
+
+// Helper function to get nested values from object using dot notation
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  return path.split(".").reduce((current, key) => {
+    if (current && typeof current === "object") {
+      return (current as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, obj as unknown);
+}
 
 const encodeMessage = (message: string) =>
   Buffer.from(message, "utf-8")
@@ -62,9 +113,14 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
   step,
   publish,
 }) => {
-  await publish(gmailChannel().status({ nodeId, status: "loading" }));
+  await step.run(`gmail-${nodeId}-publish-loading`, async () => {
+    await publish(gmailChannel().status({ nodeId, status: "loading" }));
+  });
 
   try {
+    console.log("Gmail Executor - Context received:", JSON.stringify(context, null, 2));
+    console.log("Gmail Executor - data.subject:", data.subject);
+    console.log("Gmail Executor - data.body:", data.body);
     if (!data.variableName) {
       throw new NonRetriableError("Variable name is required for Gmail nodes.");
     }
@@ -81,6 +137,12 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
       throw new NonRetriableError("Body content is required.");
     }
 
+    console.log("Gmail Executor - Before compilation:");
+    console.log("  data.to:", data.to);
+    console.log("  data.subject:", data.subject);
+    console.log("  data.body:", data.body);
+    console.log("  data.bodyFormat:", data.bodyFormat);
+
     const [to, cc, bcc, subject, body, fromName, replyTo] = [
       data.to,
       data.cc,
@@ -90,6 +152,13 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
       data.fromName,
       data.replyTo,
     ].map((value) => compileTemplate(value, context));
+
+    console.log("Gmail Executor - After compilation:");
+    console.log("  to:", to);
+    console.log("  subject:", subject);
+    console.log("  body:", body);
+    console.log("  body length:", body?.length);
+    console.log("  body type:", typeof body);
 
     if (!to || !subject || !body) {
       throw new NonRetriableError(
@@ -116,6 +185,11 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
     );
     const senderEmail = profile.emailAddress;
 
+    console.log("[Gmail] Before header construction:");
+    console.log("  body variable:", body);
+    console.log("  body length:", body?.length);
+    console.log("  data.bodyFormat:", data.bodyFormat);
+
     const headerLines = [
       formatFromHeader(fromName, senderEmail),
       `To: ${formatAddressList(to)}`,
@@ -126,11 +200,25 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
       "MIME-Version: 1.0",
       "Content-Transfer-Encoding: 8bit",
       `Content-Type: ${data.bodyFormat || "text/plain"}; charset="UTF-8"`,
-      "",
-      body,
     ].filter(Boolean) as string[];
 
-    const encoded = encodeMessage(headerLines.join("\r\n"));
+    // Add blank line separator and body
+    headerLines.push("");
+    headerLines.push(body);
+
+    console.log("[Gmail] After header construction:");
+    console.log("  headerLines array length:", headerLines.length);
+    console.log("  Last element (should be body):", headerLines[headerLines.length - 1]);
+
+    const joinedHeaders = headerLines.join("\r\n");
+    console.log("[Gmail] Joined headers:");
+    console.log("  Total length:", joinedHeaders.length);
+    console.log("  Last 200 chars:", joinedHeaders.slice(-200));
+
+    const encoded = encodeMessage(joinedHeaders);
+    console.log("[Gmail] Encoded message:");
+    console.log("  Encoded length:", encoded.length);
+    console.log("  First 100 chars:", encoded.substring(0, 100));
 
     const result = await step.run("gmail-send-message", async () => {
       const response = await fetch(
@@ -155,14 +243,18 @@ export const gmailExecutor: NodeExecutor<GmailExecutionData> = async ({
       return response.json();
     });
 
-    await publish(gmailChannel().status({ nodeId, status: "success" }));
+    await step.run(`gmail-${nodeId}-publish-success`, async () => {
+      await publish(gmailChannel().status({ nodeId, status: "success" }));
+    });
 
     return {
       ...context,
       [data.variableName]: result,
     };
   } catch (error) {
-    await publish(gmailChannel().status({ nodeId, status: "error" }));
+    await step.run(`gmail-${nodeId}-publish-error`, async () => {
+      await publish(gmailChannel().status({ nodeId, status: "error" }));
+    });
     throw error;
   }
 };

@@ -12,6 +12,8 @@ import { extractRouterConfig } from "uploadthing/server";
 import { uploadRouter } from "@/app/api/uploadthing/core";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { PostHogProvider, PostHogIdentifier } from "@/lib/posthog/client";
+import { PageViewTracker } from "@/lib/posthog/page-view-tracker";
 
 import { Inter } from "next/font/google";
 
@@ -34,20 +36,21 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} antialiased`}>
         <NextSSRPlugin routerConfig={extractRouterConfig(uploadRouter)} />
-        <TRPCReactProvider>
-          <Provider>
-            <NuqsAdapter>
-              {children}
-              <Toaster />
-            </NuqsAdapter>
-          </Provider>
-        </TRPCReactProvider>
+        <PostHogProvider>
+          <TRPCReactProvider>
+            <Provider>
+              <NuqsAdapter>
+                <Suspense fallback={null}>
+                  <PostHogIdentifier />
+                  <PageViewTracker />
+                </Suspense>
+                {children}
+                <Toaster closeButton={false} />
+              </NuqsAdapter>
+            </Provider>
+          </TRPCReactProvider>
+        </PostHogProvider>
       </body>
     </html>
   );
-}
-
-async function UTSSR() {
-  await connection();
-  return <NextSSRPlugin routerConfig={extractRouterConfig(uploadRouter)} />;
 }

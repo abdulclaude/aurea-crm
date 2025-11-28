@@ -7,13 +7,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useSuspenseQuery } from "@tanstack/react-query";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Form,
   FormControl,
@@ -42,10 +42,11 @@ import {
 import { useTRPC } from "@/trpc/client";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/trpc/routers/_app";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type CalendarListItem =
-  RouterOutputs["integrations"]["listGoogleCalendars"][number];
+  RouterOutputs["apps"]["listGoogleCalendars"][number];
 
 const EVENT_OPTIONS = [
   {
@@ -88,6 +89,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: GoogleCalendarTriggerFormValues) => void;
   defaultValues?: Partial<GoogleCalendarTriggerFormValues>;
+  variables: VariableItem[];
 }
 
 export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
@@ -95,6 +97,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const form = useForm<GoogleCalendarTriggerFormValues>({
     resolver: zodResolver(formSchema),
@@ -121,7 +124,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
           : ["created", "updated"],
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.calendarId, defaultValues.calendarName, defaultValues.timezone, defaultValues.listenFor, form]);
 
   const handleSubmit = (values: GoogleCalendarTriggerFormValues) => {
     onSubmit(values);
@@ -144,21 +147,21 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Google Calendar Trigger</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Google Calendar Trigger</SheetTitle>
+          <SheetDescription>
             Choose which calendar and events should start this workflow.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -356,18 +359,18 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
               )}
             />
 
-            <DialogFooter className="px-0">
+            <SheetFooter className="mt-6 px-0 pb-4">
               <Button
                 type="submit"
-                className="w-full bg-[#202E32] hover:bg-[#202E32] hover:brightness-110 transition duration-150 border-none hover:text-white text-white text-xs"
+                className="brightness-120! hover:brightness-130! w-full py-5"
               >
-                Save configuration
+                Save changes
               </Button>
-            </DialogFooter>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };
 
@@ -380,10 +383,10 @@ const CalendarSelectField = ({
 }) => {
   const trpc = useTRPC();
   const query = useSuspenseQuery(
-    trpc.integrations.listGoogleCalendars.queryOptions()
+    trpc.apps.listGoogleCalendars.queryOptions()
   );
   const calendars = (query.data ??
-    []) as RouterOutputs["integrations"]["listGoogleCalendars"];
+    []) as RouterOutputs["apps"]["listGoogleCalendars"];
   const selected = calendars.find(
     (calendar: CalendarListItem) => calendar.id === value
   );

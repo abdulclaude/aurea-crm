@@ -6,22 +6,31 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 const Layout = async ({ children }: { children: React.ReactNode }) => {
-  // Ensure the user has at least one organization; otherwise redirect to onboarding
+  // Ensure the user has at least one organization or subaccount membership
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect("/login");
 
-  const membershipCount = await prisma.member.count({
+  // Check for organization membership
+  const organizationMembershipCount = await prisma.member.count({
     where: { userId: session.user.id },
   });
 
-  if (membershipCount === 0) {
+  // Check for subaccount membership (client workspace access)
+  const subaccountMembershipCount = await prisma.subaccountMember.count({
+    where: { userId: session.user.id },
+  });
+
+  // Only redirect to onboarding if user has neither organization nor subaccount membership
+  if (organizationMembershipCount === 0 && subaccountMembershipCount === 0) {
     redirect("/onboarding/agency");
   }
 
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset className="bg-accent/20">{children}</SidebarInset>
+      <SidebarInset className="bg-accent/20 overflow-x-hidden">
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   );
 };

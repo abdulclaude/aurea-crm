@@ -17,7 +17,7 @@ import {
 } from "@/components/react-flow/node-status-indicator";
 
 interface BaseTriggerNodeProps extends NodeProps {
-  icon: LucideIcon | string;
+  icon: LucideIcon | React.ComponentType<{ className?: string }> | string;
   name: string;
   description?: string;
   children?: ReactNode;

@@ -81,6 +81,7 @@ export const GoogleCalendarNode: React.FC<
           )[],
           timezone: nodeData.timezone || "",
         }}
+        variables={[]}
       />
       <BaseTriggerNode
         {...props}

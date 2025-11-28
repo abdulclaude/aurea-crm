@@ -3,11 +3,12 @@
 import type { NodeProps } from "@xyflow/react";
 import { memo, useState } from "react";
 import { BaseTriggerNode } from "../../base-trigger-node";
-import { MousePointerIcon } from "lucide-react";
 import { ManualTriggerDialog } from "./dialog";
 import { MANUAL_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/manual-trigger";
 import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
 import { fetchManualTriggerRealtimeToken } from "./actions";
+
+import { IconCursorClick as ManualTriggerIcon } from "central-icons/IconCursorClick";
 
 export const ManualTriggerNode: React.FC<NodeProps> = memo((props) => {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -25,10 +26,14 @@ export const ManualTriggerNode: React.FC<NodeProps> = memo((props) => {
 
   return (
     <>
-      <ManualTriggerDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <ManualTriggerDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        variables={[]}
+      />
       <BaseTriggerNode
         {...props}
-        icon={MousePointerIcon}
+        icon={ManualTriggerIcon}
         name="When clicking 'Execute workflow'"
         status={nodeStatus}
         onSettings={handleOpenSettings}

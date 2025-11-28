@@ -13,16 +13,22 @@ const parseScopes = (value?: string) =>
     .map((scope) => scope.trim())
     .filter(Boolean) ?? [];
 
-const FACEBOOK_DEFAULT_SCOPES = [
-  "whatsapp_business_management",
-  "whatsapp_business_messaging",
-];
+const FACEBOOK_DEFAULT_SCOPES = parseScopes(
+  process.env.FACEBOOK_DEFAULT_SCOPES
+);
 
 const FACEBOOK_OPTIONAL_SCOPES = parseScopes(
   process.env.FACEBOOK_OPTIONAL_SCOPES
 );
 
+// process.env.APP_URL ||
+// process.env.BETTER_AUTH_URL,
+
 export const auth = betterAuth({
+  baseURL: "http://localhost:3000",
+  trustedOrigins: ["http://localhost:3000", process.env.APP_URL || ""].filter(
+    Boolean
+  ),
   database: prismaAdapter(prisma, {
     provider: "postgresql", // or "mysql", "postgresql", ...etc
   }),
@@ -34,7 +40,6 @@ export const auth = betterAuth({
       clientId: process.env.FACEBOOK_CLIENT_ID ?? "",
       clientSecret: process.env.FACEBOOK_CLIENT_SECRET ?? "",
       scopes: [...FACEBOOK_DEFAULT_SCOPES, ...FACEBOOK_OPTIONAL_SCOPES],
-      redirectUri: `${process.env.APP_URL}/api/auth/callback/facebook`,
     },
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -46,6 +51,20 @@ export const auth = betterAuth({
         "email",
         "profile",
         "https://www.googleapis.com/auth/calendar",
+      ],
+    },
+    microsoft: {
+      clientId: process.env.MICROSOFT_CLIENT_ID ?? "",
+      clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? "",
+      tenantId: "common",
+      scopes: [
+        "openid",
+        "email",
+        "profile",
+        "offline_access",
+        "Mail.ReadWrite",
+        "Mail.Send",
+        "Files.ReadWrite.All",
       ],
     },
   },

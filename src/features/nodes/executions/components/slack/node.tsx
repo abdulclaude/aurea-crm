@@ -1,14 +1,15 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
 
 import { BaseExecutionNode } from "@/features/nodes/executions/base-execution-node";
 import { SlackDialog, type SlackFormValues } from "./dialog";
 import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
-
 import { fetchSlackRealtimeToken } from "./actions";
 import { SLACK_CHANNEL_NAME } from "@/inngest/channels/slack";
+import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
+import { useWorkflowContext } from "@/features/editor/store/workflow-context";
 
 type SlackNodeData = {
   variableName?: string;
@@ -21,9 +22,23 @@ type SlackNodeType = Node<SlackNodeData>;
 
 export const SlackNode: React.FC<NodeProps<SlackNodeType>> = memo((props) => {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const { setNodes } = useReactFlow();
+  const { setNodes, getNodes, getEdges } = useReactFlow();
+  const workflowContext = useWorkflowContext();
 
   const nodeData = props.data;
+
+  // Build available context from upstream nodes
+  const variables = useMemo(() => {
+    if (!dialogOpen) return [];
+    const nodes = getNodes();
+    const edges = getEdges();
+    return buildNodeContext(props.id, nodes, edges, {
+      isBundle: workflowContext.isBundle,
+      bundleInputs: workflowContext.bundleInputs,
+      bundleWorkflowName: workflowContext.workflowName,
+      parentWorkflowContext: workflowContext.parentWorkflowContext,
+    });
+  }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
   const description = nodeData?.content
     ? `Send ${nodeData.content.slice(0, 50)}...`
@@ -65,6 +80,7 @@ export const SlackNode: React.FC<NodeProps<SlackNodeType>> = memo((props) => {
         onOpenChange={setDialogOpen}
         onSubmit={handleSubmit}
         defaultValues={nodeData}
+        variables={variables}
       />
 
       <BaseExecutionNode

@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import prisma from "@/lib/db";
 import { polarClient } from "@/lib/polar";
+import { updateSessionActivity } from "@/lib/activity-tracker";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { headers } from "next/headers";
 import { cache } from "react";
@@ -30,7 +31,9 @@ export const createTRPCRouter = t.router;
 export const createCallerFactory = t.createCallerFactory;
 
 export const baseProcedure = t.procedure;
-export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
+
+// Authenticated procedure without requiring organization context
+export const authenticatedProcedure = baseProcedure.use(async ({ ctx, next }) => {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
@@ -42,8 +45,22 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
     });
   }
 
+  // Update session activity in the background (don't await to avoid slowing down requests)
+  updateSessionActivity(session.session.token).catch((error) => {
+    console.error("Failed to update session activity:", error);
+  });
+
+  return next({
+    ctx: {
+      ...ctx,
+      auth: session,
+    },
+  });
+});
+
+export const protectedProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
   const sessionRecord = await prisma.session.findUnique({
-    where: { token: session.session.token },
+    where: { token: ctx.auth.session.token },
     select: {
       activeOrganizationId: true,
       activeSubaccountId: true,
@@ -52,21 +69,43 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
 
   let orgId =
     sessionRecord?.activeOrganizationId ??
-    session.session.activeOrganizationId ??
+    ctx.auth.session.activeOrganizationId ??
     null;
-  const activeSubaccountId = sessionRecord?.activeSubaccountId ?? null;
+  let activeSubaccountId = sessionRecord?.activeSubaccountId ?? null;
 
+  // If no orgId, try to find a fallback organization membership
   if (!orgId) {
     const fallbackMembership = await prisma.member.findFirst({
-      where: { userId: session.user.id },
+      where: { userId: ctx.auth.user.id },
       orderBy: { createdAt: "asc" },
     });
 
     if (fallbackMembership) {
       orgId = fallbackMembership.organizationId;
       await prisma.session.update({
-        where: { token: session.session.token },
+        where: { token: ctx.auth.session.token },
         data: { activeOrganizationId: orgId },
+      });
+    }
+  }
+
+  // If still no orgId, check for subaccount-only membership
+  if (!orgId && !activeSubaccountId) {
+    const fallbackSubaccountMembership = await prisma.subaccountMember.findFirst({
+      where: { userId: ctx.auth.user.id },
+      include: { subaccount: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    if (fallbackSubaccountMembership) {
+      activeSubaccountId = fallbackSubaccountMembership.subaccountId;
+      orgId = fallbackSubaccountMembership.subaccount.organizationId;
+      await prisma.session.update({
+        where: { token: ctx.auth.session.token },
+        data: {
+          activeSubaccountId,
+          activeOrganizationId: orgId,
+        },
       });
     }
   }
@@ -85,7 +124,7 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
 
     if (!activeSubaccount) {
       await prisma.session.update({
-        where: { token: session.session.token },
+        where: { token: ctx.auth.session.token },
         data: { activeSubaccountId: null },
       });
     }
@@ -94,10 +133,55 @@ export const protectedProcedure = baseProcedure.use(async ({ ctx, next }) => {
   return next({
     ctx: {
       ...ctx,
-      auth: session,
       orgId,
       subaccountId: activeSubaccount?.id ?? null,
       subaccount: activeSubaccount,
+    },
+  });
+});
+
+// Worker procedure for worker portal authentication (no Better Auth session)
+export const workerProcedure = baseProcedure.use(async ({ ctx, next, input }) => {
+  // Extract workerId from input - procedures using this MUST have workerId in their input
+  const workerId = (input as any)?.workerId;
+
+  if (!workerId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Worker ID is required",
+    });
+  }
+
+  // Verify the worker exists
+  const worker = await prisma.worker.findUnique({
+    where: { id: workerId },
+    select: {
+      id: true,
+      name: true,
+      subaccountId: true,
+      isActive: true,
+    },
+  });
+
+  if (!worker) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Worker not found",
+    });
+  }
+
+  if (!worker.isActive) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Worker account is inactive",
+    });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      worker,
+      subaccountId: worker.subaccountId,
     },
   });
 });

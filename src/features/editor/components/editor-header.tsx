@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronLeftIcon } from "lucide-react";
 
 import { IconCloudCheck as SaveIcon } from "central-icons/IconCloudCheck";
 import { IconSquareDotedBehindSquare as TemplateIcon } from "central-icons/IconSquareDotedBehindSquare";
@@ -51,12 +51,13 @@ export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   return (
     <Button
       size="sm"
+      variant="gradient"
       onClick={handleSave}
       disabled={saveWorkflow.isPending}
-      className="bg-[#202e32] gap-2 text-xs hover:bg-[#202e32] hover:text-white hover:brightness-110"
+      className=" gap-1.5 text-xs w-max"
     >
       <SaveIcon className="size-3.5" />
-      Save
+      Save changes
     </Button>
   );
 };
@@ -118,14 +119,14 @@ export const EditorNameInput = ({ workflowId }: { workflowId: string }) => {
         onChange={(e) => setName(e.target.value)}
         onBlur={handleSave}
         onKeyDown={handleKeyDown}
-        className="h-7 w-auto min-w-[100px] px-2 text-xs text-white bg-[#202e32] border-none hover:bg-[#202e32] hover:text-white hover:brightness-110 rounded-sm"
+        className="h-7 w-auto min-w-[100px] px-2 text-xs text-primary bg-background border-none hover:bg-primary-foreground/25 hover:text-primary rounded-sm"
       />
     );
   }
 
   return (
     <BreadcrumbItem
-      className="cursor-pointer hover:text-foreground transition-colors text-white text-xs font-medium hover:text-white"
+      className="cursor-pointer transition-colors text-primary text-xs font-medium hover:text-primary tracking-tight"
       onClick={() => setIsEditing(true)}
     >
       {workflow.name}
@@ -139,7 +140,11 @@ export const EditorBreadcrumbs = ({ workflowId }: { workflowId: string }) => {
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link prefetch href="/workflows" className="text-white/50 text-xs">
+            <Link
+              prefetch
+              href="/workflows"
+              className="text-primary/75 font-medium text-xs"
+            >
               Workflows
             </Link>
           </BreadcrumbLink>
@@ -192,11 +197,11 @@ const WorkflowStateActions = ({ workflowId }: { workflowId: string }) => {
         <Button
           size="sm"
           variant="outline"
-          className="border-none bg-[#202e32] hover:bg-[#202e32] hover:text-white hover:brightness-110 text-white gap-2 text-xs"
+          className="gap-2 text-xs w-max h-8.5"
           disabled={updateArchived.isPending}
           onClick={handleArchive}
         >
-          <ArchiveIcon className="size-3.5" />
+          {/* <ArchiveIcon className="size-3.5" /> */}
           Archive
         </Button>
       )}
@@ -208,11 +213,11 @@ const WorkflowStateActions = ({ workflowId }: { workflowId: string }) => {
         <Button
           size="sm"
           variant="outline"
-          className="border-none bg-[#202e32] hover:bg-[#202e32] hover:text-white hover:brightness-110 text-white gap-2 text-xs"
+          className=" gap-2 text-xs w-max h-8.5"
           disabled={createTemplate.isPending}
           onClick={handleTemplate}
         >
-          <TemplateIcon className="size-3.5" />
+          {/* <TemplateIcon className="size-3.5" /> */}
           Template
         </Button>
       )}
@@ -233,16 +238,16 @@ const EditorHeader = ({ workflowId }: { workflowId: string }) => {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/10 px-4 bg-[#1A2326] text-white">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-black/10 dark:border-white/5 px-4 bg-background text-primary">
       <div className="flex flex-row items-center justify-between gap-x-4 w-full">
         <div className="flex items-center gap-3">
           <Button
             size="sm"
             variant="ghost"
-            className="text-white/70 hover:text-white hover:bg-white/10 text-xs"
+            className="text-primary hover:text-primary text-xs border-none hover:bg-primary-foreground gap-1.5 items-center"
             onClick={handleGoBack}
           >
-            <ArrowLeftIcon className="mr-1 size-3.5" />
+            <ChevronLeftIcon className="mt-0.5 size-2.5" />
             Go back
           </Button>
         </div>

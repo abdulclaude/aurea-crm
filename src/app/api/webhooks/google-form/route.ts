@@ -1,5 +1,7 @@
 import { sendWorkflowExecution } from "@/inngest/utils";
 import { NextRequest, NextResponse } from "next/server";
+import prisma from "@/lib/db";
+import { NodeType } from "@/generated/prisma/enums";
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,14 +30,31 @@ export async function POST(request: NextRequest) {
       raw: body,
     };
 
+    // Fetch the Google Form trigger node to get the variable name
+    const triggerNode = await prisma.node.findFirst({
+      where: {
+        workflowId,
+        type: NodeType.GOOGLE_FORM_TRIGGER,
+      },
+      select: {
+        data: true,
+      },
+    });
+
+    // Extract variable name from node data, default to "googleForm" if not found
+    const nodeData = triggerNode?.data as { variableName?: string } | null;
+    const variableName = nodeData?.variableName || "googleForm";
+
     // trigger an inngest job
 
     await sendWorkflowExecution({
       workflowId,
       initialData: {
-        googleForm: formData,
+        [variableName]: formData,
       },
     });
+
+    return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error("Google form webhook error: ", error);
     return NextResponse.json(

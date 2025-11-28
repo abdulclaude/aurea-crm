@@ -1,21 +1,19 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-
 import { useEffect } from "react";
-
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
-
+import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+
+import {
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   Form,
   FormControl,
@@ -33,8 +31,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 const formSchema = z.object({
   variableName: z
@@ -56,6 +55,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: z.infer<typeof formSchema>) => void;
   defaultValues?: Partial<HttpRequestFormValues>;
+  variables: VariableItem[];
 }
 
 export const HttpRequestDialog: React.FC<Props> = ({
@@ -63,6 +63,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -85,7 +86,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
         body: defaultValues.body || "",
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.endpoint, defaultValues.method, defaultValues.body, form]);
 
   const watchMethod = form.watch("method");
   const showBodyField = ["POST", "PUT", "PATCH"].includes(watchMethod);
@@ -96,21 +97,21 @@ export const HttpRequestDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle> HTTP Request </DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>HTTP Request</SheetTitle>
+          <SheetDescription>
             Configure settings for the HTTP Request node.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             {/* variable name */}
 
@@ -145,7 +146,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
                   <FormLabel> Method </FormLabel>
                   <Select
                     onValueChange={field.onChange}
-                    defaultValue={field.value}
+                    value={field.value}
                   >
                     <FormControl>
                       <SelectTrigger className="w-full">
@@ -182,11 +183,14 @@ export const HttpRequestDialog: React.FC<Props> = ({
               name="endpoint"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel> Endpoint URL </FormLabel>
+                  <FormLabel>Endpoint URL</FormLabel>
                   <FormControl>
-                    <Input
+                    <VariableInput
                       placeholder="https://api.example.com/users/{{httpResponse.data.id}}"
-                      {...field}
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
                     />
                   </FormControl>
 
@@ -213,14 +217,15 @@ export const HttpRequestDialog: React.FC<Props> = ({
                 name="body"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel> Body </FormLabel>
+                    <FormLabel>Body</FormLabel>
                     <FormControl>
-                      <Textarea
+                      <VariableInput
                         placeholder={
                           '{\n "userId": "{{httpResponse.data.id}}"\n "name": "{{httpResponse.data.name}}",\n "items": "{{httpResponse.data.items}}"\n}'
                         }
-                        className="min-h-[120px] font-mono text-sm"
-                        {...field}
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
                       />
                     </FormControl>
 
@@ -242,12 +247,17 @@ export const HttpRequestDialog: React.FC<Props> = ({
               />
             )}
 
-            <DialogFooter className="mt-4">
-              <Button type="submit"> Save </Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

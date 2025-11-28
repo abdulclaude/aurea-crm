@@ -30,7 +30,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GlobeIcon, MoreHorizontalIcon, MousePointerIcon } from "lucide-react";
+import { GlobeIcon, MoreHorizontalIcon } from "lucide-react";
+
+import { IconCursorClick as MousePointerIcon } from "central-icons/IconCursorClick";
 
 import {
   EmptyView,
@@ -66,12 +68,13 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
+import type { Prisma } from "@/generated/prisma/client";
 
 type WorkflowNodePreview = {
   id?: string;
   type?: NodeType;
   createdAt?: string | Date | null;
-  position?: Record<string, unknown> | null;
+  position?: Prisma.JsonValue;
 };
 
 type WorkflowEntity = Omit<Workflows, "nodes"> & {
@@ -87,7 +90,7 @@ export const WorkflowsTabs = () => {
       value={view}
       onValueChange={(v) => setParams({ ...params, view: v, page: 1 })}
     >
-      <TabsList className="bg-[#212F34] rounded-sm">
+      <TabsList className="rounded-sm">
         <TabsTrigger value="all">All workflows</TabsTrigger>
         <TabsTrigger value="archived">Archived</TabsTrigger>
         <TabsTrigger value="templates">Templates</TabsTrigger>
@@ -168,9 +171,9 @@ export const WorkflowsContainer = ({
         </div>
       }
       search={
-        <div className="flex gap-2 justify-between">
+        <div className="flex gap-2 justify-between items-end mt-4 w-full">
           <WorkflowsTabs />
-          <WorkflowsSearch className="w-96" />{" "}
+          <WorkflowsSearch className="w-72" />{" "}
         </div>
       }
       pagination={<WorkflowsPagination />}
@@ -264,8 +267,6 @@ export const WorkflowsEmpty = () => {
 
 export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
   const removeWorkflow = useRemoveWorkflow();
-  const updateArchived = useUpdateWorkflowArchived();
-  const createTemplate = useCreateTemplateFromWorkflow();
 
   const handleRemove = () => {
     removeWorkflow.mutate({ id: data.id });
@@ -284,6 +285,7 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
             Archived
           </Badge>
         )}
+
         {templated && (
           <Badge className="bg-teal-700 rounded-sm h-6 text-[10px] uppercase tracking-wide text-teal-200 border border-white/5 px-2">
             Templated
@@ -316,24 +318,7 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
           <NodePreviewIcon type={lastIconType} />
         </div>
       }
-      menuItems={
-        <>
-          <DropdownMenuItem
-            className="bg-[#1A2326] hover:bg-[#202E32]! hover:text-white! transition duration-150 w-full"
-            onClick={() =>
-              updateArchived.mutate({ id: data.id, archived: !archived })
-            }
-          >
-            {archived ? "Unarchive" : "Archive"}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="bg-[#1A2326] hover:bg-[#202E32]! hover:text-white! transition duration-150 w-full"
-            onClick={() => createTemplate.mutate({ id: data.id })}
-          >
-            Save as template
-          </DropdownMenuItem>
-        </>
-      }
+      menuItems={<></>}
       onRemove={handleRemove}
       isRemoving={removeWorkflow.isPending}
     />
@@ -515,6 +500,7 @@ type NodeIconDescriptor =
     };
 
 const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
+  [NodeType.INITIAL]: { icon: IconPayment, alt: "Initial" },
   [NodeType.MANUAL_TRIGGER]: { icon: MousePointerIcon, alt: "Manual trigger" },
   [NodeType.GOOGLE_FORM_TRIGGER]: {
     image: "/logos/googleform.svg",
@@ -524,6 +510,26 @@ const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
     image: "/logos/googlecalendar.svg",
     alt: "Google Calendar",
   },
+  [NodeType.GOOGLE_CALENDAR_EXECUTION]: {
+    image: "/logos/googlecalendar.svg",
+    alt: "Google Calendar",
+  },
+  [NodeType.GMAIL_TRIGGER]: {
+    image: "/logos/gmail.svg",
+    alt: "Gmail",
+  },
+  [NodeType.GMAIL_EXECUTION]: {
+    image: "/logos/gmail.svg",
+    alt: "Gmail",
+  },
+  [NodeType.TELEGRAM_TRIGGER]: {
+    image: "/logos/telegram.svg",
+    alt: "Telegram",
+  },
+  [NodeType.TELEGRAM_EXECUTION]: {
+    image: "/logos/telegram.svg",
+    alt: "Telegram",
+  },
   [NodeType.STRIPE_TRIGGER]: { image: "/logos/stripe.svg", alt: "Stripe" },
   [NodeType.HTTP_REQUEST]: { icon: GlobeIcon, alt: "HTTP Request" },
   [NodeType.GEMINI]: { image: "/logos/gemini.svg", alt: "Gemini" },
@@ -531,23 +537,54 @@ const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
   [NodeType.OPENAI]: { image: "/logos/openai.svg", alt: "OpenAI" },
   [NodeType.DISCORD]: { image: "/logos/discord.svg", alt: "Discord" },
   [NodeType.SLACK]: { image: "/logos/slack.svg", alt: "Slack" },
-  [NodeType.GOOGLE_CALENDAR_EXECUTION]: {
-    image: "/logos/googlecalendar.svg",
-    alt: "Google Calendar",
+  [NodeType.WAIT]: { icon: IconPayment, alt: "Wait" },
+  [NodeType.CREATE_CONTACT]: { icon: IconPayment, alt: "Create Contact" },
+  [NodeType.UPDATE_CONTACT]: { icon: IconPayment, alt: "Update Contact" },
+  [NodeType.DELETE_CONTACT]: { icon: IconPayment, alt: "Delete Contact" },
+  [NodeType.CREATE_DEAL]: { icon: IconPayment, alt: "Create Deal" },
+  [NodeType.UPDATE_DEAL]: { icon: IconPayment, alt: "Update Deal" },
+  [NodeType.DELETE_DEAL]: { icon: IconPayment, alt: "Delete Deal" },
+  [NodeType.UPDATE_PIPELINE]: { icon: IconPayment, alt: "Update Pipeline" },
+  [NodeType.CONTACT_CREATED_TRIGGER]: { icon: IconPayment, alt: "Contact Created" },
+  [NodeType.CONTACT_UPDATED_TRIGGER]: { icon: IconPayment, alt: "Contact Updated" },
+  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Field Changed" },
+  [NodeType.CONTACT_DELETED_TRIGGER]: { icon: IconPayment, alt: "Contact Deleted" },
+  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Type Changed" },
+  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Lifecycle Changed" },
+  [NodeType.IF_ELSE]: { icon: IconPayment, alt: "If/Else" },
+  [NodeType.SWITCH]: { icon: IconPayment, alt: "Switch" },
+  [NodeType.LOOP]: { icon: IconPayment, alt: "Loop" },
+  [NodeType.SET_VARIABLE]: { icon: IconPayment, alt: "Set Variable" },
+  [NodeType.STOP_WORKFLOW]: { icon: IconPayment, alt: "Stop Workflow" },
+  [NodeType.BUNDLE_WORKFLOW]: { icon: IconPayment, alt: "Bundle Workflow" },
+  [NodeType.OUTLOOK_TRIGGER]: {
+    image: "/logos/microsoft.svg",
+    alt: "Outlook",
   },
-  [NodeType.INITIAL]: { icon: IconPayment, alt: "Initial" },
+  [NodeType.OUTLOOK_EXECUTION]: {
+    image: "/logos/microsoft.svg",
+    alt: "Outlook",
+  },
+  [NodeType.ONEDRIVE_TRIGGER]: {
+    image: "/logos/microsoft.svg",
+    alt: "OneDrive",
+  },
+  [NodeType.ONEDRIVE_EXECUTION]: {
+    image: "/logos/microsoft.svg",
+    alt: "OneDrive",
+  },
 };
 
 const renderNodeIconGraphic = (type: NodeType) => {
   const descriptor = nodeIconDescriptors[type];
 
   if (!descriptor) {
-    return <IconPayment className="size-4 text-white" />;
+    return <IconPayment className="size-4 text-black" />;
   }
 
   if ("icon" in descriptor) {
     const IconComp = descriptor.icon;
-    return <IconComp className="size-4 text-white" />;
+    return <IconComp className="size-4 text-black" />;
   }
 
   return (
@@ -564,14 +601,14 @@ const renderNodeIconGraphic = (type: NodeType) => {
 const NodePreviewIcon = ({ type }: { type?: NodeType }) => {
   if (!type) {
     return (
-      <div className="size-8 rounded-sm bg-[#202E32] border border-white/10 flex items-center justify-center">
-        <IconPayment className="size-4 text-white fill-white" />
+      <div className="size-8 rounded-sm bg-background border border-black/10 first:border-r-0 last:border-l-0 first:rounded-r-none last:rounded-l-none flex items-center justify-center first:-mr-1.5 last:-ml-1.5">
+        <IconPayment className="size-4 text-black" />
       </div>
     );
   }
 
   return (
-    <div className="size-8 rounded-sm bg-[#202E32] border border-white/10 flex items-center justify-center -mx-1 last:border-l-0 last:rounded-l-none first:border-r-none first:rounded-r-none">
+    <div className="size-8 rounded-sm bg-background border border-black/10 flex items-center justify-center first:-mr-1.5 last:-ml-1.5 last:border-l-0 last:rounded-l-none first:border-r-none first:rounded-r-none">
       {renderNodeIconGraphic(type)}
     </div>
   );

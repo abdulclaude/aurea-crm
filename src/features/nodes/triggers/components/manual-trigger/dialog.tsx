@@ -1,43 +1,46 @@
 "use client";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  variables: VariableItem[];
 }
 
 export const ManualTriggerDialog: React.FC<Props> = ({
   open,
   onOpenChange,
+  variables,
 }) => {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle> Manual Trigger </DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle> Manual Trigger </SheetTitle>
+          <SheetDescription>
             {" "}
             Configure settings for the manual trigger node.{" "}
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
-        <div className="px-8">
+        <div className="px-6">
           <p className="text-muted-foreground text-sm">
             {" "}
             Used to manually execute a workflow. No configuration needed.{" "}
           </p>
         </div>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

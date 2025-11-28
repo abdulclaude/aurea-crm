@@ -6,13 +6,14 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   Form,
   FormControl,
@@ -23,8 +24,9 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 const formSchema = z.object({
   variableName: z
@@ -55,6 +57,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: GoogleCalendarActionFormValues) => void;
   defaultValues?: Partial<GoogleCalendarActionFormValues>;
+  variables: VariableItem[];
 }
 
 export const GoogleCalendarActionDialog: React.FC<Props> = ({
@@ -62,6 +65,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const form = useForm<GoogleCalendarActionFormValues>({
     resolver: zodResolver(formSchema),
@@ -88,7 +92,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
         timezone: defaultValues.timezone || "UTC",
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues.variableName, defaultValues.calendarId, defaultValues.summary, defaultValues.description, defaultValues.startDateTime, defaultValues.endDateTime, defaultValues.timezone, form]);
 
   const handleSubmit = (values: GoogleCalendarActionFormValues) => {
     onSubmit(values);
@@ -96,20 +100,22 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Google Calendar Event</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Google Calendar Event</SheetTitle>
+          <SheetDescription>
             Create or update an event on your connected Google Calendar. Use{" "}
             {"{{variables}}"} to reference previous nodes.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
+
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-5 px-8 py-6"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -136,7 +142,13 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Calendar ID</FormLabel>
                   <FormControl>
-                    <Input placeholder="primary" {...field} />
+                    <VariableInput
+                      placeholder="primary"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
+                    />
                   </FormControl>
                   <FormDescription className="text-xs">
                     Use <span className="font-semibold">primary</span> or any
@@ -154,7 +166,13 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Event summary</FormLabel>
                   <FormControl>
-                    <Input placeholder={"Demo with {{lead.name}}"} {...field} />
+                    <VariableInput
+                      placeholder="Demo with {{lead.name}}"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -168,10 +186,11 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Description</FormLabel>
                   <FormControl>
-                    <Textarea
-                      placeholder={"Notes, zoom link, {{deal.context}}"}
-                      className="min-h-[80px]"
-                      {...field}
+                    <VariableInput
+                      placeholder="Notes, zoom link, {{deal.context}}"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
                     />
                   </FormControl>
                   <FormMessage />
@@ -187,7 +206,13 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>Start date/time</FormLabel>
                     <FormControl>
-                      <Input placeholder="2025-01-01T15:00:00Z" {...field} />
+                      <VariableInput
+                        placeholder="2025-01-01T15:00:00Z"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormDescription className="text-xs">
                       ISO string or a variable (e.g.
@@ -205,7 +230,13 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                   <FormItem>
                     <FormLabel>End date/time</FormLabel>
                     <FormControl>
-                      <Input placeholder="2025-01-01T16:00:00Z" {...field} />
+                      <VariableInput
+                        placeholder="2025-01-01T16:00:00Z"
+                        value={field.value || ""}
+                        onChange={field.onChange}
+                        variables={variables}
+                        className="h-13"
+                      />
                     </FormControl>
                     <FormDescription className="text-xs">
                       Should be later than the start time.
@@ -223,7 +254,13 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
                 <FormItem>
                   <FormLabel>Timezone</FormLabel>
                   <FormControl>
-                    <Input placeholder="UTC" {...field} />
+                    <VariableInput
+                      placeholder="UTC"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="h-13"
+                    />
                   </FormControl>
                   <FormDescription className="text-xs">
                     Used when parsing the start and end time inputs.
@@ -233,14 +270,17 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
               )}
             />
 
-            <DialogFooter>
-              <Button type="submit" className="w-full">
-                Save configuration
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
               </Button>
-            </DialogFooter>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

@@ -12,7 +12,8 @@ import superjson from "superjson";
 import { makeQueryClient } from "@/trpc/query-client";
 import type { AppRouter } from "@/trpc/routers/_app";
 
-export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
+export const { TRPCProvider, useTRPC, useTRPCClient } =
+  createTRPCContext<AppRouter>();
 let browserQueryClient: QueryClient;
 
 function getQueryClient() {

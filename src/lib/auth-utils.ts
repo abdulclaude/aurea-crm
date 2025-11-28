@@ -20,7 +20,7 @@ export const requireUnauth = async () => {
   });
 
   if (session) {
-    redirect("/");
+    redirect("/dashboard");
   }
 
   return session;

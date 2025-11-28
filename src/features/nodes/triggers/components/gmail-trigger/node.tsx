@@ -63,6 +63,7 @@ export const GmailTriggerNode: React.FC<NodeProps<GmailTriggerNodeType>> = memo(
             maxResults: data.maxResults ?? 5,
             pollIntervalMinutes: data.pollIntervalMinutes ?? 5,
           }}
+          variables={[]}
         />
         <BaseTriggerNode
           {...props}

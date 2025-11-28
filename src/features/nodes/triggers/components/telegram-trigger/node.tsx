@@ -70,6 +70,7 @@ export const TelegramTriggerNode: React.FC<NodeProps<TelegramTriggerNodeType>> =
             credentialId: data.credentialId,
             chatId: data.chatId,
           }}
+          variables={[]}
         />
         <BaseTriggerNode
           {...props}

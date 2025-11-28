@@ -26,6 +26,44 @@ export const uploadRouter = {
       });
       return { url: file.ufsUrl };
     }),
+  profilePicture: f({
+    image: {
+      maxFileSize: "4MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(async () => {
+      // Allow anyone for now; wire to real auth later
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] profile picture upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+      });
+      return { url: file.ufsUrl };
+    }),
+  workspaceLogo: f({
+    image: {
+      maxFileSize: "8MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(async () => {
+      // Allow anyone for now; wire to real auth later
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] workspace logo upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+      });
+      return { url: file.ufsUrl };
+    }),
 } satisfies FileRouter;
 
 export type UploadRouter = typeof uploadRouter;

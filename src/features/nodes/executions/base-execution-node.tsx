@@ -17,7 +17,7 @@ import {
 } from "@/components/react-flow/node-status-indicator";
 
 interface BaseExecutionNodeProps extends NodeProps {
-  icon: LucideIcon | string;
+  icon: LucideIcon | React.ComponentType<{ className?: string }> | string;
   name: string;
   description?: string;
   children?: ReactNode;
@@ -67,7 +67,7 @@ export const BaseExecutionNode: React.FC<BaseExecutionNodeProps> = memo(
               {typeof Icon === "string" ? (
                 <Image src={Icon} alt={name} width={12} height={12} />
               ) : (
-                <Icon className="size-3 text-gray-400" />
+                <Icon className="size-3 text-primary/60" />
               )}
 
               {children}

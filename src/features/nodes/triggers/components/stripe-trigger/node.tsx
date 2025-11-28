@@ -27,7 +27,7 @@ export const StripeTriggerNode: React.FC<NodeProps> = memo((props) => {
 
   return (
     <>
-      <StripeTriggerDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <StripeTriggerDialog open={dialogOpen} onOpenChange={setDialogOpen} variables={[]} />
       <BaseTriggerNode
         {...props}
         icon="/logos/stripe.svg"

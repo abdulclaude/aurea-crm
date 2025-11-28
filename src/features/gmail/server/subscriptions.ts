@@ -3,7 +3,7 @@
 import prisma from "@/lib/db";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { IntegrationProvider, NodeType } from "@/generated/prisma/enums";
+import { AppProvider, NodeType } from "@/generated/prisma/enums";
 import type {
   Account,
   Node as PrismaNode,
@@ -21,14 +21,14 @@ type SyncParams = {
 
 export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
   try {
-    const gmailIntegration = await prisma.integration.findFirst({
+    const gmailApp = await prisma.apps.findFirst({
       where: {
         userId,
-        provider: IntegrationProvider.GMAIL,
+        provider: AppProvider.GMAIL,
       },
     });
 
-    if (!gmailIntegration) {
+    if (!gmailApp) {
       await stopGmailWatchForUser(userId);
       await prisma.gmailTriggerState.deleteMany({
         where: { workflow: { userId } },
@@ -148,15 +148,6 @@ export async function processGmailNotification({
     },
   });
 
-  console.log(
-    "[Gmail] Nodes eligible for trigger",
-    subscriptionId,
-    nodes.map((node) => ({
-      id: node.id,
-      workflowId: node.workflowId,
-    }))
-  );
-
   if (nodes.length === 0) {
     await stopGmailWatchForUser(subscription.userId);
     return;
@@ -229,30 +220,10 @@ async function maybeTriggerWorkflowFromNode({
   });
 
   const latestId = payload.messages[0]?.id;
-  console.log(
-    "[Gmail] Latest message for node",
-    node.id,
-    "latestId:",
-    latestId,
-    "messageCount:",
-    payload.messages.length
-  );
-  if (!latestId) {
-    return;
-  }
 
   const state = await prisma.gmailTriggerState.findUnique({
     where: { nodeId: node.id },
   });
-
-  if (state) {
-    console.log(
-      "[Gmail] Last seen message for node",
-      node.id,
-      "is",
-      state.lastMessageId
-    );
-  }
 
   if (state?.lastMessageId === latestId) {
     return;

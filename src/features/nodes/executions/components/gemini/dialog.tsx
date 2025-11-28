@@ -5,13 +5,13 @@ import { useForm } from "react-hook-form";
 import { useEffect } from "react";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 
 import { z } from "zod";
@@ -33,11 +33,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
 import { CredentialType } from "@/generated/prisma/enums";
 import Image from "next/image";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 export const AVAILABLE_MODELS = ["gemini-2.5-flash"] as const;
 
@@ -62,6 +63,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: z.infer<typeof formSchema>) => void;
   defaultValues?: Partial<GeminiFormValues>;
+  variables: VariableItem[];
 }
 
 export const GeminiDialog: React.FC<Props> = ({
@@ -69,6 +71,7 @@ export const GeminiDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
+  variables,
 }) => {
   const { data: credentials, isLoading } = useCredentialsByType(
     CredentialType.GEMINI
@@ -86,7 +89,6 @@ export const GeminiDialog: React.FC<Props> = ({
   });
 
   // reset form values when dialog opens with new defaults
-
   useEffect(() => {
     if (open) {
       form.reset({
@@ -97,7 +99,15 @@ export const GeminiDialog: React.FC<Props> = ({
         userPrompt: defaultValues.userPrompt || "",
       });
     }
-  }, [open, defaultValues, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.model,
+    defaultValues.credentialId,
+    defaultValues.systemPrompt,
+    defaultValues.userPrompt,
+    form,
+  ]);
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);
@@ -105,21 +115,21 @@ export const GeminiDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle> Gemini Configuration </DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Gemini Configuration</SheetTitle>
+          <SheetDescription>
             Configure the AI model and prompts for this node.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             {/* variable name */}
 
@@ -153,7 +163,7 @@ export const GeminiDialog: React.FC<Props> = ({
 
                   <Select
                     onValueChange={field.onChange}
-                    defaultValue={field.value}
+                    value={field.value}
                   >
                     <FormControl>
                       <SelectTrigger className="w-full">
@@ -186,7 +196,7 @@ export const GeminiDialog: React.FC<Props> = ({
                   <FormLabel> Gemini Credential </FormLabel>
                   <Select
                     onValueChange={field.onChange}
-                    defaultValue={field.value}
+                    value={field.value}
                     disabled={isLoading}
                   >
                     <FormControl>
@@ -222,12 +232,14 @@ export const GeminiDialog: React.FC<Props> = ({
               name="systemPrompt"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel> System prompt (optional) </FormLabel>
+                  <FormLabel>System prompt (optional)</FormLabel>
                   <FormControl>
-                    <Textarea
-                      placeholder={"You are a helpful assistant."}
-                      className="min-h-[80px] font-mono text-sm"
-                      {...field}
+                    <VariableInput
+                      placeholder="You are a helpful assistant."
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="font-mono text-sm"
                     />
                   </FormControl>
 
@@ -253,14 +265,14 @@ export const GeminiDialog: React.FC<Props> = ({
               name="userPrompt"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel> User prompt </FormLabel>
+                  <FormLabel>User prompt</FormLabel>
                   <FormControl>
-                    <Textarea
-                      placeholder={
-                        "Summarize this text: {{json httpResponse.data}}"
-                      }
-                      className="min-h-[120px] font-mono text-sm"
-                      {...field}
+                    <VariableInput
+                      placeholder="Summarize this text: {{json httpResponse.data}}"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                      className="font-mono text-sm"
                     />
                   </FormControl>
 
@@ -281,12 +293,17 @@ export const GeminiDialog: React.FC<Props> = ({
               )}
             />
 
-            <DialogFooter className="mt-4">
-              <Button type="submit"> Save </Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

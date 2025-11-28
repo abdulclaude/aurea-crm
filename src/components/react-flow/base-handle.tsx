@@ -10,10 +10,7 @@ export const BaseHandle = forwardRef<HTMLDivElement, BaseHandleProps>(
     return (
       <Handle
         ref={ref}
-        className={cn(
-          "size-[6px] rounded-full border-[0.5px]! border-white/50! bg-[#202E32]! transition",
-          className
-        )}
+        className={cn("rounded-full bg-sky-500! transition", className)}
         {...props}
       >
         {children}

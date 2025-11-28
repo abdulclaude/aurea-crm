@@ -24,22 +24,22 @@ type ExecutionWithWorkflow = Execution & {
 function getStatusIcon(status: ExecutionStatus) {
   switch (status) {
     case ExecutionStatus.SUCCESS:
-      return <CheckCircle2Icon className="size-4 text-emerald-500" />;
+      return <CheckCircle2Icon className="size-4 text-emerald-100" />;
     case ExecutionStatus.FAILED:
-      return <XCircleIcon className="size-4 text-rose-500" />;
+      return <XCircleIcon className="size-4 text-rose-100" />;
     default:
-      return <Loader2Icon className="size-4 text-blue-500 animate-spin" />;
+      return <Loader2Icon className="size-4 text-blue-100 animate-spin" />;
   }
 }
 
 function getIndicatorClass(status: ExecutionStatus) {
   switch (status) {
     case ExecutionStatus.SUCCESS:
-      return "bg-emerald-600/20 border-emerald-600";
+      return "bg-teal-500 border-emerald-200";
     case ExecutionStatus.FAILED:
-      return "bg-rose-600/20 border-rose-600";
+      return "bg-rose-500 border-rose-200";
     default:
-      return "bg-blue-600/20 border-blue-600";
+      return "bg-sky-500 border-blue-200";
   }
 }
 
@@ -88,7 +88,7 @@ export function ExecutionsTimeline({
               <TimelineSeparator className=" group-data-[orientation=vertical]/timeline:-left-7 -mt-1 group-data-[orientation=vertical]/timeline:h-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=vertical]/timeline:translate-y-6.5" />
               <TimelineDate>{startedAgo}</TimelineDate>
 
-              <TimelineTitle className="text-white/60 font-normal">
+              <TimelineTitle className="text-primary/50 font-normal">
                 {title}{" "}
                 <Link
                   href={`/executions/${item.id}`}
@@ -115,9 +115,9 @@ export function ExecutionsTimeline({
             </TimelineHeader>
 
             <TimelineContent className="mt-0.5">
-              <p className="text-[11px] text-white/40 hover:text-white select-none cursor-default transition duration-150 flex gap-1.5 items-center">
+              <p className="text-[11px] text-primary/50 hover:text-white select-none cursor-default transition duration-150 flex gap-1.5 items-center">
                 {typeof duration === "number" && (
-                  <p className="italic"> Took {duration}s </p>
+                  <span className="italic"> Took {duration}s </span>
                 )}
               </p>
             </TimelineContent>

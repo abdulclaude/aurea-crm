@@ -1,11 +1,16 @@
 "use client";
 
+import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { IconDoor as LogOutIcon } from "central-icons/IconDoor";
+import { IconPeopleCopy as UsersIcon } from "central-icons/IconPeopleCopy";
+import { IconInvite as InviteIcon } from "central-icons/IconInvite";
+import { IconStores as ClientsIcon } from "central-icons/IconStores";
+import { ChevronDownIcon, Layers2Icon, PlusIcon } from "lucide-react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import * as React from "react";
-import { authClient } from "@/lib/auth-client";
-import { useTRPC } from "@/trpc/client";
-
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,21 +23,9 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import {
-  ChevronDownIcon,
-  LogOutIcon,
-  SettingsIcon,
-  UsersIcon,
-  CreditCardIcon,
-  Layers2Icon,
-  PlusIcon,
-} from "lucide-react";
+import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
-
-import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useTRPC } from "@/trpc/client";
 
 type AccountSwitcherProps = {
   className?: string;
@@ -67,7 +60,9 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
     activeClient?.companyName ?? activeOrg?.name ?? "Select account";
   const currentAccountLogo = activeClient?.logo ?? activeOrg?.logo ?? "";
 
-  const canManageClients = activeOrg?.role === "owner";
+  // All agency members can see and switch between clients
+  // Agency Staff will only see their assigned clients (filtered server-side)
+  const canSwitchClients = !!activeOrg?.role;
 
   const handleSwitch = async (subaccountId: string | null) => {
     try {
@@ -82,110 +77,74 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
 
   const router = useRouter();
 
-  const workspaceLabel = canManageClients
-    ? activeClient
-      ? "Client workspace"
-      : "Agency workspace"
-    : "Workspace";
-
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="w-max flex" asChild>
+      <DropdownMenuTrigger className="w-36 flex " asChild>
         <Button
           variant="ghost"
           className={cn(
-            "rounded-md text-left font-medium text-xs flex items-center justify-between h-max!  hover:bg-[#202E32] hover:text-white ",
+            "rounded-sm text-left font-medium text-xs flex items-center justify-between h-max! hover:bg-foreground hover:text-black border-none transition duration-150 px-1! py-1! pr-2.5!",
             className
           )}
         >
-          <div className="flex items-center gap-2">
-            <Avatar className="size-4">
+          <div className="flex items-center gap-1">
+            <Avatar className="size-6">
               <AvatarImage
                 src={currentAccountLogo}
-                className="object-scale-down"
+                className="object-scale-down size-5 pl-1"
               />
-              <AvatarFallback>
+
+              <AvatarFallback className="bg-[#202E32] brightness-120 text-white text-[10px]">
                 {(currentAccountName?.[0] ?? "O").toUpperCase()}
               </AvatarFallback>
             </Avatar>
 
-            <span className="truncate text-xs font-medium tracking-tight">
+            <span className="truncate text-[11px] font-medium tracking-tight">
               {currentAccountName.slice(0, 14)}
               {currentAccountName.length > 14 && "..."}
             </span>
           </div>
+
           <ChevronDownIcon className="size-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent
-        align="start"
-        className="w-64 bg-[#1A2326] text-white border-white/10"
-      >
-        <DropdownMenuLabel className="flex min-w-0 flex-col space-y-1.5 text-white">
-          <span className="text-[10px] uppercase tracking-[0.2em] text-white/40">
-            {workspaceLabel}
-          </span>
-
-          <div className="space-y-0.5 flex flex-col">
-            <span className="truncate text-xs font-semibold text-white uppercase">
+      <DropdownMenuContent align="start" className="w-64 text-primary">
+        <DropdownMenuLabel className="flex min-w-0 flex-col space-y-1.5 text-primary">
+          <div className=" flex flex-col">
+            <span className="truncate text-xs font-semibold text-primary">
               {currentAccountName}
             </span>
 
             {activeClient && activeOrg?.name ? (
-              <span className="truncate text-xs font-medium text-white/50">
+              <span className="truncate text-xs font-normal text-primary/75">
                 <span className="text-[10px]"> via {activeOrg.name} </span>
               </span>
             ) : !activeClient ? (
-              <span className="truncate text-[10px] font-medium text-white/50">
-                {activeOrg?.ownerEmail ?? activeOrg?.ownerName}
+              <span className="truncate text-[10px] font-medium text-primary/75">
+                {activeOrg?.ownerName ?? activeOrg?.ownerEmail}
               </span>
             ) : null}
           </div>
         </DropdownMenuLabel>
 
-        {canManageClients && (
+        {canSwitchClients && (
           <>
-            <DropdownMenuSeparator className="bg-white/5" />
+            <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
-            <DropdownMenuLabel className="text-xs text-white/50">
+            <DropdownMenuLabel className="text-xs text-primary/75">
               Clients
             </DropdownMenuLabel>
 
             <DropdownMenuGroup>
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="flex items-center gap-2 hover:bg-[#202E32]! hover:text-white!">
-                  <UsersIcon className="size-4" />
-                  <span className="text-xs font-medium ">Switch to client</span>
+                <DropdownMenuSubTrigger className="flex items-center gap-2 hover:bg-foreground hover:text-black group">
+                  <ClientsIcon className="size-3.5 text-primary/75 group-hover:text-black" />
+
+                  <span className="text-xs ">Switch to client</span>
                 </DropdownMenuSubTrigger>
 
-                <DropdownMenuSubContent className="w-64 bg-[#1A2326] ml-3  text-white border-white/10">
-                  <DropdownMenuItem
-                    className={cn(
-                      "flex items-center gap-3 hover:bg-[#202E32]! hover:text-white!",
-                      !activeSubaccountId &&
-                        "bg-[#202E32] hover:bg-[#202E32] hover:brightness-125"
-                    )}
-                    onClick={() => handleSwitch(null)}
-                  >
-                    <Layers2Icon className="size-3 text-white/60" />
-                    <div className="flex min-w-0 flex-col">
-                      <span className="text-[11px] text-white/50">
-                        {activeSubaccountId
-                          ? `Back to ${activeOrg?.name ?? "agency"}`
-                          : activeOrg?.name ?? "Agency workspace"}
-                      </span>
-                    </div>
-
-                    {isSwitching === "agency" && (
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        Switching...
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator className="bg-white/5" />
-
+                <DropdownMenuSubContent className="w-64 ml-2.5 text-primary border-black/5 flex flex-col gap-y-1">
                   {clients && clients.length > 0 ? (
                     clients.map((client) => {
                       const selected =
@@ -195,9 +154,9 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                         <DropdownMenuItem
                           key={client.subaccountId ?? client.id}
                           className={cn(
-                            "flex items-center gap-3 hover:bg-[#202E32]! hover:text-white!",
+                            "flex items-center gap-3 bg-background hover:bg-foreground hover:text-black opacity-75! hover:opacity-100! p-1",
                             selected &&
-                              "bg-[#202E32] hover:bg-[#202E32] hover:brightness-120"
+                              "bg-foreground hover:bg-primary-foreground opacity-100!"
                           )}
                           onClick={() =>
                             handleSwitch(client.subaccountId ?? null)
@@ -213,7 +172,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                               unoptimized
                             />
                           ) : (
-                            <div className="bg-muted text-foreground/80 grid size-6 shrink-0 place-items-center rounded">
+                            <div className="bg-foreground brightness-120 text-primary text-xs grid size-6 shrink-0 place-items-center rounded">
                               {(client.name?.[0] ?? "C").toUpperCase()}
                             </div>
                           )}
@@ -233,51 +192,84 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                   ) : (
                     <DropdownMenuItem
                       disabled
-                      className="text-white/60 text-xs px-3"
+                      className="text-primary/75 text-xs px-3"
                     >
                       No clients found
                     </DropdownMenuItem>
                   )}
 
-                  <DropdownMenuSeparator className="bg-white/5" />
+                  <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
 
                   <DropdownMenuItem
-                    className="hover:bg-[#202E32]! hover:text-white! group"
+                    className="bg-background hover:bg-foreground hover:text-black group py-2"
                     onClick={() => {
                       router.push("/clients/new");
                     }}
                   >
-                    <PlusIcon className=" size-3 text-white/50 group-hover:text-white transition duration-150" />
-                    <span className="text-xs font-medium text-white/50 group-hover:text-white transition duration-150">
+                    <PlusIcon className=" size-3 text-primary/75 group-hover:text-black transition duration-150" />
+                    <span className="text-xs font-medium text-primary/75 group-hover:text-black transition duration-150">
                       Create new client
                     </span>
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+
+              {activeSubaccountId && (
+                <DropdownMenuItem
+                  className={cn(
+                    "flex items-center gap-3 hover:bg-foreground hover:text-black group",
+                    !activeSubaccountId &&
+                      "hover:bg-foreground hover:text-black"
+                  )}
+                  onClick={() => handleSwitch(null)}
+                >
+                  <Layers2Icon className="size-3 text-primary/75 group-hover:text-black" />
+                  <div className="flex min-w-0 flex-col">
+                    <span className="text-[11px] font-medium truncate">
+                      Back to {activeOrg?.name ?? "Agency"}'s workspace
+                    </span>
+                  </div>
+
+                  {isSwitching === "agency" && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      Switching...
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
-            <DropdownMenuSeparator className="bg-white/5" />
+            <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
           </>
         )}
+
         <DropdownMenuItem
+          className="group"
           onClick={() => {
-            // Placeholder: Organization settings route
-            window.location.href = "/settings";
+            router.push("/settings/members");
           }}
         >
-          <SettingsIcon className=" size-4" />
-          <span className="text-xs font-medium">Settings</span>
+          <UsersIcon className="text-primary/75 group-hover:text-black size-3.5" />
+          <span className="text-xs group-hover:text-black">Manage members</span>
         </DropdownMenuItem>
 
-        <DropdownMenuItem onClick={() => authClient.customer.portal()}>
-          <CreditCardIcon className=" size-4" />
-          <span className="text-xs font-medium">Billing</span>
+        <DropdownMenuItem
+          className="group"
+          onClick={() => {
+            router.push("/invites");
+          }}
+        >
+          <InviteIcon className="text-primary/75 group-hover:text-black size-3.5" />
+          <span className="text-xs group-hover:text-black">Invites</span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator className="bg-white/5" />
+        <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
-        <DropdownMenuItem onClick={() => authClient.signOut()}>
-          <LogOutIcon className=" size-4" />
-          <span className="text-xs font-medium">Logout</span>
+        <DropdownMenuItem
+          className="group"
+          onClick={() => authClient.signOut()}
+        >
+          <LogOutIcon className="text-primary/75 group-hover:text-black size-3.5" />
+          <span className="text-xs group-hover:text-black">Logout</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -4,17 +4,24 @@ import { cn } from "@/lib/utils";
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return (
-    <input
-      type={type}
-      data-slot="input"
+    <div
       className={cn(
-        "file:text-white placeholder:text-white/60 selection:bg-primary selection:text-primary-foreground h-9 w-full min-w-0 rounded-xl border border-white/10 bg-[#202E32] px-3 py-1 text-base text-white transition-[color] outline-none file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-xs",
-        "hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/10 focus-visible:ring-offset-0 transition duration-150",
-        "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
-        className
+        "relative",
+        "before:pointer-events-none focus-within:before:opacity-100 before:opacity-0 before:absolute before:-inset-0.5 before:rounded-[12px] before:border before:border-sky-500 before:ring-2 before:ring-blue-500/20 before:transition",
+        "after:pointer-events-none after:absolute after:inset-px after:rounded-lg after:shadow-highlight after:shadow-white/5 focus-within:after:shadow-sky-500 dark:focus-within:after:shadow-blue-500/20 after:transition w-full"
       )}
-      {...props}
-    />
+    >
+      <input
+        autoComplete="off"
+        {...props}
+        type={type}
+        data-slot="input"
+        className={cn(
+          "relative text-xs text-primary dark:text-neutral-200 bg-white dark:bg-neutral-750 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 px-3.5 py-2 rounded-lg outline-none transition duration-150 hover:bg-primary-foreground/15 h-8.5! w-full ring ring-black/10 shadow-sm",
+          className
+        )}
+      />
+    </div>
   );
 }
 

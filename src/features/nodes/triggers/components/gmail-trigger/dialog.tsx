@@ -6,13 +6,13 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import {
   Form,
@@ -27,6 +27,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { VariableInput } from "@/components/tiptap/variable-input";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 const formSchema = z.object({
   variableName: z
@@ -42,18 +44,14 @@ const formSchema = z.object({
   query: z.string().optional(),
   includeSpamTrash: z.boolean().default(false),
   maxResults: z.coerce
-    .number({
-      invalid_type_error: "Max results must be a number.",
-    })
-    .min(1)
-    .max(50)
+    .number()
+    .min(1, "Max results must be at least 1.")
+    .max(50, "Max results must be at most 50.")
     .default(5),
   pollIntervalMinutes: z.coerce
-    .number({
-      invalid_type_error: "Poll interval must be a number.",
-    })
-    .min(1)
-    .max(60)
+    .number()
+    .min(1, "Poll interval must be at least 1 minute.")
+    .max(60, "Poll interval must be at most 60 minutes.")
     .default(5),
 });
 
@@ -64,6 +62,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: GmailTriggerFormValues) => void;
   defaultValues?: Partial<GmailTriggerFormValues>;
+  variables: VariableItem[];
 }
 
 export const GmailTriggerDialog: React.FC<Props> = ({
@@ -71,9 +70,10 @@ export const GmailTriggerDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues,
+  variables,
 }) => {
   const form = useForm<GmailTriggerFormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       variableName: defaultValues?.variableName || "gmailTrigger",
       labelId: defaultValues?.labelId || "INBOX",
@@ -95,7 +95,7 @@ export const GmailTriggerDialog: React.FC<Props> = ({
         pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
       });
     }
-  }, [open, defaultValues, form]);
+  }, [open, defaultValues?.variableName, defaultValues?.labelId, defaultValues?.query, defaultValues?.includeSpamTrash, defaultValues?.maxResults, defaultValues?.pollIntervalMinutes, form]);
 
   const handleSubmit = (values: GmailTriggerFormValues) => {
     onSubmit(values);
@@ -103,21 +103,21 @@ export const GmailTriggerDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle>Gmail trigger</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle>Gmail trigger</SheetTitle>
+          <SheetDescription>
             Watch a mailbox for new messages and expose them to your workflow.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 mt-4 px-8"
+            className="space-y-6 px-6"
           >
             <FormField
               control={form.control}
@@ -239,12 +239,14 @@ export const GmailTriggerDialog: React.FC<Props> = ({
               )}
             />
 
-            <DialogFooter className="mt-4">
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="mt-6 px-0 pb-4">
+              <Button type="submit" className="brightness-120! hover:brightness-130! w-full py-5">
+                Save changes
+              </Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

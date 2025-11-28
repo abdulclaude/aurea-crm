@@ -2,27 +2,30 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  ResizableSheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ChevronRight, CopyIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  variables: VariableItem[];
 }
 
 export const StripeTriggerDialog: React.FC<Props> = ({
   open,
   onOpenChange,
+  variables,
 }) => {
   const params = useParams();
   const workflowId = params.workflowId as string;
@@ -43,19 +46,19 @@ export const StripeTriggerDialog: React.FC<Props> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="px-0">
-        <DialogHeader className="px-8">
-          <DialogTitle> Stripe Trigger </DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
+          <SheetTitle> Stripe Trigger </SheetTitle>
+          <SheetDescription>
             Configure this Webhook URL in your Stripe Dashboard to trigger this
             workflow on payment events.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator />
+        <Separator className="my-5 bg-white/5" />
 
-        <div className="space-y-4 px-8">
+        <div className="space-y-4 px-6">
           <div className="space-y-2">
             <Label htmlFor="webhook-url">Webhook URL</Label>
 
@@ -78,7 +81,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
           </div>
         </div>
 
-        <div className="rounded-lg bg-muted space-y-2 p-8">
+        <div className="rounded-lg bg-muted space-y-2 p-6 mx-6 mt-4">
           <h4 className="font-medium text-sm"> Setup instructions </h4>
           <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
             <li> Open your Stripe Dashboard </li>
@@ -101,7 +104,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
           </ol>
         </div>
 
-        <div className="rounded-lg bg-muted p-8 space-y-2">
+        <div className="rounded-lg bg-muted p-6 mx-6 mt-4 space-y-2">
           <h4 className="font-medium text-sm"> Available variables </h4>
           <ul className="text-sm text-muted-foreground space-y-6">
             <li className="flex flex-col gap-1">
@@ -145,7 +148,7 @@ export const StripeTriggerDialog: React.FC<Props> = ({
             </li>
           </ul>
         </div>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

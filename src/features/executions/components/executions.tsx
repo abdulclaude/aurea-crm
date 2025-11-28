@@ -10,6 +10,7 @@ import {
 import { useSuspenseAllExecutions } from "../hooks/use-executions";
 import { ExecutionsTimeline } from "./executions-timeline";
 import type { Execution } from "@/generated/prisma/client";
+import { Separator } from "@/components/ui/separator";
 type ExecutionWithWorkflow = Execution & {
   workflow: { id: string; name: string };
 };
@@ -23,7 +24,7 @@ const ExecutionsList = () => {
 
   return (
     <ExecutionsTimeline
-      className="mt-4"
+      className=""
       items={executions.data as unknown as ExecutionWithWorkflow[]}
     />
   );

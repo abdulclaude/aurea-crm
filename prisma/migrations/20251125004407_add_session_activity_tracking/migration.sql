@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "session" ADD COLUMN     "isOnline" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "lastActivityAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP;
