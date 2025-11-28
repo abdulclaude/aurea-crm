@@ -31,7 +31,7 @@ import { useLogsParams } from "@/features/ai/logs/hooks/use-logs-params";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { LogsToolbar } from "./logs-toolbar";
-import { AILogStatus } from "@/generated/prisma/enums";
+import { AILogStatus } from "@prisma/client";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type LogRow = RouterOutput["logs"]["list"]["items"][number];

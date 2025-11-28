@@ -1,6 +1,6 @@
 import prisma from "@/lib/db";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { AppProvider } from "@/generated/prisma/enums";
+import { AppProvider } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { removeGoogleCalendarSubscriptionsForUser } from "@/features/google-calendar/server/subscriptions";

@@ -1,6 +1,6 @@
 import { PAGINATION } from "@/config/constants";
-import { WebhookProvider } from "@/generated/prisma/enums";
-import type { Webhook } from "@/generated/prisma/client";
+import { WebhookProvider } from "@prisma/client";
+import type { Webhook } from "@prisma/client";
 import prisma from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/encryption";
 import {

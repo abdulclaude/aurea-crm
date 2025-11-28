@@ -1,5 +1,5 @@
 import type { NodeExecutor } from "../types";
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { manualTriggerExecutor } from "@/features/nodes/triggers/components/manual-trigger/executor";
 import { googleFormTriggerExecutor } from "@/features/nodes/triggers/components/google-form-trigger/executor";
 import { stripeTriggerExecutor } from "@/features/nodes/triggers/components/stripe-trigger/executor";

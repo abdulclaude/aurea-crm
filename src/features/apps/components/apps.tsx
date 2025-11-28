@@ -23,7 +23,7 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
-import { AppProvider } from "@/generated/prisma/enums";
+import { AppProvider } from "@prisma/client";
 import {
   GMAIL_SCOPES,
   GOOGLE_CALENDAR_SCOPES,
@@ -145,7 +145,12 @@ export const AppsList = () => {
       [AppProvider.GOOGLE]: syncGoogleWorkspaceMutate,
       [AppProvider.MICROSOFT]: syncMicrosoftMutate,
     }),
-    [syncGoogleCalendarMutate, syncGmailMutate, syncGoogleWorkspaceMutate, syncMicrosoftMutate]
+    [
+      syncGoogleCalendarMutate,
+      syncGmailMutate,
+      syncGoogleWorkspaceMutate,
+      syncMicrosoftMutate,
+    ]
   );
 
   const syncLoadingByProvider: Record<AppProvider, boolean | undefined> = {

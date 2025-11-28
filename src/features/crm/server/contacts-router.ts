@@ -2,12 +2,9 @@ import { TRPCError } from "@trpc/server";
 import z from "zod";
 
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
-import type {
-  ContactGetPayload,
-  ContactInclude,
-  ContactWhereInput,
-} from "@/generated/prisma/models";
+import { ContactType, LifecycleStage } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
+
 import prisma from "@/lib/db";
 import { getUsersActivityStatus } from "@/lib/activity-tracker";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
@@ -23,19 +20,24 @@ const contactInclude = {
       },
     },
   },
-} satisfies ContactInclude;
+} satisfies Prisma.ContactInclude;
 
-type ContactResult = ContactGetPayload<{ include: typeof contactInclude }>;
+type ContactResult = Prisma.ContactGetPayload<{
+  include: typeof contactInclude;
+}>;
 
 const mapContact = (
   contact: ContactResult,
-  activityStatus?: Map<string, {
-    isOnline: boolean;
-    lastActivityAt: Date | null;
-    lastLoginAt: Date;
-    status: string;
-    statusMessage: string | null;
-  }>
+  activityStatus?: Map<
+    string,
+    {
+      isOnline: boolean;
+      lastActivityAt: Date | null;
+      lastLoginAt: Date;
+      status: string;
+      statusMessage: string | null;
+    }
+  >
 ) => {
   return {
     id: contact.id,
@@ -59,7 +61,8 @@ const mapContact = (
     updatedAt: contact.updatedAt,
     assignees: contact.assignees.map((assignee) => {
       const userId = assignee.subaccountMember.user?.id;
-      const activity = userId && activityStatus ? activityStatus.get(userId) : undefined;
+      const activity =
+        userId && activityStatus ? activityStatus.get(userId) : undefined;
 
       return {
         id: assignee.subaccountMemberId,
@@ -176,8 +179,8 @@ export const contactsRouter = createTRPCRouter({
       };
     }
 
-    const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
-    const maxDate = new Date(Math.max(...allDates.map(d => d.getTime())));
+    const minDate = new Date(Math.min(...allDates.map((d) => d.getTime())));
+    const maxDate = new Date(Math.max(...allDates.map((d) => d.getTime())));
 
     return {
       minDate,
@@ -202,7 +205,7 @@ export const contactsRouter = createTRPCRouter({
           cursor: z.number().optional(),
           limit: z.number().optional(),
         })
-        .optional(),
+        .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -215,7 +218,7 @@ export const contactsRouter = createTRPCRouter({
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
       const skip = input?.cursor ?? 0;
 
-      const where: ContactWhereInput = {
+      const where: Prisma.ContactWhereInput = {
         organizationId: orgId,
         ...(subaccountId && { subaccountId }),
       };
@@ -312,9 +315,10 @@ export const contactsRouter = createTRPCRouter({
       }
 
       // Fetch activity status for all users
-      const activityStatus = userIds.size > 0
-        ? await getUsersActivityStatus(Array.from(userIds))
-        : new Map();
+      const activityStatus =
+        userIds.size > 0
+          ? await getUsersActivityStatus(Array.from(userIds))
+          : new Map();
 
       const nextCursor = skip + items.length < total ? skip + take : null;
 
@@ -348,7 +352,7 @@ export const contactsRouter = createTRPCRouter({
         linkedin: z.string().optional(),
         tags: z.array(z.string()).optional(),
         notes: z.string().optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -425,7 +429,7 @@ export const contactsRouter = createTRPCRouter({
         tags: z.array(z.string()).optional(),
         notes: z.string().optional(),
         assigneeIds: z.array(z.string()).optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -452,7 +456,7 @@ export const contactsRouter = createTRPCRouter({
 
         const validMemberIds = validMembers.map((m) => m.id);
         const invalidIds = assigneeIds.filter(
-          (id) => !validMemberIds.includes(id),
+          (id) => !validMemberIds.includes(id)
         );
 
         if (invalidIds.length > 0) {

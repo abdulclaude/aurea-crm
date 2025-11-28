@@ -6,8 +6,8 @@ import {
 } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import prisma from "@/lib/db";
-import { CheckInMethod, TimeLogStatus } from "@/generated/prisma/enums";
-import { Prisma } from "@/generated/prisma/client";
+import { CheckInMethod, TimeLogStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 const CRM_PAGE_SIZE = 20;
 
@@ -148,186 +148,183 @@ function calculateTotalAmount(
 
 export const timeTrackingRouter = createTRPCRouter({
   // ========== Clock In/Out ==========
-  clockIn: baseProcedure
-    .input(clockInSchema)
-    .mutation(async ({ input }) => {
-      // Verify worker exists and is active
-      const worker = await prisma.worker.findUnique({
-        where: { id: input.workerId },
-        select: {
-          id: true,
-          name: true,
-          subaccountId: true,
-          isActive: true,
-          hourlyRate: true,
-          currency: true,
-        },
+  clockIn: baseProcedure.input(clockInSchema).mutation(async ({ input }) => {
+    // Verify worker exists and is active
+    const worker = await prisma.worker.findUnique({
+      where: { id: input.workerId },
+      select: {
+        id: true,
+        name: true,
+        subaccountId: true,
+        isActive: true,
+        hourlyRate: true,
+        currency: true,
+      },
+    });
+
+    if (!worker) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Worker not found",
       });
+    }
 
-      if (!worker) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Worker not found",
-        });
-      }
-
-      if (!worker.isActive) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Worker account is inactive",
-        });
-      }
-
-      if (!worker.subaccountId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Worker must belong to a subaccount",
-        });
-      }
-
-      // Check if worker has an active time log (hasn't clocked out)
-      const activeTimeLog = await prisma.timeLog.findFirst({
-        where: {
-          subaccountId: worker.subaccountId,
-          workerId: input.workerId,
-          endTime: null,
-        },
+    if (!worker.isActive) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Worker account is inactive",
       });
+    }
 
-      if (activeTimeLog) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "You already have an active time log. Please clock out first.",
-        });
-      }
-
-      // Auto-generate title from worker info if not provided
-      const title = input.title || `${worker.name} - Shift`;
-
-      const timeLog = await prisma.timeLog.create({
-        data: {
-          subaccountId: worker.subaccountId,
-          workerId: input.workerId,
-          dealId: input.dealId,
-          title,
-          startTime: new Date(),
-          checkInMethod: input.checkInMethod,
-          checkInLocation: input.checkInLocation as Prisma.InputJsonValue,
-          qrCodeId: input.qrCodeId,
-          customFields: input.customFields as Prisma.InputJsonValue,
-          status: TimeLogStatus.DRAFT,
-          hourlyRate: worker.hourlyRate,
-          currency: worker.currency,
-          billable: true,
-        },
-        include: {
-          worker: true,
-          contact: true,
-          deal: true,
-        },
+    if (!worker.subaccountId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Worker must belong to a subaccount",
       });
+    }
 
-      return timeLog;
-    }),
+    // Check if worker has an active time log (hasn't clocked out)
+    const activeTimeLog = await prisma.timeLog.findFirst({
+      where: {
+        subaccountId: worker.subaccountId,
+        workerId: input.workerId,
+        endTime: null,
+      },
+    });
 
-  clockOut: baseProcedure
-    .input(clockOutSchema)
-    .mutation(async ({ input }) => {
-      // Verify worker exists and is active
-      const worker = await prisma.worker.findUnique({
-        where: { id: input.workerId },
-        select: { isActive: true },
+    if (activeTimeLog) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "You already have an active time log. Please clock out first.",
       });
+    }
 
-      if (!worker) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Worker not found",
-        });
-      }
+    // Auto-generate title from worker info if not provided
+    const title = input.title || `${worker.name} - Shift`;
 
-      if (!worker.isActive) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Worker account is inactive",
-        });
-      }
+    const timeLog = await prisma.timeLog.create({
+      data: {
+        subaccountId: worker.subaccountId,
+        workerId: input.workerId,
+        dealId: input.dealId,
+        title,
+        startTime: new Date(),
+        checkInMethod: input.checkInMethod,
+        checkInLocation: input.checkInLocation as Prisma.InputJsonValue,
+        qrCodeId: input.qrCodeId,
+        customFields: input.customFields as Prisma.InputJsonValue,
+        status: TimeLogStatus.DRAFT,
+        hourlyRate: worker.hourlyRate,
+        currency: worker.currency,
+        billable: true,
+      },
+      include: {
+        worker: true,
+        contact: true,
+        deal: true,
+      },
+    });
 
-      // Verify the time log belongs to this worker
-      const timeLog = await prisma.timeLog.findUnique({
-        where: {
-          id: input.timeLogId,
-        },
-        include: {
-          worker: true,
-        },
+    return timeLog;
+  }),
+
+  clockOut: baseProcedure.input(clockOutSchema).mutation(async ({ input }) => {
+    // Verify worker exists and is active
+    const worker = await prisma.worker.findUnique({
+      where: { id: input.workerId },
+      select: { isActive: true },
+    });
+
+    if (!worker) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Worker not found",
       });
+    }
 
-      if (!timeLog) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Time log not found",
-        });
-      }
-
-      if (timeLog.workerId !== input.workerId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "This time log does not belong to you",
-        });
-      }
-
-      if (timeLog.endTime) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "This time log has already been clocked out",
-        });
-      }
-
-      const endTime = new Date();
-      const duration = calculateDuration(timeLog.startTime, endTime);
-
-      const hourlyRate = input.hourlyRate ?? timeLog.hourlyRate;
-      const totalAmount =
-        hourlyRate && input.billable !== false
-          ? calculateTotalAmount(
-              duration,
-              Number(hourlyRate),
-              input.breakDuration
-            )
-          : undefined;
-
-      const updatedTimeLog = await prisma.timeLog.update({
-        where: { id: input.timeLogId },
-        data: {
-          endTime,
-          duration,
-          breakDuration: input.breakDuration,
-          description: input.description,
-          checkOutLocation: input.checkOutLocation as Prisma.InputJsonValue,
-          hourlyRate: hourlyRate,
-          totalAmount: totalAmount,
-          billable: input.billable ?? timeLog.billable,
-          status: TimeLogStatus.SUBMITTED,
-          submittedAt: new Date(),
-          // Only set submittedBy if we have auth context (CRM user)
-          // Workers don't have auth, so leave it null
-        },
-        include: {
-          contact: true,
-          deal: true,
-        },
+    if (!worker.isActive) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Worker account is inactive",
       });
+    }
 
-      return updatedTimeLog;
-    }),
+    // Verify the time log belongs to this worker
+    const timeLog = await prisma.timeLog.findUnique({
+      where: {
+        id: input.timeLogId,
+      },
+      include: {
+        worker: true,
+      },
+    });
+
+    if (!timeLog) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Time log not found",
+      });
+    }
+
+    if (timeLog.workerId !== input.workerId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "This time log does not belong to you",
+      });
+    }
+
+    if (timeLog.endTime) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "This time log has already been clocked out",
+      });
+    }
+
+    const endTime = new Date();
+    const duration = calculateDuration(timeLog.startTime, endTime);
+
+    const hourlyRate = input.hourlyRate ?? timeLog.hourlyRate;
+    const totalAmount =
+      hourlyRate && input.billable !== false
+        ? calculateTotalAmount(
+            duration,
+            Number(hourlyRate),
+            input.breakDuration
+          )
+        : undefined;
+
+    const updatedTimeLog = await prisma.timeLog.update({
+      where: { id: input.timeLogId },
+      data: {
+        endTime,
+        duration,
+        breakDuration: input.breakDuration,
+        description: input.description,
+        checkOutLocation: input.checkOutLocation as Prisma.InputJsonValue,
+        hourlyRate: hourlyRate,
+        totalAmount: totalAmount,
+        billable: input.billable ?? timeLog.billable,
+        status: TimeLogStatus.SUBMITTED,
+        submittedAt: new Date(),
+        // Only set submittedBy if we have auth context (CRM user)
+        // Workers don't have auth, so leave it null
+      },
+      include: {
+        contact: true,
+        deal: true,
+      },
+    });
+
+    return updatedTimeLog;
+  }),
 
   // Get active time log for a worker
   getActiveTimeLog: baseProcedure
-    .input(z.object({
-      workerId: z.string(),
-    }))
+    .input(
+      z.object({
+        workerId: z.string(),
+      })
+    )
     .query(async ({ input }) => {
       // Verify worker exists and is active
       const worker = await prisma.worker.findUnique({
@@ -595,8 +592,14 @@ export const timeTrackingRouter = createTRPCRouter({
           OR: [
             { title: { contains: input.search, mode: "insensitive" } },
             { description: { contains: input.search, mode: "insensitive" } },
-            { worker: { name: { contains: input.search, mode: "insensitive" } } },
-            { contact: { name: { contains: input.search, mode: "insensitive" } } },
+            {
+              worker: { name: { contains: input.search, mode: "insensitive" } },
+            },
+            {
+              contact: {
+                name: { contains: input.search, mode: "insensitive" },
+              },
+            },
             { deal: { name: { contains: input.search, mode: "insensitive" } } },
           ],
         });

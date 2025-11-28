@@ -37,7 +37,7 @@ import { OutlookNode } from "@/features/nodes/executions/components/outlook/node
 import { OneDriveTriggerNode } from "@/features/nodes/triggers/components/onedrive-trigger/node";
 import { OneDriveNode } from "@/features/nodes/executions/components/onedrive/node";
 
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { NodeTypes } from "@xyflow/react";
 
 export const nodeComponents = {

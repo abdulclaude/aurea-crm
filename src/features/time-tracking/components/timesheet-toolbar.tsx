@@ -56,7 +56,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import RangeSlider from "@/components/ui/range-slider";
 import DateRangeFilter from "@/components/ui/date-range-filter";
 import { cn } from "@/lib/utils";
-import { TimeLogStatus } from "@/generated/prisma/enums";
+import { TimeLogStatus } from "@prisma/client";
 
 export interface TimesheetToolbarProps {
   search: string;

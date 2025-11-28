@@ -1,5 +1,5 @@
 import { PAGINATION } from "@/config/constants";
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 
@@ -16,8 +16,8 @@ import {
   syncGoogleCalendarWorkflowSubscriptions,
 } from "@/features/google-calendar/server/subscriptions";
 import { syncGmailWorkflowSubscriptions } from "@/features/gmail/server/subscriptions";
-import type { WorkflowsWhereInput } from "@/generated/prisma/models";
 import { createNotification } from "@/lib/notifications";
+import { Prisma } from "@prisma/client";
 
 const nodePreviewSelect = {
   id: true,
@@ -40,7 +40,7 @@ const findWorkflowForCtx = (
     subaccountId?: string | null;
   },
   workflowId: string,
-  extra?: WorkflowsWhereInput
+  extra?: Prisma.WorkflowsWhereInput
 ) =>
   prisma.workflows.findFirstOrThrow({
     where: {
@@ -350,7 +350,7 @@ export const workflowsRouter = createTRPCRouter({
       const { page, pageSize, search, isBundle } = input;
 
       const ownerWhere = workflowScopeWhere(ctx);
-      const where: WorkflowsWhereInput = {
+      const where: Prisma.WorkflowsWhereInput = {
         ...ownerWhere,
         name: {
           contains: search,

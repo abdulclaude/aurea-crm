@@ -1,4 +1,4 @@
-import type { OrganizationMemberRole, Prisma } from "@/generated/prisma/client";
+import type { OrganizationMemberRole, Prisma } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import z from "zod";
 

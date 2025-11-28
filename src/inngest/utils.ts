@@ -1,6 +1,6 @@
 import toposort from "toposort";
 
-import type { Connection, Node } from "@/generated/prisma/client";
+import type { Connection, Node } from "@prisma/client";
 import { NonRetriableError } from "inngest";
 import { inngest } from "./client";
 

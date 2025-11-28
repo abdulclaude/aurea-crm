@@ -23,7 +23,7 @@ import { IconSignature } from "central-icons/IconSignature";
 import { IconKanbanView as KanbanIcon } from "central-icons/IconKanbanView";
 import { toast } from "sonner";
 import { useState } from "react";
-import { ModuleType } from "@/generated/prisma/enums";
+import { ModuleType } from "@prisma/client";
 
 export const ModulesContainer = ({
   children,

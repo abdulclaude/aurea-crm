@@ -15,14 +15,11 @@ import {
   ErrorView,
   LoadingView,
 } from "@/components/react-flow/entity-components";
-import {
-  useRemoveWebhook,
-  useSuspenseWebhooks,
-} from "../hooks/use-webhooks";
+import { useRemoveWebhook, useSuspenseWebhooks } from "../hooks/use-webhooks";
 import { useWebhooksParams } from "../hooks/use-webhooks-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
-import type { Webhook } from "@/generated/prisma/client";
-import { WebhookProvider } from "@/generated/prisma/enums";
+import type { Webhook } from "@prisma/client";
+import { WebhookProvider } from "@prisma/client";
 
 const providerLogos: Record<WebhookProvider, string> = {
   [WebhookProvider.SLACK]: "/logos/slack.svg",
@@ -140,7 +137,9 @@ const WebhookItem = ({ data }: { data: Webhook }) => {
             {formatDistanceToNow(data.updatedAt, { addSuffix: true })}
           </span>
           {data.description && (
-            <span className="text-white/40 text-[11px]">{data.description}</span>
+            <span className="text-white/40 text-[11px]">
+              {data.description}
+            </span>
           )}
         </div>
       }
@@ -154,4 +153,3 @@ const WebhookItem = ({ data }: { data: Webhook }) => {
     />
   );
 };
-

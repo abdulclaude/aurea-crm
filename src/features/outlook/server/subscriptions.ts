@@ -3,11 +3,8 @@
 import prisma from "@/lib/db";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@/generated/prisma/enums";
-import type {
-  Account,
-  Node as PrismaNode,
-} from "@/generated/prisma/client";
+import { AppProvider, NodeType } from "@prisma/client";
+import type { Account, Node as PrismaNode } from "@prisma/client";
 
 const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
 const SUBSCRIPTION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 3; // 3 days (max allowed by Microsoft)
@@ -517,7 +514,8 @@ async function refreshMicrosoftAccessToken(account: Account) {
     client_secret: clientSecret,
     refresh_token: refreshToken,
     grant_type: "refresh_token",
-    scope: "openid email profile offline_access Mail.ReadWrite Mail.Send Files.ReadWrite.All",
+    scope:
+      "openid email profile offline_access Mail.ReadWrite Mail.Send Files.ReadWrite.All",
   });
 
   const response = await fetch(
@@ -572,9 +570,7 @@ function normalizeVariableName(value?: string | null) {
 function getOutlookWebhookUrl() {
   const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
   if (!baseUrl) {
-    throw new Error(
-      "Set APP_URL or NEXT_PUBLIC_APP_URL for Outlook webhooks."
-    );
+    throw new Error("Set APP_URL or NEXT_PUBLIC_APP_URL for Outlook webhooks.");
   }
   return `${baseUrl}/api/webhooks/outlook`;
 }

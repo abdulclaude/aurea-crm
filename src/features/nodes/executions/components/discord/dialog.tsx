@@ -37,7 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import Link from "next/link";
-import { WebhookProvider } from "@/generated/prisma/enums";
+import { WebhookProvider } from "@prisma/client";
 import { useWebhooksByProvider } from "@/features/webhooks/hooks/use-webhooks";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
@@ -102,7 +102,15 @@ export const DiscordDialog: React.FC<Props> = ({
         webhookId: defaultValues.webhookId || undefined,
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.username, defaultValues.content, defaultValues.webhookUrl, defaultValues.webhookId, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.username,
+    defaultValues.content,
+    defaultValues.webhookUrl,
+    defaultValues.webhookId,
+    form,
+  ]);
 
   const handleSavedWebhookChange = (value: string) => {
     if (value === "custom") {

@@ -1,6 +1,6 @@
 import { getExecutor } from "@/features/executions/lib/executor-registry";
 import { inngest } from "./client";
-import { ExecutionStatus, NodeType } from "@/generated/prisma/enums";
+import { ExecutionStatus, NodeType } from "@prisma/client";
 import prisma from "@/lib/db";
 import { topologicalSort } from "./utils";
 import { NonRetriableError } from "inngest";
@@ -251,8 +251,9 @@ export const executeWorkflow = inngest.createFunction(
       const nodeContribution: Record<string, unknown> = {};
 
       // Find new/changed values in context.variables
-      if (context.variables && typeof context.variables === 'object') {
-        const contextBeforeVars = (contextBefore.variables as Record<string, unknown>) || {};
+      if (context.variables && typeof context.variables === "object") {
+        const contextBeforeVars =
+          (contextBefore.variables as Record<string, unknown>) || {};
         const contextAfterVars = context.variables as Record<string, unknown>;
 
         for (const [key, value] of Object.entries(contextAfterVars)) {

@@ -1,6 +1,6 @@
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import prisma from "@/lib/db";
-import { UserStatus } from "@/generated/prisma/enums";
+import { UserStatus } from "@prisma/client";
 import z from "zod";
 
 export const usersRouter = createTRPCRouter({

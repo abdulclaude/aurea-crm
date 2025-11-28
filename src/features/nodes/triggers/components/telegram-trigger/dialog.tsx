@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
-import { CredentialType } from "@/generated/prisma/enums";
+import { CredentialType } from "@prisma/client";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 
@@ -87,7 +87,13 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
         chatId: defaultValues.chatId || "",
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.credentialId, defaultValues.chatId, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.credentialId,
+    defaultValues.chatId,
+    form,
+  ]);
 
   const handleSubmit = (values: TelegramTriggerFormValues) => {
     onSubmit(values);
@@ -198,7 +204,10 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
             />
 
             <SheetFooter className="mt-6 px-0 pb-4">
-              <Button type="submit" className="brightness-120! hover:brightness-130! w-full py-5">
+              <Button
+                type="submit"
+                className="brightness-120! hover:brightness-130! w-full py-5"
+              >
                 Save changes
               </Button>
             </SheetFooter>

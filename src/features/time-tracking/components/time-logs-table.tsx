@@ -25,7 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { TimeLogStatus } from "@/generated/prisma/enums";
+import { TimeLogStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { useTRPC } from "@/trpc/client";

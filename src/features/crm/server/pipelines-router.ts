@@ -3,11 +3,7 @@ import z from "zod";
 
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
 import { convertCurrency } from "@/features/crm/lib/currency";
-import type {
-  PipelineGetPayload,
-  PipelineInclude,
-  PipelineWhereInput,
-} from "@/generated/prisma/models";
+import type { Prisma } from "@prisma/client";
 import prisma from "@/lib/db";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
@@ -18,7 +14,7 @@ const pipelineInclude = {
       position: "asc",
     },
   },
-} satisfies PipelineInclude;
+} satisfies Prisma.PipelineInclude;
 
 const pipelineListInclude = {
   stages: {
@@ -46,10 +42,12 @@ const pipelineListInclude = {
       },
     },
   },
-} satisfies PipelineInclude;
+} satisfies Prisma.PipelineInclude;
 
-type PipelineResult = PipelineGetPayload<{ include: typeof pipelineInclude }>;
-type PipelineListResult = PipelineGetPayload<{
+type PipelineResult = Prisma.PipelineGetPayload<{
+  include: typeof pipelineInclude;
+}>;
+type PipelineListResult = Prisma.PipelineGetPayload<{
   include: typeof pipelineListInclude;
 }>;
 
@@ -77,7 +75,7 @@ const mapPipeline = (pipeline: PipelineResult) => {
 
 const mapPipelineWithStats = (
   pipeline: PipelineListResult,
-  targetCurrency?: string,
+  targetCurrency?: string
 ) => {
   // Get unique contacts from all deals
   const contactsMap = new Map();
@@ -105,7 +103,7 @@ const mapPipelineWithStats = (
 
   // Calculate win rate - deals in the last stage vs total deals
   const sortedStages = [...pipeline.stages].sort(
-    (a, b) => a.position - b.position,
+    (a, b) => a.position - b.position
   );
   const lastStage = sortedStages[sortedStages.length - 1];
   const dealsInLastStage = lastStage
@@ -288,7 +286,7 @@ export const pipelinesRouter = createTRPCRouter({
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
         })
-        .optional(),
+        .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -301,7 +299,7 @@ export const pipelinesRouter = createTRPCRouter({
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
       const skip = input?.cursor ?? 0;
 
-      const where: PipelineWhereInput = {
+      const where: Prisma.PipelineWhereInput = {
         organizationId: orgId,
         ...(subaccountId && { subaccountId }),
       };
@@ -386,7 +384,7 @@ export const pipelinesRouter = createTRPCRouter({
       // Map pipelines with stats and then filter by numeric criteria
       // Pass target currency to mapPipelineWithStats to convert all deal values
       let mappedItems = items.map((item) =>
-        mapPipelineWithStats(item, input?.dealsValueCurrency),
+        mapPipelineWithStats(item, input?.dealsValueCurrency)
       );
 
       // Filter by deals count
@@ -396,10 +394,16 @@ export const pipelinesRouter = createTRPCRouter({
       ) {
         mappedItems = mappedItems.filter((pipeline) => {
           const count = pipeline.dealsCount;
-          if (input.dealsCountMin !== undefined && count < input.dealsCountMin) {
+          if (
+            input.dealsCountMin !== undefined &&
+            count < input.dealsCountMin
+          ) {
             return false;
           }
-          if (input.dealsCountMax !== undefined && count > input.dealsCountMax) {
+          if (
+            input.dealsCountMax !== undefined &&
+            count > input.dealsCountMax
+          ) {
             return false;
           }
           return true;
@@ -413,10 +417,16 @@ export const pipelinesRouter = createTRPCRouter({
       ) {
         mappedItems = mappedItems.filter((pipeline) => {
           const value = pipeline.dealsValue;
-          if (input.dealsValueMin !== undefined && value < input.dealsValueMin) {
+          if (
+            input.dealsValueMin !== undefined &&
+            value < input.dealsValueMin
+          ) {
             return false;
           }
-          if (input.dealsValueMax !== undefined && value > input.dealsValueMax) {
+          if (
+            input.dealsValueMax !== undefined &&
+            value > input.dealsValueMax
+          ) {
             return false;
           }
           return true;
@@ -489,10 +499,10 @@ export const pipelinesRouter = createTRPCRouter({
               probability: z.number().min(0).max(100).optional(),
               rottingDays: z.number().min(1).optional(),
               color: z.string().optional(),
-            }),
+            })
           )
           .min(1, "At least one stage is required"),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -568,10 +578,10 @@ export const pipelinesRouter = createTRPCRouter({
               probability: z.number().min(0).max(100).optional(),
               rottingDays: z.number().min(1).optional(),
               color: z.string().optional(),
-            }),
+            })
           )
           .optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;

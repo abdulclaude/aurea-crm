@@ -1,7 +1,7 @@
 "use server";
 
 import prisma from "@/lib/db";
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 
 type TelegramChat = {

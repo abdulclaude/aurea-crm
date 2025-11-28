@@ -37,7 +37,7 @@ import { Switch } from "@/components/ui/switch";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
-import { CredentialType } from "@/generated/prisma/enums";
+import { CredentialType } from "@prisma/client";
 
 const formSchema = z.object({
   variableName: z
@@ -93,7 +93,16 @@ export const TelegramExecutionDialog: React.FC<
         disableNotification: defaultValues.disableNotification ?? false,
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.credentialId, defaultValues.chatId, defaultValues.text, defaultValues.parseMode, defaultValues.disableNotification, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.credentialId,
+    defaultValues.chatId,
+    defaultValues.text,
+    defaultValues.parseMode,
+    defaultValues.disableNotification,
+    form,
+  ]);
 
   const handleSubmit = (values: TelegramExecutionFormValues) => {
     onSubmit(values);

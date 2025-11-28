@@ -1,7 +1,7 @@
 import { NonRetriableError } from "inngest";
 import { getExecutor } from "@/features/executions/lib/executor-registry";
 import type { NodeExecutor } from "@/features/executions/types";
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { bundleWorkflowChannel } from "@/inngest/channels/bundle-workflow";
 import { topologicalSort } from "@/inngest/utils";
 import prisma from "@/lib/db";
@@ -20,7 +20,7 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
 // Resolve variables in a value string
 function resolveVariables(
   value: string,
-  context: Record<string, unknown>,
+  context: Record<string, unknown>
 ): unknown {
   const matches = value.match(/\{\{(.+?)\}\}/g);
 
@@ -36,7 +36,7 @@ function resolveVariables(
     // Try to get value from context.variables first, then root context
     let varValue = getNestedValue(
       context.variables as Record<string, unknown>,
-      path,
+      path
     );
     if (varValue === undefined) {
       varValue = getNestedValue(context, path);
@@ -86,7 +86,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
   // Publish loading status
   await step.run(`bundle-workflow-${nodeId}-publish-loading`, async () => {
     await publish(
-      bundleWorkflowChannel().status({ nodeId, status: "loading" }),
+      bundleWorkflowChannel().status({ nodeId, status: "loading" })
     );
   });
 
@@ -103,13 +103,13 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
       if (!workflow) {
         throw new NonRetriableError(
-          `Bundle workflow ${config.bundleWorkflowId} not found`,
+          `Bundle workflow ${config.bundleWorkflowId} not found`
         );
       }
 
       if (!workflow.isBundle) {
         throw new NonRetriableError(
-          `Workflow ${config.bundleWorkflowId} is not a bundle workflow`,
+          `Workflow ${config.bundleWorkflowId} is not a bundle workflow`
         );
       }
 
@@ -172,7 +172,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
     // Execute bundle workflow nodes in topological order
     const sortedNodes = topologicalSort(
       bundleWorkflow.nodes as any,
-      bundleWorkflow.connections as any,
+      bundleWorkflow.connections as any
     );
 
     // Build adjacency map for conditional branching
@@ -195,7 +195,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
     // Find trigger node (MANUAL_TRIGGER or INITIAL in bundle workflows)
     const targetNodeIds = new Set(
-      bundleWorkflow.connections.map((c) => c.toNodeId),
+      bundleWorkflow.connections.map((c) => c.toNodeId)
     );
     const triggerNode = sortedNodes.find((node) => !targetNodeIds.has(node.id));
 
@@ -286,7 +286,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
       for (const outputDef of bundleOutputDefinitions) {
         const value = getNestedValue(
           bundleContext.variables as Record<string, unknown>,
-          outputDef.variablePath,
+          outputDef.variablePath
         );
         bundleOutputs[outputDef.name] = value;
       }
@@ -309,7 +309,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
     // Publish success status
     await step.run(`bundle-workflow-${nodeId}-publish-success`, async () => {
       await publish(
-        bundleWorkflowChannel().status({ nodeId, status: "success" }),
+        bundleWorkflowChannel().status({ nodeId, status: "success" })
       );
     });
 
@@ -318,7 +318,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
     // Publish error status
     await step.run(`bundle-workflow-${nodeId}-publish-error`, async () => {
       await publish(
-        bundleWorkflowChannel().status({ nodeId, status: "error" }),
+        bundleWorkflowChannel().status({ nodeId, status: "error" })
       );
     });
     throw error;

@@ -9,7 +9,7 @@ import {
 } from "@/components/react-flow/entity-components";
 import { useSuspenseAllExecutions } from "../hooks/use-executions";
 import { ExecutionsTimeline } from "./executions-timeline";
-import type { Execution } from "@/generated/prisma/client";
+import type { Execution } from "@prisma/client";
 import { Separator } from "@/components/ui/separator";
 type ExecutionWithWorkflow = Execution & {
   workflow: { id: string; name: string };

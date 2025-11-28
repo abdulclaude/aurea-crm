@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
+import { ContactType, LifecycleStage } from "@prisma/client";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import { Switch } from "@/components/ui/switch";
@@ -135,7 +135,25 @@ export const UpdateContactDialog: React.FC<Props> = ({
         notes: defaultValues.notes || "",
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.contactId, defaultValues.name, defaultValues.email, defaultValues.companyName, defaultValues.phone, defaultValues.position, defaultValues.type, defaultValues.lifecycleStage, defaultValues.source, defaultValues.website, defaultValues.linkedin, defaultValues.country, defaultValues.city, defaultValues.notes, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.contactId,
+    defaultValues.name,
+    defaultValues.email,
+    defaultValues.companyName,
+    defaultValues.phone,
+    defaultValues.position,
+    defaultValues.type,
+    defaultValues.lifecycleStage,
+    defaultValues.source,
+    defaultValues.website,
+    defaultValues.linkedin,
+    defaultValues.country,
+    defaultValues.city,
+    defaultValues.notes,
+    form,
+  ]);
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);

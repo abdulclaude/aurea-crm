@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
+import { ContactType, LifecycleStage } from "@prisma/client";
 import { useTRPC } from "@/trpc/client";
 
 const formSchema = z.object({

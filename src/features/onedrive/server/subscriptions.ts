@@ -3,8 +3,8 @@
 import prisma from "@/lib/db";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@/generated/prisma/enums";
-import type { Node as PrismaNode } from "@/generated/prisma/client";
+import { AppProvider, NodeType } from "@prisma/client";
+import type { Node as PrismaNode } from "@prisma/client";
 import { ensureMicrosoftAccessToken } from "@/features/outlook/server/subscriptions";
 
 const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
@@ -22,7 +22,9 @@ type SyncParams = {
   userId: string;
 };
 
-export async function syncOneDriveWorkflowSubscriptions({ userId }: SyncParams) {
+export async function syncOneDriveWorkflowSubscriptions({
+  userId,
+}: SyncParams) {
   try {
     const oneDriveApp = await prisma.apps.findFirst({
       where: {

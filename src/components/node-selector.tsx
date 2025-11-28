@@ -34,7 +34,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { AppProvider, NodeType } from "@/generated/prisma/enums";
+import { AppProvider, NodeType } from "@prisma/client";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useSuspenseAppProviders } from "@/features/apps/hooks/use-apps";

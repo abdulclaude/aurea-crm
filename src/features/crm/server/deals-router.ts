@@ -3,11 +3,7 @@ import z from "zod";
 
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
 import { convertToUSD } from "@/features/crm/lib/currency";
-import type {
-  DealGetPayload,
-  DealInclude,
-  DealWhereInput,
-} from "@/generated/prisma/models";
+import type { Prisma } from "@prisma/client";
 import prisma from "@/lib/db";
 import { getUsersActivityStatus } from "@/lib/activity-tracker";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
@@ -30,19 +26,22 @@ const dealInclude = {
       contact: true,
     },
   },
-} satisfies DealInclude;
+} satisfies Prisma.DealInclude;
 
-type DealResult = DealGetPayload<{ include: typeof dealInclude }>;
+type DealResult = Prisma.DealGetPayload<{ include: typeof dealInclude }>;
 
 const mapDeal = (
   deal: DealResult,
-  activityStatus?: Map<string, {
-    isOnline: boolean;
-    lastActivityAt: Date | null;
-    lastLoginAt: Date;
-    status: string;
-    statusMessage: string | null;
-  }>
+  activityStatus?: Map<
+    string,
+    {
+      isOnline: boolean;
+      lastActivityAt: Date | null;
+      lastLoginAt: Date;
+      status: string;
+      statusMessage: string | null;
+    }
+  >
 ) => {
   return {
     id: deal.id,
@@ -70,7 +69,7 @@ const mapDeal = (
     // Add valueUSD for filtering and aggregation purposes
     valueUSD: convertToUSD(
       deal.value ? Number(deal.value) : null,
-      deal.currency,
+      deal.currency
     ),
     deadline: deal.deadline,
     source: deal.source,
@@ -81,7 +80,8 @@ const mapDeal = (
     updatedAt: deal.updatedAt,
     members: deal.members.map((member) => {
       const userId = member.subaccountMember.user?.id;
-      const activity = userId && activityStatus ? activityStatus.get(userId) : undefined;
+      const activity =
+        userId && activityStatus ? activityStatus.get(userId) : undefined;
 
       return {
         id: member.subaccountMember.user?.id ?? member.subaccountMemberId,
@@ -233,7 +233,7 @@ export const dealsRouter = createTRPCRouter({
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
         })
-        .optional(),
+        .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -246,7 +246,7 @@ export const dealsRouter = createTRPCRouter({
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
       const skip = input?.cursor ?? 0;
 
-      const where: DealWhereInput = {
+      const where: Prisma.DealWhereInput = {
         organizationId: orgId,
         ...(subaccountId && { subaccountId }),
       };
@@ -370,9 +370,10 @@ export const dealsRouter = createTRPCRouter({
       }
 
       // Fetch activity status for all users
-      const activityStatus = userIds.size > 0
-        ? await getUsersActivityStatus(Array.from(userIds))
-        : new Map();
+      const activityStatus =
+        userIds.size > 0
+          ? await getUsersActivityStatus(Array.from(userIds))
+          : new Map();
 
       const nextCursor = skip + items.length < total ? skip + take : null;
 
@@ -402,7 +403,7 @@ export const dealsRouter = createTRPCRouter({
           .array(z.string())
           .min(1, "At least one contact is required"),
         memberIds: z.array(z.string()).optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
@@ -528,7 +529,7 @@ export const dealsRouter = createTRPCRouter({
         description: z.string().optional(),
         contactIds: z.array(z.string()).optional(),
         memberIds: z.array(z.string()).optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;

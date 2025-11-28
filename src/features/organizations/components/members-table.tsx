@@ -30,7 +30,7 @@ import {
   ROLE_COLORS,
 } from "@/features/organizations/members/constants";
 import { useMembersParams } from "@/features/organizations/members/hooks/use-members-params";
-import { UserStatus } from "@/generated/prisma/enums";
+import { UserStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";

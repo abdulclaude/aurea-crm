@@ -54,7 +54,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
+import { ContactType, LifecycleStage } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 

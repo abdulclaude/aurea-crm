@@ -25,14 +25,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { TimeLogStatus } from "@/generated/prisma/enums";
+import { TimeLogStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { useTRPC } from "@/trpc/client";
 import { toast } from "sonner";
 import { useTimesheetParams } from "../hooks/use-timesheet-params";
 import { TimesheetToolbar } from "./timesheet-toolbar";
-import { useApproveTimeLog, useDeleteTimeLog } from "../hooks/use-time-tracking";
+import {
+  useApproveTimeLog,
+  useDeleteTimeLog,
+} from "../hooks/use-time-tracking";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type TimeLogRow = RouterOutput["timeTracking"]["list"]["items"][number];
@@ -130,7 +133,10 @@ export function TimesheetTable() {
   const { data, isFetching, refetch } = useSuspenseQuery(
     trpc.timeTracking.list.queryOptions({
       search: params.search || undefined,
-      workers: params.workers && params.workers.length > 0 ? params.workers : undefined,
+      workers:
+        params.workers && params.workers.length > 0
+          ? params.workers
+          : undefined,
       deals: params.deals && params.deals.length > 0 ? params.deals : undefined,
       statuses:
         params.statuses && params.statuses.length > 0
@@ -613,9 +619,15 @@ export function TimesheetTable() {
       }
 
       // Calculate totals
-      const totalMinutes = data.items.reduce((sum, log) => sum + (log.duration ?? 0), 0);
+      const totalMinutes = data.items.reduce(
+        (sum, log) => sum + (log.duration ?? 0),
+        0
+      );
       const totalHours = totalMinutes / 60;
-      const totalAmount = data.items.reduce((sum, log) => sum + Number(log.totalAmount ?? 0), 0);
+      const totalAmount = data.items.reduce(
+        (sum, log) => sum + Number(log.totalAmount ?? 0),
+        0
+      );
 
       const html = `
         <!DOCTYPE html>
@@ -804,7 +816,10 @@ export function TimesheetTable() {
               </div>
               <div class="total-item">
                 <div class="total-label">Total Amount</div>
-                <div class="total-value">${formatCurrency(totalAmount, null)}</div>
+                <div class="total-value">${formatCurrency(
+                  totalAmount,
+                  null
+                )}</div>
               </div>
             </div>
 
@@ -864,7 +879,9 @@ export function TimesheetTable() {
               selectedWorkers={params.workers ?? []}
               selectedDeals={params.deals ?? []}
               selectedStatuses={params.statuses ?? []}
-              startDate={params.startDate ? new Date(params.startDate) : undefined}
+              startDate={
+                params.startDate ? new Date(params.startDate) : undefined
+              }
               endDate={params.endDate ? new Date(params.endDate) : undefined}
               selectedDurationMin={params.durationMin ?? undefined}
               selectedDurationMax={params.durationMax ?? undefined}

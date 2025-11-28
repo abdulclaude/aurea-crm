@@ -62,13 +62,13 @@ import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useWorkflowsParams } from "../hooks/use-workflows-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
-import type { Workflows } from "@/generated/prisma/client";
-import { NodeType } from "@/generated/prisma/enums";
+import type { Workflows } from "@prisma/client";
+import { NodeType } from "@prisma/client";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
-import type { Prisma } from "@/generated/prisma/client";
+import type { Prisma } from "@prisma/client";
 
 type WorkflowNodePreview = {
   id?: string;
@@ -545,12 +545,30 @@ const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
   [NodeType.UPDATE_DEAL]: { icon: IconPayment, alt: "Update Deal" },
   [NodeType.DELETE_DEAL]: { icon: IconPayment, alt: "Delete Deal" },
   [NodeType.UPDATE_PIPELINE]: { icon: IconPayment, alt: "Update Pipeline" },
-  [NodeType.CONTACT_CREATED_TRIGGER]: { icon: IconPayment, alt: "Contact Created" },
-  [NodeType.CONTACT_UPDATED_TRIGGER]: { icon: IconPayment, alt: "Contact Updated" },
-  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Field Changed" },
-  [NodeType.CONTACT_DELETED_TRIGGER]: { icon: IconPayment, alt: "Contact Deleted" },
-  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Type Changed" },
-  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]: { icon: IconPayment, alt: "Lifecycle Changed" },
+  [NodeType.CONTACT_CREATED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Contact Created",
+  },
+  [NodeType.CONTACT_UPDATED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Contact Updated",
+  },
+  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Field Changed",
+  },
+  [NodeType.CONTACT_DELETED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Contact Deleted",
+  },
+  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Type Changed",
+  },
+  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]: {
+    icon: IconPayment,
+    alt: "Lifecycle Changed",
+  },
   [NodeType.IF_ELSE]: { icon: IconPayment, alt: "If/Else" },
   [NodeType.SWITCH]: { icon: IconPayment, alt: "Switch" },
   [NodeType.LOOP]: { icon: IconPayment, alt: "Loop" },

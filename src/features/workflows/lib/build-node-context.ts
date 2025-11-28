@@ -1,7 +1,10 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
-import { buildVariableTree, exampleContexts } from "@/components/tiptap/build-variable-tree";
-import { NodeType } from "@/generated/prisma/enums";
+import {
+  buildVariableTree,
+  exampleContexts,
+} from "@/components/tiptap/build-variable-tree";
+import { NodeType } from "@prisma/client";
 
 /**
  * Builds the available workflow context for a given node
@@ -13,7 +16,12 @@ export function buildNodeContext(
   edges: Edge[],
   options?: {
     isBundle?: boolean;
-    bundleInputs?: Array<{ name: string; type: string; description?: string; defaultValue?: any }>;
+    bundleInputs?: Array<{
+      name: string;
+      type: string;
+      description?: string;
+      defaultValue?: any;
+    }>;
     bundleWorkflowName?: string;
     parentWorkflowContext?: Record<string, Record<string, any>>;
   }
@@ -25,7 +33,7 @@ export function buildNodeContext(
   const context: Record<string, any> = {};
 
   for (const nodeId of upstreamNodeIds) {
-    const node = nodes.find(n => n.id === nodeId);
+    const node = nodes.find((n) => n.id === nodeId);
     if (!node) continue;
 
     const nodeData = node.data as any;
@@ -48,16 +56,22 @@ export function buildNodeContext(
     if (options.bundleInputs) {
       for (const input of options.bundleInputs) {
         // Use default value as example, or generate a placeholder based on type
-        const exampleValue = input.defaultValue ?? getExampleValueForType(input.type);
+        const exampleValue =
+          input.defaultValue ?? getExampleValueForType(input.type);
         context[input.name] = exampleValue;
       }
     }
 
     // Add parent workflow variables directly at the root level
     // Each parent workflow becomes a top-level key
-    if (options.parentWorkflowContext && Object.keys(options.parentWorkflowContext).length > 0) {
+    if (
+      options.parentWorkflowContext &&
+      Object.keys(options.parentWorkflowContext).length > 0
+    ) {
       // Merge parent workflow contexts directly into the root context
-      for (const [workflowName, workflowVariables] of Object.entries(options.parentWorkflowContext)) {
+      for (const [workflowName, workflowVariables] of Object.entries(
+        options.parentWorkflowContext
+      )) {
         context[workflowName] = workflowVariables;
       }
     } else if (options.bundleWorkflowName) {
@@ -123,7 +137,7 @@ function getUpstreamNodes(
     visited.add(nodeId);
 
     // Find all edges that end at this node
-    const incomingEdges = edges.filter(edge => edge.target === nodeId);
+    const incomingEdges = edges.filter((edge) => edge.target === nodeId);
 
     for (const edge of incomingEdges) {
       const sourceNodeId = edge.source;
@@ -211,7 +225,10 @@ export function getExampleContextForNodeType(
   }
 
   // CRM Executions
-  if (nodeType === NodeType.CREATE_CONTACT || nodeType === NodeType.UPDATE_CONTACT) {
+  if (
+    nodeType === NodeType.CREATE_CONTACT ||
+    nodeType === NodeType.UPDATE_CONTACT
+  ) {
     return exampleContexts.contact.contact;
   }
 

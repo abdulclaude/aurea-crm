@@ -29,7 +29,7 @@ import {
 } from "date-fns";
 import { Download, Calendar } from "lucide-react";
 import { toast } from "sonner";
-import { TimeLogStatus } from "@/generated/prisma/enums";
+import { TimeLogStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 

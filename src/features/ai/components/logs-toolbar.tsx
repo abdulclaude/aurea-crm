@@ -49,7 +49,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import DateRangeFilter from "@/components/ui/date-range-filter";
 import { cn } from "@/lib/utils";
-import { AILogStatus } from "@/generated/prisma/enums";
+import { AILogStatus } from "@prisma/client";
 
 export interface LogsToolbarProps {
   search: string;

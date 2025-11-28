@@ -39,7 +39,7 @@ import { nodeComponents } from "@/config/node-components";
 import { AddNodeButton } from "./add-node-button";
 import { useSetAtom } from "jotai";
 import { editorAtom } from "../store/atoms";
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import { ExecuteWorkflowButton } from "./execute-workflow-button";
 import { WorkflowContextProvider } from "../store/workflow-context";
 import { useTRPC } from "@/trpc/client";
@@ -196,7 +196,9 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
         if (visited.has(nodeId)) continue;
         visited.add(nodeId);
 
-        const incomingEdges = parentWf.connections.filter(e => e.toNodeId === nodeId);
+        const incomingEdges = parentWf.connections.filter(
+          (e) => e.toNodeId === nodeId
+        );
         for (const edge of incomingEdges) {
           upstreamNodeIds.add(edge.fromNodeId);
           queue.push(edge.fromNodeId);
@@ -207,7 +209,7 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
       const workflowContext: Record<string, any> = {};
 
       for (const nodeId of upstreamNodeIds) {
-        const node = parentWf.nodes.find(n => n.id === nodeId);
+        const node = parentWf.nodes.find((n) => n.id === nodeId);
         if (!node) continue;
 
         const nodeData = node.data as any;
@@ -215,7 +217,10 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
         if (!variableName) continue;
 
         // Get example context for this node type
-        const exampleContext = getExampleContextForNodeType(node.type, nodeData);
+        const exampleContext = getExampleContextForNodeType(
+          node.type,
+          nodeData
+        );
         if (exampleContext) {
           workflowContext[variableName] = exampleContext;
         }
@@ -230,28 +235,25 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
     return Object.keys(contexts).length > 0 ? contexts : undefined;
   }, [isBundle, parentWorkflows, workflowId]);
 
-  const onNodesChange = useCallback(
-    (changes: NodeChange<Node>[]) => {
-      setNodes((nodesSnapshot) => {
-        const updatedNodes = applyNodeChanges(changes, nodesSnapshot);
+  const onNodesChange = useCallback((changes: NodeChange<Node>[]) => {
+    setNodes((nodesSnapshot) => {
+      const updatedNodes = applyNodeChanges(changes, nodesSnapshot);
 
-        // If all nodes are deleted, add back the INITIAL placeholder node
-        if (updatedNodes.length === 0) {
-          return [
-            {
-              id: "initial",
-              type: NodeType.INITIAL,
-              position: { x: 0, y: 0 },
-              data: {},
-            },
-          ];
-        }
+      // If all nodes are deleted, add back the INITIAL placeholder node
+      if (updatedNodes.length === 0) {
+        return [
+          {
+            id: "initial",
+            type: NodeType.INITIAL,
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ];
+      }
 
-        return updatedNodes;
-      });
-    },
-    []
-  );
+      return updatedNodes;
+    });
+  }, []);
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) =>
       setEdges((edgesSnapshot) => applyEdgeChanges(changes, edgesSnapshot)),

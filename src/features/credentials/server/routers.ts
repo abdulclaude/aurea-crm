@@ -1,5 +1,5 @@
 import { PAGINATION } from "@/config/constants";
-import { CredentialType } from "@/generated/prisma/enums";
+import { CredentialType } from "@prisma/client";
 import prisma from "@/lib/db";
 import { decrypt, encrypt } from "@/lib/encryption";
 import {

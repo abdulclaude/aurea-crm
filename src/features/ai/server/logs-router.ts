@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { AILogStatus } from "@/generated/prisma/enums";
+import { AILogStatus } from "@prisma/client";
 import prisma from "@/lib/db";
 
 export const logsRouter = createTRPCRouter({
@@ -153,7 +153,11 @@ export const logsRouter = createTRPCRouter({
 
     // Get unique intents (filter out null/empty)
     const intents = Array.from(
-      new Set(logs.map((log) => log.intent).filter((intent): intent is string => !!intent))
+      new Set(
+        logs
+          .map((log) => log.intent)
+          .filter((intent): intent is string => !!intent)
+      )
     ).sort();
 
     // Get unique users

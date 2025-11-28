@@ -6,7 +6,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { WebhookProvider } from "@/generated/prisma/enums";
+import { WebhookProvider } from "@prisma/client";
 import { useWebhooksParams } from "./use-webhooks-params";
 
 export const useSuspenseWebhooks = () => {
@@ -72,4 +72,3 @@ export const useWebhooksByProvider = (provider: WebhookProvider) => {
   const trpc = useTRPC();
   return useQuery(trpc.webhooks.getByProvider.queryOptions({ provider }));
 };
-

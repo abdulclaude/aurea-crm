@@ -5,9 +5,9 @@ import type {
   GoogleCalendarSubscription,
   Node as PrismaNode,
   Account,
-} from "@/generated/prisma/client";
+} from "@prisma/client";
 
-import { NodeType } from "@/generated/prisma/enums";
+import { NodeType } from "@prisma/client";
 import prisma from "@/lib/db";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";

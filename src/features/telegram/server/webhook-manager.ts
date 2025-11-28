@@ -2,7 +2,7 @@
 
 import { randomBytes } from "node:crypto";
 
-import type { Prisma, Credential } from "@/generated/prisma/client";
+import type { Prisma, Credential } from "@prisma/client";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 

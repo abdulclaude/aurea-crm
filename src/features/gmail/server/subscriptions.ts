@@ -3,12 +3,12 @@
 import prisma from "@/lib/db";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@/generated/prisma/enums";
+import { AppProvider, NodeType } from "@prisma/client";
 import type {
   Account,
   Node as PrismaNode,
   GmailSubscription as PrismaGmailSubscription,
-} from "@/generated/prisma/client";
+} from "@prisma/client";
 import { fetchGmailMessages, type GmailTriggerConfig } from "./messages";
 import { fetchGmailProfile } from "./profile";
 

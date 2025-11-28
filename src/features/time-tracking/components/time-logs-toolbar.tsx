@@ -60,7 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { TimeLogStatus } from "@/generated/prisma/enums";
+import { TimeLogStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 

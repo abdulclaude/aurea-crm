@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
-import { WebhookProvider } from "@/generated/prisma/enums";
+import { WebhookProvider } from "@prisma/client";
 import { useWebhooksByProvider } from "@/features/webhooks/hooks/use-webhooks";
 
 const formSchema = z.object({
@@ -93,7 +93,14 @@ export const SlackDialog: React.FC<Props> = ({
         webhookId: defaultValues.webhookId || undefined,
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.content, defaultValues.webhookUrl, defaultValues.webhookId, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.content,
+    defaultValues.webhookUrl,
+    defaultValues.webhookId,
+    form,
+  ]);
 
   const handleSavedWebhookChange = (value: string) => {
     if (value === "custom") {

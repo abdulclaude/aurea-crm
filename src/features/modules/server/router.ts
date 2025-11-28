@@ -6,8 +6,8 @@ import {
 } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import prisma from "@/lib/db";
-import { ModuleType } from "@/generated/prisma/enums";
-import type { Prisma } from "@/generated/prisma/client";
+import { ModuleType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 // Module configurations with premium requirements
 export const MODULE_CONFIG = {

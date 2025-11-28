@@ -35,7 +35,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
-import { WebhookProvider } from "@/generated/prisma/enums";
+import { WebhookProvider } from "@prisma/client";
 import {
   useCreateWebhook,
   useSuspenseWebhook,
@@ -279,9 +279,7 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={
-                    createWebhook.isPending || updateWebhook.isPending
-                  }
+                  disabled={createWebhook.isPending || updateWebhook.isPending}
                 >
                   {isEdit ? "Update" : "Create"}
                 </Button>
@@ -309,4 +307,3 @@ export const WebhookView = ({ webhookId }: { webhookId: string }) => {
     />
   );
 };
-

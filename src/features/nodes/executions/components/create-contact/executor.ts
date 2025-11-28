@@ -4,7 +4,7 @@ import { NonRetriableError } from "inngest";
 import { createContactChannel } from "@/inngest/channels/create-contact";
 import prisma from "@/lib/db";
 import { decode } from "html-entities";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
+import { ContactType, LifecycleStage } from "@prisma/client";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -131,25 +131,29 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
 
     return {
       ...context,
-      ...(data.variableName ? {[data.variableName]: {
-        id: contact.id,
-        name: contact.name,
-        email: contact.email,
-        companyName: contact.companyName,
-        phone: contact.phone,
-        position: contact.position,
-        type: contact.type,
-        lifecycleStage: contact.lifecycleStage,
-        source: contact.source,
-        website: contact.website,
-        linkedin: contact.linkedin,
-        country: contact.country,
-        city: contact.city,
-        createdAt:
-          typeof contact.createdAt === "string"
-            ? contact.createdAt
-            : (contact.createdAt as Date).toISOString(),
-      }} : {}),
+      ...(data.variableName
+        ? {
+            [data.variableName]: {
+              id: contact.id,
+              name: contact.name,
+              email: contact.email,
+              companyName: contact.companyName,
+              phone: contact.phone,
+              position: contact.position,
+              type: contact.type,
+              lifecycleStage: contact.lifecycleStage,
+              source: contact.source,
+              website: contact.website,
+              linkedin: contact.linkedin,
+              country: contact.country,
+              city: contact.city,
+              createdAt:
+                typeof contact.createdAt === "string"
+                  ? contact.createdAt
+                  : (contact.createdAt as Date).toISOString(),
+            },
+          }
+        : {}),
     };
   } catch (error) {
     await publish(createContactChannel().status({ nodeId, status: "error" }));

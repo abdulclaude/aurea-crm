@@ -4,7 +4,7 @@ import { NonRetriableError } from "inngest";
 import { updateContactChannel } from "@/inngest/channels/update-contact";
 import prisma from "@/lib/db";
 import { decode } from "html-entities";
-import { ContactType, LifecycleStage } from "@/generated/prisma/enums";
+import { ContactType, LifecycleStage } from "@prisma/client";
 
 type UpdateContactData = {
   variableName?: string;
@@ -24,27 +24,25 @@ type UpdateContactData = {
   notes?: string;
 };
 
-export const updateContactExecutor: NodeExecutor<
-  UpdateContactData
-> = async ({ data, nodeId, context, step, publish }) => {
-  await publish(
-    updateContactChannel().status({ nodeId, status: "loading" })
-  );
+export const updateContactExecutor: NodeExecutor<UpdateContactData> = async ({
+  data,
+  nodeId,
+  context,
+  step,
+  publish,
+}) => {
+  await publish(updateContactChannel().status({ nodeId, status: "loading" }));
 
   try {
     if (!data.variableName) {
-      await publish(
-        updateContactChannel().status({ nodeId, status: "error" })
-      );
+      await publish(updateContactChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError(
         "Update Contact Node error: No variable name has been set."
       );
     }
 
     if (!data.contactId) {
-      await publish(
-        updateContactChannel().status({ nodeId, status: "error" })
-      );
+      await publish(updateContactChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError(
         "Update Contact Node error: Contact ID is required."
       );
@@ -145,9 +143,7 @@ export const updateContactExecutor: NodeExecutor<
       });
     });
 
-    await publish(
-      updateContactChannel().status({ nodeId, status: "success" })
-    );
+    await publish(updateContactChannel().status({ nodeId, status: "success" }));
 
     return {
       ...context,
@@ -159,13 +155,14 @@ export const updateContactExecutor: NodeExecutor<
         phone: contact.phone,
         type: contact.type,
         lifecycleStage: contact.lifecycleStage,
-        updatedAt: typeof contact.updatedAt === 'string' ? contact.updatedAt : (contact.updatedAt as Date).toISOString(),
+        updatedAt:
+          typeof contact.updatedAt === "string"
+            ? contact.updatedAt
+            : (contact.updatedAt as Date).toISOString(),
       },
     };
   } catch (error) {
-    await publish(
-      updateContactChannel().status({ nodeId, status: "error" })
-    );
+    await publish(updateContactChannel().status({ nodeId, status: "error" }));
     throw error;
   }
 };

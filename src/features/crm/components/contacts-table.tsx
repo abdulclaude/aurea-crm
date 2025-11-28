@@ -30,7 +30,7 @@ import { TagsDisplay } from "@/components/ui/tags-input";
 import { UserStatusBadge } from "@/components/user-status-indicator";
 import { CONTACTS_DEFAULT_SORT } from "@/features/crm/contacts/constants";
 import { useContactsParams } from "@/features/crm/contacts/hooks/use-contacts-params";
-import { type ContactType, UserStatus } from "@/generated/prisma/enums";
+import { type ContactType, UserStatus } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
