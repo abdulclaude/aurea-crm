@@ -53,14 +53,15 @@ export const updatePipelineExecutor: NodeExecutor<
           workflow: {
             select: {
               subaccountId: true,
+              organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.workflow?.subaccountId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Update Pipeline Node error: This workflow must be in a subaccount context."
+          "Update Pipeline Node error: This workflow must be in an organization context."
         );
       }
 
@@ -92,10 +93,13 @@ export const updatePipelineExecutor: NodeExecutor<
         );
       }
 
-      if (stage.pipeline.subaccountId !== workflow.subaccountId) {
-        throw new NonRetriableError(
-          "Update Pipeline Node error: Pipeline stage does not belong to this subaccount."
-        );
+      // Verify pipeline belongs to same context (subaccount or organization)
+      if (workflow.subaccountId) {
+        if (stage.pipeline.subaccountId !== workflow.subaccountId) {
+          throw new NonRetriableError(
+            "Update Pipeline Node error: Pipeline stage does not belong to this subaccount."
+          );
+        }
       }
 
       return stage;
@@ -105,7 +109,9 @@ export const updatePipelineExecutor: NodeExecutor<
       return await prisma.deal.update({
         where: {
           id: dealId,
-          subaccountId: workflow.subaccountId!,
+          ...(workflow.subaccountId
+            ? { subaccountId: workflow.subaccountId }
+            : { organizationId: workflow.organizationId! }),
         },
         data: {
           pipelineId: pipelineStage.pipelineId,

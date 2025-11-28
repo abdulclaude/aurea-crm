@@ -12,6 +12,8 @@ import {
   useSyncGoogleApp,
   useSyncMicrosoftApp,
 } from "../hooks/use-apps";
+import { useTRPC } from "@/trpc/client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
   CardContent,
@@ -101,6 +103,8 @@ const appsCatalog: AppCatalogItem[] = [
 
 export const AppsList = () => {
   const apps = useSuspenseApps();
+  const queryClient = useQueryClient();
+  const trpc = useTRPC();
   const {
     mutate: syncGoogleCalendarMutate,
     isPending: isSyncingGoogleCalendar,
@@ -113,9 +117,22 @@ export const AppsList = () => {
     useSyncMicrosoftApp();
   const [connectingProvider, setConnectingProvider] =
     useState<AppProvider | null>(null);
-  const refetchApps = apps.refetch;
+  const [hasInitialSync, setHasInitialSync] = useState(false);
 
+  // Refetch both apps list and connected providers
+  const refetchApps = () => {
+    apps.refetch();
+    queryClient.invalidateQueries({
+      queryKey: trpc.apps.getConnectedProviders.queryOptions().queryKey,
+    });
+  };
+
+  // Run sync on mount (handles OAuth callback returns)
   useEffect(() => {
+    if (hasInitialSync) return;
+    setHasInitialSync(true);
+
+    // Run all syncs silently on mount to detect any new connections
     syncGoogleCalendarMutate(undefined, {
       onSettled: () => refetchApps(),
     });
@@ -129,6 +146,7 @@ export const AppsList = () => {
       onSettled: () => refetchApps(),
     });
   }, [
+    hasInitialSync,
     syncGoogleCalendarMutate,
     syncGmailMutate,
     syncGoogleWorkspaceMutate,
@@ -171,34 +189,15 @@ export const AppsList = () => {
   ) => {
     try {
       setConnectingProvider(provider);
+      // This will redirect to OAuth provider, and when we return,
+      // the useEffect will handle syncing the new connection
       await authClient.linkSocial({
         provider: authProvider,
         scopes,
-        callbackURL: window.location.origin,
-      });
-      const syncFn = syncByProvider[provider];
-      syncFn?.(undefined, {
-        onSuccess: (
-          result:
-            | { connected: boolean; missingScopes?: boolean }
-            | { connected?: undefined; missingScopes?: undefined }
-        ) => {
-          if (result?.missingScopes) {
-            toast.error(
-              `${label} requires additional permissions. Please reconnect and allow the requested scopes.`
-            );
-          } else if (result?.connected) {
-            toast.success(`${label} connected.`);
-          }
-        },
-        onError: () => {
-          toast.error(`Failed to sync ${label}. Please try again.`);
-        },
-        onSettled: () => refetchApps(),
+        callbackURL: window.location.href,
       });
     } catch (_error) {
       toast.error(`Failed to connect ${label}. Please try again.`);
-    } finally {
       setConnectingProvider(null);
     }
   };

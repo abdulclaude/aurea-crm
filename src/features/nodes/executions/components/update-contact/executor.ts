@@ -55,14 +55,15 @@ export const updateContactExecutor: NodeExecutor<UpdateContactData> = async ({
           workflow: {
             select: {
               subaccountId: true,
+              organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.workflow?.subaccountId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Update Contact Node error: This workflow must be in a subaccount context."
+          "Update Contact Node error: This workflow must be in an organization context."
         );
       }
 
@@ -137,7 +138,9 @@ export const updateContactExecutor: NodeExecutor<UpdateContactData> = async ({
       return await prisma.contact.update({
         where: {
           id: contactId,
-          subaccountId: workflow.subaccountId!,
+          ...(workflow.subaccountId
+            ? { subaccountId: workflow.subaccountId }
+            : { organizationId: workflow.organizationId! }),
         },
         data: updateData,
       });

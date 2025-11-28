@@ -49,7 +49,7 @@ export const createDealExecutor: NodeExecutor<
       );
     }
 
-    // Get subaccount from workflow
+    // Get organization/subaccount from workflow
     const workflow = await step.run("get-workflow-context", async () => {
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
@@ -63,9 +63,9 @@ export const createDealExecutor: NodeExecutor<
         },
       });
 
-      if (!node?.workflow?.subaccountId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Create Deal Node error: This workflow must be in a subaccount context to create deals."
+          "Create Deal Node error: This workflow must be in an organization context to create deals."
         );
       }
 
@@ -112,7 +112,7 @@ export const createDealExecutor: NodeExecutor<
     const deal = await step.run("create-deal", async () => {
       return await prisma.deal.create({
         data: {
-          subaccountId: workflow.subaccountId!,
+          subaccountId: workflow.subaccountId || null,
           organizationId: workflow.organizationId!,
           name,
           value: value !== undefined ? value : null,

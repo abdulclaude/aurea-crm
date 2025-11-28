@@ -74,6 +74,7 @@ export const workflowsRouter = createTRPCRouter({
       data: {
         name: generateSlug(3),
         userId: ctx.auth.user.id,
+        organizationId: ctx.orgId ?? null,
         subaccountId: ctx.subaccountId ?? null,
         nodes: {
           create: {
@@ -104,6 +105,7 @@ export const workflowsRouter = createTRPCRouter({
       data: {
         name: `${generateSlug(3)}-bundle`,
         userId: ctx.auth.user.id,
+        organizationId: ctx.orgId ?? null,
         subaccountId: ctx.subaccountId ?? null,
         isBundle: true,
         nodes: {
@@ -548,6 +550,7 @@ export const workflowsRouter = createTRPCRouter({
           data: {
             name: input.name ?? `${base.name} Template`,
             userId: ctx.auth.user.id,
+            organizationId: ctx.orgId ?? null,
             isTemplate: true,
             subaccountId: ctx.subaccountId ?? null,
           },
@@ -615,6 +618,7 @@ export const workflowsRouter = createTRPCRouter({
           data: {
             name: input.name ?? generateSlug(3),
             userId: ctx.auth.user.id,
+            organizationId: ctx.orgId ?? null,
             isTemplate: false,
             archived: false,
             subaccountId: ctx.subaccountId ?? null,

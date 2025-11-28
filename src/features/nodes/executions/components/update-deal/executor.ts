@@ -49,14 +49,15 @@ export const updateDealExecutor: NodeExecutor<
           workflow: {
             select: {
               subaccountId: true,
+              organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.workflow?.subaccountId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Update Deal Node error: This workflow must be in a subaccount context."
+          "Update Deal Node error: This workflow must be in an organization context."
         );
       }
 
@@ -96,7 +97,9 @@ export const updateDealExecutor: NodeExecutor<
       return await prisma.deal.update({
         where: {
           id: dealId,
-          subaccountId: workflow.subaccountId!,
+          ...(workflow.subaccountId
+            ? { subaccountId: workflow.subaccountId }
+            : { organizationId: workflow.organizationId! }),
         },
         data: updateData,
       });

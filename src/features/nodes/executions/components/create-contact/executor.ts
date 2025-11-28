@@ -46,7 +46,7 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
       );
     }
 
-    // Get subaccount from workflow
+    // Get organization/subaccount from workflow
     const workflow = await step.run("get-workflow-context", async () => {
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
@@ -60,9 +60,9 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
         },
       });
 
-      if (!node?.workflow?.subaccountId || !node?.workflow?.organizationId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Create Contact Node error: This workflow must be in a subaccount context to create contacts."
+          "Create Contact Node error: This workflow must be in an organization context to create contacts."
         );
       }
 
@@ -106,7 +106,7 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
     const contact = await step.run("create-contact", async () => {
       return await prisma.contact.create({
         data: {
-          subaccountId: workflow.subaccountId!,
+          subaccountId: workflow.subaccountId || null,
           organizationId: workflow.organizationId!,
           name,
           email: email || null,

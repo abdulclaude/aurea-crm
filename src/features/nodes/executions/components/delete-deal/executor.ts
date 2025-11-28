@@ -43,14 +43,15 @@ export const deleteDealExecutor: NodeExecutor<
           workflow: {
             select: {
               subaccountId: true,
+              organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.workflow?.subaccountId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
-          "Delete Deal Node error: This workflow must be in a subaccount context."
+          "Delete Deal Node error: This workflow must be in an organization context."
         );
       }
 
@@ -63,7 +64,9 @@ export const deleteDealExecutor: NodeExecutor<
       return await prisma.deal.delete({
         where: {
           id: dealId,
-          subaccountId: workflow.subaccountId!,
+          ...(workflow.subaccountId
+            ? { subaccountId: workflow.subaccountId }
+            : { organizationId: workflow.organizationId! }),
         },
       });
     });

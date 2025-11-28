@@ -30,6 +30,8 @@ export const VariableInput = ({
   const onChangeRef = useRef(onChange);
   // Use a ref to maintain the latest variables array
   const variablesRef = useRef(variables);
+  // Use a ref to track if the editor has been initialized with the correct value
+  const isInitializedRef = useRef(false);
 
   // Update the ref whenever onChange changes
   useEffect(() => {
@@ -127,6 +129,11 @@ export const VariableInput = ({
         },
       },
       onUpdate: ({ editor }) => {
+        // Don't call onChange until the editor has been initialized with the correct value
+        if (!isInitializedRef.current) {
+          return;
+        }
+
         // Extract the content and convert variable nodes to Handlebars
         const json = editor.getJSON();
         const handlebarsText = convertToHandlebars(json);
@@ -183,6 +190,11 @@ export const VariableInput = ({
 
       // Use setContent without emitting onChange
       editor.commands.setContent(content, { emitUpdate: false });
+    }
+
+    // Mark as initialized after the first sync (even if value is empty)
+    if (!isInitializedRef.current) {
+      isInitializedRef.current = true;
     }
   }, [value, editor]); // Removed variables from deps to prevent reset on variable changes
 

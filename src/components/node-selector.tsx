@@ -596,13 +596,18 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   // Get all nodes for root-level global search
   const allNodes = useMemo(() => {
     const nodes: NodeTypeOption[] = [];
-    if (!isBundle) {
+
+    // If no trigger exists, show ONLY trigger nodes
+    if (!hasTrigger && !isBundle) {
       nodes.push(manualTriggerNode);
       nodes.push(...googleTriggerNodes);
       nodes.push(...microsoftTriggerNodes);
       nodes.push(...otherTriggers);
       nodes.push(...contactTriggerNodes);
+      return nodes;
     }
+
+    // If trigger exists, show ONLY execution nodes
     nodes.push(...googleExecutionNodes);
     nodes.push(...microsoftExecutionNodes);
     nodes.push(...socialNodes);
@@ -613,7 +618,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       nodes.push(...logicNodes);
     }
     return nodes;
-  }, [isBundle]);
+  }, [isBundle, hasTrigger]);
 
   // Filter nodes based on search query
   const filterNodes = (nodes: NodeTypeOption[]) => {
@@ -636,7 +641,10 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         searchableNodes = allNodes;
         break;
       case "google":
-        searchableNodes = [...googleTriggerNodes, ...googleExecutionNodes];
+        // If no trigger, show only triggers; if trigger exists, show only executions
+        searchableNodes = hasTrigger
+          ? googleExecutionNodes
+          : googleTriggerNodes;
         break;
       case "google-triggers":
         searchableNodes = googleTriggerNodes;
@@ -645,10 +653,10 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         searchableNodes = googleExecutionNodes;
         break;
       case "microsoft":
-        searchableNodes = [
-          ...microsoftTriggerNodes,
-          ...microsoftExecutionNodes,
-        ];
+        // If no trigger, show only triggers; if trigger exists, show only executions
+        searchableNodes = hasTrigger
+          ? microsoftExecutionNodes
+          : microsoftTriggerNodes;
         break;
       case "microsoft-triggers":
         searchableNodes = microsoftTriggerNodes;
@@ -660,15 +668,25 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         searchableNodes = socialNodes;
         break;
       case "crm":
-        searchableNodes = [
-          ...contactTriggerNodes,
-          ...contactExecutionNodes,
-          ...dealExecutionNodes,
-          ...pipelineExecutionNodes,
-        ];
+        // If no trigger, show triggers + executions; if trigger exists, show only executions
+        searchableNodes = hasTrigger
+          ? [
+              ...contactExecutionNodes,
+              ...dealExecutionNodes,
+              ...pipelineExecutionNodes,
+            ]
+          : [
+              ...contactTriggerNodes,
+              ...contactExecutionNodes,
+              ...dealExecutionNodes,
+              ...pipelineExecutionNodes,
+            ];
         break;
       case "crm-contacts":
-        searchableNodes = [...contactTriggerNodes, ...contactExecutionNodes];
+        // If no trigger, show triggers + executions; if trigger exists, show only executions
+        searchableNodes = hasTrigger
+          ? contactExecutionNodes
+          : [...contactTriggerNodes, ...contactExecutionNodes];
         break;
       case "crm-contacts-triggers":
         searchableNodes = contactTriggerNodes;
@@ -698,7 +716,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         node.label.toLowerCase().includes(query) ||
         node.description.toLowerCase().includes(query)
     );
-  }, [currentView, searchQuery, allNodes]);
+  }, [currentView, searchQuery, allNodes, hasTrigger]);
 
   // Filter bundles based on search query
   const filteredBundles = useMemo(() => {
@@ -778,39 +796,53 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       case "main":
         return (
           <div className="flex flex-col gap-2">
+            {/* Manual trigger - only show when no trigger exists */}
             {!isBundle && !hasTrigger && renderNodeButton(manualTriggerNode)}
 
+            {/* Google - show when no trigger OR when trigger exists (different nodes shown inside) */}
             {!isBundle &&
               renderMenuButton(
                 "Google",
-                hasTrigger ? "Gmail, Calendar" : "Gmail, Calendar, Forms",
+                hasTrigger
+                  ? "Gmail, Calendar"
+                  : "Gmail, Calendar, Forms (Triggers)",
                 "/logos/google.svg",
                 () => navigateTo("google", "Google")
               )}
 
+            {/* Microsoft - show when no trigger OR when trigger exists */}
             {!isBundle &&
               renderMenuButton(
                 "Microsoft",
-                hasTrigger ? "Outlook" : "Outlook, OneDrive",
+                hasTrigger
+                  ? "Outlook, OneDrive"
+                  : "Outlook, OneDrive (Triggers)",
                 "/logos/microsoft.svg",
                 () => navigateTo("microsoft", "Microsoft")
               )}
 
-            {renderMenuButton(
-              "Social",
-              "Discord, Slack, Telegram",
-              "/logos/slack.svg",
-              () => navigateTo("social", "Social")
-            )}
+            {/* Social - only show when trigger exists (execution nodes only) */}
+            {hasTrigger &&
+              renderMenuButton(
+                "Social",
+                "Discord, Slack, Telegram",
+                "/logos/slack.svg",
+                () => navigateTo("social", "Social")
+              )}
 
+            {/* CRM - show based on trigger state */}
             {renderMenuButton(
               "CRM",
-              "Contacts, Deals, Pipelines",
+              hasTrigger
+                ? "Contacts, Deals, Pipelines"
+                : "Contact Triggers & Actions",
               CreateContactIcon,
               () => navigateTo("crm", "CRM")
             )}
 
+            {/* Logic - only show when trigger exists (execution nodes) */}
             {!isBundle &&
+              hasTrigger &&
               renderMenuButton(
                 "Logic",
                 "IF/ELSE, Switch, Loop, HTTP, AI",
@@ -818,7 +850,9 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 () => navigateTo("logic", "Logic")
               )}
 
+            {/* Bundles - only show when trigger exists */}
             {!isBundle &&
+              hasTrigger &&
               renderMenuButton(
                 "Bundle Workflows",
                 "Reusable workflow bundles",
@@ -826,6 +860,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 () => navigateTo("bundles", "Bundles")
               )}
 
+            {/* Other triggers - only show when no trigger exists */}
             {!isBundle && !hasTrigger && otherTriggers.length > 0 && (
               <>
                 <div className="px-2 py-2 mt-2">
@@ -844,19 +879,16 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       case "google":
         return (
           <div className="flex flex-col gap-2">
+            {/* Show only triggers when no trigger exists */}
             {!hasTrigger &&
-              renderMenuButton(
-                "Triggers",
-                `${googleTriggerNodes.length} trigger nodes`,
-                "/logos/google.svg",
-                () => navigateTo("google-triggers", "Triggers")
+              filterNodes(googleTriggerNodes).map((node) =>
+                renderNodeButton(node)
               )}
-            {renderMenuButton(
-              "Executions",
-              `${googleExecutionNodes.length} execution nodes`,
-              "/logos/google.svg",
-              () => navigateTo("google-executions", "Executions")
-            )}
+            {/* Show only executions when trigger exists */}
+            {hasTrigger &&
+              filterNodes(googleExecutionNodes).map((node) =>
+                renderNodeButton(node)
+              )}
           </div>
         );
 
@@ -881,19 +913,16 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       case "microsoft":
         return (
           <div className="flex flex-col gap-2">
+            {/* Show only triggers when no trigger exists */}
             {!hasTrigger &&
-              renderMenuButton(
-                "Triggers",
-                `${microsoftTriggerNodes.length} trigger nodes`,
-                "/logos/microsoft.svg",
-                () => navigateTo("microsoft-triggers", "Triggers")
+              filterNodes(microsoftTriggerNodes).map((node) =>
+                renderNodeButton(node)
               )}
-            {renderMenuButton(
-              "Executions",
-              `${microsoftExecutionNodes.length} execution nodes`,
-              "/logos/microsoft.svg",
-              () => navigateTo("microsoft-executions", "Executions")
-            )}
+            {/* Show only executions when trigger exists */}
+            {hasTrigger &&
+              filterNodes(microsoftExecutionNodes).map((node) =>
+                renderNodeButton(node)
+              )}
           </div>
         );
 
@@ -925,41 +954,42 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       case "crm":
         return (
           <div className="flex flex-col gap-2">
+            {/* Contacts - always show */}
             {renderMenuButton(
               "Contacts",
-              hasTrigger ? "Contact actions" : "Contact triggers and actions",
+              hasTrigger ? "Contact actions" : "Contact triggers",
               CreateContactIcon,
               () => navigateTo("crm-contacts", "Contacts")
             )}
-            {renderMenuButton("Deals", "Deal actions", CreateDealIcon, () =>
-              navigateTo("crm-deals", "Deals")
-            )}
-            {renderMenuButton(
-              "Pipeline",
-              "Pipeline actions",
-              "/logos/move-right.svg",
-              () => navigateTo("crm-pipeline", "Pipeline")
-            )}
+            {/* Deals - only show when trigger exists (execution only) */}
+            {hasTrigger &&
+              renderMenuButton("Deals", "Deal actions", CreateDealIcon, () =>
+                navigateTo("crm-deals", "Deals")
+              )}
+            {/* Pipeline - only show when trigger exists (execution only) */}
+            {hasTrigger &&
+              renderMenuButton(
+                "Pipeline",
+                "Pipeline actions",
+                "/logos/move-right.svg",
+                () => navigateTo("crm-pipeline", "Pipeline")
+              )}
           </div>
         );
 
       case "crm-contacts":
         return (
           <div className="flex flex-col gap-2">
-            {!isBundle &&
-              !hasTrigger &&
-              renderMenuButton(
-                "Triggers",
-                `${contactTriggerNodes.length} trigger nodes`,
-                CreateContactIcon,
-                () => navigateTo("crm-contacts-triggers", "Triggers")
+            {/* Show only triggers when no trigger exists */}
+            {!hasTrigger &&
+              filterNodes(contactTriggerNodes).map((node) =>
+                renderNodeButton(node)
               )}
-            {renderMenuButton(
-              "Executions",
-              `${contactExecutionNodes.length} execution nodes`,
-              CreateContactIcon,
-              () => navigateTo("crm-contacts-executions", "Executions")
-            )}
+            {/* Show only executions when trigger exists */}
+            {hasTrigger &&
+              filterNodes(contactExecutionNodes).map((node) =>
+                renderNodeButton(node)
+              )}
           </div>
         );
 
