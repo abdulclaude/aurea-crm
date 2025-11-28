@@ -2,7 +2,7 @@ import { PAGINATION } from "@/config/constants";
 import { NodeType } from "@/generated/prisma/enums";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
-import type { Prisma } from "@prisma/client";
+
 import {
   createTRPCRouter,
   premiumProcedure,
@@ -630,8 +630,8 @@ export const workflowsRouter = createTRPCRouter({
               workflowId: workflow.id,
               name: node.name,
               type: node.type,
-              position: node.position as Prisma.InputJsonValue,
-              data: node.data as Prisma.InputJsonValue,
+              position: node.position as any,
+              data: node.data as any,
             },
           });
           oldToNewNodeId.set(node.id, created.id);
@@ -770,8 +770,8 @@ export const workflowsRouter = createTRPCRouter({
       return prisma.workflows.update({
         where: { id: scoped.id },
         data: {
-          bundleInputs: input.bundleInputs as Prisma.InputJsonValue,
-          bundleOutputs: input.bundleOutputs as Prisma.InputJsonValue,
+          bundleInputs: input.bundleInputs as any,
+          bundleOutputs: input.bundleOutputs as any,
         },
       });
     }),

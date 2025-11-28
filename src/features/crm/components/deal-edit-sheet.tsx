@@ -106,7 +106,7 @@ export function DealEditSheet({
 
   const selectedPipelineId = form.watch("pipelineId");
   const selectedPipeline = pipelinesData?.items.find(
-    (p) => p.id === selectedPipelineId,
+    (p) => p.id === selectedPipelineId
   );
 
   // Auto-select first stage when pipeline changes
@@ -114,7 +114,7 @@ export function DealEditSheet({
     if (selectedPipeline && selectedPipeline.stages.length > 0) {
       const currentStageId = form.getValues("pipelineStageId");
       const isValidStage = selectedPipeline.stages.some(
-        (s) => s.id === currentStageId,
+        (s) => s.id === currentStageId
       );
       if (!isValidStage) {
         form.setValue("pipelineStageId", selectedPipeline.stages[0].id);
@@ -128,7 +128,7 @@ export function DealEditSheet({
         await queryClient.invalidateQueries();
         onOpenChange(false);
       },
-    }),
+    })
   );
 
   const onSubmit = async (values: FormValues) => {
