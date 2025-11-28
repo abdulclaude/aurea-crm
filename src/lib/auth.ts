@@ -25,7 +25,6 @@ const FACEBOOK_OPTIONAL_SCOPES = parseScopes(
 // process.env.BETTER_AUTH_URL,
 
 export const auth = betterAuth({
-  baseURL: "http://localhost:3000",
   trustedOrigins: ["http://localhost:3000", process.env.APP_URL || ""].filter(
     Boolean
   ),
