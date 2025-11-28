@@ -317,8 +317,10 @@ export const workflowsRouter = createTRPCRouter({
         id: connection.id,
         source: connection.fromNodeId,
         target: connection.toNodeId,
-        sourceHandle: connection.fromOutput === "main" ? "source-1" : connection.fromOutput,
-        targetHandle: connection.toInput === "main" ? "target-1" : connection.toInput,
+        sourceHandle:
+          connection.fromOutput === "main" ? "source-1" : connection.fromOutput,
+        targetHandle:
+          connection.toInput === "main" ? "target-1" : connection.toInput,
       }));
 
       return {
@@ -560,8 +562,8 @@ export const workflowsRouter = createTRPCRouter({
               workflowId: template.id,
               name: node.name,
               type: node.type,
-              position: node.position as Prisma.InputJsonValue,
-              data: node.data as Prisma.InputJsonValue,
+              position: node.position as any,
+              data: node.data as any,
             },
           });
           oldToNewNodeId.set(node.id, created.id);

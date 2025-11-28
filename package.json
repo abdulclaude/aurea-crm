@@ -6,8 +6,6 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "biome check",
-    "format": "biome format --write",
     "inngest:dev": "inngest-cli dev",
     "dev:all": "mprocs",
     "ngrok:dev": "ngrok http --url=decoctive-debi-grayly.ngrok-free.dev 3000"
@@ -117,7 +115,6 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.2.0",
     "@tailwindcss/postcss": "^4",
     "@types/color": "^4.2.0",
     "@types/lodash.throttle": "^4.1.9",
