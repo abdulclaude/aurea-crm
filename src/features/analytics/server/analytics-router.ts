@@ -38,12 +38,15 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter = input?.dateFrom || input?.dateTo ? {
-        createdAt: {
-          ...(input?.dateFrom && { gte: input.dateFrom }),
-          ...(input?.dateTo && { lte: input.dateTo }),
-        },
-      } : {};
+      const dateFilter =
+        input?.dateFrom || input?.dateTo
+          ? {
+              createdAt: {
+                ...(input?.dateFrom && { gte: input.dateFrom }),
+                ...(input?.dateTo && { lte: input.dateTo }),
+              },
+            }
+          : {};
 
       const baseWhere = {
         organizationId: orgId,
@@ -93,15 +96,17 @@ export const analyticsRouter = createTRPCRouter({
 
       const totalDuration = executionsWithTimes.reduce((sum, exec) => {
         if (exec.completedAt) {
-          const duration = exec.completedAt.getTime() - exec.startedAt.getTime();
+          const duration =
+            exec.completedAt.getTime() - exec.startedAt.getTime();
           return sum + duration;
         }
         return sum;
       }, 0);
 
-      const avgDuration = executionsWithTimes.length > 0
-        ? totalDuration / executionsWithTimes.length
-        : 0;
+      const avgDuration =
+        executionsWithTimes.length > 0
+          ? totalDuration / executionsWithTimes.length
+          : 0;
 
       // Count other workflow actions
       const created = await prisma.activity.count({
@@ -120,7 +125,10 @@ export const analyticsRouter = createTRPCRouter({
         totalExecuted: totalExecutions,
         successCount: successfulExecutions,
         failedCount: failedExecutions,
-        successRate: totalExecutions > 0 ? (successfulExecutions / totalExecutions) * 100 : 0,
+        successRate:
+          totalExecutions > 0
+            ? (successfulExecutions / totalExecutions) * 100
+            : 0,
         avgDuration: Math.round(avgDuration),
         totalCreated: created,
         totalUpdated: updated,
@@ -154,12 +162,15 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter = input?.dateFrom || input?.dateTo ? {
-        createdAt: {
-          ...(input?.dateFrom && { gte: input.dateFrom }),
-          ...(input?.dateTo && { lte: input.dateTo }),
-        },
-      } : {};
+      const dateFilter =
+        input?.dateFrom || input?.dateTo
+          ? {
+              createdAt: {
+                ...(input?.dateFrom && { gte: input.dateFrom }),
+                ...(input?.dateTo && { lte: input.dateTo }),
+              },
+            }
+          : {};
 
       const baseWhere = {
         organizationId: orgId,
@@ -199,7 +210,9 @@ export const analyticsRouter = createTRPCRouter({
       });
 
       const byLifecycleStage = contactsByStage.reduce((acc, stage) => {
-        acc[stage.lifecycleStage] = stage._count;
+        if (stage.lifecycleStage) {
+          acc[stage.lifecycleStage] = stage._count;
+        }
         return acc;
       }, {} as Record<string, number>);
 
@@ -251,12 +264,15 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter = input?.dateFrom || input?.dateTo ? {
-        createdAt: {
-          ...(input?.dateFrom && { gte: input.dateFrom }),
-          ...(input?.dateTo && { lte: input.dateTo }),
-        },
-      } : {};
+      const dateFilter =
+        input?.dateFrom || input?.dateTo
+          ? {
+              createdAt: {
+                ...(input?.dateFrom && { gte: input.dateFrom }),
+                ...(input?.dateTo && { lte: input.dateTo }),
+              },
+            }
+          : {};
 
       const baseWhere = {
         organizationId: orgId,
@@ -284,12 +300,12 @@ export const analyticsRouter = createTRPCRouter({
           action: ActivityAction.STAGE_CHANGED,
           metadata: {
             path: ["newStageId"],
-            not: null,
+            not: undefined,
           },
         },
-        include: {
-          _count: true,
-        },
+        // include: {
+        //   _count: true,
+        // },
       });
 
       // Get current deal values
@@ -334,9 +350,16 @@ export const analyticsRouter = createTRPCRouter({
         stageChanges,
         wonCount,
         lostCount,
-        winRate: (wonCount + lostCount) > 0 ? (wonCount / (wonCount + lostCount)) * 100 : 0,
-        totalValue: dealAggregates._sum.value ? Number(dealAggregates._sum.value) : 0,
-        avgDealValue: dealAggregates._avg.value ? Number(dealAggregates._avg.value) : 0,
+        winRate:
+          wonCount + lostCount > 0
+            ? (wonCount / (wonCount + lostCount)) * 100
+            : 0,
+        totalValue: dealAggregates._sum.value
+          ? Number(dealAggregates._sum.value)
+          : 0,
+        avgDealValue: dealAggregates._avg.value
+          ? Number(dealAggregates._avg.value)
+          : 0,
       };
     }),
 
@@ -365,12 +388,15 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter = input?.dateFrom || input?.dateTo ? {
-        createdAt: {
-          ...(input?.dateFrom && { gte: input.dateFrom }),
-          ...(input?.dateTo && { lte: input.dateTo }),
-        },
-      } : {};
+      const dateFilter =
+        input?.dateFrom || input?.dateTo
+          ? {
+              createdAt: {
+                ...(input?.dateFrom && { gte: input.dateFrom }),
+                ...(input?.dateTo && { lte: input.dateTo }),
+              },
+            }
+          : {};
 
       const baseWhere = {
         organizationId: orgId,
@@ -444,12 +470,15 @@ export const analyticsRouter = createTRPCRouter({
         return [];
       }
 
-      const dateFilter = input.dateFrom || input.dateTo ? {
-        createdAt: {
-          ...(input.dateFrom && { gte: input.dateFrom }),
-          ...(input.dateTo && { lte: input.dateTo }),
-        },
-      } : {};
+      const dateFilter =
+        input.dateFrom || input.dateTo
+          ? {
+              createdAt: {
+                ...(input.dateFrom && { gte: input.dateFrom }),
+                ...(input.dateTo && { lte: input.dateTo }),
+              },
+            }
+          : {};
 
       const topEntities = await prisma.activity.groupBy({
         by: ["entityId", "entityName"],

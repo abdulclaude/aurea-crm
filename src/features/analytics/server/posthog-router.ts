@@ -145,7 +145,10 @@ export const posthogRouter = createTRPCRouter({
         // Placeholder - see note above
         return null;
       } catch (error) {
-        console.error("Failed to fetch user behavior stats from PostHog:", error);
+        console.error(
+          "Failed to fetch user behavior stats from PostHog:",
+          error
+        );
         return null;
       }
     }),
@@ -159,7 +162,8 @@ export const posthogRouter = createTRPCRouter({
         event: z.string(),
         dateFrom: z.string().optional().default("-30d"),
         dateTo: z.string().optional(),
-        properties: z.record(z.unknown()).optional(),
+        // properties: z.record(z.unknown()).optional(),
+        properties: z.record(z.any(), z.any()).optional(),
       })
     )
     .query(async ({ ctx, input }) => {
