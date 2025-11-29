@@ -164,20 +164,7 @@ export const WorkflowsContainer = ({
   children: React.ReactNode;
 }) => {
   return (
-    <EntityContainer
-      header={
-        <div className="flex flex-col gap-2">
-          <WorkflowsHeader />
-        </div>
-      }
-      search={
-        <div className="flex gap-2 justify-between items-end mt-4 w-full">
-          <WorkflowsTabs />
-          <WorkflowsSearch className="w-72" />{" "}
-        </div>
-      }
-      pagination={<WorkflowsPagination />}
-    >
+    <EntityContainer pagination={<WorkflowsPagination />}>
       {children}
     </EntityContainer>
   );

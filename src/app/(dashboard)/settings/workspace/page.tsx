@@ -92,27 +92,35 @@ export default function WorkspaceSettingsPage() {
   const isPending = updateOrganization.isPending || updateSubaccount.isPending;
 
   return (
-    <div className=" py-8 px-6">
-      <div className="mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">Workspace Settings</h1>
-          <Badge variant={isOrganization ? "default" : "secondary"}>
+    <div className="">
+      <div className="p-6">
+        <div className="flex flex-col justify-center gap-2">
+          <Badge
+            variant={isOrganization ? "gradient" : "secondary"}
+            className="w-max rounded-full p-1 px-2.5"
+          >
             {isOrganization ? "Agency" : "Client"}
           </Badge>
+
+          <h1 className="text-lg font-bold">Workspace Settings</h1>
         </div>
-        <p className="text-muted-foreground mt-1">
+
+        <p className="text-muted-foreground text-xs">
           Manage your {isOrganization ? "agency" : "client"} workspace
           information
         </p>
       </div>
 
+      <Separator className="bg-black/10 dark:bg-white/5" />
+
       <div className="">
-        <div className="space-y-6">
+        <div className="">
           {/* Workspace Logo */}
-          <div>
-            <Label className="text-sm font-medium mb-3 block">
+          <div className="p-6">
+            <Label className="text-xs font-medium mb-3 block">
               Workspace Logo
             </Label>
+
             <WorkspaceLogoUploader
               value={logo}
               onChange={(url) => setLogo(url ?? null)}
@@ -120,11 +128,11 @@ export default function WorkspaceSettingsPage() {
             />
           </div>
 
-          <Separator />
+          <Separator className="bg-black/10 dark:bg-white/5" />
 
           {/* Workspace Name */}
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium">
+          <div className="space-y-2 p-6 max-w-[300px]">
+            <Label htmlFor="name" className="text-xs font-medium">
               {isOrganization ? "Agency Name" : "Company Name"}
             </Label>
 
@@ -136,15 +144,15 @@ export default function WorkspaceSettingsPage() {
               placeholder={`Enter your ${
                 isOrganization ? "agency" : "company"
               } name`}
+              className="w-full"
             />
           </div>
 
-          <Separator />
+          <Separator className="bg-black/10 dark:bg-white/5" />
 
           {/* Members Management Link */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Members</Label>
-            <p className="text-sm text-muted-foreground">
+          <div className="space-y-2 p-6">
+            <p className="text-xs text-muted-foreground">
               Manage who has access to this workspace
             </p>
             <Button variant="outline" asChild className="w-fit">
@@ -152,36 +160,10 @@ export default function WorkspaceSettingsPage() {
             </Button>
           </div>
 
-          {workspace.data?.members && workspace.data.members.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {workspace.data.members.slice(0, 5).map((member: any) => (
-                <div
-                  key={member.id}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md text-xs"
-                >
-                  {member.user?.image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={member.user.image}
-                      alt={member.user.name}
-                      className="h-5 w-5 rounded-full"
-                    />
-                  )}
-                  <span>{member.user?.name}</span>
-                </div>
-              ))}
-              {workspace.data.members.length > 5 && (
-                <div className="flex items-center px-3 py-1.5 bg-muted rounded-md text-xs text-muted-foreground">
-                  +{workspace.data.members.length - 5} more
-                </div>
-              )}
-            </div>
-          )}
-
-          <Separator />
+          <Separator className="bg-black/10 dark:bg-white/5" />
 
           {/* Weekly Report (placeholder for future implementation) */}
-          <div className="space-y-2">
+          <div className="space-y-2 p-6">
             <Label className="text-sm font-medium">Weekly Report</Label>
             <p className="text-sm text-muted-foreground">
               Receive a weekly summary of workspace activity (Coming soon)
@@ -202,12 +184,15 @@ export default function WorkspaceSettingsPage() {
             </div>
           </div>
 
+          <Separator className="bg-black/10 dark:bg-white/5" />
+
           {/* Save Button */}
-          <div className="flex justify-end pt-4">
+          <div className="flex justify-end p-6">
             <Button
               onClick={handleSave}
               disabled={isPending}
-              className="min-w-[120px]"
+              className="min-w-[120px] w-max"
+              variant="gradient"
             >
               {isPending ? (
                 <>

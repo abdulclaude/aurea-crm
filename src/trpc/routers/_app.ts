@@ -14,6 +14,8 @@ import { notificationsRouter } from "@/features/notifications/server/routers";
 import { timeTrackingRouter } from "@/features/time-tracking/server/router";
 import { modulesRouter } from "@/features/modules/server/router";
 import { workersRouter } from "@/features/workers/server/router";
+import { activityRouter } from "@/features/activity/server/router";
+import { analyticsRouter } from "@/features/analytics/server/analytics-router";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -33,6 +35,8 @@ export const appRouter = createTRPCRouter({
   timeTracking: timeTrackingRouter,
   modules: modulesRouter,
   workers: workersRouter,
+  activity: activityRouter,
+  analytics: analyticsRouter,
 });
 
 // export type definition of API

@@ -217,13 +217,13 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
       <div className={cn("relative", className)}>
         <div
           className={cn(
-            "rounded-sm border border-black/10 bg-background text-xs text-primary",
-            " shadow-none!",
+            "rounded-xl ring ring-black/10 bg-background text-xs text-primary",
+            " shadow-md",
             disabled && "opacity-50 cursor-not-allowed"
           )}
         >
-          <EditorContent editor={editor} className="px-5 py-2 pt-4" />
-          {bottomBar && <div className="px-2 pb-2">{bottomBar}</div>}
+          <EditorContent editor={editor} className="px-4 py-2 pt-4" />
+          {bottomBar && <div className="px-1 pb-3">{bottomBar}</div>}
         </div>
       </div>
     );

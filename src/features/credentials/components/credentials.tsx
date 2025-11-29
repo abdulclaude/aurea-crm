@@ -79,11 +79,13 @@ export const CredentialsSearch = () => {
   });
 
   return (
-    <EntitySearch
-      value={searchValue}
-      onChange={onSearchChange}
-      placeholder="Search credentials..."
-    />
+    <div className="mt-4">
+      <EntitySearch
+        value={searchValue}
+        onChange={onSearchChange}
+        placeholder="Search credentials..."
+      />
+    </div>
   );
 };
 

@@ -8,6 +8,8 @@ import prisma from "@/lib/db";
 import { getUsersActivityStatus } from "@/lib/activity-tracker";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import { ActivityAction } from "@prisma/client";
 
 const dealInclude = {
   pipeline: true,
@@ -479,6 +481,30 @@ export const dealsRouter = createTRPCRouter({
         subaccountId: subaccountId ?? undefined,
       });
 
+      // Log activity and PostHog analytics
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "deal",
+        entityId: deal.id,
+        entityName: deal.name,
+        metadata: {
+          value: deal.value?.toString(),
+          currency: deal.currency,
+          pipelineId: deal.pipelineId,
+          pipelineStageId: deal.pipelineStageId,
+        },
+        posthogProperties: {
+          value: deal.value ? Number(deal.value) : null,
+          currency: deal.currency,
+          pipeline_id: deal.pipelineId,
+          pipeline_stage_id: deal.pipelineStageId,
+          has_deadline: !!deal.deadline,
+        },
+      });
+
       return mapDeal(deal);
     }),
 
@@ -551,6 +577,16 @@ export const dealsRouter = createTRPCRouter({
           organizationId: orgId,
           ...(subaccountId && { subaccountId }),
         },
+        select: {
+          name: true,
+          value: true,
+          currency: true,
+          pipelineId: true,
+          pipelineStageId: true,
+          deadline: true,
+          description: true,
+          tags: true,
+        },
       });
 
       if (!existing) {
@@ -594,6 +630,45 @@ export const dealsRouter = createTRPCRouter({
           }),
         },
         include: dealInclude,
+      });
+
+      // Log activity with changes (convert Decimal to number for comparison)
+      const existingForComparison = {
+        ...existing,
+        value: existing.value ? Number(existing.value) : existing.value,
+      };
+      const changes = getChangedFields(existingForComparison, data);
+
+      // Determine if this is a stage change
+      const isStageChange = data.pipelineStageId !== undefined &&
+        data.pipelineStageId !== existing.pipelineStageId;
+
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: isStageChange ? ActivityAction.STAGE_CHANGED : ActivityAction.UPDATED,
+        entityType: "deal",
+        entityId: deal.id,
+        entityName: deal.name,
+        changes,
+        metadata: {
+          fieldsChanged: changes ? Object.keys(changes) : [],
+          ...(isStageChange && {
+            oldStageId: existing.pipelineStageId,
+            newStageId: data.pipelineStageId,
+          }),
+        },
+        posthogProperties: {
+          fields_changed: changes ? Object.keys(changes) : [],
+          is_stage_change: isStageChange,
+          ...(isStageChange && {
+            old_stage_id: existing.pipelineStageId,
+            new_stage_id: data.pipelineStageId,
+          }),
+          value: deal.value ? Number(deal.value) : null,
+          currency: deal.currency,
+        },
       });
 
       return mapDeal(deal);

@@ -47,6 +47,16 @@ const settingsNavSections = [
         href: "/settings/members",
         icon: MembersIcon,
       },
+    ],
+  },
+  {
+    title: "Integrations",
+    items: [
+      {
+        title: "Apps",
+        href: "/settings/apps",
+        icon: AppsIcon,
+      },
       {
         title: "Credentials",
         href: "/settings/credentials",
@@ -56,11 +66,6 @@ const settingsNavSections = [
         title: "Webhooks",
         href: "/settings/webhooks",
         icon: WebhooksIcon,
-      },
-      {
-        title: "Apps",
-        href: "/settings/apps",
-        icon: AppsIcon,
       },
       {
         title: "Modules",

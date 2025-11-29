@@ -108,7 +108,7 @@ export const EntityContainer: React.FC<EntityContainerProps> = ({
   pagination,
 }) => {
   return (
-    <div className="h-full bg-background ">
+    <div className="h-full bg-background">
       <div className=" w-full flex flex-col gap-y-8 h-full">
         <div className="flex flex-col gap-y-4 h-full">
           {" "}
@@ -116,8 +116,7 @@ export const EntityContainer: React.FC<EntityContainerProps> = ({
             {header}
             {search}
           </div>
-          <Separator className="bg-black/10 dark:bg-white/5" />
-          <main className="px-6 pt-6">{children}</main>
+          <main className="px-6 ">{children}</main>
         </div>
         {pagination}
       </div>

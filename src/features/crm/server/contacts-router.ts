@@ -9,6 +9,8 @@ import prisma from "@/lib/db";
 import { getUsersActivityStatus } from "@/lib/activity-tracker";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import { ActivityAction } from "@prisma/client";
 
 const contactInclude = {
   assignees: {
@@ -401,6 +403,29 @@ export const contactsRouter = createTRPCRouter({
         subaccountId: subaccountId ?? undefined,
       });
 
+      // Log activity and PostHog analytics
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "contact",
+        entityId: contact.id,
+        entityName: contact.name,
+        metadata: {
+          email: contact.email,
+          companyName: contact.companyName,
+          type: contact.type,
+        },
+        posthogProperties: {
+          email: contact.email,
+          company_name: contact.companyName,
+          contact_type: contact.type,
+          lifecycle_stage: contact.lifecycleStage,
+          score: contact.score,
+        },
+      });
+
       return mapContact(contact);
     }),
 
@@ -443,6 +468,28 @@ export const contactsRouter = createTRPCRouter({
       }
 
       const { id, assigneeIds, ...data } = input;
+
+      // Fetch old contact data for change tracking
+      const oldContact = await prisma.contact.findUnique({
+        where: { id },
+        select: {
+          name: true,
+          email: true,
+          companyName: true,
+          type: true,
+          lifecycleStage: true,
+          score: true,
+          phone: true,
+          position: true,
+        },
+      });
+
+      if (!oldContact) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Contact not found",
+        });
+      }
 
       // Validate assigneeIds belong to the same subaccount (only if in subaccount context)
       if (assigneeIds && assigneeIds.length > 0 && subaccountId) {
@@ -508,6 +555,40 @@ export const contactsRouter = createTRPCRouter({
           }),
         },
         include: contactInclude,
+      });
+
+      // Log activity with changes
+      const changes = getChangedFields(oldContact, data);
+      const isLifecycleChange = data.lifecycleStage !== undefined &&
+        data.lifecycleStage !== oldContact.lifecycleStage;
+
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "contact",
+        entityId: contact.id,
+        entityName: contact.name,
+        changes,
+        metadata: {
+          fieldsChanged: changes ? Object.keys(changes) : [],
+          isLifecycleChange,
+          ...(isLifecycleChange && {
+            oldLifecycleStage: oldContact.lifecycleStage,
+            newLifecycleStage: data.lifecycleStage,
+          }),
+        },
+        posthogProperties: {
+          fields_changed: changes ? Object.keys(changes) : [],
+          is_lifecycle_change: isLifecycleChange,
+          ...(isLifecycleChange && {
+            old_lifecycle_stage: oldContact.lifecycleStage,
+            new_lifecycle_stage: data.lifecycleStage,
+          }),
+          lifecycle_stage: contact.lifecycleStage,
+          score: contact.score,
+        },
       });
 
       return mapContact(contact);

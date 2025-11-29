@@ -33,6 +33,9 @@ import {
   MICROSOFT_SCOPES,
 } from "@/features/apps/constants";
 
+import { IconPlusSmall as PlusIcon } from "central-icons/IconPlusSmall";
+import { cn } from "@/lib/utils";
+
 export const AppsContainer = ({ children }: { children: React.ReactNode }) => {
   return (
     <EntityContainer
@@ -59,26 +62,6 @@ type AppCatalogItem = {
 };
 
 const appsCatalog: AppCatalogItem[] = [
-  {
-    id: "google-calendar",
-    provider: AppProvider.GOOGLE_CALENDAR,
-    title: "Google Calendar",
-    description:
-      "Stream calendar events directly into your workflows and let workflows create or update events automatically.",
-    icon: "/logos/googlecalendar.svg",
-    scopes: GOOGLE_CALENDAR_SCOPES,
-    authProvider: "google",
-  },
-  {
-    id: "gmail",
-    provider: AppProvider.GMAIL,
-    title: "Gmail",
-    description:
-      "Read incoming messages and send automated replies directly from your workflows.",
-    icon: "/logos/google.svg",
-    scopes: GMAIL_SCOPES,
-    authProvider: "google",
-  },
   {
     id: "google-workspace",
     provider: AppProvider.GOOGLE,
@@ -213,9 +196,9 @@ export const AppsList = () => {
         return (
           <Card
             key={app.id}
-            className="bg-[#1A2326] border-white/5 text-white p-0"
+            className="bg-background border-none ring! shadow-sm! ring-black/10! text-black p-0"
           >
-            <CardContent className="flex flex-col gap-10 p-5">
+            <CardContent className="flex flex-col gap-10 p-6 relative">
               <div className="flex flex-col items-start gap-2.5">
                 <div className="">
                   <Image
@@ -228,14 +211,14 @@ export const AppsList = () => {
 
                 <div className="flex flex-col gap-2">
                   <CardTitle className="text-sm">{app.title}</CardTitle>
-                  <CardDescription className="text-[13px] text-white/50 font-medium tracking-tight">
+                  <CardDescription className="text-[13px] text-primary/50 font-medium tracking-tight">
                     {app.description}
                   </CardDescription>
                 </div>
               </div>
 
               <Button
-                variant={isConnected ? "outline" : "default"}
+                variant={isConnected ? "outline" : "gradient"}
                 disabled={isSyncing || isConnecting || isConnected}
                 onClick={() => {
                   if (isConnected) {
@@ -249,9 +232,12 @@ export const AppsList = () => {
                     app.title
                   );
                 }}
-                className="w-full bg-[#202E32] hover:bg-[#202E32]! hover:brightness-110 text-xs py-2! h-max! font-medium border-none hover:text-white"
+                className={cn(
+                  "absolute right-6 w-max",
+                  isConnected ? "h-max! p-1.5! px-3!" : "  right-6 p-1.5! h-max"
+                )}
               >
-                {isConnected ? "Connected" : "Connect"}
+                {isConnected ? "Connected" : <PlusIcon className="size-4" />}
               </Button>
             </CardContent>
           </Card>

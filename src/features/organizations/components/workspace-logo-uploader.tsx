@@ -81,7 +81,7 @@ export function WorkspaceLogoUploader({
   if (value) {
     return (
       <div className={className}>
-        <div className="h-20 w-20 overflow-hidden rounded border bg-white">
+        <div className="h-20 w-20 overflow-hidden rounded bg-white">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={value}

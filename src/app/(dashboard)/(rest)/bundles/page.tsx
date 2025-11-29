@@ -1,42 +1,58 @@
-import { Suspense } from "react";
+"use client";
+
+import { Suspense, useState } from "react";
 
 import { ErrorBoundary } from "react-error-boundary";
-
-import { HydrateClient } from "@/trpc/server";
-
-import { requireAuth } from "@/lib/auth-utils";
 
 import BundlesList, {
   BundlesContainer,
   BundlesError,
   BundlesLoading,
+  BundlesHeader,
+  BundlesSearch,
 } from "@/features/bundles/components/bundles";
-import { prefetchBundles } from "@/features/bundles/server/prefetch";
 
-import type { SearchParams } from "nuqs/server";
-import { bundlesParamsLoader } from "@/features/bundles/server/params-loader";
+import { PageTabs } from "@/components/ui/page-tabs";
+import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
+import { Separator } from "@/components/ui/separator";
 
-type Props = {
-  searchParams: Promise<SearchParams>;
-};
-
-const Page: React.FC<Props> = async ({ searchParams }) => {
-  await requireAuth();
-
-  const params = await bundlesParamsLoader(searchParams);
-  prefetchBundles(params);
+export default function Page() {
+  const [activeTab, setActiveTab] = useState("data");
 
   return (
-    <BundlesContainer>
-      <HydrateClient>
-        <ErrorBoundary fallback={<BundlesError />}>
-          <Suspense fallback={<BundlesLoading />}>
-            <BundlesList />
-          </Suspense>
-        </ErrorBoundary>
-      </HydrateClient>
-    </BundlesContainer>
-  );
-};
+    <div className="space-y-0">
+      <div className="flex items-end justify-between gap-4 p-6 pb-6">
+        <div className="flex-1">
+          <BundlesHeader />
+        </div>
+        <BundlesSearch className="w-96" />
+      </div>
 
-export default Page;
+      <Separator className="bg-black/5 dark:bg-white/5" />
+
+      <PageTabs
+        tabs={[
+          { id: "data", label: "Data table" },
+          { id: "activity", label: "Activity" },
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        className="px-6"
+      />
+
+      {activeTab === "data" ? (
+        <BundlesContainer>
+          <ErrorBoundary fallback={<BundlesError />}>
+            <Suspense fallback={<BundlesLoading />}>
+              <BundlesList />
+            </Suspense>
+          </ErrorBoundary>
+        </BundlesContainer>
+      ) : (
+        <div className="p-6">
+          <ActivityTimeline limit={50} />
+        </div>
+      )}
+    </div>
+  );
+}

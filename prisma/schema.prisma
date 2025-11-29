@@ -57,6 +57,9 @@ model User {
   presence              UserPresence?
   notificationPreference NotificationPreference?
 
+  // Activity timeline
+  activities            Activity[]
+
   @@unique([email])
   @@map("user")
 }
@@ -540,6 +543,9 @@ model Organization {
   workflows   Workflows[]
   aiLogs      AILog[]
   modules     SubaccountModule[]
+  workers     Worker[]
+  timeLogs    TimeLog[]
+  qrCodes     QRCode[]
 
   @@unique([slug])
   @@map("organization")
@@ -894,6 +900,81 @@ model NotificationPreference {
 }
 
 // ============================================================================
+// ACTIVITY TIMELINE
+// ============================================================================
+
+enum ActivityType {
+  CONTACT
+  DEAL
+  WORKFLOW
+  EXECUTION
+  PIPELINE
+  TASK
+  EMAIL
+  CALL
+  MEETING
+  NOTE
+  WORKER
+  TIME_LOG
+  INVOICE
+  CREDENTIAL
+  WEBHOOK
+  INTEGRATION
+  SUBACCOUNT
+  ORGANIZATION
+}
+
+enum ActivityAction {
+  CREATED
+  UPDATED
+  DELETED
+  ASSIGNED
+  UNASSIGNED
+  STAGE_CHANGED
+  STATUS_CHANGED
+  COMPLETED
+  ARCHIVED
+  RESTORED
+}
+
+model Activity {
+  id             String         @id @default(cuid())
+  organizationId String
+  subaccountId   String?
+
+  // Actor (who performed the action)
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Activity details
+  type           ActivityType
+  action         ActivityAction
+  entityType     String         // "contact", "deal", "workflow", etc. (lowercase for flexibility)
+  entityId       String
+  entityName     String         // For display (e.g., contact name, deal title)
+
+  // Changes (for updates)
+  changes        Json?          // { field: { old: "x", new: "y" } }
+  metadata       Json?          // Additional context data
+
+  // Context
+  ipAddress      String?
+  userAgent      String?
+
+  createdAt      DateTime       @default(now())
+
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([organizationId, subaccountId])
+  @@index([organizationId, entityType, entityId])
+  @@map("activity")
+}
+
+// ============================================================================
 // MODULE SYSTEM
 // ============================================================================
 
@@ -951,9 +1032,11 @@ enum TimeLogStatus {
 }
 
 model TimeLog {
-  id            String      @id @default(cuid())
-  subaccountId  String
-  subaccount    Subaccount  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccountId   String?
+  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
 
   // Worker association (separate from CRM contacts)
   workerId      String?
@@ -1009,19 +1092,24 @@ model TimeLog {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  @@index([subaccountId, workerId])
-  @@index([subaccountId, contactId])
-  @@index([subaccountId, dealId])
-  @@index([subaccountId, status])
-  @@index([subaccountId, startTime])
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([organizationId, subaccountId])
+  @@index([organizationId, workerId])
+  @@index([organizationId, contactId])
+  @@index([organizationId, dealId])
+  @@index([organizationId, status])
+  @@index([organizationId, startTime])
   @@map("time_log")
 }
 
 // QR Code for quick check-ins at specific locations/sites
 model QRCode {
-  id            String      @id @default(cuid())
-  subaccountId  String
-  subaccount    Subaccount  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccountId   String?
+  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
 
   name          String      // e.g., "Warehouse A", "Client Site - Downtown"
   code          String      @unique // The actual QR code value (UUID)
@@ -1036,16 +1124,20 @@ model QRCode {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
+  @@index([organizationId])
   @@index([subaccountId])
+  @@index([organizationId, subaccountId])
   @@index([code])
   @@map("qr_code")
 }
 
 // Worker - Separate from CRM users, for time tracking portal
 model Worker {
-  id              String      @id @default(cuid())
-  subaccountId    String
-  subaccount      Subaccount  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccountId    String?
+  subaccount      Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
 
   // Basic info
   name            String
@@ -1076,7 +1168,9 @@ model Worker {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  @@index([organizationId])
   @@index([subaccountId])
+  @@index([organizationId, subaccountId])
   @@index([email])
   @@index([phone])
   @@index([portalToken])

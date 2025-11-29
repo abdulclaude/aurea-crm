@@ -5,6 +5,7 @@ import { IconDoor as LogOutIcon } from "central-icons/IconDoor";
 import { IconPeopleCopy as UsersIcon } from "central-icons/IconPeopleCopy";
 import { IconInvite as InviteIcon } from "central-icons/IconInvite";
 import { IconStores as ClientsIcon } from "central-icons/IconStores";
+import { IconBuildings as WorkspaceSettingsIcon } from "central-icons/IconBuildings";
 import { ChevronDownIcon, Layers2Icon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -109,7 +110,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" className="w-64 text-primary">
+      <DropdownMenuContent align="start" className="w-56 text-primary">
         <DropdownMenuLabel className="flex min-w-0 flex-col space-y-1.5 text-primary">
           <div className=" flex flex-col">
             <span className="truncate text-xs font-semibold text-primary">
@@ -132,19 +133,17 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
           <>
             <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
-            <DropdownMenuLabel className="text-xs text-primary/75">
-              Clients
-            </DropdownMenuLabel>
-
             <DropdownMenuGroup>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="flex items-center gap-2 hover:bg-foreground hover:text-black group">
                   <ClientsIcon className="size-3.5 text-primary/75 group-hover:text-black" />
 
-                  <span className="text-xs ">Switch to client</span>
+                  <span className="text-xs text-primary/75 group-hover:text-black tracking-tight">
+                    Switch to client
+                  </span>
                 </DropdownMenuSubTrigger>
 
-                <DropdownMenuSubContent className="w-64 ml-2.5 text-primary border-black/5 flex flex-col gap-y-1">
+                <DropdownMenuSubContent className="w-64 ml-2.5 text-primary border-black/5 flex flex-col gap-y-0 p-0">
                   {clients && clients.length > 0 ? (
                     clients.map((client) => {
                       const selected =
@@ -154,7 +153,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                         <DropdownMenuItem
                           key={client.subaccountId ?? client.id}
                           className={cn(
-                            "flex items-center gap-3 bg-background hover:bg-foreground hover:text-black opacity-75! hover:opacity-100! p-1",
+                            "flex items-center gap-2 bg-background hover:bg-foreground hover:text-black hover:opacity-100! p-2 px-3 m-1 group",
                             selected &&
                               "bg-foreground hover:bg-primary-foreground opacity-100!"
                           )}
@@ -172,12 +171,12 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                               unoptimized
                             />
                           ) : (
-                            <div className="bg-foreground brightness-120 text-primary text-xs grid size-6 shrink-0 place-items-center rounded">
+                            <div className="bg-foreground text-primary text-xs grid size-6 shrink-0 place-items-center rounded">
                               {(client.name?.[0] ?? "C").toUpperCase()}
                             </div>
                           )}
                           <div className="flex min-w-0 flex-col">
-                            <span className="truncate text-xs font-medium">
+                            <span className="truncate text-xs font-medium text-primary/75 group-hover:text-primary">
                               {client.name}
                             </span>
                           </div>
@@ -201,7 +200,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                   <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
 
                   <DropdownMenuItem
-                    className="bg-background hover:bg-foreground hover:text-black group py-2"
+                    className="bg-background hover:bg-foreground hover:text-black group p-2 px-3 m-1"
                     onClick={() => {
                       router.push("/clients/new");
                     }}
@@ -249,7 +248,9 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
           }}
         >
           <UsersIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black">Manage members</span>
+          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+            Manage members
+          </span>
         </DropdownMenuItem>
 
         <DropdownMenuItem
@@ -259,17 +260,23 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
           }}
         >
           <InviteIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black">Invites</span>
+          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+            Invites
+          </span>
         </DropdownMenuItem>
 
-        <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
+        <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
 
         <DropdownMenuItem
           className="group"
-          onClick={() => authClient.signOut()}
+          onClick={() => {
+            router.push("/settings/workspace");
+          }}
         >
-          <LogOutIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black">Logout</span>
+          <WorkspaceSettingsIcon className="text-primary/75 group-hover:text-black size-3.5" />
+          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+            Workspace settings
+          </span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

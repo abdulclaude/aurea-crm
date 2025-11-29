@@ -16,14 +16,16 @@ import { Switch } from "@/components/ui/switch";
 import { useTRPC } from "@/trpc/client";
 import { useSuspenseQuery, useMutation } from "@tanstack/react-query";
 import { IconCalendarClock as ClockIcon } from "central-icons/IconCalendarClock";
-import { IconFileText as FileTextIcon } from "central-icons/IconFileText";
-import { IconPackage as PackageIcon } from "central-icons/IconPackage";
-import { IconCalendarClock as CalendarIcon } from "central-icons/IconCalendarClock";
+import { IconReceiptBill as FileTextIcon } from "central-icons/IconReceiptBill";
+import { IconStore4 as PackageIcon } from "central-icons/IconStore4";
+import { IconVoiceAndVideo as CalendarIcon } from "central-icons/IconVoiceAndVideo";
 import { IconSignature } from "central-icons/IconSignature";
 import { IconKanbanView as KanbanIcon } from "central-icons/IconKanbanView";
+import { IconChevronRightSmall as BulletpointIcon } from "central-icons/IconChevronRightSmall";
 import { toast } from "sonner";
 import { useState } from "react";
 import { ModuleType } from "@prisma/client";
+import { Separator } from "@/components/ui/separator";
 
 export const ModulesContainer = ({
   children,
@@ -77,44 +79,51 @@ const ModuleCard = ({
   const Icon = moduleIcons[type];
 
   return (
-    <Card className="overflow-hidden border border-white/5">
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between gap-4">
+    <Card className="overflow-hidden border-none! ring ring-black/5 shadow-sm h-full pb-2">
+      <CardContent className="p-0 py-0 relative">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex-1 space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="p-3 rounded-lg bg-primary-foreground/75">
-                <Icon className="size-6 text-primary" />
+            <div className="flex flex-col items-start gap-4 px-6">
+              <div className="p-2.5 rounded-lg bg-primary-foreground/75 border border-sky-500/20 border-b-sky-700/70 border-t-sky-400/70 bg-linear-to-b from-sky-500 to-sky-600 font-medium leading-none text-white antialiased shadow-md ring-1 ring-sky-600 w-max text-shadow-2xs">
+                <Icon className="size-6 text-sky-100" />
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <CardTitle className="text-lg">{name}</CardTitle>
-                  {requiresPremium && (
-                    <Badge variant="secondary" className="text-xs">
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-1 mb-0.5">
+                  <CardTitle className="text-base text-primary">
+                    {name}
+                  </CardTitle>
+
+                  {/* {requiresPremium && (
+                    <Badge variant="secondary" className="text-xs w-max">
                       Premium
                     </Badge>
-                  )}
-                  {enabled && (
-                    <Badge className="text-xs bg-green-500/10 text-green-500 border-green-500/20">
+                  )} */}
+
+                  {/* {enabled && (
+                    <Badge className="text-xs bg-emerald-400/10 text-emerald-500 border-emerald-500/20">
                       Enabled
                     </Badge>
-                  )}
+                  )} */}
                 </div>
-                <CardDescription className="text-sm">
+
+                <CardDescription className="text-xs max-w-[250px] text-primary/75">
                   {description}
                 </CardDescription>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-primary/60">Features:</p>
+            <Separator className="bg-black/10 dark:bg-white/5" />
+
+            <div className="space-y-2 px-6">
+              <p className="text-xs font-medium text-primary/60">Features</p>
               <ul className="space-y-1">
                 {features.map((feature, idx) => (
                   <li
                     key={idx}
-                    className="text-xs text-primary/80 flex items-start gap-2"
+                    className="text-xs text-primary/80 flex items-start gap-1.5"
                   >
-                    <span className="text-primary/40 mt-0.5">•</span>
+                    <BulletpointIcon className="size-4 text-primary" />
                     {feature}
                   </li>
                 ))}
@@ -122,7 +131,7 @@ const ModuleCard = ({
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-3">
+          <div className="flex flex-col items-end gap-3 absolute top-0 right-6">
             <Switch
               checked={enabled}
               onCheckedChange={onToggle}
@@ -197,8 +206,8 @@ export const ModulesList = () => {
   }
 
   return (
-    <div className="p-6 space-y-4">
-      {!hasSubaccount && (
+    <div className="space-y-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* {!hasSubaccount && (
         <Card className="border-yellow-500/20 bg-yellow-500/5">
           <CardContent className="p-4">
             <p className="text-sm text-yellow-600 dark:text-yellow-500">
@@ -207,7 +216,7 @@ export const ModulesList = () => {
             </p>
           </CardContent>
         </Card>
-      )}
+      )} */}
 
       {modules.map((module) => (
         <ModuleCard

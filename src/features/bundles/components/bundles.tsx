@@ -101,19 +101,7 @@ export const BundlesContainer = ({
   children: React.ReactNode;
 }) => {
   return (
-    <EntityContainer
-      header={
-        <div className="flex flex-col gap-2">
-          <BundlesHeader />
-        </div>
-      }
-      search={
-        <div className="flex gap-2 justify-end mt-4">
-          <BundlesSearch className="w-96" />
-        </div>
-      }
-      pagination={<BundlesPagination />}
-    >
+    <EntityContainer pagination={<BundlesPagination />}>
       {children}
     </EntityContainer>
   );

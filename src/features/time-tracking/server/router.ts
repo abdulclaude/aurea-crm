@@ -155,6 +155,7 @@ export const timeTrackingRouter = createTRPCRouter({
       select: {
         id: true,
         name: true,
+        organizationId: true,
         subaccountId: true,
         isActive: true,
         hourlyRate: true,
@@ -176,17 +177,17 @@ export const timeTrackingRouter = createTRPCRouter({
       });
     }
 
-    if (!worker.subaccountId) {
+    if (!worker.organizationId) {
       throw new TRPCError({
         code: "FORBIDDEN",
-        message: "Worker must belong to a subaccount",
+        message: "Worker must belong to an organization",
       });
     }
 
     // Check if worker has an active time log (hasn't clocked out)
     const activeTimeLog = await prisma.timeLog.findFirst({
       where: {
-        subaccountId: worker.subaccountId,
+        organizationId: worker.organizationId,
         workerId: input.workerId,
         endTime: null,
       },
@@ -204,7 +205,8 @@ export const timeTrackingRouter = createTRPCRouter({
 
     const timeLog = await prisma.timeLog.create({
       data: {
-        subaccountId: worker.subaccountId,
+        organizationId: worker.organizationId,
+        subaccountId: worker.subaccountId ?? null,
         workerId: input.workerId,
         dealId: input.dealId,
         title,
@@ -365,16 +367,17 @@ export const timeTrackingRouter = createTRPCRouter({
   create: protectedProcedure
     .input(createTimeLogSchema)
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const timeLog = await prisma.timeLog.create({
         data: {
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
           contactId: input.contactId,
           dealId: input.dealId,
           title: input.title,
@@ -402,10 +405,10 @@ export const timeTrackingRouter = createTRPCRouter({
   update: protectedProcedure
     .input(updateTimeLogSchema)
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -467,10 +470,10 @@ export const timeTrackingRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -515,7 +518,7 @@ export const timeTrackingRouter = createTRPCRouter({
           where: { id: input.workerId },
           select: { subaccountId: true },
         });
-        subaccountId = worker?.subaccountId;
+        subaccountId = worker?.subaccountId ?? undefined;
       } else {
         // CRM - get subaccount from authenticated user's session
         const { auth } = await import("@/lib/auth");
@@ -661,10 +664,10 @@ export const timeTrackingRouter = createTRPCRouter({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -699,10 +702,10 @@ export const timeTrackingRouter = createTRPCRouter({
   approve: protectedProcedure
     .input(approveTimeLogSchema)
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -755,10 +758,10 @@ export const timeTrackingRouter = createTRPCRouter({
   createQRCode: protectedProcedure
     .input(createQRCodeSchema)
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -767,7 +770,8 @@ export const timeTrackingRouter = createTRPCRouter({
 
       const qrCode = await prisma.qRCode.create({
         data: {
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
           name: input.name,
           code,
           dealId: input.dealId,
@@ -780,13 +784,14 @@ export const timeTrackingRouter = createTRPCRouter({
     }),
 
   listQRCodes: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.subaccountId) {
+    if (!ctx.orgId) {
       return [];
     }
 
     const qrCodes = await prisma.qRCode.findMany({
       where: {
-        subaccountId: ctx.subaccountId,
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -828,17 +833,18 @@ export const timeTrackingRouter = createTRPCRouter({
   deleteQRCode: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       await prisma.qRCode.delete({
         where: {
           id: input.id,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
       });
 
@@ -855,12 +861,13 @@ export const timeTrackingRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         return { timeLogs: [], totalHours: 0, totalAmount: 0 };
       }
 
       const whereClause: Prisma.TimeLogWhereInput = {
-        subaccountId: ctx.subaccountId,
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
         contactId: input.contactId,
         status: {
           in: [

@@ -38,15 +38,17 @@ export const workersRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const where: any = {
-        subaccountId: ctx.subaccountId,
+        organizationId: ctx.orgId,
+        // Strict scoping: only show workers created in the current context
+        subaccountId: ctx.subaccountId ?? null,
       };
 
       if (input.search) {
@@ -117,17 +119,18 @@ export const workersRouter = createTRPCRouter({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const worker = await prisma.worker.findFirst({
         where: {
           id: input.id,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
         include: {
           timeLogs: {
@@ -169,10 +172,10 @@ export const workersRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
@@ -186,7 +189,8 @@ export const workersRouter = createTRPCRouter({
 
       const worker = await prisma.worker.create({
         data: {
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
           name: input.name,
           email: input.email,
           phone: input.phone,
@@ -216,17 +220,18 @@ export const workersRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const worker = await prisma.worker.findFirst({
         where: {
           id: input.id,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
       });
 
@@ -251,17 +256,18 @@ export const workersRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const worker = await prisma.worker.findFirst({
         where: {
           id: input.id,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
       });
 
@@ -283,17 +289,18 @@ export const workersRouter = createTRPCRouter({
   generateMagicLink: protectedProcedure
     .input(z.object({ workerId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const worker = await prisma.worker.findFirst({
         where: {
           id: input.workerId,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
       });
 
@@ -336,19 +343,25 @@ export const workersRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in an organization context",
         });
       }
 
       const worker = await prisma.worker.findFirst({
         where: {
           id: input.workerId,
-          subaccountId: ctx.subaccountId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
         },
         include: {
+          organization: {
+            select: {
+              name: true,
+            },
+          },
           subaccount: {
             select: {
               companyName: true,
@@ -395,7 +408,7 @@ export const workersRouter = createTRPCRouter({
           workerName: worker.name,
           magicLink,
           expiresAt: addHours(new Date(), MAGIC_LINK_EXPIRY_HOURS),
-          organizationName: worker.subaccount.companyName,
+          organizationName: worker.subaccount?.companyName || worker.organization.name,
         });
 
         if (!result.success) {

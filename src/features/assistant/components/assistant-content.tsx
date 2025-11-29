@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { Badge } from "@/components/ui/badge";
 
 interface EntitySelectorProps {
   label: string;
@@ -125,13 +126,19 @@ interface AssistantContentProps {
 }
 
 export function AssistantContent({
-  subaccountId,
+  subaccountId: _subaccountId, // Prop is deprecated, we use active context instead
   logsLimit = 3,
   showAllLogs = false,
 }: AssistantContentProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const editorRef = useRef<ChatEditorHandle>(null);
+
+  // Get active organization info - must be fetched early to use in other hooks
+  const activeOrgQuery = useQuery(trpc.organizations.getActive.queryOptions());
+
+  // Use the active subaccount from session context
+  const activeSubaccountId = activeOrgQuery.data?.activeSubaccountId ?? null;
 
   // Fetch logs from database
   const logsQuery = useQuery(
@@ -147,7 +154,7 @@ export function AssistantContent({
   );
 
   const { sendMessage, status } = useChat({
-    body: { subaccountId },
+    body: { subaccountId: activeSubaccountId },
     onFinish: () => {
       // Refetch logs when AI finishes
       queryClient.invalidateQueries({ queryKey: trpc.ai.getLogs.queryKey() });
@@ -189,9 +196,6 @@ export function AssistantContent({
     staleTime: 30000,
   });
 
-  // Get active organization info
-  const activeOrgQuery = useQuery(trpc.organizations.getActive.queryOptions());
-
   // Fetch user's organizations to get the agency name
   const myOrgsQuery = useQuery({
     ...trpc.organizations.getMyOrganizations.queryOptions(),
@@ -215,9 +219,13 @@ export function AssistantContent({
   );
   const agencyName = currentOrg?.name || "Agency";
 
+  // Check if user is a member of the main organization (not just subaccount)
+  const isAgencyMember = currentOrg?.role !== undefined;
+
   // Build client items for selector
   const clientItems = [
-    { id: "agency", name: agencyName },
+    // Only show "Agency" option if user is an agency member
+    ...(isAgencyMember ? [{ id: "agency", name: agencyName }] : []),
     ...(clientsQuery.data || []).map((client) => ({
       id: client.subaccountId,
       name: client.name,
@@ -226,9 +234,11 @@ export function AssistantContent({
 
   // Get current selection label
   const currentClientLabel = activeOrgQuery.data?.activeSubaccountId
-    ? clientsQuery.data?.find(
+    ? activeOrgQuery.data?.activeSubaccount?.companyName ||
+      clientsQuery.data?.find(
         (c) => c.subaccountId === activeOrgQuery.data?.activeSubaccountId
-      )?.name || "Client"
+      )?.name ||
+      "Client"
     : agencyName;
 
   const handleClientSelect = (id: string) => {
@@ -394,7 +404,7 @@ export function AssistantContent({
         },
         {
           body: {
-            subaccountId,
+            subaccountId: activeSubaccountId,
             entities,
             html,
           },
@@ -404,7 +414,7 @@ export function AssistantContent({
       editorRef.current?.clear();
       editorRef.current?.focus();
     },
-    [sendMessage, isLoading, subaccountId]
+    [sendMessage, isLoading, activeSubaccountId]
   );
 
   const removeLog = (logId: string) => {
@@ -432,14 +442,23 @@ export function AssistantContent({
           bottomBar={
             <div className="flex items-center justify-between px-2">
               {/* Left side - Entity selectors */}
-              <div className="flex items-center gap-1">
-                {/* Select client - for agency accounts */}
-                <EntitySelector
-                  label={currentClientLabel}
-                  icon={<Users className="size-3" />}
-                  items={clientItems}
-                  onSelect={(id) => handleClientSelect(id)}
-                />
+              <div className="flex items-center gap-2">
+                {/* Select client - for agency accounts or show static label for subaccount-only users */}
+                {isAgencyMember ? (
+                  <EntitySelector
+                    label={currentClientLabel}
+                    icon={<Users className="size-3" />}
+                    items={clientItems}
+                    onSelect={(id) => handleClientSelect(id)}
+                  />
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="h-7 px-3 text-xs text-primary flex items-center gap-2 w-max rounded-lg"
+                  >
+                    {currentClientLabel}
+                  </Badge>
+                )}
 
                 {/* Select entity triggers */}
                 <EntitySelector
@@ -564,7 +583,7 @@ export function AssistantContent({
               <div
                 key={log.id}
                 className={cn(
-                  "bg-background border rounded-lg p-4",
+                  "bg-background ring ring-black/10 shadow-xs rounded-xl p-4",
                   log.status === "FAILED"
                     ? "border-red-500/20"
                     : "border-black/10 dark:border-white/5"

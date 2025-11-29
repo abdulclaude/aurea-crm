@@ -80,11 +80,13 @@ export const WebhooksSearch = () => {
     setParams,
   });
   return (
-    <EntitySearch
-      value={searchValue}
-      onChange={onSearchChange}
-      placeholder="Search webhooks..."
-    />
+    <div className="mt-4">
+      <EntitySearch
+        value={searchValue}
+        onChange={onSearchChange}
+        placeholder="Search webhooks..."
+      />
+    </div>
   );
 };
 

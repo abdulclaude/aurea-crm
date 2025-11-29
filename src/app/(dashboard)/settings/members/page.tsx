@@ -10,10 +10,13 @@ import { InviteMemberDialog } from "@/features/organizations/components/invite-m
 import { MembersTable } from "@/features/organizations/components/members-table";
 import { useTRPC } from "@/trpc/client";
 import { Separator } from "@/components/ui/separator";
+import { PageTabs } from "@/components/ui/page-tabs";
+import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
 
 function MembersPageContent() {
   const trpc = useTRPC();
   const [inviteDialogOpen, setInviteDialogOpen] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState("data");
 
   // Get active organization/subaccount context
   const { data: active } = useSuspenseQuery(
@@ -44,8 +47,8 @@ function MembersPageContent() {
     : activeOrg?.name ?? "Organization";
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between px-6 pt-6">
+    <div className="space-y-0">
+      <div className="flex items-center justify-between px-6 pt-6 pb-6">
         <div>
           <h1 className="text-xl font-bold text-primary dark:text-white">
             Team Members
@@ -68,15 +71,31 @@ function MembersPageContent() {
 
       <Separator className="bg-black/5 dark:bg-white/5" />
 
-      <Suspense
-        fallback={
-          <div className="flex min-h-[400px] items-center justify-center">
-            <LoaderIcon className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        }
-      >
-        <MembersTable />
-      </Suspense>
+      <PageTabs
+        tabs={[
+          { id: "data", label: "Data table" },
+          { id: "activity", label: "Activity" },
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        className="px-6"
+      />
+
+      {activeTab === "data" ? (
+        <Suspense
+          fallback={
+            <div className="flex min-h-[400px] items-center justify-center">
+              <LoaderIcon className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          }
+        >
+          <MembersTable />
+        </Suspense>
+      ) : (
+        <div className="p-6">
+          <ActivityTimeline limit={50} />
+        </div>
+      )}
 
       <InviteMemberDialog
         open={inviteDialogOpen}

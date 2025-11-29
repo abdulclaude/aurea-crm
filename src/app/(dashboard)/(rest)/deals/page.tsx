@@ -1,17 +1,28 @@
+"use client";
+
 import { LoaderCircle } from "lucide-react";
 import Link from "next/link";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { PageTabs } from "@/components/ui/page-tabs";
 
 import { DealsTable } from "@/features/crm/components/deals-table";
-import { caller } from "@/trpc/server";
 import { IconFistbump as AddDealIcon } from "central-icons/IconFistbump";
 import { Badge } from "@/components/ui/badge";
+import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
+import { useTRPC } from "@/trpc/client";
+import { useQuery } from "@tanstack/react-query";
 
-export default async function DealsPage() {
-  const contactCount = await caller.contacts.count();
+export default function DealsPage() {
+  const [activeTab, setActiveTab] = useState("data");
+  const trpc = useTRPC();
+
+  const { data: contactCount = 0 } = useQuery({
+    ...trpc.contacts.count.queryOptions(),
+  });
+
   const hasContacts = contactCount > 0;
 
   return (
@@ -40,18 +51,34 @@ export default async function DealsPage() {
         )}
       </div>
 
+      <PageTabs
+        tabs={[
+          { id: "data", label: "Data table" },
+          { id: "activity", label: "Activity" },
+        ]}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        className="px-6"
+      />
+
       <Separator className="bg-black/5 dark:bg-white/5" />
 
-      <Suspense
-        fallback={
-          <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
-            <LoaderCircle className="size-3.5 animate-spin" />
-            Loading deals...
-          </div>
-        }
-      >
-        <DealsTable />
-      </Suspense>
+      {activeTab === "data" ? (
+        <Suspense
+          fallback={
+            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading deals...
+            </div>
+          }
+        >
+          <DealsTable />
+        </Suspense>
+      ) : (
+        <div className="p-6">
+          <ActivityTimeline limit={50} filterByEntityType="DEAL" />
+        </div>
+      )}
     </div>
   );
 }
