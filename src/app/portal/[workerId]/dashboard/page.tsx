@@ -256,7 +256,7 @@ export default function WorkerDashboardPage({
                 No time entries yet
               </p>
             ) : (
-              <div className={cn("space-y-3 flex gap-2")}>
+              <div className={cn("space-y-3 flex md:flex-row flex-col gap-2")}>
                 {recentTimeLogs?.items.map((log) => (
                   <div
                     key={log.id}
