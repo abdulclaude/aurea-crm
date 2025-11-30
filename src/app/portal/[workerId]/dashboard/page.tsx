@@ -311,14 +311,9 @@ export default function WorkerDashboardPage({
                           "capitalize"
                         )}
                       >
-                        {
-                          (log.status === "DRAFT" && "Working",
-                          log.status === "SUBMITTED" && "Submitted",
-                          log.status === "APPROVED" && "Approved",
-                          log.status === "REJECTED" && "Rejected",
-                          log.status === "INVOICED" && "Invoiced",
-                          "Working")
-                        }
+                        {log.status === "DRAFT"
+                          ? "Working"
+                          : log.status.toLowerCase()}
                       </Badge>
 
                       {log.duration! > 0 && (
