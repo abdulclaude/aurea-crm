@@ -256,12 +256,16 @@ export default function WorkerDashboardPage({
                 No time entries yet
               </p>
             ) : (
-              <div className={cn("space-y-3 flex md:flex-row flex-col gap-2")}>
+              <div
+                className={cn(
+                  "space-y-3 flex md:flex-row flex-col gap-2 h-[70px]"
+                )}
+              >
                 {recentTimeLogs?.items.map((log) => (
                   <div
                     key={log.id}
                     className={cn(
-                      "flex items-center justify-between p-3 rounded-lg ring ring-black/10 h-full w-[275px]",
+                      "flex items-center justify-between p-3 rounded-lg ring ring-black/10 min-h-full w-[275px]",
                       log.status === "DRAFT" &&
                         "bg-amber-500/5 text-amber-500 ring-amber-500/20",
                       log.status === "SUBMITTED" &&
@@ -317,11 +321,11 @@ export default function WorkerDashboardPage({
                         }
                       </Badge>
 
-                      {log.duration && (
+                      {log.duration! > 0 && (
                         <div className="text-right">
-                          <p className="text-[13px] font-medium text-primary">
-                            {Math.floor(log.duration / 60)}h {log.duration % 60}
-                            m
+                          <p className="text-[12px] font-medium text-primary/60">
+                            {Math.floor(log.duration! / 60)}h{" "}
+                            {log.duration! % 60 > 0 && `${log.duration! % 60}m`}
                           </p>
                         </div>
                       )}
