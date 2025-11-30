@@ -26,8 +26,8 @@ export default function DealsPage() {
   const hasContacts = contactCount > 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-2 p-6 pb-0">
+    <div className="space-y-0">
+      <div className="flex items-end justify-between gap-2 p-6">
         <div>
           <h1 className="text-lg font-semibold text-primary dark:text-white">
             Deals
@@ -51,6 +51,8 @@ export default function DealsPage() {
         )}
       </div>
 
+      <Separator className="bg-black/5 dark:bg-white/5" />
+
       <PageTabs
         tabs={[
           { id: "data", label: "Data table" },
@@ -60,8 +62,6 @@ export default function DealsPage() {
         onTabChange={setActiveTab}
         className="px-6"
       />
-
-      <Separator className="bg-black/5 dark:bg-white/5" />
 
       {activeTab === "data" ? (
         <Suspense

@@ -621,7 +621,7 @@ export function WorkersTable() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pt-6">
       <DataTable
         data={workers}
         columns={workerColumns}

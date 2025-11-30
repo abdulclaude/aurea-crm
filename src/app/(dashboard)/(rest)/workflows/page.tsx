@@ -27,7 +27,7 @@ export default function Page() {
 
   return (
     <div className="space-y-0">
-      <div className="flex items-end justify-between gap-4 p-6 pb-6">
+      <div className="flex items-end justify-between gap-2 p-6 pb-6">
         <div className="flex-1">
           <WorkflowsHeader />
         </div>

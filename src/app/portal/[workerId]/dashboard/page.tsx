@@ -3,9 +3,15 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { IconClock as ClockIcon } from "central-icons/IconClock";
+import { IconClockAlert as ClockIcon } from "central-icons/IconClockAlert";
 import { LogOut, Clock, CheckCircle } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -22,7 +28,10 @@ function formatDuration(startTime: Date): string {
   const minutes = Math.floor((diff / 1000 / 60) % 60);
   const seconds = Math.floor((diff / 1000) % 60);
 
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+    2,
+    "0"
+  )}:${String(seconds).padStart(2, "0")}`;
 }
 
 export default function WorkerDashboardPage({
@@ -144,7 +153,9 @@ export default function WorkerDashboardPage({
       <div className="bg-white dark:bg-black/20 border-b border-black/5 dark:border-white/5">
         <div className="max-w-4xl mx-auto p-4 flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-primary">Worker Portal</h1>
+            <h1 className="text-lg font-semibold text-primary">
+              Worker Portal
+            </h1>
             <p className="text-xs text-primary/60">Welcome, {profile.name}</p>
           </div>
           <Button variant="ghost" size="sm" onClick={handleLogout}>
@@ -154,37 +165,40 @@ export default function WorkerDashboardPage({
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-6">
+      <div>
         {/* Current Time */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-sm text-primary/60 mb-2">Current Time</p>
-              <p className="text-3xl font-mono font-bold text-primary">
-                {currentTime}
-              </p>
-              <p className="text-xs text-primary/40 mt-2">
-                {format(new Date(), "EEEE, MMMM d, yyyy")}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+
+        <div className="p-6">
+          <div className="text-center">
+            <p className="text-xs text-primary/60 mb-1">
+              {format(new Date(), "EEEE, MMMM d, yyyy")}
+            </p>
+            <p className="text-3xl font-mono font-bold text-primary">
+              {currentTime}
+            </p>
+          </div>
+        </div>
+
+        <Separator className="bg-black/5 dark:bg-white/5" />
 
         {/* Clock In/Out */}
         {activeTimeLog ? (
-          <Card className="border-green-500/20 bg-green-500/5">
-            <CardHeader>
+          <Card className=" border-none rounded-none p-0 gap-0">
+            <CardHeader className="flex flex-col items-center justify-center border-green-500/20 bg-green-500/5 p-6">
               <CardTitle className="flex items-center gap-2 text-green-600 dark:text-green-500">
-                <ClockIcon className="size-5" />
-                Currently Clocked In
+                <ClockIcon className="size-4" />
+                Currently clocked in
               </CardTitle>
               <CardDescription>
                 Started at {format(new Date(activeTimeLog.startTime), "h:mm a")}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="text-center py-4">
-                <p className="text-sm text-primary/60 mb-2">Elapsed Time</p>
+
+            <Separator className="bg-black/5 dark:bg-white/5" />
+
+            <CardContent className="space-y-4 flex flex-col items-center bg-background p-6">
+              <div className="text-center">
+                <p className="text-sm text-primary/60 mb-2">Elapsed time</p>
                 <p className="text-4xl font-mono font-bold text-primary">
                   {duration}
                 </p>
@@ -193,31 +207,34 @@ export default function WorkerDashboardPage({
               <Button
                 onClick={handleClockOut}
                 disabled={clockOutMutation.isPending}
-                className="w-full"
+                className="w-max py-1.5! px-2.5! h-max gap-1.5"
                 size="lg"
                 variant="destructive"
               >
-                <Clock className="size-4 mr-2" />
+                <ClockIcon className="size-3.5" />
                 {clockOutMutation.isPending ? "Clocking out..." : "Clock Out"}
               </Button>
             </CardContent>
           </Card>
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle>Ready to start?</CardTitle>
-              <CardDescription>
+          <Card className="rounded-none border-none p-0 flex items-center justify-center gap-3.5">
+            <CardHeader className="p-6 pb-0 w-[400px]">
+              <CardTitle className="text-center">Ready to start?</CardTitle>
+
+              <CardDescription className="text-center">
                 Click the button below to clock in and start tracking your time
               </CardDescription>
             </CardHeader>
-            <CardContent>
+
+            <CardContent className="pb-6">
               <Button
                 onClick={handleClockIn}
                 disabled={clockInMutation.isPending}
-                className="w-full"
+                className="w-max py-1.5! px-2.5! h-max gap-1.5"
+                variant="gradient"
                 size="lg"
               >
-                <ClockIcon className="size-4 mr-2" />
+                <ClockIcon className="size-3.5" />
                 {clockInMutation.isPending ? "Clocking in..." : "Clock In"}
               </Button>
             </CardContent>
@@ -225,57 +242,90 @@ export default function WorkerDashboardPage({
         )}
 
         {/* Recent Activity */}
-        <Card>
-          <CardHeader>
+        <Card className="rounded-none shadow-none p-0 border-black/5 flex flex-col items-center justify-center">
+          <CardHeader className="p-6 pb-0 text-center w-[400px]">
             <CardTitle>Recent Activity</CardTitle>
             <CardDescription>Your last 5 time entries</CardDescription>
           </CardHeader>
-          <CardContent>
+
+          <Separator className="bg-black/5 dark:bg-white/5" />
+
+          <CardContent className={cn("pb-6")}>
             {recentTimeLogs?.items.length === 0 ? (
               <p className="text-sm text-primary/60 text-center py-8">
                 No time entries yet
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className={cn("space-y-3 flex gap-2")}>
                 {recentTimeLogs?.items.map((log) => (
                   <div
                     key={log.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-primary-foreground/50 border border-black/5 dark:border-white/5"
+                    className={cn(
+                      "flex items-center justify-between p-3 rounded-lg ring ring-black/10 h-full w-[275px]",
+                      log.status === "DRAFT" &&
+                        "bg-amber-500/5 text-amber-500 ring-amber-500/20",
+                      log.status === "SUBMITTED" &&
+                        "bg-sky-500/5 text-sky-500 ring-sky-500/20",
+                      log.status === "APPROVED" &&
+                        "bg-emerald-500/5 text-emerald-500 ring-emerald-500/20",
+                      log.status === "REJECTED" &&
+                        "bg-rose-500/5 text-rose-500 ring-rose-500/20",
+                      log.status === "INVOICED" &&
+                        "bg-purple-500/5 text-purple-500 ring-purple-500/20"
+                    )}
                   >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
                         <p className="text-sm font-medium">
                           {format(new Date(log.startTime), "MMM d, yyyy")}
                         </p>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-xs",
-                            log.status === "APPROVED" &&
-                              "bg-green-500/10 text-green-500 border-green-500/20",
-                            log.status === "SUBMITTED" &&
-                              "bg-blue-500/10 text-blue-500 border-blue-500/20",
-                            log.status === "REJECTED" &&
-                              "bg-red-500/10 text-red-500 border-red-500/20"
-                          )}
-                        >
-                          {log.status}
-                        </Badge>
                       </div>
-                      <p className="text-xs text-primary/60">
+
+                      <p className="text-xs text-primary/50 font-medium">
                         {format(new Date(log.startTime), "h:mm a")} -{" "}
                         {log.endTime
                           ? format(new Date(log.endTime), "h:mm a")
                           : "In Progress"}
                       </p>
                     </div>
-                    {log.duration && (
-                      <div className="text-right">
-                        <p className="text-sm font-medium">
-                          {Math.floor(log.duration / 60)}h {log.duration % 60}m
-                        </p>
-                      </div>
-                    )}
+
+                    <div className="flex flex-col items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-xs shadow-xs",
+                          log.status === "DRAFT" &&
+                            "bg-amber-500/10 text-amber-500 ring-amber-500/20",
+                          log.status === "SUBMITTED" &&
+                            "bg-sky-500/10 text-sky-500 ring-sky-500/20",
+                          log.status === "APPROVED" &&
+                            "bg-emerald-500/10 text-emerald-500 ring-emerald-500/20",
+                          log.status === "REJECTED" &&
+                            "bg-rose-500/10 text-rose-500 ring-rose-500/20",
+                          log.status === "INVOICED" &&
+                            "bg-purple-500/10 text-purple-500 ring-purple-500/20",
+                          "capitalize"
+                        )}
+                      >
+                        {
+                          (log.status === "DRAFT" && "Working",
+                          log.status === "SUBMITTED" && "Submitted",
+                          log.status === "APPROVED" && "Approved",
+                          log.status === "REJECTED" && "Rejected",
+                          log.status === "INVOICED" && "Invoiced",
+                          "Working")
+                        }
+                      </Badge>
+
+                      {log.duration && (
+                        <div className="text-right">
+                          <p className="text-[13px] font-medium text-primary">
+                            {Math.floor(log.duration / 60)}h {log.duration % 60}
+                            m
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

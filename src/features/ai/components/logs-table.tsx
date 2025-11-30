@@ -516,7 +516,7 @@ export function LogsTable() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pt-6">
       <DataTable
         data={data.items}
         columns={logColumns}

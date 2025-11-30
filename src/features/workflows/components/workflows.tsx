@@ -8,7 +8,7 @@ import { IconPayment } from "central-icons/IconPayment";
 import { formatDistanceToNow } from "date-fns";
 
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,24 +79,6 @@ type WorkflowNodePreview = {
 
 type WorkflowEntity = Omit<Workflows, "nodes"> & {
   nodes?: WorkflowNodePreview[];
-};
-
-export const WorkflowsTabs = () => {
-  const [params, setParams] = useWorkflowsParams();
-  const view = params.view || "all";
-
-  return (
-    <Tabs
-      value={view}
-      onValueChange={(v) => setParams({ ...params, view: v, page: 1 })}
-    >
-      <TabsList className="rounded-sm">
-        <TabsTrigger value="all">All workflows</TabsTrigger>
-        <TabsTrigger value="archived">Archived</TabsTrigger>
-        <TabsTrigger value="templates">Templates</TabsTrigger>
-      </TabsList>
-    </Tabs>
-  );
 };
 
 const WorkflowsList = () => {

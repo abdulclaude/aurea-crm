@@ -652,7 +652,7 @@ export function PipelinesTable() {
   }, [data.items]);
 
   return (
-    <div className="space-y-4 w-full">
+    <div className="space-y-4 w-full pt-6">
       <DataTable
         data={data.items}
         columns={pipelineColumns}

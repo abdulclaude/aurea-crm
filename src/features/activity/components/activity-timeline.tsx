@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ActivityType, ActivityAction } from "@prisma/client";
+import { Separator } from "@/components/ui/separator";
 
 interface ActivityTimelineProps {
   entityType?: string;
@@ -160,8 +161,8 @@ export function ActivityTimeline({
 
   if (activitiesQuery.isLoading) {
     return (
-      <div className="space-y-4">
-        {Array.from({ length: 3 }).map((_, i) => (
+      <div className="space-y-8">
+        {Array.from({ length: 9 }).map((_, i) => (
           <div key={i} className="flex gap-3">
             <Skeleton className="h-10 w-10 rounded-full" />
             <div className="flex-1 space-y-2">
@@ -176,11 +177,11 @@ export function ActivityTimeline({
 
   if (activitiesQuery.isError) {
     return (
-      <Card className="p-6">
-        <div className="text-center text-sm text-muted-foreground">
+      <div className="p-6">
+        <div className="text-center text-sm text-primary/60 font-medium">
           Failed to load activity timeline
         </div>
-      </Card>
+      </div>
     );
   }
 
@@ -191,16 +192,16 @@ export function ActivityTimeline({
 
   if (!activities || activities.length === 0) {
     return (
-      <Card className="p-6">
-        <div className="text-center text-sm text-muted-foreground">
-          No activity yet
+      <div className="p-6">
+        <div className="text-center text-sm text-primary/60 font-medium">
+          No activities found yet
         </div>
-      </Card>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div>
       {activities.map((activity: any) => {
         const TypeIcon = activityTypeIcons[activity.type] || FileText;
         const ActionIcon = activityActionIcons[activity.action] || Edit;
@@ -223,66 +224,70 @@ export function ActivityTimeline({
         );
 
         return (
-          <div key={activity.id} className="flex gap-3 group">
-            {/* User Avatar */}
-            <Avatar className="h-10 w-10 border">
-              <AvatarImage src={activity.user.image || undefined} />
-              <AvatarFallback>
-                {activity.user.name
-                  ?.split(" ")
-                  .map((n: string) => n[0])
-                  .join("")
-                  .toUpperCase() || "U"}
-              </AvatarFallback>
-            </Avatar>
+          <div>
+            <div key={activity.id} className="flex gap-3 group w-max p-6">
+              {/* User Avatar */}
+              <Avatar className="size-10">
+                <AvatarImage src={activity.user.image || undefined} />
+                <AvatarFallback className="text-white">
+                  {activity.user.name
+                    ?.split(" ")
+                    .map((n: string) => n[0])
+                    .join("")
+                    .toUpperCase() || "U"}
+                </AvatarFallback>
+              </Avatar>
 
-            {/* Activity Content */}
-            <div className="flex-1 space-y-1">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-sm">
-                      {activity.user.name}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {description}
-                    </span>
+              {/* Activity Content */}
+              <div className="flex-1 space-y-1">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="font-medium text-xs">
+                        {activity.user.name}
+                      </span>
+
+                      <span className="text-xs text-primary/75">
+                        {description}
+                      </span>
+                    </div>
+
+                    {/* Changes details */}
+                    {changesText && (
+                      <div className="mt-1 text-xs text-primary/75 bg-primary-foreground rounded px-2 py-1 inline-block">
+                        {changesText}
+                      </div>
+                    )}
+
+                    {/* Metadata badges */}
+                    {activity.metadata && (
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] capitalize rounded-full px-2 py-0.5"
+                          >
+                            {activity.type.toLowerCase()}
+                            <span className="lowercase">
+                              {" "}
+                              {activity.action.toLowerCase().replace("_", " ")}
+                            </span>
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Changes details */}
-                  {changesText && (
-                    <div className="mt-1 text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1 inline-block">
-                      {changesText}
-                    </div>
-                  )}
-
-                  {/* Metadata badges */}
-                  {activity.metadata && (
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center gap-1.5">
-                        <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                        <Badge variant="outline" className="text-xs">
-                          {activity.type.toLowerCase()}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <ActionIcon className={`h-3.5 w-3.5 ${actionColor}`} />
-                        <Badge variant="outline" className="text-xs">
-                          {activity.action.toLowerCase().replace("_", " ")}
-                        </Badge>
-                      </div>
-                    </div>
-                  )}
+                  {/* Timestamp */}
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatDistanceToNow(new Date(activity.createdAt), {
+                      addSuffix: true,
+                    })}
+                  </span>
                 </div>
-
-                {/* Timestamp */}
-                <span className="text-xs text-muted-foreground whitespace-nowrap">
-                  {formatDistanceToNow(new Date(activity.createdAt), {
-                    addSuffix: true,
-                  })}
-                </span>
               </div>
             </div>
+            <Separator className="bg-black/5 dark:bg-white/5" />
           </div>
         );
       })}

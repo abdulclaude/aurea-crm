@@ -57,9 +57,7 @@ export default function ContactsPage() {
           <ContactsTable />
         </Suspense>
       ) : (
-        <div className="p-6">
-          <ActivityTimeline limit={50} filterByEntityType="CONTACT" />
-        </div>
+        <ActivityTimeline limit={50} filterByEntityType="CONTACT" />
       )}
     </div>
   );

@@ -89,26 +89,25 @@ function getStatusBadge(status: TimeLogStatus) {
   const config = {
     [TimeLogStatus.DRAFT]: {
       label: "Working",
-      className:
-        "bg-amber-500/10 text-amber-500 border-amber-500/20 text-[11px]",
+      className: "bg-amber-500/10 text-amber-500 ring-amber-500/20 text-[11px]",
     },
     [TimeLogStatus.SUBMITTED]: {
       label: "Submitted",
-      className: "bg-sky-500/10 text-sky-500 border-sky-500/20 text-[11px]",
+      className: "bg-sky-500/10 text-sky-500 ring-sky-500/20 text-[11px]",
     },
     [TimeLogStatus.APPROVED]: {
       label: "Approved",
       className:
-        "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[11px]",
+        "bg-emerald-500/10 text-emerald-500 ring-emerald-500/20 text-[11px]",
     },
     [TimeLogStatus.REJECTED]: {
       label: "Rejected",
-      className: "bg-rose-500/10 text-rose-500 border-rose-500/20 text-[11px]",
+      className: "bg-rose-500/10 text-rose-500 ring-rose-500/20 text-[11px]",
     },
     [TimeLogStatus.INVOICED]: {
       label: "Invoiced",
       className:
-        "bg-purple-500/10 text-purple-500 border-purple-500/20 text-[11px]",
+        "bg-purple-500/10 text-purple-500 ring-purple-500/20 text-[11px]",
     },
   };
 
@@ -320,7 +319,7 @@ export function TimeLogsTable() {
               <ChevronRightIcon className="size-3" />
               <Badge
                 variant="outline"
-                className="bg-amber-500/10 text-amber-500 border-amber-500/20 text-[11px]"
+                className="bg-amber-500/10 text-amber-500 ring-amber-500/20 text-[11px]"
               >
                 Working
               </Badge>
@@ -847,7 +846,7 @@ export function TimeLogsTable() {
   }, [data.items]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pt-6">
       <DataTable
         data={data.items}
         columns={timeLogColumns}
