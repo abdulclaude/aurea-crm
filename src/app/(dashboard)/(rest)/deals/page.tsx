@@ -3,6 +3,7 @@
 import { LoaderCircle } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -16,14 +17,33 @@ import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 
 export default function DealsPage() {
-  const [activeTab, setActiveTab] = useState("data");
+  const [activeTab, setActiveTab] = useState("agency-data");
   const trpc = useTRPC();
+
+  // Check if user is at agency level (no active subaccount)
+  const { data: active } = useSuspenseQuery(
+    trpc.organizations.getActive.queryOptions()
+  );
+
+  const isAgencyLevel = !active?.activeSubaccountId;
 
   const { data: contactCount = 0 } = useQuery({
     ...trpc.contacts.count.queryOptions(),
   });
 
   const hasContacts = contactCount > 0;
+
+  // Define tabs based on context
+  const tabs = isAgencyLevel
+    ? [
+        { id: "agency-data", label: "Agency data" },
+        { id: "clients-data", label: "All clients data" },
+        { id: "activity", label: "Activity timeline" },
+      ]
+    : [
+        { id: "data", label: "Data table" },
+        { id: "activity", label: "Activity timeline" },
+      ];
 
   return (
     <div className="space-y-0">
@@ -54,16 +74,13 @@ export default function DealsPage() {
       <Separator className="bg-black/5 dark:bg-white/5" />
 
       <PageTabs
-        tabs={[
-          { id: "data", label: "Data table" },
-          { id: "activity", label: "Activity" },
-        ]}
+        tabs={tabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         className="px-6"
       />
 
-      {activeTab === "data" ? (
+      {activeTab === "data" || activeTab === "agency-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
@@ -72,11 +89,22 @@ export default function DealsPage() {
             </div>
           }
         >
-          <DealsTable />
+          <DealsTable scope="agency" />
+        </Suspense>
+      ) : activeTab === "clients-data" ? (
+        <Suspense
+          fallback={
+            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading deals...
+            </div>
+          }
+        >
+          <DealsTable scope="all-clients" />
         </Suspense>
       ) : (
         <div className="p-6">
-          <ActivityTimeline limit={50} filterByEntityType="DEAL" />
+          <ActivityTimeline limit={50} filterByEntityType="deal" />
         </div>
       )}
     </div>

@@ -361,11 +361,21 @@ const DEAL_COLUMN_IDS = dealColumns.map(
 );
 const COLUMN_ORDER_STORAGE_KEY = "deals-table.column-order";
 
-export function DealsTable() {
+type DealsTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function DealsTable({ scope = "agency" }: DealsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useDealsParams();
   const [rowSelection, setRowSelection] = React.useState({});
   const router = useRouter();
+
+  // Client filter for "all-clients" scope (agency viewing all client data)
+  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
+    "subaccountId",
+    parseAsString.withDefault("")
+  );
 
   // Date query state hooks (using parseAsString like profitableedge)
   const [deadlineStartStr, setDeadlineStartStr] = useQueryState(
@@ -416,6 +426,11 @@ export function DealsTable() {
       deadlineEnd: deadlineEnd || undefined,
       updatedAtStart: updatedAtStart || undefined,
       updatedAtEnd: updatedAtEnd || undefined,
+      // For "all-clients" scope, pass the selected subaccount filter
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
+        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+      }),
     })
   );
 
@@ -679,6 +694,9 @@ export function DealsTable() {
               updatedAtStart={updatedAtStart}
               updatedAtEnd={updatedAtEnd}
               onUpdatedAtChange={handleUpdatedAtChange}
+              scope={scope}
+              selectedSubaccountId={selectedSubaccountId}
+              onSubaccountChange={setSelectedSubaccountId}
             />
           ),
         }}

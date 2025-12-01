@@ -121,10 +121,17 @@ function getStatusBadge(status: TimeLogStatus) {
 
 const PRIMARY_COLUMN_ID = "select";
 
-export function TimeLogsTable() {
+type TimeLogsTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useTimeLogsParams();
   const [rowSelection, setRowSelection] = React.useState({});
+
+  // Client filter for "all-clients" scope (agency viewing all client data)
+  const [selectedSubaccountId, setSelectedSubaccountId] = React.useState<string>("");
 
   const { mutate: approveTimeLog } = useApproveTimeLog();
   const { mutate: deleteTimeLog } = useDeleteTimeLog();
@@ -147,6 +154,11 @@ export function TimeLogsTable() {
       durationMax: params.durationMax ?? undefined,
       amountMin: params.amountMin ?? undefined,
       amountMax: params.amountMax ?? undefined,
+      // For "all-clients" scope, pass the selected subaccount filter
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
+        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+      }),
     })
   );
 
@@ -896,6 +908,9 @@ export function TimeLogsTable() {
               onClearFilters={handleClearFilters}
               onStartDateChange={handleDateChange}
               onExportPDF={handleExportPDF}
+              scope={scope}
+              selectedSubaccountId={selectedSubaccountId}
+              onSubaccountChange={setSelectedSubaccountId}
             />
           ),
         }}

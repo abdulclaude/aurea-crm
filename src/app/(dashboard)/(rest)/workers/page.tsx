@@ -2,6 +2,7 @@
 
 import { LoaderCircle } from "lucide-react";
 import { Suspense, useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { WorkersTable } from "@/features/workers/components/workers-table";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -9,9 +10,33 @@ import { IconConstructionHelmet as UserPlusIcon } from "central-icons/IconConstr
 import { CreateWorkerDialog } from "@/features/workers/components/create-worker-dialog";
 import { PageTabs } from "@/components/ui/page-tabs";
 import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
+import { useTRPC } from "@/trpc/client";
 
 export default function WorkersPage() {
-  const [activeTab, setActiveTab] = useState("data");
+  const trpc = useTRPC();
+
+  // Check if user is at agency level (no active subaccount)
+  const { data: active } = useSuspenseQuery(
+    trpc.organizations.getActive.queryOptions()
+  );
+
+  const isAgencyLevel = !active?.activeSubaccountId;
+
+  const [activeTab, setActiveTab] = useState(
+    isAgencyLevel ? "agency-data" : "data"
+  );
+
+  // Define tabs based on context
+  const tabs = isAgencyLevel
+    ? [
+        { id: "agency-data", label: "Agency data" },
+        { id: "clients-data", label: "All clients data" },
+        { id: "activity", label: "Activity timeline" },
+      ]
+    : [
+        { id: "data", label: "Data table" },
+        { id: "activity", label: "Activity timeline" },
+      ];
 
   return (
     <div className="space-y-0">
@@ -34,16 +59,13 @@ export default function WorkersPage() {
       <Separator className="bg-black/5 dark:bg-white/5" />
 
       <PageTabs
-        tabs={[
-          { id: "data", label: "Data table" },
-          { id: "activity", label: "Activity" },
-        ]}
+        tabs={tabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         className="px-6"
       />
 
-      {activeTab === "data" ? (
+      {activeTab === "data" || activeTab === "agency-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground text-sm text-primary flex items-center justify-center gap-3 p-6">
@@ -52,11 +74,22 @@ export default function WorkersPage() {
             </div>
           }
         >
-          <WorkersTable />
+          <WorkersTable scope="agency" />
+        </Suspense>
+      ) : activeTab === "clients-data" ? (
+        <Suspense
+          fallback={
+            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground text-sm text-primary flex items-center justify-center gap-3 p-6">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading workers...
+            </div>
+          }
+        >
+          <WorkersTable scope="all-clients" />
         </Suspense>
       ) : (
         <div className="p-6">
-          <ActivityTimeline limit={50} filterByEntityType="WORKER" />
+          <ActivityTimeline limit={50} filterByEntityType="worker" />
         </div>
       )}
     </div>

@@ -88,6 +88,9 @@ export interface ContactsToolbarProps {
   updatedAtStart?: Date;
   updatedAtEnd?: Date;
   onUpdatedAtChange?: (start?: Date, end?: Date) => void;
+  scope?: "agency" | "all-clients";
+  selectedSubaccountId?: string;
+  onSubaccountChange?: (subaccountId: string) => void;
 }
 
 const contactTypeOptions = ["LEAD", "PROSPECT", "CUSTOMER", "CHURN", "CLOSED"];
@@ -131,6 +134,9 @@ export function ContactsToolbar({
   updatedAtStart,
   updatedAtEnd,
   onUpdatedAtChange,
+  scope = "agency",
+  selectedSubaccountId = "",
+  onSubaccountChange,
 }: ContactsToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
@@ -143,6 +149,11 @@ export function ContactsToolbar({
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   const trpc = useTRPC();
+
+  // Fetch available clients/subaccounts for "all-clients" scope
+  const { data: clients = [] } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions()
+  );
 
   // Fetch available members for assignment filter
   const { data: members = [] } = useSuspenseQuery(
@@ -561,6 +572,47 @@ export function ContactsToolbar({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Client Filter - Only show for "all-clients" scope */}
+        {scope === "all-clients" && onSubaccountChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-8.5! min-w-32">
+                {selectedSubaccountId
+                  ? clients.find((c: any) => c.subaccountId === selectedSubaccountId)
+                      ?.name || "Select client"
+                  : "All clients"}
+                <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent
+              align="start"
+              className="bg-background border border-black/10 dark:border-white/5 w-[280px] p-1 max-h-[400px] overflow-auto"
+            >
+              <DropdownMenuCheckboxItem
+                checked={selectedSubaccountId === ""}
+                onSelect={() => onSubaccountChange("")}
+                className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+              >
+                All clients
+              </DropdownMenuCheckboxItem>
+
+              <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />
+
+              {clients.map((client: any) => (
+                <DropdownMenuCheckboxItem
+                  key={client.subaccountId}
+                  checked={selectedSubaccountId === client.subaccountId}
+                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+                >
+                  {client.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         {/* Sort dropdown */}
         <DropdownMenu>

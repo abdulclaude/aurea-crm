@@ -1,4 +1,5 @@
 import type { OrganizationMemberRole, Prisma } from "@prisma/client";
+import { ActivityAction } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import z from "zod";
 
@@ -15,6 +16,7 @@ import {
   protectedProcedure,
 } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
+import { logAnalytics } from "@/lib/analytics-logger";
 
 const clientInclude = {
   organization: {
@@ -1037,6 +1039,28 @@ export const organizationsRouter = createTRPCRouter({
         subaccountId: null,
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId,
+        subaccountId: null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "invitation",
+        entityId: invitation.id,
+        entityName: input.email,
+        metadata: {
+          email: input.email,
+          role: input.role,
+          invitationType: "organization",
+        },
+        posthogProperties: {
+          email: input.email,
+          role: input.role,
+          invitation_type: "organization",
+          organization_name: organization.name,
+        },
+      });
+
       return invitation;
     }),
 
@@ -1162,6 +1186,28 @@ export const organizationsRouter = createTRPCRouter({
         invitationUrl,
         role: input.role,
         isSubaccount: true,
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: subaccount.organizationId,
+        subaccountId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "invitation",
+        entityId: invitation.id,
+        entityName: input.email,
+        metadata: {
+          email: input.email,
+          role: input.role,
+          invitationType: "subaccount",
+        },
+        posthogProperties: {
+          email: input.email,
+          role: input.role,
+          invitation_type: "subaccount",
+          subaccount_name: subaccount.companyName,
+        },
       });
 
       return invitation;
@@ -1443,6 +1489,27 @@ export const organizationsRouter = createTRPCRouter({
           subaccountId,
         });
 
+        // Log analytics
+        await logAnalytics({
+          organizationId: invitation.organizationId,
+          subaccountId,
+          userId: ctx.auth.user.id,
+          action: ActivityAction.UPDATED,
+          entityType: "invitation",
+          entityId: invitation.id,
+          entityName: ctx.auth.user.email,
+          metadata: {
+            status: "accepted",
+            role,
+            invitationType: "subaccount",
+          },
+          posthogProperties: {
+            status: "accepted",
+            role,
+            invitation_type: "subaccount",
+          },
+        });
+
         return {
           success: true,
           organizationId: invitation.organizationId,
@@ -1498,6 +1565,28 @@ export const organizationsRouter = createTRPCRouter({
           entityId: invitation.id,
           organizationId: invitation.organizationId,
           subaccountId: null,
+        });
+
+        // Log analytics
+        await logAnalytics({
+          organizationId: invitation.organizationId,
+          subaccountId: null,
+          userId: ctx.auth.user.id,
+          action: ActivityAction.UPDATED,
+          entityType: "invitation",
+          entityId: invitation.id,
+          entityName: ctx.auth.user.email,
+          metadata: {
+            status: "accepted",
+            role: invitation.role,
+            invitationType: "organization",
+          },
+          posthogProperties: {
+            status: "accepted",
+            role: invitation.role,
+            invitation_type: "organization",
+            organization_name: invitation.organization.name,
+          },
         });
 
         return {

@@ -243,17 +243,17 @@ function UserStatusIndicatorInner() {
               <Badge
                 variant="outline"
                 className={cn(
-                  "text-[9px] px-1.5 py-0 h-5 border-current shrink-0 border-none",
+                  "text-[9px] px-1.5 py-0 h-5 shrink-0 ",
                   statusConfig.color.includes("emerald") &&
-                    "bg-emerald-500 text-emerald-100",
+                    "bg-emerald-500 text-emerald-100 ring-emerald-700/10",
                   statusConfig.color.includes("amber") &&
-                    "bg-amber-500 text-amber-100",
+                    "bg-amber-500 text-amber-100 ring-amber-700/10",
                   statusConfig.color.includes("rose") &&
-                    "bg-rose-500 text-rose-100",
+                    "bg-rose-500 text-rose-100 ring-rose-700/10",
                   statusConfig.color.includes("indigo") &&
-                    "bg-indigo-500 text-indigo-100",
+                    "bg-indigo-500 text-indigo-100 ring-indigo-700/10",
                   statusConfig.color.includes("slate") &&
-                    "bg-slate-500 text-slate-100"
+                    "bg-slate-500 text-slate-100 ring-slate-700/10"
                 )}
               >
                 {statusConfig.label}
@@ -334,14 +334,8 @@ function UserStatusIndicatorInner() {
                 onClick={() => router.push("/settings/billing")}
                 className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
               >
-                <UpgradeIcon className="size-3.5 text-sky-500 shrink-0" />
+                <UpgradeIcon className="size-3.5 shrink-0" />
                 <span className="text-xs font-medium">Upgrade to Pro</span>
-                <Badge
-                  variant="destructive"
-                  className="ml-auto text-[10px] px-1.5 py-0 h-4"
-                >
-                  20% off
-                </Badge>
               </DropdownMenuItem>
             )}
 

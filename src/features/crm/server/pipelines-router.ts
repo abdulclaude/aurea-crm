@@ -4,9 +4,11 @@ import z from "zod";
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
 import { convertCurrency } from "@/features/crm/lib/currency";
 import type { Prisma } from "@prisma/client";
+import { ActivityAction } from "@prisma/client";
 import prisma from "@/lib/db";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 
 const pipelineInclude = {
   stages: {
@@ -285,12 +287,15 @@ export const pipelinesRouter = createTRPCRouter({
           createdAtEnd: z.date().optional(),
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
+          subaccountId: z.string().optional(), // Override for "all-clients" view
+          includeAllClients: z.boolean().optional(), // Flag to include all clients
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      // Use input subaccountId if provided, otherwise use context subaccountId
+      const subaccountId = input?.subaccountId ?? ctx.subaccountId;
 
       if (!orgId) {
         return { items: [], nextCursor: null, total: 0 };
@@ -301,7 +306,12 @@ export const pipelinesRouter = createTRPCRouter({
 
       const where: Prisma.PipelineWhereInput = {
         organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
+        // Only filter by subaccount if not viewing all clients
+        ...(input?.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : {}),
       };
 
       if (input?.isActive !== undefined) {
@@ -559,6 +569,26 @@ export const pipelinesRouter = createTRPCRouter({
         subaccountId: subaccountId ?? undefined,
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "pipeline",
+        entityId: pipeline.id,
+        entityName: pipeline.name,
+        metadata: {
+          isDefault: pipeline.isDefault,
+          stagesCount: input.stages.length,
+        },
+        posthogProperties: {
+          is_default: pipeline.isDefault,
+          stages_count: input.stages.length,
+          has_description: !!pipeline.description,
+        },
+      });
+
       return mapPipeline(pipeline);
     }),
 
@@ -650,6 +680,28 @@ export const pipelinesRouter = createTRPCRouter({
         include: pipelineInclude,
       });
 
+      // Log analytics
+      const changes = getChangedFields(existing, data);
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "pipeline",
+        entityId: pipeline.id,
+        entityName: pipeline.name,
+        changes,
+        metadata: {
+          fieldsChanged: changes ? Object.keys(changes) : [],
+          stagesUpdated: !!stages,
+        },
+        posthogProperties: {
+          fields_changed: changes ? Object.keys(changes) : [],
+          stages_updated: !!stages,
+          is_default: pipeline.isDefault,
+        },
+      });
+
       return mapPipeline(pipeline);
     }),
 
@@ -684,6 +736,23 @@ export const pipelinesRouter = createTRPCRouter({
 
       await prisma.pipeline.delete({
         where: { id: input.id },
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: orgId,
+        subaccountId: subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "pipeline",
+        entityId: existing.id,
+        entityName: existing.name,
+        metadata: {
+          wasDefault: existing.isDefault,
+        },
+        posthogProperties: {
+          was_default: existing.isDefault,
+        },
       });
 
       return { success: true };

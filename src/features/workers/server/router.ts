@@ -2,12 +2,14 @@ import { TRPCError } from "@trpc/server";
 import crypto from "crypto";
 import { addHours } from "date-fns";
 import { z } from "zod";
+import { ActivityAction } from "@prisma/client";
 import prisma from "@/lib/db";
 import {
   baseProcedure,
   createTRPCRouter,
   protectedProcedure,
 } from "@/trpc/init";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
 
@@ -35,6 +37,8 @@ export const workersRouter = createTRPCRouter({
         rateMax: z.number().optional(),
         createdAfter: z.date().optional(),
         createdBefore: z.date().optional(),
+        subaccountId: z.string().optional(), // Override for "all-clients" view
+        includeAllClients: z.boolean().optional(), // Flag to include all clients
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -45,10 +49,20 @@ export const workersRouter = createTRPCRouter({
         });
       }
 
+      // Use input subaccountId if provided, otherwise use context subaccountId
+      const subaccountId = input.subaccountId !== undefined
+        ? (input.subaccountId || null)
+        : ctx.subaccountId;
+
       const where: any = {
         organizationId: ctx.orgId,
-        // Strict scoping: only show workers created in the current context
-        subaccountId: ctx.subaccountId ?? null,
+        // Only filter by subaccount if not viewing all clients
+        ...(input.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : { subaccountId: null }
+        ),
       };
 
       if (input.search) {
@@ -201,6 +215,29 @@ export const workersRouter = createTRPCRouter({
         },
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "worker",
+        entityId: worker.id,
+        entityName: worker.name,
+        metadata: {
+          email: worker.email,
+          role: worker.role,
+          hourlyRate: worker.hourlyRate?.toString(),
+        },
+        posthogProperties: {
+          has_email: !!worker.email,
+          has_phone: !!worker.phone,
+          has_hourly_rate: !!worker.hourlyRate,
+          role: worker.role,
+          currency: worker.currency,
+        },
+      });
+
       return worker;
     }),
 
@@ -249,6 +286,27 @@ export const workersRouter = createTRPCRouter({
         data: updateData,
       });
 
+      // Log analytics - convert data for comparison
+      const workerForComparison = { ...worker, hourlyRate: worker.hourlyRate ? Number(worker.hourlyRate) : null };
+      const changes = getChangedFields(workerForComparison, updateData);
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "worker",
+        entityId: updated.id,
+        entityName: updated.name,
+        changes,
+        metadata: {
+          fieldsChanged: changes ? Object.keys(changes) : [],
+        },
+        posthogProperties: {
+          fields_changed: changes ? Object.keys(changes) : [],
+          is_active: updated.isActive,
+        },
+      });
+
       return updated;
     }),
 
@@ -280,6 +338,23 @@ export const workersRouter = createTRPCRouter({
 
       await prisma.worker.delete({
         where: { id: input.id },
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "worker",
+        entityId: worker.id,
+        entityName: worker.name,
+        metadata: {
+          role: worker.role,
+        },
+        posthogProperties: {
+          role: worker.role,
+        },
       });
 
       return { success: true };

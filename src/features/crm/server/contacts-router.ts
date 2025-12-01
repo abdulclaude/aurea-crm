@@ -206,12 +206,17 @@ export const contactsRouter = createTRPCRouter({
           updatedAtEnd: z.date().optional(),
           cursor: z.number().optional(),
           limit: z.number().optional(),
+          subaccountId: z.string().optional(), // Override for "all-clients" view
+          includeAllClients: z.boolean().optional(), // Flag to include all clients
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      // Use input subaccountId if provided, otherwise use context subaccountId
+      const subaccountId = input?.subaccountId !== undefined
+        ? (input.subaccountId || null)
+        : ctx.subaccountId;
 
       if (!orgId) {
         return { items: [], nextCursor: null, total: 0 };
@@ -222,7 +227,13 @@ export const contactsRouter = createTRPCRouter({
 
       const where: Prisma.ContactWhereInput = {
         organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
+        // Only filter by subaccount if not viewing all clients
+        ...(input?.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : { subaccountId: null }
+        ),
       };
 
       if (input?.types && input.types.length > 0) {

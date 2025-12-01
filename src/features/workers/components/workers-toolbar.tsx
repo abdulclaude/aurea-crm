@@ -64,6 +64,9 @@ export interface WorkersToolbarProps {
   columnOrder: ColumnOrderState;
   onColumnOrderChange: (order: ColumnOrderState) => void;
   initialColumnOrder: ColumnOrderState;
+  scope?: "agency" | "all-clients";
+  selectedSubaccountId?: string;
+  onSubaccountIdChange?: (subaccountId: string) => void;
   // Filter props
   selectedRoles?: string[];
   selectedStatus?: boolean | null;
@@ -107,6 +110,9 @@ export function WorkersToolbar({
   columnOrder,
   onColumnOrderChange,
   initialColumnOrder,
+  scope = "agency",
+  selectedSubaccountId = "",
+  onSubaccountIdChange,
   selectedRoles = [],
   selectedStatus,
   startDate,
@@ -121,6 +127,11 @@ export function WorkersToolbar({
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
 
   const trpc = useTRPC();
+
+  // Fetch available clients/subaccounts for "all-clients" scope
+  const { data: clients = [] } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions()
+  );
 
   // Fetch all workers for filter options and preview
   const { data: allWorkersData } = useSuspenseQuery(
@@ -504,6 +515,47 @@ export function WorkersToolbar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Client Filter - Only show for "all-clients" scope */}
+        {scope === "all-clients" && onSubaccountIdChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-8.5! min-w-32">
+                {selectedSubaccountId
+                  ? clients.find((c: any) => c.subaccountId === selectedSubaccountId)
+                      ?.name || "Select client"
+                  : "All clients"}
+                <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent
+              align="start"
+              className="bg-background border border-black/10 dark:border-white/5 w-[280px] p-1 max-h-[400px] overflow-auto"
+            >
+              <DropdownMenuCheckboxItem
+                checked={selectedSubaccountId === ""}
+                onSelect={() => onSubaccountIdChange("")}
+                className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+              >
+                All clients
+              </DropdownMenuCheckboxItem>
+
+              <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />
+
+              {clients.map((client: any) => (
+                <DropdownMenuCheckboxItem
+                  key={client.subaccountId}
+                  checked={selectedSubaccountId === client.subaccountId}
+                  onSelect={() => onSubaccountIdChange(client.subaccountId)}
+                  className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+                >
+                  {client.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {/* Column visibility and ordering on the right */}

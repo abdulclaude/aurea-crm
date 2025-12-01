@@ -1,5 +1,5 @@
 import { PAGINATION } from "@/config/constants";
-import { NodeType } from "@prisma/client";
+import { NodeType, ActivityAction } from "@prisma/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 import prisma from "@/lib/db";
 
@@ -18,6 +18,7 @@ import {
 import { syncGmailWorkflowSubscriptions } from "@/features/gmail/server/subscriptions";
 import { createNotification } from "@/lib/notifications";
 import { Prisma } from "@prisma/client";
+import { logAnalytics } from "@/lib/analytics-logger";
 
 const nodePreviewSelect = {
   id: true,
@@ -98,6 +99,26 @@ export const workflowsRouter = createTRPCRouter({
       subaccountId: ctx.subaccountId ?? undefined,
     });
 
+    // Log analytics
+    await logAnalytics({
+      organizationId: ctx.orgId ?? "",
+      subaccountId: ctx.subaccountId ?? null,
+      userId: ctx.auth.user.id,
+      action: ActivityAction.CREATED,
+      entityType: "workflow",
+      entityId: workflow.id,
+      entityName: workflow.name,
+      metadata: {
+        isBundle: workflow.isBundle,
+        isTemplate: workflow.isTemplate,
+      },
+      posthogProperties: {
+        is_bundle: workflow.isBundle,
+        is_template: workflow.isTemplate,
+        has_initial_node: true,
+      },
+    });
+
     return workflow;
   }),
   createBundle: premiumProcedure.mutation(({ ctx }) => {
@@ -122,6 +143,7 @@ export const workflowsRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), archived: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const scoped = await findWorkflowForCtx(ctx, input.id);
+      const oldArchived = scoped.archived;
       const workflow = await prisma.workflows.update({
         where: {
           id: scoped.id,
@@ -141,6 +163,27 @@ export const workflowsRouter = createTRPCRouter({
       }
 
       await syncGmailWorkflowSubscriptions({ userId: ctx.auth.user.id });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "workflow",
+        entityId: workflow.id,
+        entityName: workflow.name,
+        changes: { archived: { old: oldArchived, new: input.archived } },
+        metadata: {
+          archived: input.archived,
+          fieldsChanged: ["archived"],
+        },
+        posthogProperties: {
+          archived: input.archived,
+          was_archived: oldArchived,
+          fields_changed: ["archived"],
+        },
+      });
 
       return workflow;
     }),
@@ -169,12 +212,31 @@ export const workflowsRouter = createTRPCRouter({
         subaccountId: ctx.subaccountId ?? undefined,
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "workflow",
+        entityId: workflow.id,
+        entityName: workflow.name,
+        metadata: {
+          isBundle: workflow.isBundle,
+          isTemplate: workflow.isTemplate,
+        },
+        posthogProperties: {
+          is_bundle: workflow.isBundle,
+          is_template: workflow.isTemplate,
+        },
+      });
+
       return workflow;
     }),
   updateName: protectedProcedure
     .input(z.object({ id: z.string(), name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      await findWorkflowForCtx(ctx, input.id);
+      const oldWorkflow = await findWorkflowForCtx(ctx, input.id);
       const workflow = await prisma.workflows.update({
         where: {
           id: input.id,
@@ -194,6 +256,27 @@ export const workflowsRouter = createTRPCRouter({
         entityId: workflow.id,
         organizationId: ctx.orgId ?? undefined,
         subaccountId: ctx.subaccountId ?? undefined,
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "workflow",
+        entityId: workflow.id,
+        entityName: workflow.name,
+        changes: { name: { old: oldWorkflow.name, new: input.name } },
+        metadata: {
+          fieldsChanged: ["name"],
+          oldName: oldWorkflow.name,
+        },
+        posthogProperties: {
+          fields_changed: ["name"],
+          old_name: oldWorkflow.name,
+          new_name: input.name,
+        },
       });
 
       return workflow;

@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import * as React from "react";
+import { useQueryState, parseAsString } from "nuqs";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -452,10 +453,20 @@ function normalizeHiddenColumns(columns: string[]): string[] {
   return [...columns].sort();
 }
 
-export function WorkersTable() {
+type WorkersTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useWorkersParams();
   const [rowSelection, setRowSelection] = React.useState({});
+
+  // Client filter for "all-clients" scope (agency viewing all client data)
+  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
+    "subaccountId",
+    parseAsString.withDefault("")
+  );
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.workers.list.queryOptions({
@@ -470,6 +481,11 @@ export function WorkersTable() {
       createdBefore: params.createdBefore
         ? new Date(params.createdBefore)
         : undefined,
+      // For "all-clients" scope, pass the selected subaccount filter
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
+        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+      }),
     })
   );
 
@@ -664,6 +680,9 @@ export function WorkersTable() {
               }
               onApplyAllFilters={handleApplyFilters}
               onStartDateChange={handleDateRangeChange}
+              scope={scope}
+              selectedSubaccountId={selectedSubaccountId}
+              onSubaccountIdChange={setSelectedSubaccountId}
             />
           ),
         }}

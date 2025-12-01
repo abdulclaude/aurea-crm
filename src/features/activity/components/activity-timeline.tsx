@@ -152,7 +152,11 @@ export function ActivityTimeline({
   });
 
   const allActivitiesQuery = useQuery({
-    ...trpc.activity.list.queryOptions({ limit }),
+    ...trpc.activity.list.queryOptions({
+      limit,
+      // Filter by entity type when filterByEntityType is provided
+      ...(filterByEntityType && { entityType: filterByEntityType }),
+    }),
     enabled: !entityType || !entityId,
   });
 

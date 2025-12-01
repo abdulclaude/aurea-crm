@@ -51,7 +51,7 @@ export default function Page() {
 
       {view === "activity" ? (
         <div className="p-6">
-          <ActivityTimeline limit={50} filterByEntityType="WORKFLOW" />
+          <ActivityTimeline limit={50} filterByEntityType="workflow" />
         </div>
       ) : (
         <WorkflowsContainer>

@@ -189,7 +189,7 @@ export default function WorkerDashboardPage({
                 <ClockIcon className="size-4" />
                 Currently clocked in
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="font-medium">
                 Started at {format(new Date(activeTimeLog.startTime), "h:mm a")}
               </CardDescription>
             </CardHeader>
@@ -198,7 +198,7 @@ export default function WorkerDashboardPage({
 
             <CardContent className="space-y-4 flex flex-col items-center bg-background p-6">
               <div className="text-center">
-                <p className="text-sm text-primary/60 mb-2">Elapsed time</p>
+                <p className="text-xs text-primary/60 mb-2">Elapsed time</p>
                 <p className="text-4xl font-mono font-bold text-primary">
                   {duration}
                 </p>

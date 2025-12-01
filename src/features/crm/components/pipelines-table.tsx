@@ -366,11 +366,21 @@ const PIPELINE_COLUMN_IDS = getPipelineColumns(null).map(
   (column, index) => (column.id ?? `column-${index}`) as string
 );
 
-export function PipelinesTable() {
+type PipelinesTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
   const router = useRouter();
   const trpc = useTRPC();
   const [params, setParams] = usePipelinesParams();
   const [rowSelection, setRowSelection] = React.useState({});
+
+  // Client filter for "all-clients" scope (agency viewing all client data)
+  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
+    "subaccountId",
+    parseAsString.withDefault("")
+  );
 
   // Date query state hooks (using parseAsString like profitableedge)
   const [createdAtStartStr, setCreatedAtStartStr] = useQueryState(
@@ -427,6 +437,11 @@ export function PipelinesTable() {
       createdAtEnd: createdAtEnd || undefined,
       updatedAtStart: updatedAtStart || undefined,
       updatedAtEnd: updatedAtEnd || undefined,
+      // For "all-clients" scope, pass the selected subaccount filter
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
+        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+      }),
     })
   );
 
@@ -717,6 +732,9 @@ export function PipelinesTable() {
               updatedAtStart={updatedAtStart}
               updatedAtEnd={updatedAtEnd}
               onUpdatedAtChange={handleUpdatedAtChange}
+              scope={scope}
+              selectedSubaccountId={selectedSubaccountId}
+              onSubaccountChange={setSelectedSubaccountId}
             />
           ),
         }}

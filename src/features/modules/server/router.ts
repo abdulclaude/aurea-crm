@@ -6,8 +6,9 @@ import {
 } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import prisma from "@/lib/db";
-import { ModuleType } from "@prisma/client";
+import { ModuleType, ActivityAction } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
+import { logAnalytics } from "@/lib/analytics-logger";
 
 // Module configurations with premium requirements
 export const MODULE_CONFIG = {
@@ -220,6 +221,27 @@ export const modulesRouter = createTRPCRouter({
         },
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "module",
+        entityId: module.id,
+        entityName: moduleConfig.name,
+        metadata: {
+          moduleType: input.moduleType,
+          enabled: true,
+        },
+        posthogProperties: {
+          module_type: input.moduleType,
+          enabled: true,
+          is_premium: moduleConfig.requiresPremium,
+          is_subaccount_level: isSubaccountLevel,
+        },
+      });
+
       return module;
     }),
 
@@ -238,6 +260,7 @@ export const modulesRouter = createTRPCRouter({
       // Prefer subaccount over organization
       const isSubaccountLevel = !!ctx.subaccountId;
 
+      const moduleConfig = MODULE_CONFIG[input.moduleType];
       const module = await prisma.subaccountModule.upsert({
         where: isSubaccountLevel
           ? {
@@ -260,6 +283,26 @@ export const modulesRouter = createTRPCRouter({
         },
         update: {
           enabled: false,
+        },
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "module",
+        entityId: module.id,
+        entityName: moduleConfig.name,
+        metadata: {
+          moduleType: input.moduleType,
+          enabled: false,
+        },
+        posthogProperties: {
+          module_type: input.moduleType,
+          enabled: false,
+          is_subaccount_level: isSubaccountLevel,
         },
       });
 

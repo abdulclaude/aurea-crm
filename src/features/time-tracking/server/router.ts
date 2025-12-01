@@ -6,8 +6,9 @@ import {
 } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import prisma from "@/lib/db";
-import { CheckInMethod, TimeLogStatus } from "@prisma/client";
+import { CheckInMethod, TimeLogStatus, ActivityAction } from "@prisma/client";
 import { Prisma } from "@prisma/client";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 
 const CRM_PAGE_SIZE = 20;
 
@@ -108,6 +109,9 @@ const listTimeLogsSchema = z.object({
   workerId: z.string().optional(),
   dealId: z.string().optional(),
   status: z.nativeEnum(TimeLogStatus).optional(),
+  // Dual data table support
+  subaccountId: z.string().optional(), // Override for "all-clients" view
+  includeAllClients: z.boolean().optional(), // Flag to include all clients
 });
 
 const createQRCodeSchema = z.object({
@@ -399,6 +403,29 @@ export const timeTrackingRouter = createTRPCRouter({
         },
       });
 
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "time_log",
+        entityId: timeLog.id,
+        entityName: timeLog.title || "Time Log",
+        metadata: {
+          checkInMethod: timeLog.checkInMethod,
+          billable: timeLog.billable,
+          status: timeLog.status,
+        },
+        posthogProperties: {
+          check_in_method: timeLog.checkInMethod,
+          billable: timeLog.billable,
+          has_hourly_rate: !!timeLog.hourlyRate,
+          has_deal: !!timeLog.dealId,
+          currency: timeLog.currency,
+        },
+      });
+
       return timeLog;
     }),
 
@@ -417,7 +444,6 @@ export const timeTrackingRouter = createTRPCRouter({
       // First verify the time log belongs to this subaccount
       const existingLog = await prisma.timeLog.findUnique({
         where: { id },
-        select: { subaccountId: true },
       });
 
       if (!existingLog) {
@@ -464,6 +490,40 @@ export const timeTrackingRouter = createTRPCRouter({
         },
       });
 
+      // Log analytics - prepare existing data for comparison
+      const existingForComparison = {
+        contactId: existingLog.contactId,
+        dealId: existingLog.dealId,
+        title: existingLog.title,
+        description: existingLog.description,
+        startTime: existingLog.startTime,
+        endTime: existingLog.endTime,
+        breakDuration: existingLog.breakDuration,
+        status: existingLog.status,
+        billable: existingLog.billable,
+        hourlyRate: existingLog.hourlyRate ? Number(existingLog.hourlyRate) : null,
+      };
+      const changes = getChangedFields(existingForComparison, data);
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "time_log",
+        entityId: timeLog.id,
+        entityName: timeLog.title || "Time Log",
+        changes,
+        metadata: {
+          fieldsChanged: changes ? Object.keys(changes) : [],
+          status: timeLog.status,
+        },
+        posthogProperties: {
+          fields_changed: changes ? Object.keys(changes) : [],
+          status: timeLog.status,
+          billable: timeLog.billable,
+        },
+      });
+
       return timeLog;
     }),
 
@@ -503,6 +563,19 @@ export const timeTrackingRouter = createTRPCRouter({
         },
       });
 
+      // Log analytics (existingLog only has subaccountId at this point)
+      await logAnalytics({
+        organizationId: ctx.orgId ?? "",
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "time_log",
+        entityId: input.id,
+        entityName: "Time Log",
+        metadata: {},
+        posthogProperties: {},
+      });
+
       return { success: true };
     }),
 
@@ -531,18 +604,28 @@ export const timeTrackingRouter = createTRPCRouter({
         if (session?.session?.token) {
           const sessionRecord = await prisma.session.findUnique({
             where: { token: session.session.token },
-            select: { activeSubaccountId: true },
+            select: { activeSubaccountId: true, activeOrganizationId: true },
           });
-          subaccountId = sessionRecord?.activeSubaccountId ?? undefined;
+
+          // Use input subaccountId if provided (for "all-clients" view filter)
+          subaccountId = input?.subaccountId !== undefined
+            ? (input.subaccountId || undefined)
+            : (sessionRecord?.activeSubaccountId ?? undefined);
         }
       }
 
-      if (!subaccountId) {
+      if (!subaccountId && !input.includeAllClients) {
         return { items: [], nextCursor: null };
       }
 
       const where: Prisma.TimeLogWhereInput = {
-        subaccountId,
+        // Only filter by subaccount if not viewing all clients
+        ...(input?.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : { subaccountId: null }
+        ),
       };
 
       const andConditions: Prisma.TimeLogWhereInput[] = [];

@@ -234,12 +234,17 @@ export const dealsRouter = createTRPCRouter({
           deadlineEnd: z.date().optional(),
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
+          subaccountId: z.string().optional(), // Override for "all-clients" view
+          includeAllClients: z.boolean().optional(), // Flag to include all clients
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      // Use input subaccountId if provided, otherwise use context subaccountId
+      const subaccountId = input?.subaccountId !== undefined
+        ? (input.subaccountId || null)
+        : ctx.subaccountId;
 
       if (!orgId) {
         return { items: [], nextCursor: null, total: 0 };
@@ -250,7 +255,13 @@ export const dealsRouter = createTRPCRouter({
 
       const where: Prisma.DealWhereInput = {
         organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
+        // Only filter by subaccount if not viewing all clients
+        ...(input?.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : { subaccountId: null }
+        ),
       };
 
       if (input?.pipelineId) {

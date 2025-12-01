@@ -371,9 +371,19 @@ function AssigneeCell({ contact }: { contact: ContactRow }) {
   );
 }
 
-export function ContactsTable() {
+type ContactsTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useContactsParams();
+
+  // Client filter for "all-clients" scope (agency viewing all client data)
+  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
+    "subaccountId",
+    parseAsString.withDefault("")
+  );
 
   // Separate query state hooks for date parameters (using parseAsString like profitableedge)
   const [createdAtStartStr, setCreatedAtStartStr] = useQueryState(
@@ -433,6 +443,11 @@ export function ContactsTable() {
       lastActivityEnd: lastActivityEnd || undefined,
       updatedAtStart: updatedAtStart || undefined,
       updatedAtEnd: updatedAtEnd || undefined,
+      // For "all-clients" scope, pass the selected subaccount filter
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
+        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+      }),
     })
   );
 
@@ -685,6 +700,9 @@ export function ContactsTable() {
                 updatedAtStart={updatedAtStart || undefined}
                 updatedAtEnd={updatedAtEnd || undefined}
                 onUpdatedAtChange={handleUpdatedAtChange}
+                scope={scope}
+                selectedSubaccountId={selectedSubaccountId}
+                onSubaccountChange={setSelectedSubaccountId}
               />
             ),
           }}

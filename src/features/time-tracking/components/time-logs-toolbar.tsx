@@ -97,6 +97,10 @@ export interface TimeLogsToolbarProps {
   onStartDateChange?: (start?: Date, end?: Date) => void;
   // Export props
   onExportPDF?: () => void;
+  // Scope props
+  scope?: "agency" | "all-clients";
+  selectedSubaccountId?: string;
+  onSubaccountChange?: (subaccountId: string) => void;
 }
 
 const sortOptions = [
@@ -141,11 +145,19 @@ export function TimeLogsToolbar({
   onClearFilters,
   onStartDateChange,
   onExportPDF,
+  scope = "agency",
+  selectedSubaccountId = "",
+  onSubaccountChange,
 }: TimeLogsToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
 
   const trpc = useTRPC();
+
+  // Fetch available clients/subaccounts for "all-clients" scope
+  const { data: clients = [] } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions()
+  );
 
   // Fetch all time logs for filter options and preview
   const { data: allTimeLogsData } = useSuspenseQuery(
@@ -703,6 +715,47 @@ export function TimeLogsToolbar({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        {/* Client Filter - Only show for "all-clients" scope */}
+        {scope === "all-clients" && onSubaccountChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-8.5! min-w-32">
+                {selectedSubaccountId
+                  ? clients.find((c: any) => c.subaccountId === selectedSubaccountId)
+                      ?.name || "Select client"
+                  : "All clients"}
+                <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent
+              align="start"
+              className="bg-background border border-black/10 dark:border-white/5 w-[280px] p-1 max-h-[400px] overflow-auto"
+            >
+              <DropdownMenuCheckboxItem
+                checked={selectedSubaccountId === ""}
+                onSelect={() => onSubaccountChange("")}
+                className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+              >
+                All clients
+              </DropdownMenuCheckboxItem>
+
+              <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />
+
+              {clients.map((client: any) => (
+                <DropdownMenuCheckboxItem
+                  key={client.subaccountId}
+                  checked={selectedSubaccountId === client.subaccountId}
+                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
+                >
+                  {client.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         {/* Sort dropdown */}
         <DropdownMenu>
