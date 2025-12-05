@@ -15,11 +15,23 @@ export const logsRouter = createTRPCRouter({
         createdAtEnd: z.date().optional(),
         completedAtStart: z.date().optional(),
         completedAtEnd: z.date().optional(),
+        subaccountId: z.string().optional(), // Override for "all-clients" view
+        includeAllClients: z.boolean().optional(), // Flag to include all clients
       })
     )
     .query(async ({ ctx, input }) => {
+      const subaccountId =
+        input?.subaccountId !== undefined
+          ? input.subaccountId || null
+          : ctx.subaccountId;
+
       const where: any = {
         organizationId: ctx.orgId,
+        ...(input?.includeAllClients
+          ? {}
+          : subaccountId
+            ? { subaccountId }
+            : { subaccountId: null }),
       };
 
       if (input.search) {

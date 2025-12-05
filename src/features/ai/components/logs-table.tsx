@@ -295,10 +295,20 @@ const LOG_COLUMN_IDS = logColumns.map(
 );
 const COLUMN_ORDER_STORAGE_KEY = "logs-table.column-order";
 
-export function LogsTable() {
+type LogsTableProps = {
+  scope?: "agency" | "all-clients";
+};
+
+export function LogsTable({ scope = "agency" }: LogsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useLogsParams();
   const [rowSelection, setRowSelection] = React.useState({});
+
+  // Client filter for all-clients view
+  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
+    "subaccountId",
+    parseAsString.withDefault("")
+  );
 
   // Date query state hooks
   const [createdAtStartStr, setCreatedAtStartStr] = useQueryState(
@@ -349,6 +359,10 @@ export function LogsTable() {
       createdAtEnd: createdAtEnd || undefined,
       completedAtStart: completedAtStart || undefined,
       completedAtEnd: completedAtEnd || undefined,
+      ...(scope === "all-clients" && {
+        includeAllClients: !selectedSubaccountId,
+        subaccountId: selectedSubaccountId || undefined,
+      }),
     })
   );
 
@@ -563,6 +577,9 @@ export function LogsTable() {
               completedAtEnd={completedAtEnd}
               onCompletedAtChange={handleCompletedAtChange}
               stats={stats}
+              scope={scope}
+              selectedSubaccountId={selectedSubaccountId}
+              onSubaccountChange={setSelectedSubaccountId}
             />
           ),
         }}

@@ -80,6 +80,9 @@ export interface LogsToolbarProps {
     total: number;
     statusCounts: Record<AILogStatus, number>;
   };
+  scope?: "agency" | "all-clients";
+  selectedSubaccountId?: string;
+  onSubaccountChange?: (subaccountId: string) => void;
 }
 
 const sortOptions = [
@@ -122,6 +125,9 @@ export function LogsToolbar({
   completedAtEnd,
   onCompletedAtChange,
   stats,
+  scope,
+  selectedSubaccountId,
+  onSubaccountChange,
 }: LogsToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
@@ -157,6 +163,19 @@ export function LogsToolbar({
 
   const availableIntents = filterOptions?.intents || [];
   const availableUsers = filterOptions?.users || [];
+
+  // Fetch clients for all-clients view
+  const { data: clientsData } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions()
+  );
+
+  const clients = React.useMemo(() => {
+    if (!clientsData) return [];
+    return clientsData.map((client: any) => ({
+      subaccountId: client.id,
+      name: client.companyName,
+    }));
+  }, [clientsData]);
 
   React.useEffect(() => {
     setSearchInput(search);
@@ -521,6 +540,45 @@ export function LogsToolbar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Client filter for all-clients view */}
+        {scope === "all-clients" && onSubaccountChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-8.5! min-w-32">
+                {selectedSubaccountId
+                  ? clients.find(
+                      (c: any) => c.subaccountId === selectedSubaccountId
+                    )?.name || "Select client"
+                  : "All clients"}
+                <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
+              </Button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent
+              align="start"
+              className="rounded-lg bg-background border border-black/10 dark:border-white/5 w-[220px] p-1"
+            >
+              <DropdownMenuCheckboxItem
+                checked={selectedSubaccountId === ""}
+                onSelect={() => onSubaccountChange("")}
+                className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black rounded-lg cursor-pointer"
+              >
+                All clients
+              </DropdownMenuCheckboxItem>
+              {clients.map((client: any) => (
+                <DropdownMenuCheckboxItem
+                  key={client.subaccountId}
+                  checked={selectedSubaccountId === client.subaccountId}
+                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black rounded-lg cursor-pointer"
+                >
+                  {client.name}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {/* Column visibility and ordering on the right */}
