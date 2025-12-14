@@ -12,7 +12,23 @@ import { IconImagineAi } from "central-icons/IconImagineAi";
 import { IconPayment as WorkflowsIcon } from "central-icons/IconPayment";
 import { IconVerticalAlignmentCenter as PipelinesIcon } from "central-icons/IconVerticalAlignmentCenter";
 
-import { Handshake, NotebookPen, ScrollText } from "lucide-react";
+import { IconCalendar3 as ClassesIcon } from "central-icons/IconCalendar3";
+import { IconCalendarClock4 as RotasIcon } from "central-icons/IconCalendarClock4";
+import { IconDumbell as AppsIcon } from "central-icons/IconDumbell";
+import { IconReceiptBill as Receipt } from "central-icons/IconReceiptBill";
+
+import {
+  Handshake,
+  NotebookPen,
+  ScrollText,
+  Zap,
+  FileText,
+  Boxes,
+  Palette,
+  RefreshCw,
+  Clock,
+  Banknote,
+} from "lucide-react";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -30,6 +46,12 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ChevronDown } from "lucide-react";
 import AccountSwitcher from "@/features/organizations/components/account-switcher";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
@@ -121,6 +143,16 @@ const AppSidebar = () => {
     (m) => m.type === "TIME_TRACKING" && m.enabled
   );
 
+  // Check if Pilates Studio module is enabled
+  const isPilatesStudioEnabled = modules.some(
+    (m) => m.type === "PILATES_STUDIO" && m.enabled
+  );
+
+  // Check if Invoicing module is enabled
+  const isInvoicingEnabled = modules.some(
+    (m) => m.type === "INVOICING" && m.enabled
+  );
+
   const crmMenuItem = {
     title: "CRM",
     items: [
@@ -143,17 +175,53 @@ const AppSidebar = () => {
   };
 
   const timeTrackingMenuItem = {
-    title: "Time Tracking",
+    title: "Shift tracking",
     items: [
       {
-        title: "Time Logs",
+        title: "Time logs",
         icon: TimeLogsIcon,
         url: "/time-logs",
       },
       {
-        title: "Workers",
+        title: "Rotas",
+        icon: RotasIcon,
+        url: "/rotas",
+      },
+      {
+        title: "Staff",
         icon: WorkersIcon,
         url: "/workers",
+      },
+      {
+        title: "Payroll",
+        icon: Banknote,
+        url: "/payroll",
+      },
+      {
+        title: "Requests",
+        icon: Clock,
+        url: "/requests",
+      },
+    ],
+  };
+
+  const builderMenuItem = {
+    title: "Builder",
+    items: [
+      {
+        title: "Funnels",
+        icon: Zap,
+        url: "/funnels",
+      },
+      {
+        title: "Forms",
+        icon: FileText,
+        url: "/builder/forms",
+      },
+      {
+        title: "Library",
+        icon: Boxes,
+        url: "/builder/library",
       },
     ],
   };
@@ -169,10 +237,50 @@ const AppSidebar = () => {
     ],
   };
 
+  const pilatesStudioMenuItem = {
+    title: "Pilates Studio",
+    items: [
+      {
+        title: "Classes",
+        icon: ClassesIcon,
+        url: "/studio/classes",
+      },
+      {
+        title: "Mindbody",
+        icon: AppsIcon,
+        url: "/studio/mindbody",
+      },
+    ],
+  };
+
+  const invoicingMenuItem = {
+    title: "Invoicing",
+    items: [
+      {
+        title: "Invoices",
+        icon: Receipt,
+        url: "/invoices",
+      },
+      {
+        title: "Recurring",
+        icon: RefreshCw,
+        url: "/invoices/recurring",
+      },
+      {
+        title: "Templates",
+        icon: FileText,
+        url: "/invoices/templates",
+      },
+    ],
+  };
+
   const menuItems = [
     ...baseMenuItems,
+    builderMenuItem,
     crmMenuItem,
     ...(isTimeTrackingEnabled ? [timeTrackingMenuItem] : []),
+    ...(isInvoicingEnabled ? [invoicingMenuItem] : []),
+    ...(isPilatesStudioEnabled ? [pilatesStudioMenuItem] : []),
     analyticsMenuItem,
   ];
 
@@ -208,66 +316,78 @@ const AppSidebar = () => {
 
       <SidebarContent className="bg-background text-primary flex flex-col pt-4">
         {groupedMenuItems.map((group) => (
-          <SidebarGroup key={group.title} className={cn(isIconMode && "px-1")}>
-            <SidebarGroupLabel
-              className={cn(
-                "text-primary/60 text-[11px] data-[collapsible=icon]:hidden select-none",
-                canSeeClients &&
-                  activeClient &&
-                  group.title === "Clients" &&
-                  "text-amber-200"
-              )}
-            >
-              {group.title}
-            </SidebarGroupLabel>
+          <Collapsible
+            key={group.title}
+            defaultOpen={false}
+            className="group/collapsible w-full"
+          >
+            <SidebarGroup className={cn(isIconMode && "px-1", "w-full")}>
+              <SidebarGroupLabel
+                className={cn(
+                  "text-primary/60 text-[11px] select-none group-data-[collapsible=icon]:hidden w-full",
+                  canSeeClients &&
+                    activeClient &&
+                    group.title === "Clients" &&
+                    "text-amber-200"
+                )}
+                asChild
+              >
+                <CollapsibleTrigger className="w-full flex items-center justify-between hover:text-primary/80 transition-colors">
+                  {group.title}
+                  <ChevronDown className="ml-auto size-3 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
+                </CollapsibleTrigger>
+              </SidebarGroupLabel>
 
-            <SidebarGroupContent>
-              <SidebarMenu className={cn("gap-1", isIconMode && "gap-2")}>
-                {group.items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      tooltip={item.title}
-                      isActive={
-                        item.url === "/"
-                          ? pathname === "/"
-                          : pathname.startsWith(item.url)
-                      }
-                      asChild
-                      className={cn(
-                        "gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground!",
-                        pathname === item.url && "bg-primary-foreground!"
-                      )}
-                    >
-                      <Link
-                        href={item.url}
-                        prefetch
-                        className="group/menu-item"
-                      >
-                        <item.icon
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu className={cn("gap-1", isIconMode && "gap-2")}>
+                    {group.items.map((item) => (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          tooltip={item.title}
+                          isActive={
+                            item.url === "/"
+                              ? pathname === "/"
+                              : pathname.startsWith(item.url)
+                          }
+                          asChild
                           className={cn(
-                            "size-3.5 select-none text-primary/80 group-hover/menu-item:text-primary",
-                            pathname === item.url &&
-                              "text-black group-hover/menu-item:text-black"
-                          )}
-                        />
-
-                        <span
-                          className={cn(
-                            "text-primary/80 group-hover/menu-item:text-primary font-medium tracking-tight",
-                            pathname === item.url &&
-                              "text-black font-medium group-hover/menu-item:text-black",
-                            "group-data-[collapsible=icon]:sr-only"
+                            "gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground!",
+                            pathname === item.url && "bg-primary-foreground!"
                           )}
                         >
-                          {item.title}
-                        </span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                          <Link
+                            href={item.url}
+                            prefetch
+                            className="group/menu-item"
+                          >
+                            <item.icon
+                              className={cn(
+                                "size-3.5 select-none text-primary/80 group-hover/menu-item:text-primary",
+                                pathname === item.url &&
+                                  "text-black group-hover/menu-item:text-black"
+                              )}
+                            />
+
+                            <span
+                              className={cn(
+                                "text-primary/80 group-hover/menu-item:text-primary font-medium tracking-tight",
+                                pathname === item.url &&
+                                  "text-black font-medium group-hover/menu-item:text-black",
+                                "group-data-[collapsible=icon]:sr-only"
+                              )}
+                            >
+                              {item.title}
+                            </span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
         ))}
       </SidebarContent>
     </Sidebar>

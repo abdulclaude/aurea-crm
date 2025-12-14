@@ -42,16 +42,16 @@ export default function WorkersPage() {
     <div className="space-y-0">
       <div className="flex items-end justify-between gap-2 p-6 pb-6">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Workers</h1>
+          <h1 className="text-lg font-semibold text-primary">Staff</h1>
           <p className="text-xs text-primary/75">
-            Manage field workers and portal access
+            Manage staff members and portal access
           </p>
         </div>
 
         <CreateWorkerDialog>
           <Button variant="outline" size="sm">
             <UserPlusIcon className="size-3.5" />
-            Add Worker
+            Add staff member
           </Button>
         </CreateWorkerDialog>
       </div>
@@ -70,7 +70,7 @@ export default function WorkersPage() {
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground text-sm text-primary flex items-center justify-center gap-3 p-6">
               <LoaderCircle className="size-3.5 animate-spin" />
-              Loading workers...
+              Loading staff members...
             </div>
           }
         >
@@ -81,7 +81,7 @@ export default function WorkersPage() {
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground text-sm text-primary flex items-center justify-center gap-3 p-6">
               <LoaderCircle className="size-3.5 animate-spin" />
-              Loading workers...
+              Loading staff members...
             </div>
           }
         >
