@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { prisma } from "@/lib/db";
+import prisma from "@/lib/db";
 import { TRPCError } from "@trpc/server";
 import { generatePayslipHTML, getPayslipData } from "../lib/payslip-generator";
 import { calculateUKTax } from "../lib/uk-tax-calculator";
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear } from "date-fns";
+import { startOfYear } from "date-fns";
 
 export const payrollRouter = createTRPCRouter({
   // List payroll runs
