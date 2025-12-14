@@ -7,6 +7,8 @@ export const logsRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
       z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(20),
         search: z.string().optional(),
         statuses: z.array(z.nativeEnum(AILogStatus)).optional(),
         intents: z.array(z.string()).optional(),
@@ -20,6 +22,8 @@ export const logsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
+      const { page, pageSize } = input;
+
       const subaccountId =
         input?.subaccountId !== undefined
           ? input.subaccountId || null
@@ -75,8 +79,13 @@ export const logsRouter = createTRPCRouter({
         }
       }
 
+      // Get total count for pagination
+      const totalItems = await prisma.aILog.count({ where });
+
       const logs = await prisma.aILog.findMany({
         where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         include: {
           user: {
             select: {
@@ -92,8 +101,16 @@ export const logsRouter = createTRPCRouter({
         },
       });
 
+      const totalPages = Math.ceil(totalItems / pageSize);
+
       return {
         items: logs,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          pageSize,
+          totalItems,
+        },
       };
     }),
 

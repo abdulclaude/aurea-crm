@@ -29,6 +29,7 @@ import {
   Table as UiTable,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { DataTablePagination } from "./data-table-pagination";
 
 export interface DataTableToolbarContext<TData> {
   table: TanstackTable<TData>;
@@ -52,6 +53,16 @@ export interface DataTableToolbarConfig<TData> {
   sort?: ToolbarRenderer<TData>;
   view?: ToolbarRenderer<TData>;
   search?: DataTableSearchConfig;
+}
+
+export interface DataTablePaginationConfig {
+  currentPage: number;
+  totalPages: number;
+  pageSize: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  pageSizeOptions?: number[];
 }
 
 export interface DataTableProps<TData, TValue> {
@@ -80,6 +91,7 @@ export interface DataTableProps<TData, TValue> {
   rowSelection?: RowSelectionState;
   onRowSelectionChange?: (state: RowSelectionState) => void;
   initialRowSelection?: RowSelectionState;
+  pagination?: DataTablePaginationConfig;
 }
 
 const resolveUpdater = <T,>(updater: Updater<T>, previous: T) => {
@@ -114,6 +126,7 @@ export function DataTable<TData, TValue>({
   rowSelection: rowSelectionProp,
   onRowSelectionChange,
   initialRowSelection = {},
+  pagination,
 }: DataTableProps<TData, TValue>) {
   const [sortingState, setSortingState] =
     React.useState<SortingState>(initialSorting);
@@ -424,6 +437,19 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </UiTable>
       </div>
+
+      {/* Pagination */}
+      {pagination && (
+        <DataTablePagination
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          pageSize={pagination.pageSize}
+          totalItems={pagination.totalItems}
+          onPageChange={pagination.onPageChange}
+          onPageSizeChange={pagination.onPageSizeChange}
+          pageSizeOptions={pagination.pageSizeOptions}
+        />
+      )}
     </div>
   );
 }

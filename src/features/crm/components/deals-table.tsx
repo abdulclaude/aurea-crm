@@ -12,7 +12,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
 import { Eye, MoreHorizontal, Pencil, Trash } from "lucide-react";
 import * as React from "react";
-import { useQueryState, parseAsString } from "nuqs";
+import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -371,6 +371,10 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
   const [rowSelection, setRowSelection] = React.useState({});
   const router = useRouter();
 
+  // Pagination state
+  const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
+  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+
   // Client filter for "all-clients" scope (agency viewing all client data)
   const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
     "subaccountId",
@@ -407,6 +411,8 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.deals.list.queryOptions({
+      page,
+      pageSize,
       search: params.search || undefined,
       pipelineStageIds:
         params.stages && params.stages.length > 0 ? params.stages : undefined,
@@ -520,13 +526,27 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
     [setParams]
   );
 
+  const handlePageChange = React.useCallback(
+    (newPage: number) => void setPage(newPage),
+    [setPage]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      void setPageSize(newPageSize);
+      void setPage(1);
+    },
+    [setPageSize, setPage]
+  );
+
   const handleDeadlineChange = React.useCallback(
     (start?: Date, end?: Date) => {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setDeadlineStartStr(start ? toYMD(start) : "");
       void setDeadlineEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setDeadlineStartStr, setDeadlineEndStr]
+    [setDeadlineStartStr, setDeadlineEndStr, setPage]
   );
 
   const handleUpdatedAtChange = React.useCallback(
@@ -534,15 +554,17 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setUpdatedAtStartStr(start ? toYMD(start) : "");
       void setUpdatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setUpdatedAtStartStr, setUpdatedAtEndStr]
+    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage]
   );
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleToggleStage = React.useCallback(
@@ -551,8 +573,9 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
         ...prev,
         stages: toggleValue(prev.stages ?? [], value),
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleClearFilters = React.useCallback(() => {
@@ -566,7 +589,8 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       probabilityMin: undefined,
       probabilityMax: undefined,
     }));
-  }, [setParams]);
+    void setPage(1);
+  }, [setParams, setPage]);
 
   const handleApplyAllFilters = React.useCallback(
     (filters: {
@@ -590,8 +614,9 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
         probabilityMin: filters.probabilityMin,
         probabilityMax: filters.probabilityMax,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   // Get unique stages for filter with their IDs
@@ -657,6 +682,14 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
         enableRowSelection
         rowSelection={rowSelection}
         onRowSelectionChange={setRowSelection}
+        pagination={{
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages,
+          pageSize: data.pagination.pageSize,
+          totalItems: data.pagination.totalItems,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
+        }}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
             No deals have been made yet. <br /> Start by making a deal.

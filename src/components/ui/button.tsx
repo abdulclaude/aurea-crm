@@ -22,6 +22,8 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         gradient:
           "rounded-lg border border-sky-300/20 border-b-sky-500/70 border-t-sky-300/70 bg-linear-to-b from-sky-400 to-sky-500 px-4 pb-3 pt-2.5 font-medium leading-none text-white antialiased shadow-md ring-1 ring-sky-500 w-full hover:brightness-110 text-shadow-2xs",
+        success:
+          "rounded-lg border border-emerald-300/20 border-b-emerald-500/70 border-t-emerald-300/70 bg-linear-to-b from-emerald-400 to-emerald-500 px-4 pb-3 pt-2.5 font-medium leading-none text-white antialiased shadow-md ring-1 ring-emerald-500 w-full hover:brightness-110 text-shadow-2xs",
         filter:
           "rounded-md rounded-t-sm ring ring-black/10 shadow-sm bg-background hover:bg-primary-foreground/50 text-primary hover:text-black w-full",
       },

@@ -86,6 +86,21 @@ export const MODULE_CONFIG = {
       "Milestone tracking",
     ],
   },
+  [ModuleType.PILATES_STUDIO]: {
+    name: "Pilates Studio",
+    description:
+      "Complete studio management with class scheduling, client bookings, and Mindbody integration",
+    icon: "Dumbbell",
+    requiresPremium: true,
+    features: [
+      "Mindbody integration for class sync",
+      "Class schedule display on funnels",
+      "Client booking management",
+      "Membership tracking",
+      "Attendance analytics",
+      "Studio-specific automation triggers",
+    ],
+  },
 } as const;
 
 export const modulesRouter = createTRPCRouter({
@@ -209,11 +224,14 @@ export const modulesRouter = createTRPCRouter({
               },
             },
         create: {
+          id: crypto.randomUUID(),
           organizationId: isSubaccountLevel ? undefined : ctx.orgId,
           subaccountId: isSubaccountLevel ? ctx.subaccountId : undefined,
           moduleType: input.moduleType,
           enabled: true,
           config: input.config as Prisma.InputJsonValue,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         update: {
           enabled: true,
@@ -276,10 +294,13 @@ export const modulesRouter = createTRPCRouter({
               },
             },
         create: {
+          id: crypto.randomUUID(),
           organizationId: isSubaccountLevel ? undefined : ctx.orgId,
           subaccountId: isSubaccountLevel ? ctx.subaccountId : undefined,
           moduleType: input.moduleType,
           enabled: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         update: {
           enabled: false,

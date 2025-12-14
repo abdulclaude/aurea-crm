@@ -21,6 +21,7 @@ import { IconStore4 as PackageIcon } from "central-icons/IconStore4";
 import { IconVoiceAndVideo as CalendarIcon } from "central-icons/IconVoiceAndVideo";
 import { IconSignature } from "central-icons/IconSignature";
 import { IconKanbanView as KanbanIcon } from "central-icons/IconKanbanView";
+import { IconDumbell } from "central-icons/IconDumbell";
 import { IconChevronRightSmall as BulletpointIcon } from "central-icons/IconChevronRightSmall";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -53,6 +54,7 @@ const moduleIcons: Record<ModuleType, any> = {
   [ModuleType.BOOKING_CALENDAR]: CalendarIcon,
   [ModuleType.DOCUMENT_SIGNING]: IconSignature,
   [ModuleType.PROJECT_MANAGEMENT]: KanbanIcon,
+  [ModuleType.PILATES_STUDIO]: IconDumbell,
 };
 
 type ModuleCardProps = {

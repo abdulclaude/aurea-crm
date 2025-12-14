@@ -52,7 +52,7 @@ export const updateContactExecutor: NodeExecutor<UpdateContactData> = async ({
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               subaccountId: true,
               organizationId: true,
@@ -61,13 +61,13 @@ export const updateContactExecutor: NodeExecutor<UpdateContactData> = async ({
         },
       });
 
-      if (!node?.workflow?.organizationId) {
+      if (!node?.Workflows?.organizationId) {
         throw new NonRetriableError(
           "Update Contact Node error: This workflow must be in an organization context."
         );
       }
 
-      return node.workflow;
+      return node.Workflows;
     });
 
     const contactId = decode(Handlebars.compile(data.contactId)(context));

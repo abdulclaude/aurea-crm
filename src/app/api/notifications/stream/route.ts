@@ -62,7 +62,7 @@ export async function GET(request: Request) {
           },
         },
         include: {
-          actor: {
+          userNotificationActorIdTouser: {
             select: {
               id: true,
               name: true,

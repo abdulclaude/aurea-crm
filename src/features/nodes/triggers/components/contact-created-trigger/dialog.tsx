@@ -78,15 +78,16 @@ export const ContactCreatedTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-white/5">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
-          <SheetTitle>Contact Created Trigger Configuration</SheetTitle>
+          <SheetTitle>Contact created trigger configuration</SheetTitle>
           <SheetDescription>
-            This workflow will trigger whenever a new contact is created in your CRM.
+            This workflow will trigger whenever a new contact is created in your
+            CRM.
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5" />
 
         <Form {...form}>
           <form
@@ -98,18 +99,18 @@ export const ContactCreatedTriggerDialog: React.FC<Props> = ({
               name="variableName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Variable Name</FormLabel>
+                  <FormLabel>Variable name</FormLabel>
                   <FormControl>
                     <Input placeholder="newContact" {...field} />
                   </FormControl>
-                  <FormDescription className="text-xs mt-2 leading-5">
+                  <FormDescription className="text-[11px] mt-1">
                     Access the created contact data in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
-                      {`{{${field.value || "newContact"}.name}}`}
+                    <span className="text-primary font-medium tracking-wide">
+                      {`@${field.value || "newContact"}.name`}
                     </span>
                     {", "}
-                    <span className="text-white font-medium tracking-wide">
-                      {`{{${field.value || "newContact"}.email}}`}
+                    <span className="text-primary font-medium tracking-wide">
+                      {`@${field.value || "newContact"}.email`}
                     </span>
                   </FormDescription>
                   <FormMessage />
@@ -118,16 +119,17 @@ export const ContactCreatedTriggerDialog: React.FC<Props> = ({
             />
 
             <div className="bg-blue-500/10 border border-blue-500/20 rounded p-4">
-              <p className="text-sm text-blue-200">
-                This trigger will fire automatically whenever a new contact is created
-                through your CRM or any workflow that creates a contact.
+              <p className="text-xs text-blue-400">
+                This trigger will fire automatically whenever a new contact is
+                created through your CRM or any workflow that creates a contact.
               </p>
             </div>
 
-            <SheetFooter className="mt-6 px-0 pb-4">
+            <SheetFooter className="px-0 pb-4">
               <Button
                 type="submit"
-                className="brightness-120! hover:brightness-130! w-full py-5"
+                className="w-max ml-auto"
+                variant="gradient"
               >
                 Save changes
               </Button>

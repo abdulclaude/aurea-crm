@@ -51,7 +51,7 @@ export const BundleWorkflowNode: React.FC<NodeProps<BundleWorkflowNodeType>> =
       nodeId: props.id,
       channel: BUNDLE_WORKFLOW_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchBundleWorkflowRealtimeToken,
+      refreshToken: fetchBundleWorkflowRealtimeToken as any,
     });
 
     const handleSubmit = (values: BundleWorkflowFormValues) => {

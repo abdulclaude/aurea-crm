@@ -66,7 +66,7 @@ export const ContactCreatedTriggerNode: React.FC<
       <BaseTriggerNode
         {...props}
         icon={CreateContactIcon}
-        name="Contact Created"
+        name="Contact created"
         description={description}
         status={nodeStatus}
         onSettings={handleOpen}

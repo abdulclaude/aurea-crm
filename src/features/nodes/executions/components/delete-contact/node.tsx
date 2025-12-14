@@ -51,7 +51,7 @@ export const DeleteContactNode: React.FC<
     nodeId: props.id,
     channel: DELETE_CONTACT_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchDeleteContactRealtimeToken,
+    refreshToken: fetchDeleteContactRealtimeToken as any,
   });
 
   const handleOpenSettings = () => {

@@ -55,7 +55,7 @@ export const DeleteDealNode: React.FC<NodeProps<DeleteDealNodeType>> = memo(
       nodeId: props.id,
       channel: DELETE_DEAL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchDeleteDealRealtimeToken,
+      refreshToken: fetchDeleteDealRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

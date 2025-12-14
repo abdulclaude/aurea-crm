@@ -56,7 +56,7 @@ export const GoogleCalendarActionNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_CALENDAR_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleCalendarRealtimeToken,
+    refreshToken: fetchGoogleCalendarRealtimeToken as any,
   });
 
   const handleOpenSettings = () => setDialogOpen(true);

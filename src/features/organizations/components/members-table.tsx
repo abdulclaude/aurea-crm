@@ -11,6 +11,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { formatDistanceToNow } from "date-fns";
 import { Mail, MoreHorizontal, Shield, UserX } from "lucide-react";
 import * as React from "react";
+import { parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -333,6 +334,8 @@ export function MembersTable() {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.organizations.listMembers.queryOptions({
+      page: params.page,
+      pageSize: params.pageSize,
       search: params.search || undefined,
       roles: params.roles.length > 0 ? (params.roles as any) : undefined,
       status: params.status.length > 0 ? (params.status as any) : undefined,
@@ -418,7 +421,7 @@ export function MembersTable() {
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
-      setParams((prev) => ({ ...prev, search: value }));
+      setParams((prev) => ({ ...prev, search: value, page: 1 }));
     },
     [setParams]
   );
@@ -456,9 +459,24 @@ export function MembersTable() {
     (filters: { roles: string[]; status: string[] }) => {
       setParams((prev) => ({
         ...prev,
+        page: 1, // Reset to page 1 on filter change
         roles: filters.roles,
         status: filters.status,
       }));
+    },
+    [setParams]
+  );
+
+  const handlePageChange = React.useCallback(
+    (newPage: number) => {
+      setParams((prev) => ({ ...prev, page: newPage }));
+    },
+    [setParams]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      setParams((prev) => ({ ...prev, pageSize: newPageSize, page: 1 }));
     },
     [setParams]
   );
@@ -504,6 +522,14 @@ export function MembersTable() {
               onApplyAllFilters={handleApplyAllFilters}
             />
           ),
+        }}
+        pagination={{
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages,
+          pageSize: data.pagination.pageSize,
+          totalItems: data.pagination.totalItems,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
         }}
       />
     </div>

@@ -13,7 +13,7 @@ import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { ActivityAction } from "@prisma/client";
 
 const contactInclude = {
-  assignees: {
+  contactAssignee: {
     include: {
       subaccountMember: {
         include: {
@@ -59,9 +59,11 @@ const mapContact = (
     linkedin: contact.linkedin,
     lastInteractionAt: contact.lastInteractionAt,
     tags: contact.tags,
+    notes: contact.notes,
+    metadata: contact.metadata,
     createdAt: contact.createdAt,
     updatedAt: contact.updatedAt,
-    assignees: contact.assignees.map((assignee) => {
+    assignees: contact.contactAssignee.map((assignee) => {
       const userId = assignee.subaccountMember.user?.id;
       const activity =
         userId && activityStatus ? activityStatus.get(userId) : undefined;
@@ -194,6 +196,8 @@ export const contactsRouter = createTRPCRouter({
     .input(
       z
         .object({
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(100).default(20),
           search: z.string().optional(),
           types: z.array(z.enum(ContactType)).optional(),
           tags: z.array(z.string()).optional(),
@@ -219,11 +223,23 @@ export const contactsRouter = createTRPCRouter({
         : ctx.subaccountId;
 
       if (!orgId) {
-        return { items: [], nextCursor: null, total: 0 };
+        return {
+          items: [],
+          nextCursor: null,
+          total: 0,
+          pagination: {
+            currentPage: 1,
+            totalPages: 0,
+            pageSize: input?.pageSize ?? 20,
+            totalItems: 0,
+          },
+        };
       }
 
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
-      const skip = input?.cursor ?? 0;
+      const skip = input?.cursor ?? (page - 1) * pageSize;
 
       const where: Prisma.ContactWhereInput = {
         organizationId: orgId,
@@ -247,7 +263,7 @@ export const contactsRouter = createTRPCRouter({
       }
 
       if (input?.assignedTo && input.assignedTo.length > 0) {
-        where.assignees = {
+        where.contactAssignee = {
           some: {
             subaccountMemberId: {
               in: input.assignedTo,
@@ -305,13 +321,13 @@ export const contactsRouter = createTRPCRouter({
         ];
       }
 
-      const [items, total] = await Promise.all([
+      const [items, totalItems] = await Promise.all([
         prisma.contact.findMany({
           where,
           include: contactInclude,
           orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
           skip,
-          take,
+          take: pageSize,
         }),
         prisma.contact.count({ where }),
       ]);
@@ -319,7 +335,7 @@ export const contactsRouter = createTRPCRouter({
       // Collect all unique user IDs from assignees
       const userIds = new Set<string>();
       for (const contact of items) {
-        for (const assignee of contact.assignees) {
+        for (const assignee of contact.contactAssignee) {
           const userId = assignee.subaccountMember.user?.id;
           if (userId) {
             userIds.add(userId);
@@ -333,12 +349,19 @@ export const contactsRouter = createTRPCRouter({
           ? await getUsersActivityStatus(Array.from(userIds))
           : new Map();
 
-      const nextCursor = skip + items.length < total ? skip + take : null;
+      const nextCursor = skip + items.length < totalItems ? skip + take : null;
+      const totalPages = Math.ceil(totalItems / pageSize);
 
       return {
         items: items.map((contact) => mapContact(contact, activityStatus)),
         nextCursor,
-        total,
+        total: totalItems,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          pageSize,
+          totalItems,
+        },
       };
     }),
 
@@ -380,6 +403,7 @@ export const contactsRouter = createTRPCRouter({
 
       const contact = await prisma.contact.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId: orgId,
           subaccountId: subaccountId ?? null,
           name: input.name,
@@ -398,6 +422,8 @@ export const contactsRouter = createTRPCRouter({
           linkedin: input.linkedin,
           tags: input.tags ?? [],
           notes: input.notes,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         include: contactInclude,
       });
@@ -437,7 +463,7 @@ export const contactsRouter = createTRPCRouter({
         },
       });
 
-      return mapContact(contact);
+      return mapContact(contact as ContactResult);
     }),
 
   update: protectedProcedure

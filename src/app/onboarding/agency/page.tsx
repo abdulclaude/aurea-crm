@@ -26,7 +26,7 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
 import { OrgLogoUploader } from "@/components/uploader/orgLogo";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { uploadFiles } from "@/utils/uploadthing";
 
 const formSchema = z.object({
@@ -51,6 +51,14 @@ export default function AgencyOnboardingPage() {
   const router = useRouter();
   const trpc = useTRPC();
   const [pendingLogoFiles, setPendingLogoFiles] = useState<File[]>([]);
+  const { data: session, isPending: isSessionLoading } = authClient.useSession();
+
+  // Redirect to sign-in if not authenticated
+  useEffect(() => {
+    if (!isSessionLoading && !session) {
+      router.replace("/sign-in?callbackUrl=/onboarding/agency");
+    }
+  }, [session, isSessionLoading, router]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -137,6 +145,24 @@ export default function AgencyOnboardingPage() {
 
     await createAgency.mutateAsync(clean);
   };
+
+  // Show loading state while checking authentication
+  if (isSessionLoading) {
+    return (
+      <div className="mx-auto max-w-2xl p-6">
+        <Card className="shadow-none">
+          <CardContent className="flex items-center justify-center p-12">
+            <div className="text-muted-foreground">Loading...</div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Don't render form if not authenticated (redirect will happen)
+  if (!session) {
+    return null;
+  }
 
   return (
     <div className="mx-auto max-w-2xl p-6">

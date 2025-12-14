@@ -11,7 +11,7 @@ import { createNotification } from "@/lib/notifications";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 
 const pipelineInclude = {
-  stages: {
+  pipelineStage: {
     orderBy: {
       position: "asc",
     },
@@ -19,18 +19,18 @@ const pipelineInclude = {
 } satisfies Prisma.PipelineInclude;
 
 const pipelineListInclude = {
-  stages: {
+  pipelineStage: {
     orderBy: {
       position: "asc",
     },
   },
-  deals: {
+  deal: {
     select: {
       id: true,
       value: true,
       currency: true, // Need currency for USD conversion
       pipelineStageId: true,
-      contacts: {
+      dealContact: {
         select: {
           contact: {
             select: {
@@ -62,7 +62,7 @@ const mapPipeline = (pipeline: PipelineResult) => {
     isDefault: pipeline.isDefault,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages: pipeline.stages.map((stage) => ({
+    stages: pipeline.pipelineStage.map((stage) => ({
       id: stage.id,
       name: stage.name,
       position: stage.position,
@@ -84,7 +84,7 @@ const mapPipelineWithStats = (
   let totalValue = 0;
 
   // Convert all deal values to target currency and sum them
-  for (const deal of pipeline.deals) {
+  for (const deal of pipeline.deal) {
     // Convert and add to total value
     if (deal.value) {
       const convertedValue = targetCurrency
@@ -94,7 +94,7 @@ const mapPipelineWithStats = (
     }
 
     // Collect unique contacts
-    for (const dc of deal.contacts) {
+    for (const dc of deal.dealContact) {
       if (!contactsMap.has(dc.contact.id)) {
         contactsMap.set(dc.contact.id, dc.contact);
       }
@@ -104,17 +104,17 @@ const mapPipelineWithStats = (
   const uniqueContacts = Array.from(contactsMap.values());
 
   // Calculate win rate - deals in the last stage vs total deals
-  const sortedStages = [...pipeline.stages].sort(
+  const sortedStages = [...pipeline.pipelineStage].sort(
     (a, b) => a.position - b.position
   );
   const lastStage = sortedStages[sortedStages.length - 1];
   const dealsInLastStage = lastStage
-    ? pipeline.deals.filter((deal) => deal.pipelineStageId === lastStage.id)
+    ? pipeline.deal.filter((deal) => deal.pipelineStageId === lastStage.id)
         .length
     : 0;
   const winRate =
-    pipeline.deals.length > 0
-      ? (dealsInLastStage / pipeline.deals.length) * 100
+    pipeline.deal.length > 0
+      ? (dealsInLastStage / pipeline.deal.length) * 100
       : 0;
 
   return {
@@ -125,7 +125,7 @@ const mapPipelineWithStats = (
     isDefault: pipeline.isDefault,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages: pipeline.stages.map((stage) => ({
+    stages: pipeline.pipelineStage.map((stage) => ({
       id: stage.id,
       name: stage.name,
       position: stage.position,
@@ -135,7 +135,7 @@ const mapPipelineWithStats = (
       createdAt: stage.createdAt,
       updatedAt: stage.updatedAt,
     })),
-    dealsCount: pipeline.deals.length,
+    dealsCount: pipeline.deal.length,
     dealsValue: totalValue, // Total value with all deals converted to target currency
     contacts: uniqueContacts,
     winRate,
@@ -181,9 +181,9 @@ export const pipelinesRouter = createTRPCRouter({
       },
       include: {
         _count: {
-          select: { deals: true },
+          select: { deal: true },
         },
-        deals: {
+        deal: {
           select: {
             value: true,
             currency: true,
@@ -193,13 +193,13 @@ export const pipelinesRouter = createTRPCRouter({
     });
 
     // Calculate statistics
-    const dealsCounts = pipelines.map((p) => p._count?.deals || 0);
+    const dealsCounts = pipelines.map((p) => p._count?.deal || 0);
 
     // Get unique currencies and calculate max values per currency
     const currencyMaxValues = new Map<string, number>();
 
     for (const pipeline of pipelines) {
-      for (const deal of pipeline.deals) {
+      for (const deal of pipeline.deal) {
         if (deal.value && deal.currency) {
           const value = Number(deal.value);
           const currency = deal.currency;
@@ -270,6 +270,8 @@ export const pipelinesRouter = createTRPCRouter({
     .input(
       z
         .object({
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(100).default(20),
           search: z.string().optional(),
           isActive: z.boolean().optional(),
           cursor: z.number().optional(),
@@ -298,11 +300,23 @@ export const pipelinesRouter = createTRPCRouter({
       const subaccountId = input?.subaccountId ?? ctx.subaccountId;
 
       if (!orgId) {
-        return { items: [], nextCursor: null, total: 0 };
+        return {
+          items: [],
+          nextCursor: null,
+          total: 0,
+          pagination: {
+            currentPage: 1,
+            totalPages: 0,
+            pageSize: input?.pageSize ?? 20,
+            totalItems: 0,
+          },
+        };
       }
 
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
-      const skip = input?.cursor ?? 0;
+      const skip = input?.cursor ?? (page - 1) * pageSize;
 
       const where: Prisma.PipelineWhereInput = {
         organizationId: orgId,
@@ -328,7 +342,7 @@ export const pipelinesRouter = createTRPCRouter({
 
       // Filter by stages
       if (input?.stages && input.stages.length > 0) {
-        where.stages = {
+        where.pipelineStage = {
           some: {
             name: { in: input.stages },
           },
@@ -337,9 +351,9 @@ export const pipelinesRouter = createTRPCRouter({
 
       // Filter by contacts
       if (input?.contacts && input.contacts.length > 0) {
-        where.deals = {
+        where.deal = {
           some: {
-            contacts: {
+            dealContact: {
               some: {
                 contactId: { in: input.contacts },
               },
@@ -374,7 +388,7 @@ export const pipelinesRouter = createTRPCRouter({
         }
       }
 
-      const [items, total] = await Promise.all([
+      const [items, totalItems] = await Promise.all([
         prisma.pipeline.findMany({
           where,
           include: pipelineListInclude,
@@ -384,12 +398,13 @@ export const pipelinesRouter = createTRPCRouter({
             { createdAt: "desc" },
           ],
           skip,
-          take,
+          take: pageSize,
         }),
         prisma.pipeline.count({ where }),
       ]);
 
-      const nextCursor = skip + items.length < total ? skip + take : null;
+      const nextCursor = skip + items.length < totalItems ? skip + take : null;
+      const totalPages = Math.ceil(totalItems / pageSize);
 
       // Map pipelines with stats and then filter by numeric criteria
       // Pass target currency to mapPipelineWithStats to convert all deal values
@@ -461,6 +476,12 @@ export const pipelinesRouter = createTRPCRouter({
         items: mappedItems,
         nextCursor,
         total: mappedItems.length, // Update total to reflect filtered count
+        pagination: {
+          currentPage: page,
+          totalPages,
+          pageSize,
+          totalItems,
+        },
       };
     }),
 
@@ -539,18 +560,24 @@ export const pipelinesRouter = createTRPCRouter({
 
       const pipeline = await prisma.pipeline.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId: orgId,
           subaccountId: subaccountId ?? null,
           name: input.name,
           description: input.description,
           isDefault: input.isDefault ?? false,
-          stages: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          pipelineStage: {
             create: input.stages.map((stage, index) => ({
+              id: crypto.randomUUID(),
               name: stage.name,
               position: index,
               probability: Number(stage.probability) ?? 0,
               rottingDays: Number(stage.rottingDays) ?? 0,
               color: stage.color,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             })),
           },
         },
@@ -589,7 +616,7 @@ export const pipelinesRouter = createTRPCRouter({
         },
       });
 
-      return mapPipeline(pipeline);
+      return mapPipeline(pipeline as PipelineResult);
     }),
 
   update: protectedProcedure

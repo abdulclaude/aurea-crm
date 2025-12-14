@@ -9,6 +9,8 @@ import {
 } from "nuqs";
 
 export type WorkersParams = {
+  page: number;
+  pageSize: number;
   search?: string;
   roles?: string[];
   isActive?: boolean | null;
@@ -23,6 +25,8 @@ export type WorkersParams = {
 export function useWorkersParams() {
   return useQueryStates(
     {
+      page: parseAsInteger.withDefault(1),
+      pageSize: parseAsInteger.withDefault(20),
       search: parseAsString.withDefault(""),
       roles: parseAsArrayOf(parseAsString).withDefault([]),
       isActive: parseAsBoolean,

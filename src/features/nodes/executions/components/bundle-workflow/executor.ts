@@ -96,8 +96,8 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
       const workflow = await prisma.workflows.findUnique({
         where: { id: config.bundleWorkflowId },
         include: {
-          nodes: true,
-          connections: true,
+          Node: true,
+          Connection: true,
         },
       });
 
@@ -171,8 +171,8 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
     // Execute bundle workflow nodes in topological order
     const sortedNodes = topologicalSort(
-      bundleWorkflow.nodes as any,
-      bundleWorkflow.connections as any
+      bundleWorkflow.Node as any,
+      bundleWorkflow.Connection as any
     );
 
     // Build adjacency map for conditional branching
@@ -180,7 +180,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
       string,
       Array<{ toNodeId: string; fromOutput: string }>
     >();
-    for (const conn of bundleWorkflow.connections) {
+    for (const conn of bundleWorkflow.Connection) {
       if (!adjacencyMap.has(conn.fromNodeId)) {
         adjacencyMap.set(conn.fromNodeId, []);
       }
@@ -195,7 +195,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
     // Find trigger node (MANUAL_TRIGGER or INITIAL in bundle workflows)
     const targetNodeIds = new Set(
-      bundleWorkflow.connections.map((c) => c.toNodeId)
+      bundleWorkflow.Connection.map((c: any) => c.toNodeId)
     );
     const triggerNode = sortedNodes.find((node) => !targetNodeIds.has(node.id));
 

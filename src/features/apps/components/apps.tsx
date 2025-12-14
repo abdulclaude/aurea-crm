@@ -58,7 +58,7 @@ type AppCatalogItem = {
   description: string;
   icon: string;
   scopes: string[];
-  authProvider: "google" | "facebook" | "microsoft";
+  authProvider: "google" | "facebook" | "microsoft" | "slack" | "discord";
 };
 
 const appsCatalog: AppCatalogItem[] = [
@@ -67,7 +67,7 @@ const appsCatalog: AppCatalogItem[] = [
     provider: AppProvider.GOOGLE,
     title: "Google Workspace",
     description:
-      "Grant all Google permissions at once to unlock Gmail, Calendar, and future Google-powered nodes.",
+      "Connect Gmail, Calendar, Drive, and Forms to automate email, events, file management, and form responses.",
     icon: "/logos/google.svg",
     scopes: GOOGLE_FULL_SCOPES,
     authProvider: "google",
@@ -77,10 +77,36 @@ const appsCatalog: AppCatalogItem[] = [
     provider: AppProvider.MICROSOFT,
     title: "Microsoft 365",
     description:
-      "Connect Outlook and OneDrive to send emails, receive notifications, and manage files in your workflows.",
+      "Connect Outlook, OneDrive, and Calendar to send emails, manage files, and schedule events in workflows.",
     icon: "/logos/microsoft.svg",
     scopes: MICROSOFT_SCOPES,
     authProvider: "microsoft",
+  },
+  {
+    id: "slack",
+    provider: AppProvider.SLACK,
+    title: "Slack",
+    description:
+      "Send messages, upload files, and respond to channel events in your Slack workspace.",
+    icon: "/logos/slack.svg",
+    scopes: [
+      "channels:read",
+      "channels:write",
+      "chat:write",
+      "files:write",
+      "users:read",
+    ],
+    authProvider: "slack",
+  },
+  {
+    id: "discord",
+    provider: AppProvider.DISCORD,
+    title: "Discord",
+    description:
+      "Send messages, embeds, and respond to server events in your Discord community.",
+    icon: "/logos/discord.svg",
+    scopes: ["identify", "email", "guilds", "messages.read"],
+    authProvider: "discord",
   },
 ] as const;
 
@@ -154,7 +180,7 @@ export const AppsList = () => {
     ]
   );
 
-  const syncLoadingByProvider: Record<AppProvider, boolean | undefined> = {
+  const syncLoadingByProvider: Partial<Record<AppProvider, boolean | undefined>> = {
     [AppProvider.GOOGLE_CALENDAR]: isSyncingGoogleCalendar,
     [AppProvider.GMAIL]: isSyncingGmail,
     [AppProvider.GOOGLE]: isSyncingGoogle,
@@ -162,11 +188,14 @@ export const AppsList = () => {
     [AppProvider.MICROSOFT]: isSyncingMicrosoft,
     [AppProvider.OUTLOOK]: undefined,
     [AppProvider.ONEDRIVE]: undefined,
+    [AppProvider.SLACK]: undefined,
+    [AppProvider.DISCORD]: undefined,
+    [AppProvider.MINDBODY]: undefined,
   };
 
   const handleConnect = async (
     provider: AppProvider,
-    authProvider: "google" | "facebook" | "microsoft",
+    authProvider: "google" | "facebook" | "microsoft" | "slack" | "discord",
     scopes: string[],
     label: string
   ) => {

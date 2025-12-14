@@ -38,6 +38,7 @@ export const webhooksRouter = createTRPCRouter({
       return prisma.webhook
         .create({
           data: {
+            id: crypto.randomUUID(),
             name: input.name,
             provider: input.provider,
             url: input.url,
@@ -47,6 +48,8 @@ export const webhooksRouter = createTRPCRouter({
               : undefined,
             userId: ctx.auth.user.id,
             subaccountId: ctx.subaccountId ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         })
         .then(serializeWebhook);

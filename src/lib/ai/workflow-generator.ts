@@ -195,7 +195,7 @@ export async function generateWorkflow(
       organizationId: context.organizationId,
       subaccountId: context.subaccountId,
     },
-    include: { stages: { orderBy: { position: "asc" } } },
+    include: { pipelineStage: { orderBy: { position: "asc" } } },
     take: 5,
   });
 
@@ -204,7 +204,7 @@ export async function generateWorkflow(
       ? `\nExisting pipelines:\n${pipelines
           .map(
             (p) =>
-              `- ${p.name} (stages: ${p.stages.map((s) => s.name).join(" → ")})`
+              `- ${p.name} (stages: ${p.pipelineStage.map((s: any) => s.name).join(" → ")})`
           )
           .join("\n")}`
       : "";
@@ -311,7 +311,7 @@ export async function generateBundleWorkflow(
       organizationId: context.organizationId,
       subaccountId: context.subaccountId,
     },
-    include: { stages: { orderBy: { position: "asc" } } },
+    include: { pipelineStage: { orderBy: { position: "asc" } } },
     take: 5,
   });
 
@@ -320,7 +320,7 @@ export async function generateBundleWorkflow(
       ? `\nExisting pipelines:\n${pipelines
           .map(
             (p) =>
-              `- ${p.name} (stages: ${p.stages.map((s) => s.name).join(" → ")})`
+              `- ${p.name} (stages: ${p.pipelineStage.map((s: any) => s.name).join(" → ")})`
           )
           .join("\n")}`
       : "";

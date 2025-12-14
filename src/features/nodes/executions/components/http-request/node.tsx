@@ -50,7 +50,7 @@ export const HttpRequestNode: React.FC<NodeProps<HttpRequestNodeType>> = memo(
       nodeId: props.id,
       channel: HTTP_REQUEST_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchHttpRequestRealtimeToken,
+      refreshToken: fetchHttpRequestRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

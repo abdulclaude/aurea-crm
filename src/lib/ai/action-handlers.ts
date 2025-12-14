@@ -296,6 +296,7 @@ const handlers: Record<string, ActionHandler> = {
 
         const contact = await prisma.contact.create({
           data: {
+            id: crypto.randomUUID(),
             organizationId: context.organizationId,
             subaccountId: context.subaccountId || null,
             name: parsed.name,
@@ -304,10 +305,13 @@ const handlers: Record<string, ActionHandler> = {
             companyName: parsed.companyName || null,
             tags: parsed.tags || [],
             type: "LEAD", // Default type
+            createdAt: new Date(),
+            updatedAt: new Date(),
             // Create assignee association if found
             ...(subaccountMemberId && {
-              assignees: {
+              contactAssignee: {
                 create: {
+                  id: crypto.randomUUID(),
                   subaccountMemberId,
                 },
               },
@@ -377,7 +381,7 @@ const handlers: Record<string, ActionHandler> = {
                 mode: "insensitive",
               },
             },
-            include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+            include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
           });
         }
 
@@ -389,7 +393,7 @@ const handlers: Record<string, ActionHandler> = {
               subaccountId: context.subaccountId || null,
               isDefault: true,
             },
-            include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+            include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
           });
         }
 
@@ -428,6 +432,7 @@ const handlers: Record<string, ActionHandler> = {
 
         const deal = await prisma.deal.create({
           data: {
+            id: crypto.randomUUID(),
             organizationId: context.organizationId,
             subaccountId: context.subaccountId || null,
             name: parsed.name,
@@ -435,19 +440,23 @@ const handlers: Record<string, ActionHandler> = {
             currency: parsed.currency || "USD",
             deadline: parsed.deadline ? new Date(parsed.deadline) : null,
             pipelineId: targetPipeline?.id || null,
-            pipelineStageId: targetPipeline?.stages[0]?.id || null,
+            pipelineStageId: targetPipeline?.pipelineStage[0]?.id || null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
             // Create contact association if found
             ...(contactId && {
-              contacts: {
+              dealContact: {
                 create: {
+                  id: crypto.randomUUID(),
                   contactId,
                 },
               },
             }),
             // Create team member assignment if found
             ...(subaccountMemberId && {
-              members: {
+              dealMember: {
                 create: {
+                  id: crypto.randomUUID(),
                   subaccountMemberId,
                 },
               },
@@ -507,17 +516,20 @@ const handlers: Record<string, ActionHandler> = {
       try {
         const pipeline = await prisma.pipeline.create({
           data: {
+            id: crypto.randomUUID(),
             organizationId: context.organizationId,
             subaccountId: context.subaccountId || null,
             name: parsed.name,
             description: parsed.description || null,
-            stages: {
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            pipelineStage: {
               create: [
-                { name: "Lead In", position: 0 },
-                { name: "Qualified", position: 1 },
-                { name: "Proposal", position: 2 },
-                { name: "Negotiation", position: 3 },
-                { name: "Won", position: 4 },
+                { id: crypto.randomUUID(), name: "Lead In", position: 0, createdAt: new Date(), updatedAt: new Date() },
+                { id: crypto.randomUUID(), name: "Qualified", position: 1, createdAt: new Date(), updatedAt: new Date() },
+                { id: crypto.randomUUID(), name: "Proposal", position: 2, createdAt: new Date(), updatedAt: new Date() },
+                { id: crypto.randomUUID(), name: "Negotiation", position: 3, createdAt: new Date(), updatedAt: new Date() },
+                { id: crypto.randomUUID(), name: "Won", position: 4, createdAt: new Date(), updatedAt: new Date() },
               ],
             },
           },
@@ -737,22 +749,28 @@ const handlers: Record<string, ActionHandler> = {
       // Create the workflow in the database
       const createdWorkflow = await prisma.workflows.create({
         data: {
+          id: crypto.randomUUID(),
           userId: context.userId,
           organizationId: context.organizationId,
           subaccountId: context.subaccountId,
           name: workflow.name,
           description: workflow.description,
-          nodes: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          Node: {
             create: workflow.nodes.map(node => ({
+              id: crypto.randomUUID(),
               name: node.name,
               type: node.type as any,
               position: node.position,
               data: node.data,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             })),
           },
         },
         include: {
-          nodes: true,
+          Node: true,
         },
       });
 
@@ -760,8 +778,8 @@ const handlers: Record<string, ActionHandler> = {
       // Map generated node IDs to created node IDs by matching name and type
       const nodeIdMap = new Map<string, string>();
       workflow.nodes.forEach((genNode) => {
-        const createdNode = createdWorkflow.nodes.find(
-          (n) => n.name === genNode.name && n.type === genNode.type
+        const createdNode = createdWorkflow.Node.find(
+          (n: any) => n.name === genNode.name && n.type === genNode.type
         );
         if (createdNode) {
           nodeIdMap.set(genNode.id, createdNode.id);
@@ -778,9 +796,12 @@ const handlers: Record<string, ActionHandler> = {
         if (fromNodeId && toNodeId) {
           await prisma.connection.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: createdWorkflow.id,
               fromNodeId,
               toNodeId,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
           console.log(`[Workflow Gen] Connection created successfully`);
@@ -853,31 +874,37 @@ const handlers: Record<string, ActionHandler> = {
       // Create the bundle workflow in the database
       const createdWorkflow = await prisma.workflows.create({
         data: {
+          id: crypto.randomUUID(),
           userId: context.userId,
           organizationId: context.organizationId,
           subaccountId: context.subaccountId,
           name: workflow.name,
           description: workflow.description,
           isBundle: true,
-          nodes: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          Node: {
             create: workflow.nodes.map(node => ({
+              id: crypto.randomUUID(),
               name: node.name,
               type: node.type as any,
               position: node.position,
               data: node.data,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             })),
           },
         },
         include: {
-          nodes: true,
+          Node: true,
         },
       });
 
       // Create connections between nodes
       const nodeIdMap = new Map<string, string>();
       workflow.nodes.forEach((genNode) => {
-        const createdNode = createdWorkflow.nodes.find(
-          (n) => n.name === genNode.name && n.type === genNode.type
+        const createdNode = createdWorkflow.Node.find(
+          (n: any) => n.name === genNode.name && n.type === genNode.type
         );
         if (createdNode) {
           nodeIdMap.set(genNode.id, createdNode.id);
@@ -890,9 +917,12 @@ const handlers: Record<string, ActionHandler> = {
         if (fromNodeId && toNodeId) {
           await prisma.connection.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: createdWorkflow.id,
               fromNodeId,
               toNodeId,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
         }
@@ -1092,7 +1122,7 @@ const handlers: Record<string, ActionHandler> = {
       select: {
         id: true,
         name: true,
-        stages: {
+        pipelineStage: {
           select: { id: true },
         },
       },
@@ -1108,7 +1138,7 @@ const handlers: Record<string, ActionHandler> = {
     }
 
     const pipelineList = pipelines
-      .map((p: { name: string; stages: { id: string }[] }) => `• ${p.name} (${p.stages.length} stages)`)
+      .map((p: { name: string; pipelineStage: { id: string }[] }) => `• ${p.name} (${p.pipelineStage.length} stages)`)
       .join("\n");
 
     return {

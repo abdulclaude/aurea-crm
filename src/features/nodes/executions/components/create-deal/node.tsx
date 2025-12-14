@@ -55,7 +55,7 @@ export const CreateDealNode: React.FC<NodeProps<CreateDealNodeType>> = memo(
       nodeId: props.id,
       channel: CREATE_DEAL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchCreateDealRealtimeToken,
+      refreshToken: fetchCreateDealRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

@@ -96,12 +96,15 @@ export const appsRouter = createTRPCRouter({
     } else {
       await prisma.apps.create({
         data: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           provider: AppProvider.GOOGLE_CALENDAR,
           scopes: googleAccount.scopes ?? [],
           metadata: {
             accountId: googleAccount.accountId,
           },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
     }
@@ -158,12 +161,15 @@ export const appsRouter = createTRPCRouter({
     } else {
       await prisma.apps.create({
         data: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           provider: AppProvider.GMAIL,
           scopes: googleAccount.scopes ?? [],
           metadata: {
             accountId: googleAccount.accountId,
           },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
     }
@@ -220,9 +226,12 @@ export const appsRouter = createTRPCRouter({
     } else {
       await prisma.apps.create({
         data: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           provider: AppProvider.GOOGLE,
           scopes: googleAccount.scopes ?? [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
           metadata: {
             accountId: googleAccount.accountId,
           },
@@ -282,12 +291,15 @@ export const appsRouter = createTRPCRouter({
     } else {
       await prisma.apps.create({
         data: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           provider: AppProvider.MICROSOFT,
           scopes: microsoftAccount.scopes ?? [],
           metadata: {
             accountId: microsoftAccount.accountId,
           },
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
     }

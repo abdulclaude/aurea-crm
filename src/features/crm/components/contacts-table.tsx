@@ -12,7 +12,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { format, formatDistanceToNow } from "date-fns";
 import { MoreHorizontal, Pencil, Eye, Trash } from "lucide-react";
 import * as React from "react";
-import { useQueryState, parseAsString } from "nuqs";
+import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -379,6 +379,10 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useContactsParams();
 
+  // Pagination state
+  const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
+  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+
   // Client filter for "all-clients" scope (agency viewing all client data)
   const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
     "subaccountId",
@@ -433,6 +437,8 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.contacts.list.queryOptions({
+      page,
+      pageSize,
       search: params.search || undefined,
       types: params.types as ContactType[] | undefined,
       tags: params.tags.length > 0 ? params.tags : undefined,
@@ -533,11 +539,25 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
     [setParams]
   );
 
+  const handlePageChange = React.useCallback(
+    (newPage: number) => void setPage(newPage),
+    [setPage]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      void setPageSize(newPageSize);
+      void setPage(1);
+    },
+    [setPageSize, setPage]
+  );
+
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyTypes = React.useCallback(
@@ -546,8 +566,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
         ...prev,
         types,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyTags = React.useCallback(
@@ -556,8 +577,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
         ...prev,
         tags,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyAssignees = React.useCallback(
@@ -566,8 +588,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
         ...prev,
         assignedTo: assignees,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyAllFilters = React.useCallback(
@@ -578,15 +601,17 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
         tags,
         assignedTo: assignees,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleSortChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, sort: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleCreatedAtChange = React.useCallback(
@@ -594,8 +619,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setCreatedAtStartStr(start ? toYMD(start) : "");
       void setCreatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setCreatedAtStartStr, setCreatedAtEndStr]
+    [setCreatedAtStartStr, setCreatedAtEndStr, setPage]
   );
 
   const handleLastActivityChange = React.useCallback(
@@ -603,8 +629,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setLastActivityStartStr(start ? toYMD(start) : "");
       void setLastActivityEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setLastActivityStartStr, setLastActivityEndStr]
+    [setLastActivityStartStr, setLastActivityEndStr, setPage]
   );
 
   const handleUpdatedAtChange = React.useCallback(
@@ -612,8 +639,9 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setUpdatedAtStartStr(start ? toYMD(start) : "");
       void setUpdatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setUpdatedAtStartStr, setUpdatedAtEndStr]
+    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage]
   );
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -667,6 +695,14 @@ export function ContactsTable({ scope = "agency" }: ContactsTableProps) {
           enableRowSelection
           rowSelection={rowSelection}
           onRowSelectionChange={setRowSelection}
+          pagination={{
+            currentPage: data.pagination.currentPage,
+            totalPages: data.pagination.totalPages,
+            pageSize: data.pagination.pageSize,
+            totalItems: data.pagination.totalItems,
+            onPageChange: handlePageChange,
+            onPageSizeChange: handlePageSizeChange,
+          }}
           emptyState={
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
               No contacts have been added yet. <br /> Start by adding a contact.

@@ -24,6 +24,7 @@ export async function logActivity(params: LogActivityParams) {
   try {
     await prisma.activity.create({
       data: {
+        id: crypto.randomUUID(),
         organizationId: params.organizationId,
         subaccountId: params.subaccountId ?? null,
         userId: params.userId,
@@ -36,6 +37,7 @@ export async function logActivity(params: LogActivityParams) {
         metadata: params.metadata,
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
+        createdAt: new Date(),
       },
     });
   } catch (error) {

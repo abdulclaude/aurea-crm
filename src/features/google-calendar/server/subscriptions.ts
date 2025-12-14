@@ -241,6 +241,7 @@ async function ensureSubscriptionForNode({
       variableName,
     },
     create: {
+      id: crypto.randomUUID(),
       nodeId: node.id,
       calendarId: data.calendarId,
       calendarName: data.calendarName,
@@ -255,6 +256,8 @@ async function ensureSubscriptionForNode({
       userId,
       workflowId,
       variableName,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   });
 }

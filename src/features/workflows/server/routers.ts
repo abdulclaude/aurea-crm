@@ -73,15 +73,22 @@ export const workflowsRouter = createTRPCRouter({
   create: premiumProcedure.mutation(async ({ ctx }) => {
     const workflow = await prisma.workflows.create({
       data: {
+        id: crypto.randomUUID(),
         name: generateSlug(3),
         userId: ctx.auth.user.id,
         organizationId: ctx.orgId ?? null,
         subaccountId: ctx.subaccountId ?? null,
-        nodes: {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        Node: {
           create: {
+            id: crypto.randomUUID(),
             type: NodeType.INITIAL,
             position: { x: 0, y: 0 },
             name: NodeType.INITIAL,
+            data: {},
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         },
       },
@@ -124,16 +131,23 @@ export const workflowsRouter = createTRPCRouter({
   createBundle: premiumProcedure.mutation(({ ctx }) => {
     return prisma.workflows.create({
       data: {
+        id: crypto.randomUUID(),
         name: `${generateSlug(3)}-bundle`,
         userId: ctx.auth.user.id,
         organizationId: ctx.orgId ?? null,
         subaccountId: ctx.subaccountId ?? null,
         isBundle: true,
-        nodes: {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        Node: {
           create: {
+            id: crypto.randomUUID(),
             type: NodeType.INITIAL,
             position: { x: 0, y: 0 },
             name: NodeType.INITIAL,
+            data: {},
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         },
       },
@@ -333,6 +347,8 @@ export const workflowsRouter = createTRPCRouter({
               typeof node.data?.credentialId === "string"
                 ? (node.data.credentialId as string)
                 : null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
           })),
         });
 
@@ -340,11 +356,14 @@ export const workflowsRouter = createTRPCRouter({
 
         await tx.connection.createMany({
           data: edges.map((edge) => ({
+            id: crypto.randomUUID(),
             workflowId: id,
             fromNodeId: edge.source,
             toNodeId: edge.target,
             fromOutput: edge.sourceHandle || "main",
             toInput: edge.targetHandle || "main",
+            createdAt: new Date(),
+            updatedAt: new Date(),
           })),
         });
 
@@ -384,12 +403,12 @@ export const workflowsRouter = createTRPCRouter({
           id: input.id,
           ...workflowScopeWhere(ctx),
         },
-        include: { nodes: true, connections: true },
+        include: { Node: true, Connection: true },
       });
 
       // transform server nodes to react-flow compatible nodes
 
-      const nodes: Node[] = workflow.nodes.map((node) => ({
+      const nodes: Node[] = workflow.Node.map((node) => ({
         id: node.id,
         type: node.type,
         position: node.position as { x: number; y: number },
@@ -398,7 +417,7 @@ export const workflowsRouter = createTRPCRouter({
 
       // transform server connections to react-flow compatible edges
       // Map default "main" handles to actual node handle IDs
-      const edges: Edge[] = workflow.connections.map((connection) => ({
+      const edges: Edge[] = workflow.Connection.map((connection) => ({
         id: connection.id,
         source: connection.fromNodeId,
         target: connection.toNodeId,
@@ -450,7 +469,7 @@ export const workflowsRouter = createTRPCRouter({
           take: pageSize,
           where,
           include: {
-            nodes: {
+            Node: {
               select: nodePreviewSelect,
             },
           },
@@ -506,7 +525,7 @@ export const workflowsRouter = createTRPCRouter({
             },
           },
           include: {
-            nodes: {
+            Node: {
               select: nodePreviewSelect,
             },
           },
@@ -567,7 +586,7 @@ export const workflowsRouter = createTRPCRouter({
           },
         },
         include: {
-          nodes: {
+          Node: {
             select: nodePreviewSelect,
           },
         },
@@ -625,38 +644,44 @@ export const workflowsRouter = createTRPCRouter({
           id: input.id,
           ...workflowScopeWhere(ctx),
         },
-        include: { nodes: true, connections: true },
+        include: { Node: true, Connection: true },
       });
 
       return await prisma.$transaction(async (tx) => {
         const template = await tx.workflows.create({
           data: {
+            id: crypto.randomUUID(),
             name: input.name ?? `${base.name} Template`,
             userId: ctx.auth.user.id,
             organizationId: ctx.orgId ?? null,
             isTemplate: true,
             subaccountId: ctx.subaccountId ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         });
 
         const oldToNewNodeId = new Map<string, string>();
 
         // clone nodes
-        for (const node of base.nodes) {
+        for (const node of base.Node) {
           const created = await tx.node.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: template.id,
               name: node.name,
               type: node.type,
               position: node.position as any,
               data: node.data as any,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
           oldToNewNodeId.set(node.id, created.id);
         }
 
         // clone connections
-        for (const connection of base.connections) {
+        for (const connection of base.Connection) {
           const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
           const toNodeId = oldToNewNodeId.get(connection.toNodeId);
           if (!fromNodeId || !toNodeId) {
@@ -664,11 +689,14 @@ export const workflowsRouter = createTRPCRouter({
           }
           await tx.connection.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: template.id,
               fromNodeId,
               toNodeId,
               fromOutput: connection.fromOutput,
               toInput: connection.toInput,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
         }
@@ -689,7 +717,7 @@ export const workflowsRouter = createTRPCRouter({
           id: input.id,
           ...workflowScopeWhere(ctx),
         },
-        include: { nodes: true, connections: true },
+        include: { Node: true, Connection: true },
       });
 
       if (!base.isTemplate) {
@@ -699,33 +727,39 @@ export const workflowsRouter = createTRPCRouter({
       const workflow = await prisma.$transaction(async (tx) => {
         const workflow = await tx.workflows.create({
           data: {
+            id: crypto.randomUUID(),
             name: input.name ?? generateSlug(3),
             userId: ctx.auth.user.id,
             organizationId: ctx.orgId ?? null,
             isTemplate: false,
             archived: false,
             subaccountId: ctx.subaccountId ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         });
 
         const oldToNewNodeId = new Map<string, string>();
 
         // clone nodes
-        for (const node of base.nodes) {
+        for (const node of base.Node) {
           const created = await tx.node.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: workflow.id,
               name: node.name,
               type: node.type,
               position: node.position as any,
               data: node.data as any,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
           oldToNewNodeId.set(node.id, created.id);
         }
 
         // clone connections
-        for (const connection of base.connections) {
+        for (const connection of base.Connection) {
           const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
           const toNodeId = oldToNewNodeId.get(connection.toNodeId);
           if (!fromNodeId || !toNodeId) {
@@ -733,11 +767,14 @@ export const workflowsRouter = createTRPCRouter({
           }
           await tx.connection.create({
             data: {
+              id: crypto.randomUUID(),
               workflowId: workflow.id,
               fromNodeId,
               toNodeId,
               fromOutput: connection.fromOutput,
               toInput: connection.toInput,
+              createdAt: new Date(),
+              updatedAt: new Date(),
             },
           });
         }
@@ -810,16 +847,16 @@ export const workflowsRouter = createTRPCRouter({
           archived: false,
         },
         include: {
-          nodes: {
+          Node: {
             orderBy: { position: "asc" },
           },
-          connections: true,
+          Connection: true,
         },
       });
 
       // Filter workflows that have BUNDLE_WORKFLOW nodes referencing this bundle
       const parentWorkflows = workflows.filter((wf) =>
-        wf.nodes.some((node) => {
+        wf.Node.some((node: any) => {
           if (node.type !== NodeType.BUNDLE_WORKFLOW) return false;
           const data = node.data as Record<string, any>;
           return data?.bundleWorkflowId === input.bundleId;

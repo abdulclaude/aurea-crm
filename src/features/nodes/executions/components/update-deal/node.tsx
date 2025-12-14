@@ -53,7 +53,7 @@ export const UpdateDealNode: React.FC<NodeProps<UpdateDealNodeType>> = memo(
       nodeId: props.id,
       channel: UPDATE_DEAL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchUpdateDealRealtimeToken,
+      refreshToken: fetchUpdateDealRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

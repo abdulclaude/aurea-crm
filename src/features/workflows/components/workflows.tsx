@@ -468,7 +468,7 @@ type NodeIconDescriptor =
       alt: string;
     };
 
-const nodeIconDescriptors: Record<NodeType, NodeIconDescriptor> = {
+const nodeIconDescriptors: Partial<Record<NodeType, NodeIconDescriptor>> = {
   [NodeType.INITIAL]: { icon: IconPayment, alt: "Initial" },
   [NodeType.MANUAL_TRIGGER]: { icon: MousePointerIcon, alt: "Manual trigger" },
   [NodeType.GOOGLE_FORM_TRIGGER]: {

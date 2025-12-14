@@ -46,7 +46,7 @@ export const TelegramExecutionNode: React.FC<NodeProps<TelegramNodeType>> =
       nodeId: props.id,
       channel: TELEGRAM_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchTelegramExecutionRealtimeToken,
+      refreshToken: fetchTelegramExecutionRealtimeToken as any,
     });
 
     const handleSubmit = (values: TelegramExecutionFormValues) => {

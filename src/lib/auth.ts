@@ -50,6 +50,12 @@ export const auth = betterAuth({
         "email",
         "profile",
         "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/forms.responses.readonly",
+        "https://www.googleapis.com/auth/forms.body.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive",
       ],
     },
     microsoft: {
@@ -65,6 +71,22 @@ export const auth = betterAuth({
         "Mail.Send",
         "Files.ReadWrite.All",
       ],
+    },
+    slack: {
+      clientId: process.env.SLACK_CLIENT_ID ?? "",
+      clientSecret: process.env.SLACK_CLIENT_SECRET ?? "",
+      scopes: [
+        "channels:read",
+        "channels:write",
+        "chat:write",
+        "files:write",
+        "users:read",
+      ],
+    },
+    discord: {
+      clientId: process.env.DISCORD_CLIENT_ID ?? "",
+      clientSecret: process.env.DISCORD_CLIENT_SECRET ?? "",
+      scopes: ["identify", "email", "guilds", "messages.read"],
     },
   },
   account: {

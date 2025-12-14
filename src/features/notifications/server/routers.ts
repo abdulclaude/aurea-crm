@@ -52,7 +52,7 @@ export const notificationsRouter = createTRPCRouter({
           createdAt: "desc",
         },
         include: {
-          actor: {
+          userNotificationActorIdTouser: {
             select: {
               id: true,
               name: true,
@@ -119,7 +119,7 @@ export const notificationsRouter = createTRPCRouter({
           userId: ctx.auth.user.id,
         },
         include: {
-          actor: {
+          userNotificationActorIdTouser: {
             select: {
               id: true,
               name: true,
@@ -194,10 +194,13 @@ export const notificationsRouter = createTRPCRouter({
     if (!prefs) {
       prefs = await prisma.notificationPreference.create({
         data: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           preferences: {},
           emailEnabled: true,
           emailDigest: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
     }
@@ -222,10 +225,13 @@ export const notificationsRouter = createTRPCRouter({
           userId: ctx.auth.user.id,
         },
         create: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           preferences: input.preferences ?? {},
           emailEnabled: input.emailEnabled ?? true,
           emailDigest: input.emailDigest ?? false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
         update: {
           ...(input.preferences !== undefined && {
@@ -302,12 +308,14 @@ export const notificationsRouter = createTRPCRouter({
           userId: ctx.auth.user.id,
         },
         create: {
+          id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           status: input.status,
           organizationId: input.organizationId ?? null,
           subaccountId: input.subaccountId ?? null,
           lastSeenAt: new Date(),
           lastActivityAt: new Date(),
+          updatedAt: new Date(),
         },
         update: {
           status: input.status,

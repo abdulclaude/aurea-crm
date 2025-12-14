@@ -12,6 +12,14 @@ import {
   syncEmbeddingsDaily,
   reindexSubaccount,
 } from "@/inngest/channels/embedding-sync";
+import {
+  mindbodyFullSync,
+  mindbodyClientsSync,
+  mindbodyClassesSync,
+  mindbodyContactSync,
+  mindbodyScheduledSync,
+} from "@/inngest/functions/mindbody-sync";
+import { sendRotaMagicLinks } from "@/inngest/functions/send-rota-magic-links";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -25,5 +33,11 @@ export const { GET, POST, PUT } = serve({
     handleTelegramUpdate,
     syncEmbeddingsDaily,
     reindexSubaccount,
+    mindbodyFullSync,
+    mindbodyClientsSync,
+    mindbodyClassesSync,
+    mindbodyContactSync,
+    mindbodyScheduledSync,
+    sendRotaMagicLinks,
   ],
 });

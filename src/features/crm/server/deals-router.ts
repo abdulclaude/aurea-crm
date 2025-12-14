@@ -14,7 +14,7 @@ import { ActivityAction } from "@prisma/client";
 const dealInclude = {
   pipeline: true,
   pipelineStage: true,
-  members: {
+  dealMember: {
     include: {
       subaccountMember: {
         include: {
@@ -23,7 +23,7 @@ const dealInclude = {
       },
     },
   },
-  contacts: {
+  dealContact: {
     include: {
       contact: true,
     },
@@ -80,7 +80,7 @@ const mapDeal = (
     lastActivityAt: deal.lastActivityAt,
     createdAt: deal.createdAt,
     updatedAt: deal.updatedAt,
-    members: deal.members.map((member) => {
+    members: deal.dealMember.map((member) => {
       const userId = member.subaccountMember.user?.id;
       const activity =
         userId && activityStatus ? activityStatus.get(userId) : undefined;
@@ -99,7 +99,7 @@ const mapDeal = (
         statusMessage: activity?.statusMessage ?? null,
       };
     }),
-    contacts: deal.contacts.map((link) => ({
+    contacts: deal.dealContact.map((link) => ({
       id: link.contact.id,
       name: link.contact.name,
       companyName: link.contact.companyName,
@@ -118,7 +118,7 @@ export const dealsRouter = createTRPCRouter({
       return {
         minValue: 0,
         maxValue: 100000,
-        maxValueCurrency: "USD",
+        maxValueCurrency: "GBP",
         count: 0,
         currencies: [],
       };
@@ -217,6 +217,8 @@ export const dealsRouter = createTRPCRouter({
     .input(
       z
         .object({
+          page: z.number().min(1).default(1),
+          pageSize: z.number().min(1).max(100).default(20),
           pipelineId: z.string().optional(),
           pipelineStageId: z.string().optional(),
           pipelineStageIds: z.array(z.string()).optional(),
@@ -242,16 +244,29 @@ export const dealsRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
       // Use input subaccountId if provided, otherwise use context subaccountId
-      const subaccountId = input?.subaccountId !== undefined
-        ? (input.subaccountId || null)
-        : ctx.subaccountId;
+      const subaccountId =
+        input?.subaccountId !== undefined
+          ? input.subaccountId || null
+          : ctx.subaccountId;
 
       if (!orgId) {
-        return { items: [], nextCursor: null, total: 0 };
+        return {
+          items: [],
+          nextCursor: null,
+          total: 0,
+          pagination: {
+            currentPage: 1,
+            totalPages: 0,
+            pageSize: input?.pageSize ?? 20,
+            totalItems: 0,
+          },
+        };
       }
 
+      const page = input?.page ?? 1;
+      const pageSize = input?.pageSize ?? 20;
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
-      const skip = input?.cursor ?? 0;
+      const skip = input?.cursor ?? (page - 1) * pageSize;
 
       const where: Prisma.DealWhereInput = {
         organizationId: orgId,
@@ -259,9 +274,8 @@ export const dealsRouter = createTRPCRouter({
         ...(input?.includeAllClients
           ? {}
           : subaccountId
-            ? { subaccountId }
-            : { subaccountId: null }
-        ),
+          ? { subaccountId }
+          : { subaccountId: null }),
       };
 
       if (input?.pipelineId) {
@@ -285,7 +299,7 @@ export const dealsRouter = createTRPCRouter({
 
       // Filter by contacts
       if (input?.contacts && input.contacts.length > 0) {
-        where.contacts = {
+        where.dealContact = {
           some: {
             contactId: { in: input.contacts },
           },
@@ -294,7 +308,7 @@ export const dealsRouter = createTRPCRouter({
 
       // Filter by members
       if (input?.members && input.members.length > 0) {
-        where.members = {
+        where.dealMember = {
           some: {
             subaccountMemberId: { in: input.members },
           },
@@ -360,13 +374,13 @@ export const dealsRouter = createTRPCRouter({
         }
       }
 
-      const [items, total] = await Promise.all([
+      const [items, totalItems] = await Promise.all([
         prisma.deal.findMany({
           where,
           include: dealInclude,
           orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
           skip,
-          take,
+          take: pageSize,
         }),
         prisma.deal.count({ where }),
       ]);
@@ -374,7 +388,7 @@ export const dealsRouter = createTRPCRouter({
       // Collect all unique user IDs from members
       const userIds = new Set<string>();
       for (const deal of items) {
-        for (const member of deal.members) {
+        for (const member of deal.dealMember) {
           const userId = member.subaccountMember.user?.id;
           if (userId) {
             userIds.add(userId);
@@ -388,7 +402,8 @@ export const dealsRouter = createTRPCRouter({
           ? await getUsersActivityStatus(Array.from(userIds))
           : new Map();
 
-      const nextCursor = skip + items.length < total ? skip + take : null;
+      const nextCursor = skip + items.length < totalItems ? skip + take : null;
+      const totalPages = Math.ceil(totalItems / pageSize);
 
       // Map deals
       const mappedItems = items.map((deal) => mapDeal(deal, activityStatus));
@@ -396,7 +411,13 @@ export const dealsRouter = createTRPCRouter({
       return {
         items: mappedItems,
         nextCursor,
-        total,
+        total: totalItems,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          pageSize,
+          totalItems,
+        },
       };
     }),
 
@@ -440,19 +461,20 @@ export const dealsRouter = createTRPCRouter({
             ...(subaccountId && { subaccountId }),
             isDefault: true,
           },
-          include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+          include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
         });
 
         if (defaultPipeline) {
           pipelineId = defaultPipeline.id;
-          if (!pipelineStageId && defaultPipeline.stages[0]) {
-            pipelineStageId = defaultPipeline.stages[0].id;
+          if (!pipelineStageId && defaultPipeline.pipelineStage[0]) {
+            pipelineStageId = defaultPipeline.pipelineStage[0].id;
           }
         }
       }
 
       const deal = await prisma.deal.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId: orgId,
           subaccountId: subaccountId ?? null,
           name: input.name,
@@ -464,15 +486,20 @@ export const dealsRouter = createTRPCRouter({
           source: input.source,
           tags: input.tags ?? [],
           description: input.description,
-          contacts: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          dealContact: {
             create: input.contactIds.map((contactId) => ({
+              id: crypto.randomUUID(),
               contactId,
             })),
           },
-          members: input.memberIds
+          dealMember: input.memberIds
             ? {
                 create: input.memberIds.map((memberId) => ({
+                  id: crypto.randomUUID(),
                   subaccountMemberId: memberId,
+                  createdAt: new Date(),
                 })),
               }
             : undefined,
@@ -516,7 +543,7 @@ export const dealsRouter = createTRPCRouter({
         },
       });
 
-      return mapDeal(deal);
+      return mapDeal(deal as DealResult);
     }),
 
   getById: protectedProcedure
@@ -651,14 +678,17 @@ export const dealsRouter = createTRPCRouter({
       const changes = getChangedFields(existingForComparison, data);
 
       // Determine if this is a stage change
-      const isStageChange = data.pipelineStageId !== undefined &&
+      const isStageChange =
+        data.pipelineStageId !== undefined &&
         data.pipelineStageId !== existing.pipelineStageId;
 
       await logAnalytics({
         organizationId: orgId,
         subaccountId: subaccountId ?? null,
         userId: ctx.auth.user.id,
-        action: isStageChange ? ActivityAction.STAGE_CHANGED : ActivityAction.UPDATED,
+        action: isStageChange
+          ? ActivityAction.STAGE_CHANGED
+          : ActivityAction.UPDATED,
         entityType: "deal",
         entityId: deal.id,
         entityName: deal.name,
@@ -683,5 +713,77 @@ export const dealsRouter = createTRPCRouter({
       });
 
       return mapDeal(deal);
+    }),
+
+  /**
+   * Search deals by name for a specific contact and pipeline
+   */
+  search: protectedProcedure
+    .input(
+      z.object({
+        query: z.string().min(1),
+        contactId: z.string().optional(),
+        pipelineId: z.string().optional(),
+        limit: z.number().default(10),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const orgId = ctx.orgId;
+      const subaccountId = ctx.subaccountId;
+
+      if (!orgId || !subaccountId) {
+        return [];
+      }
+
+      const where: Prisma.DealWhereInput = {
+        organizationId: orgId,
+        subaccountId,
+        name: {
+          contains: input.query,
+          mode: "insensitive" as Prisma.QueryMode,
+        },
+      };
+
+      // Filter by contact if provided
+      if (input.contactId) {
+        where.dealContact = {
+          some: {
+            contactId: input.contactId,
+          },
+        };
+      }
+
+      // Filter by pipeline if provided
+      if (input.pipelineId) {
+        where.pipelineId = input.pipelineId;
+      }
+
+      const deals = await prisma.deal.findMany({
+        where,
+        include: {
+          pipeline: true,
+          pipelineStage: true,
+          dealContact: {
+            include: {
+              contact: true,
+            },
+          },
+        },
+        orderBy: [{ updatedAt: "desc" }],
+        take: input.limit,
+      });
+
+      return deals.map((deal) => ({
+        id: deal.id,
+        name: deal.name,
+        value: deal.value ? Number(deal.value) : null,
+        currency: deal.currency,
+        pipeline: deal.pipeline?.name ?? "",
+        stage: deal.pipelineStage?.name ?? "",
+        contacts: deal.dealContact.map((dc: any) => ({
+          id: dc.contact.id,
+          name: dc.contact.name,
+        })),
+      }));
     }),
 });

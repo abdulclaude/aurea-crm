@@ -60,7 +60,7 @@ export function ClockInForm() {
 
   // Get workers
   const { data: workersData } = useSuspenseQuery(
-    trpc.workers.list.queryOptions({ limit: 100 })
+    trpc.workers.list.queryOptions({ pageSize: 100 })
   );
 
   // Get contacts
@@ -163,7 +163,7 @@ export function ClockInForm() {
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {workersData?.items.map((worker) => (
+                            {(workersData as any)?.items.map((worker: any) => (
                               <SelectItem key={worker.id} value={worker.id}>
                                 {worker.name}
                               </SelectItem>
@@ -282,7 +282,7 @@ export function ClockInForm() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {workersData?.items.map((worker) => (
+                          {(workersData as any)?.items.map((worker: any) => (
                             <SelectItem key={worker.id} value={worker.id}>
                               {worker.name}
                             </SelectItem>

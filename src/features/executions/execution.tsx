@@ -63,7 +63,7 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
             <CardTitle>{formatStatus(execution.status)}</CardTitle>
 
             <CardDescription>
-              Execution for {execution.workflow.name}
+              Execution for {execution.Workflows.name}
             </CardDescription>
           </div>
         </div>
@@ -81,7 +81,7 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
               prefetch
               className="text-sm hover:underline text-primary"
             >
-              {execution.workflow.name}
+              {execution.Workflows.name}
             </Link>
           </div>
 

@@ -11,6 +11,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
 import { Check, ChevronRightIcon, MoreHorizontal, X } from "lucide-react";
+import { IconReceiptBill as Receipt } from "central-icons/IconReceiptBill";
 import * as React from "react";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -36,6 +37,9 @@ import {
   useApproveTimeLog,
   useDeleteTimeLog,
 } from "../hooks/use-time-tracking";
+import { GenerateInvoiceFromTimeLogsDialog } from "@/features/invoicing/components/generate-invoice-from-timelogs-dialog";
+import { BulkAssignContactDialog } from "./bulk-assign-contact-dialog";
+import { TimeLogEditSheet } from "./time-log-edit-sheet";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type TimeLogRow = RouterOutput["timeTracking"]["list"]["items"][number];
@@ -129,15 +133,22 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   const trpc = useTRPC();
   const [params, setParams] = useTimeLogsParams();
   const [rowSelection, setRowSelection] = React.useState({});
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = React.useState(false);
+  const [isBulkAssignContactDialogOpen, setIsBulkAssignContactDialogOpen] = React.useState(false);
+  const [selectedTimeLog, setSelectedTimeLog] = React.useState<TimeLogRow | null>(null);
+  const [isEditSheetOpen, setIsEditSheetOpen] = React.useState(false);
 
   // Client filter for "all-clients" scope (agency viewing all client data)
-  const [selectedSubaccountId, setSelectedSubaccountId] = React.useState<string>("");
+  const [selectedSubaccountId, setSelectedSubaccountId] =
+    React.useState<string>("");
 
   const { mutate: approveTimeLog } = useApproveTimeLog();
   const { mutate: deleteTimeLog } = useDeleteTimeLog();
 
   const { data, isFetching, refetch } = useSuspenseQuery(
     trpc.timeTracking.list.queryOptions({
+      page: params.page,
+      pageSize: params.pageSize,
       search: params.search || undefined,
       workers:
         params.workers && params.workers.length > 0
@@ -284,6 +295,41 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       },
     },
     {
+      id: "client",
+      accessorFn: (row) => row.contact?.name || "—",
+      header: "Client",
+      meta: { label: "Client" },
+      cell: ({ row }) => {
+        const contact = row.original.contact;
+
+        if (!contact) {
+          return (
+            <span className="text-xs text-primary/40 italic">No client</span>
+          );
+        }
+
+        return (
+          <div className="flex items-center gap-2">
+            <Avatar className="size-7">
+              <AvatarFallback className="bg-primary/5 text-primary text-[10px]">
+                {(contact.name?.[0] ?? "C").toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-primary truncate">
+                {contact.name}
+              </p>
+              {contact.email && (
+                <p className="text-[11px] text-primary/60 truncate">
+                  {contact.email}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
       id: "title",
       accessorKey: "title",
       header: "Title",
@@ -408,7 +454,9 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
               <DropdownMenuLabel className="text-xs text-primary/80 dark:text-white/50">
                 Actions
               </DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
+
+              <DropdownMenuSeparator className="bg-black/10 dark:bg-white/5" />
+
               {canApprove && (
                 <>
                   <DropdownMenuItem
@@ -541,7 +589,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
-      setParams((prev) => ({ ...prev, search: value }));
+      setParams((prev) => ({ ...prev, search: value, page: 1 }));
     },
     [setParams]
   );
@@ -558,6 +606,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
     }) => {
       setParams((prev) => ({
         ...prev,
+        page: 1, // Reset to page 1 on filter change
         workers: filters.workers,
         deals: filters.deals,
         statuses: filters.statuses,
@@ -588,9 +637,24 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       setParams((prev) => ({
         ...prev,
+        page: 1, // Reset to page 1 on filter change
         startDate: start ? toYMD(start) : "",
         endDate: end ? toYMD(end) : "",
       }));
+    },
+    [setParams]
+  );
+
+  const handlePageChange = React.useCallback(
+    (newPage: number) => {
+      setParams((prev) => ({ ...prev, page: newPage }));
+    },
+    [setParams]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      setParams((prev) => ({ ...prev, pageSize: newPageSize, page: 1 }));
     },
     [setParams]
   );
@@ -857,8 +921,79 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
     }
   }, [data.items]);
 
+  // Get selected approved time logs for the button
+  const selectedRowIds = Object.keys(rowSelection);
+  const selectedApprovedTimeLogs = data.items.filter(
+    (item) =>
+      selectedRowIds.includes(item.id) && item.status === TimeLogStatus.APPROVED
+  );
+
+  // Handle row click to open edit sheet
+  const handleRowClick = React.useCallback((row: TimeLogRow) => {
+    setSelectedTimeLog(row);
+    setIsEditSheetOpen(true);
+  }, []);
+
+  // Handle edit sheet success
+  const handleEditSuccess = React.useCallback(() => {
+    refetch();
+  }, [refetch]);
+
   return (
-    <div className="space-y-4 pt-6">
+    <div
+      className={cn(
+        "space-y-4",
+        selectedApprovedTimeLogs.length === 0 && "pt-6"
+      )}
+    >
+      {/* Bulk Actions Bar - Approved Time Logs */}
+      {selectedApprovedTimeLogs.length > 0 && (
+        <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/20 px-8 py-4">
+          <div className="text-xs text-emerald-600 dark:text-blue-100">
+            <strong>({selectedApprovedTimeLogs.length})</strong> approved time
+            log(s) selected
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setIsBulkAssignContactDialogOpen(true)}
+              className="gap-2 w-max"
+              variant="outline"
+            >
+              Assign Contact
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setIsInvoiceDialogOpen(true)}
+              className="gap-2 w-max"
+              variant="success"
+            >
+              <Receipt className="size-4" />
+              Generate Invoice
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Actions Bar - All Selected Time Logs (for non-approved) */}
+      {Object.keys(rowSelection).length > 0 && selectedApprovedTimeLogs.length === 0 && (
+        <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/20 px-8 py-4">
+          <div className="text-xs text-blue-600 dark:text-blue-100">
+            <strong>({Object.keys(rowSelection).length})</strong> time log(s) selected
+          </div>
+
+          <Button
+            size="sm"
+            onClick={() => setIsBulkAssignContactDialogOpen(true)}
+            className="gap-2 w-max"
+            variant="outline"
+          >
+            Assign Contact
+          </Button>
+        </div>
+      )}
+
       <DataTable
         data={data.items}
         columns={timeLogColumns}
@@ -875,6 +1010,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         enableRowSelection
         rowSelection={rowSelection}
         onRowSelectionChange={setRowSelection}
+        onRowClick={handleRowClick}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
             No time logs found. <br /> Time logs will appear here once workers
@@ -914,6 +1050,44 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
             />
           ),
         }}
+        pagination={{
+          currentPage: data?.pagination?.currentPage ?? 1,
+          totalPages: data?.pagination?.totalPages ?? 1,
+          pageSize: data?.pagination?.pageSize ?? 10,
+          totalItems: data?.pagination?.totalItems ?? 0,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
+        }}
+      />
+
+      {/* Generate Invoice Dialog */}
+      <GenerateInvoiceFromTimeLogsDialog
+        open={isInvoiceDialogOpen}
+        onOpenChange={setIsInvoiceDialogOpen}
+        timeLogIds={Object.keys(rowSelection)}
+        onSuccess={() => {
+          setRowSelection({});
+          refetch();
+        }}
+      />
+
+      {/* Bulk Assign Contact Dialog */}
+      <BulkAssignContactDialog
+        open={isBulkAssignContactDialogOpen}
+        onOpenChange={setIsBulkAssignContactDialogOpen}
+        timeLogIds={Object.keys(rowSelection)}
+        onSuccess={() => {
+          setRowSelection({});
+          refetch();
+        }}
+      />
+
+      {/* Time Log Edit Sheet */}
+      <TimeLogEditSheet
+        timeLog={selectedTimeLog}
+        open={isEditSheetOpen}
+        onOpenChange={setIsEditSheetOpen}
+        onSuccess={handleEditSuccess}
       />
     </div>
   );

@@ -52,6 +52,7 @@ export const aiRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       return prisma.aILog.create({
         data: {
+          id: crypto.randomUUID(),
           title: input.title,
           description: input.description,
           intent: input.intent,
@@ -60,6 +61,7 @@ export const aiRouter = createTRPCRouter({
           userId: ctx.auth.user.id,
           organizationId: ctx.orgId,
           subaccountId: ctx.subaccountId,
+          createdAt: new Date(),
         },
       });
     }),

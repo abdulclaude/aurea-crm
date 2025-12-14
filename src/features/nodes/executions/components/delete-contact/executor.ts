@@ -40,7 +40,7 @@ export const deleteContactExecutor: NodeExecutor<
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               subaccountId: true,
               organizationId: true,
@@ -49,13 +49,13 @@ export const deleteContactExecutor: NodeExecutor<
         },
       });
 
-      if (!node?.workflow?.organizationId) {
+      if (!node?.Workflows?.organizationId) {
         throw new NonRetriableError(
           "Delete Contact Node error: This workflow must be in an organization context."
         );
       }
 
-      return node.workflow;
+      return node.Workflows;
     });
 
     const contactId = decode(Handlebars.compile(data.contactId)(context));

@@ -81,7 +81,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       disabled={disabled}
       className={cn(
-        "bg-background hover:bg-foreground/80 dark:focus:bg-[#202E32] dark:focus:text-white dark:[&_svg:not([class*='text-'])]:text-white/70 relative flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-primary/60 outline-hidden select-none transition-colors [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 cursor-pointer",
+        "bg-background hover:bg-foreground/80 dark:focus:bg-[#202E32] dark:focus:text-white dark:[&_svg:not([class*='text-'])]:text-white/70 relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-primary/60 outline-hidden select-none transition-colors [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 cursor-pointer",
         insetClasses,
         disabledClasses,
         destructiveClasses,
@@ -183,7 +183,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("bg-border -mx-1 my-1 h-px", className)}
+      className={cn("bg-black/5 -mx-1 my-1 h-px", className)}
       {...props}
     />
   );

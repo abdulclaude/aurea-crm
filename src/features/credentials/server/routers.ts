@@ -36,11 +36,14 @@ export const credentialsRouter = createTRPCRouter({
       return prisma.$transaction(async (tx) => {
         const credential = await tx.credential.create({
           data: {
+            id: crypto.randomUUID(),
             name,
             type,
             userId: ctx.auth.user.id,
             subaccountId: ctx.subaccountId ?? null,
             value: encrypt(value),
+            createdAt: new Date(),
+            updatedAt: new Date(),
           },
         });
 

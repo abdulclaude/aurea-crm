@@ -4,6 +4,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
+  experimental: {
+    serverComponentsExternalPackages: ["@prisma/client", "@prisma/adapter-pg"],
+  },
   images: {
     remotePatterns: [
       {
@@ -18,7 +21,25 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "utfs.io",
       },
+      {
+        protocol: "http",
+        hostname: "testing.localhost:3000",
+      },
     ],
+  },
+  // Allow subdomain access in development
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+        ],
+      },
+    ];
   },
   turbopack: {
     rules: {

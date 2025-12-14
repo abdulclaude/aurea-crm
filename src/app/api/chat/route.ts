@@ -53,14 +53,14 @@ async function fetchEntityDetails(
           const contact = await prisma.contact.findFirst({
             where: { id: entity.id, subaccountId },
             include: {
-              assignees: {
+              contactAssignee: {
                 include: {
                   subaccountMember: {
                     include: { user: true },
                   },
                 },
               },
-              deals: {
+              dealContact: {
                 include: { deal: true },
               },
             },
@@ -69,10 +69,10 @@ async function fetchEntityDetails(
             details.push({
               entityType: "contact",
               ...contact,
-              assignees: contact.assignees.map(
-                (a) => a.subaccountMember.user?.name
+              assignees: contact.contactAssignee.map(
+                (a: any) => a.subaccountMember.user?.name
               ),
-              deals: contact.deals.map((d) => d.deal.name),
+              deals: contact.dealContact.map((d: any) => d.deal.name),
             });
           }
           break;
@@ -83,14 +83,14 @@ async function fetchEntityDetails(
             include: {
               pipeline: true,
               pipelineStage: true,
-              members: {
+              dealMember: {
                 include: {
                   subaccountMember: {
                     include: { user: true },
                   },
                 },
               },
-              contacts: {
+              dealContact: {
                 include: { contact: true },
               },
             },
@@ -101,8 +101,8 @@ async function fetchEntityDetails(
               ...deal,
               pipelineName: deal.pipeline?.name,
               stageName: deal.pipelineStage?.name,
-              members: deal.members.map((m) => m.subaccountMember.user?.name),
-              contacts: deal.contacts.map((c) => c.contact.name),
+              members: deal.dealMember.map((m: any) => m.subaccountMember.user?.name),
+              contacts: deal.dealContact.map((c: any) => c.contact.name),
             });
           }
           break;
@@ -111,17 +111,17 @@ async function fetchEntityDetails(
           const pipeline = await prisma.pipeline.findFirst({
             where: { id: entity.id, subaccountId },
             include: {
-              stages: {
+              pipelineStage: {
                 orderBy: { position: "asc" },
               },
-              _count: { select: { deals: true } },
+              _count: { select: { deal: true } },
             },
           });
           if (pipeline) {
             details.push({
               type: "pipeline",
               ...pipeline,
-              dealCount: pipeline._count.deals,
+              dealCount: pipeline._count.deal,
             });
           }
           break;
@@ -130,8 +130,8 @@ async function fetchEntityDetails(
           const workflow = await prisma.workflows.findFirst({
             where: { id: entity.id, subaccountId },
             include: {
-              nodes: true,
-              _count: { select: { executions: true } },
+              Node: true,
+              _count: { select: { Execution: true } },
             },
           });
           if (workflow) {
@@ -142,9 +142,9 @@ async function fetchEntityDetails(
               description: workflow.description,
               archived: workflow.archived,
               isTemplate: workflow.isTemplate,
-              nodeCount: workflow.nodes.length,
-              executionCount: workflow._count.executions,
-              nodeTypes: workflow.nodes.map((n) => n.type),
+              nodeCount: workflow.Node.length,
+              executionCount: workflow._count.Execution,
+              nodeTypes: workflow.Node.map((n: any) => n.type),
             });
           }
           break;
@@ -245,6 +245,7 @@ export async function POST(request: NextRequest) {
       // Create a log entry for this action
       const log = await prisma.aILog.create({
         data: {
+          id: crypto.randomUUID(),
           title: routeResult.intent.description || routeResult.intent.name,
           intent: routeResult.intent.name,
           userMessage: plainText,
@@ -252,6 +253,7 @@ export async function POST(request: NextRequest) {
           userId: session.user.id,
           organizationId: activeOrgId,
           subaccountId: subaccountId || null,
+          createdAt: new Date(),
         },
       });
 

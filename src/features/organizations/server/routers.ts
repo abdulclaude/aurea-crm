@@ -21,8 +21,8 @@ import { logAnalytics } from "@/lib/analytics-logger";
 const clientInclude = {
   organization: {
     include: {
-      invitations: true,
-      members: {
+      invitation: true,
+      member: {
         include: {
           user: {
             select: {
@@ -36,7 +36,7 @@ const clientInclude = {
       },
     },
   },
-  members: {
+  subaccountMember: {
     include: {
       user: {
         select: {
@@ -48,7 +48,7 @@ const clientInclude = {
       },
     },
   },
-  workflows: {
+  Workflows: {
     select: {
       id: true,
       createdAt: true,
@@ -65,7 +65,7 @@ const clientInclude = {
   },
   _count: {
     select: {
-      workflows: true,
+      Workflows: true,
     },
   },
 };
@@ -86,11 +86,11 @@ const CLIENT_SORT_ORDER: Record<
   "company.asc": [{ companyName: "asc" }, { createdAt: "desc" }],
   "company.desc": [{ companyName: "desc" }, { createdAt: "desc" }],
   "workflowsCount.desc": [
-    { workflows: { _count: "desc" } },
+    { Workflows: { _count: "desc" } },
     { createdAt: "desc" },
   ],
   "workflowsCount.asc": [
-    { workflows: { _count: "asc" } },
+    { Workflows: { _count: "asc" } },
     { createdAt: "desc" },
   ],
   "country.asc": [{ country: "asc" }, { companyName: "asc" }],
@@ -227,8 +227,8 @@ export const organizationsRouter = createTRPCRouter({
       include: {
         organization: {
           include: {
-            subaccounts: true,
-            members: {
+            subaccount: true,
+            member: {
               include: { user: true },
             },
           },
@@ -242,12 +242,10 @@ export const organizationsRouter = createTRPCRouter({
       name: m.organization.name,
       slug: m.organization.slug,
       logo: m.organization.logo,
-      ownerName: m.organization.members[0]?.user?.name ?? null,
-      ownerEmail: m.organization.members[0]?.user?.email ?? null,
+      ownerName: m.organization.member[0]?.user?.name ?? null,
+      ownerEmail: m.organization.member[0]?.user?.email ?? null,
       role: m.role,
-      subaccount:
-        (m.organization as unknown as { subaccounts?: unknown[] })
-          .subaccounts?.[0] ?? null,
+      subaccount: m.organization.subaccount?.[0] ?? null,
     }));
   }),
   /**
@@ -351,6 +349,7 @@ export const organizationsRouter = createTRPCRouter({
 
       const sub = await prisma.subaccount.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId,
           companyName: input.companyName,
           logo: input.logo || null,
@@ -367,11 +366,15 @@ export const organizationsRouter = createTRPCRouter({
           industry: input.industry || null,
           createdByUserId: ctx.auth.user.id,
           slug,
-          members: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          subaccountMember: {
             create: [
               {
+                id: crypto.randomUUID(),
                 userId: ctx.auth.user.id,
                 role: "AGENCY",
+                updatedAt: new Date(),
               },
             ],
           },
@@ -410,7 +413,7 @@ export const organizationsRouter = createTRPCRouter({
       const assignedSubaccounts = await prisma.subaccount.findMany({
         where: {
           organizationId: ctx.orgId,
-          members: {
+          subaccountMember: {
             some: {
               userId: ctx.auth.user.id,
             },
@@ -491,7 +494,7 @@ export const organizationsRouter = createTRPCRouter({
       if (membership.role === "staff") {
         where = {
           ...where,
-          members: {
+          subaccountMember: {
             some: {
               userId: ctx.auth.user.id,
             },
@@ -582,6 +585,7 @@ export const organizationsRouter = createTRPCRouter({
           timezone: timezone || undefined,
         },
         create: {
+          id: crypto.randomUUID(),
           organizationId,
           companyName,
           website: website || null,
@@ -595,6 +599,8 @@ export const organizationsRouter = createTRPCRouter({
           country: country || null,
           timezone: timezone || undefined,
           createdByUserId: ctx.auth.user.id,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
 
@@ -647,6 +653,8 @@ export const organizationsRouter = createTRPCRouter({
   listMembers: protectedProcedure
     .input(
       z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(20),
         search: z.string().optional(),
         // Agency roles: owner, admin, manager, staff, viewer
         // Subaccount roles: AGENCY, ADMIN, MANAGER, STANDARD, LIMITED, VIEWER
@@ -725,14 +733,25 @@ export const organizationsRouter = createTRPCRouter({
       }
 
       let items: any[] = [];
+      let totalItems = 0;
 
       if (isSubaccountContext) {
+        // Get total count for pagination
+        totalItems = await prisma.subaccountMember.count({
+          where: {
+            subaccountId: ctx.subaccountId,
+            ...where,
+          },
+        });
+
         // Subaccount members
         const subaccountMembers = await prisma.subaccountMember.findMany({
           where: {
             subaccountId: ctx.subaccountId,
             ...where,
           },
+          skip: (input.page - 1) * input.pageSize,
+          take: input.pageSize,
           include: {
             user: {
               select: {
@@ -811,12 +830,22 @@ export const organizationsRouter = createTRPCRouter({
           };
         });
       } else {
+        // Get total count for pagination
+        totalItems = await prisma.member.count({
+          where: {
+            organizationId: ctx.orgId,
+            ...where,
+          },
+        });
+
         // Organization members
         const orgMembers = await prisma.member.findMany({
           where: {
             organizationId: ctx.orgId,
             ...where,
           },
+          skip: (input.page - 1) * input.pageSize,
+          take: input.pageSize,
           include: {
             user: {
               select: {
@@ -874,7 +903,17 @@ export const organizationsRouter = createTRPCRouter({
         });
       }
 
-      return { items };
+      const totalPages = Math.ceil(totalItems / input.pageSize);
+
+      return {
+        items,
+        pagination: {
+          currentPage: input.page,
+          totalPages,
+          pageSize: input.pageSize,
+          totalItems,
+        },
+      };
     }),
 
   /**
@@ -962,13 +1001,13 @@ export const organizationsRouter = createTRPCRouter({
       const existingUser = await prisma.user.findUnique({
         where: { email: input.email },
         include: {
-          members: {
+          member: {
             where: { organizationId },
           },
         },
       });
 
-      if (existingUser && existingUser.members.length > 0) {
+      if (existingUser && existingUser.member.length > 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "User is already a member of this organization.",
@@ -1092,7 +1131,7 @@ export const organizationsRouter = createTRPCRouter({
         where: { id: subaccountId },
         include: {
           organization: true,
-          members: {
+          subaccountMember: {
             where: { userId: ctx.auth.user.id },
           },
         },
@@ -1113,7 +1152,7 @@ export const organizationsRouter = createTRPCRouter({
         },
       });
 
-      const isSubaccountAdmin = subaccount.members.some(
+      const isSubaccountAdmin = subaccount.subaccountMember.some(
         (m) =>
           m.userId === ctx.auth.user.id &&
           (m.role === "ADMIN" || m.role === "AGENCY")
@@ -1459,6 +1498,7 @@ export const organizationsRouter = createTRPCRouter({
         // Add user to subaccount
         await prisma.subaccountMember.create({
           data: {
+            id: crypto.randomUUID(),
             subaccountId,
             userId: ctx.auth.user.id,
             role: role as
@@ -1468,6 +1508,7 @@ export const organizationsRouter = createTRPCRouter({
               | "STANDARD"
               | "LIMITED"
               | "VIEWER",
+            updatedAt: new Date(),
           },
         });
 
@@ -1606,10 +1647,40 @@ export const organizationsRouter = createTRPCRouter({
         organizationId: z.string(),
         name: z.string().min(2).optional(),
         logo: z.string().url().optional().nullable(),
+        businessEmail: z.string().email().optional().nullable(),
+        businessPhone: z.string().optional().nullable(),
+        businessAddress: z
+          .object({
+            street: z.string().optional(),
+            city: z.string().optional(),
+            state: z.string().optional(),
+            zip: z.string().optional(),
+            country: z.string().optional(),
+          })
+          .optional()
+          .nullable(),
+        website: z.string().url().optional().nullable(),
+        taxId: z.string().optional().nullable(),
+        brandColor: z.string().optional().nullable(),
+        accentColor: z.string().optional().nullable(),
+        // Dunning settings
+        dunningEnabled: z.boolean().optional(),
+        dunningDays: z.array(z.number().int().positive()).optional().nullable(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { organizationId, name, logo } = input;
+      const {
+        organizationId,
+        name,
+        logo,
+        businessEmail,
+        businessPhone,
+        businessAddress,
+        website,
+        taxId,
+        brandColor,
+        accentColor,
+      } = input;
 
       // Check if user has permission (must be owner or admin)
       const member = await prisma.member.findFirst({
@@ -1628,12 +1699,22 @@ export const organizationsRouter = createTRPCRouter({
       }
 
       // Update organization
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (logo !== undefined) updateData.logo = logo;
+      if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
+      if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
+      if (businessAddress !== undefined) updateData.businessAddress = businessAddress;
+      if (website !== undefined) updateData.website = website;
+      if (taxId !== undefined) updateData.taxId = taxId;
+      if (brandColor !== undefined) updateData.brandColor = brandColor;
+      if (accentColor !== undefined) updateData.accentColor = accentColor;
+      if (input.dunningEnabled !== undefined) updateData.dunningEnabled = input.dunningEnabled;
+      if (input.dunningDays !== undefined) updateData.dunningDays = input.dunningDays;
+
       const organization = await prisma.organization.update({
         where: { id: organizationId },
-        data: {
-          ...(name !== undefined && { name }),
-          ...(logo !== undefined && { logo }),
-        },
+        data: updateData,
       });
 
       return organization;
@@ -1659,6 +1740,15 @@ export const organizationsRouter = createTRPCRouter({
         country: z.string().optional().nullable(),
         timezone: z.string().optional().nullable(),
         industry: z.string().optional().nullable(),
+        // Branding fields
+        businessEmail: z.string().email().optional().nullable(),
+        businessPhone: z.string().optional().nullable(),
+        taxId: z.string().optional().nullable(),
+        brandColor: z.string().optional().nullable(),
+        accentColor: z.string().optional().nullable(),
+        // Dunning settings
+        dunningEnabled: z.boolean().optional(),
+        dunningDays: z.array(z.number().int().positive()).optional().nullable(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1670,7 +1760,7 @@ export const organizationsRouter = createTRPCRouter({
         include: {
           organization: {
             include: {
-              members: {
+              member: {
                 where: { userId: ctx.auth.user.id },
               },
             },
@@ -1687,8 +1777,8 @@ export const organizationsRouter = createTRPCRouter({
 
       // Check if user is org member or admin
       const hasPermission =
-        subaccount.organization.members.length > 0 &&
-        ["owner", "admin"].includes(subaccount.organization.members[0].role);
+        subaccount.organization.member.length > 0 &&
+        ["owner", "admin"].includes(subaccount.organization.member[0].role);
 
       if (!hasPermission) {
         throw new TRPCError({
@@ -1740,7 +1830,7 @@ export const organizationsRouter = createTRPCRouter({
         where: { id: ctx.subaccountId },
         include: {
           organization: true,
-          members: {
+          subaccountMember: {
             include: {
               user: {
                 select: {
@@ -1766,7 +1856,7 @@ export const organizationsRouter = createTRPCRouter({
       const organization = await prisma.organization.findUnique({
         where: { id: ctx.orgId },
         include: {
-          members: {
+          member: {
             include: {
               user: {
                 select: {
@@ -1795,7 +1885,7 @@ const mapSubaccountToClient = (
   subaccount: SubaccountClientPayload,
   activeSubaccountId: string | null | undefined
 ) => {
-  const pendingInvites = (subaccount.organization.invitations || []).filter(
+  const pendingInvites = (subaccount.organization.invitation || []).filter(
     (invitation) =>
       invitation.status !== "accepted" && invitation.status !== "declined"
   ).length;
@@ -1822,19 +1912,19 @@ const mapSubaccountToClient = (
     pendingInvites,
     isActive: activeSubaccountId === subaccount.id,
     members: buildMembers(
-      subaccount.organization.members,
-      subaccount.members,
-      subaccount.workflows,
+      subaccount.organization.member,
+      subaccount.subaccountMember,
+      subaccount.Workflows,
       subaccount.createdByUserId
     ),
-    workflowsCount: subaccount._count.workflows,
+    workflowsCount: subaccount._count.Workflows,
   };
 };
 
 const buildMembers = (
-  organizationMembers: SubaccountClientPayload["organization"]["members"],
-  subaccountMembers: SubaccountClientPayload["members"],
-  workflows: SubaccountClientPayload["workflows"],
+  organizationMembers: SubaccountClientPayload["organization"]["member"],
+  subaccountMembers: SubaccountClientPayload["subaccountMember"],
+  workflows: SubaccountClientPayload["Workflows"],
   createdByUserId?: string | null
 ) => {
   const workflowStats = new Map<
@@ -2017,7 +2107,7 @@ const buildClientsWhere = ({
       OR: [
         {
           organization: {
-            invitations: {
+            invitation: {
               some: {
                 status: {
                   notIn: ["accepted", "declined"],
@@ -2027,7 +2117,7 @@ const buildClientsWhere = ({
           },
         },
         {
-          workflows: {
+          Workflows: {
             none: {},
           },
         },

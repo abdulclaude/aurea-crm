@@ -1,10 +1,3 @@
-
-// generator client {
-//   provider = "prisma-client"
-//   output   = "../src/generated/prisma"
-//   binaryTargets = ["native", "rhel-openssl-3.0.x"]
-// }
-
 generator client {
   provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
@@ -12,143 +5,132 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
-enum UserStatus {
-  ONLINE
-  WORKING
-  DO_NOT_DISTURB
-  AWAY
-  OFFLINE
-}
+model AILog {
+  id             String        @id
+  title          String
+  description    String?
+  intent         String?
+  userMessage    String
+  status         AILogStatus   @default(RUNNING)
+  error          String?
+  result         Json?
+  createdAt      DateTime      @default(now())
+  completedAt    DateTime?
+  userId         String
+  organizationId String?
+  subaccountId   String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id])
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-model User {
-  id            String       @id
-  name          String
-  email         String
-  emailVerified Boolean      @default(false)
-  image         String?
-  status        UserStatus   @default(ONLINE)
-  statusMessage String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @default(now()) @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  workflows     Workflows[]
-  credentials   Credential[]
-  apps  Apps[]
-  webhooks      Webhook[]
-
-  googleCalendarSubscriptions GoogleCalendarSubscription[]
-  gmailSubscriptions          GmailSubscription[]
-  outlookSubscriptions        OutlookSubscription[]
-  oneDriveSubscriptions       OneDriveSubscription[]
-
-  members     Member[]
-  subaccountMemberships SubaccountMember[]
-  invitations Invitation[]
-  subaccounts Subaccount[]
-  aiLogs      AILog[]
-
-  // Notifications
-  notifications         Notification[]
-  notificationsAsActor  Notification[] @relation("NotificationActor")
-  presence              UserPresence?
-  notificationPreference NotificationPreference?
-
-  // Activity timeline
-  activities            Activity[]
-
-  @@unique([email])
-  @@map("user")
-}
-
-model Session {
-  id        String   @id
-  expiresAt DateTime
-  token     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  ipAddress String?
-  userAgent String?
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  activeOrganizationId String?
-  activeSubaccountId   String?
-
-  // Activity tracking
-  lastActivityAt DateTime? @default(now())
-  isOnline       Boolean   @default(true)
-
-  @@unique([token])
-  @@map("session")
-}
-
-model Account {
-  id                    String    @id
-  accountId             String
-  providerId            String
-  userId                String
-  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  accessToken           String?
-  refreshToken          String?
-  idToken               String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  scope                 String?
-  password              String?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-
-  @@map("account")
-}
-
-model Verification {
-  id         String   @id
-  identifier String
-  value      String
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
-
-  @@map("verification")
-}
-
-enum AppProvider {
-  GOOGLE_CALENDAR
-  GMAIL
-  GOOGLE
-  TELEGRAM
-  MICROSOFT
-  OUTLOOK
-  ONEDRIVE
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([userId])
 }
 
 model Apps {
-  id        String @id @default(cuid())
-  provider  AppProvider
+  id           String      @id
+  provider     AppProvider
   accessToken  String?
   refreshToken String?
   expiresAt    DateTime?
   scopes       String[]
   metadata     Json?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  @@unique([userId, provider])
+}
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Connection {
+  id                               String    @id
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime
+  fromNodeId                       String
+  toNodeId                         String
+  fromOutput                       String    @default("main")
+  toInput                          String    @default("main")
+  workflowId                       String
+  connectionFromNodeIdToNode Node      @relation("Connection_fromNodeIdToNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  connectionToNodeIdToNode   Node      @relation("Connection_toNodeIdToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
+  Workflows                        Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, provider], name: "userId_provider")
+  @@unique([fromNodeId, toNodeId, fromOutput, toInput])
+}
+
+model Credential {
+  id           String         @id
+  name         String
+  value        String
+  type         CredentialType
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime
+  userId       String
+  metadata     Json?
+  subaccountId String?
+  subaccount   Subaccount?    @relation(fields: [subaccountId], references: [id])
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Node         Node[]
+
+  @@index([subaccountId])
+}
+
+model Execution {
+  id             String          @id
+  startedAt      DateTime        @default(now())
+  completedAt    DateTime?
+  status         ExecutionStatus @default(RUNNING)
+  inngestEventId String          @unique
+  output         Json?
+  workflowId     String
+  error          String?
+  errorStack     String?
+  subaccountId   String?
+  subaccount     Subaccount?     @relation(fields: [subaccountId], references: [id])
+  Workflows      Workflows       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([subaccountId])
+}
+
+model GmailSubscription {
+  id           String    @id
+  userId       String    @unique
+  emailAddress String
+  labelIds     String[]
+  topicName    String
+  historyId    String?
+  expiresAt    DateTime?
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([emailAddress])
+}
+
+model GmailTriggerState {
+  id              String    @id
+  nodeId          String    @unique
+  workflowId      String
+  lastMessageId   String?
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  Node            Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  Workflows       Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
 }
 
 model GoogleCalendarSubscription {
-  id           String   @id @default(cuid())
+  id           String    @id
   userId       String
   workflowId   String
-  nodeId       String
+  nodeId       String    @unique
   calendarId   String
   calendarName String?
   listenFor    String[]
@@ -159,121 +141,1768 @@ model GoogleCalendarSubscription {
   expiresAt    DateTime?
   lastSyncedAt DateTime?
   timezone     String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime
   variableName String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  Node         Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Workflows    Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-
-  @@unique([nodeId])
-  @@index([workflowId])
   @@index([channelId])
-}
-
-model GmailSubscription {
-  id           String   @id @default(cuid())
-  userId       String   @unique
-  emailAddress String
-  labelIds     String[]
-  topicName    String
-  historyId    String?
-  expiresAt    DateTime?
-  lastSyncedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([emailAddress])
-}
-
-model GmailTriggerState {
-  id              String   @id @default(cuid())
-  nodeId          String   @unique
-  workflowId      String
-  lastMessageId   String?
-  lastTriggeredAt DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-
   @@index([workflowId])
 }
 
-model TelegramTriggerState {
-  id              String   @id @default(cuid())
-  nodeId          String   @unique
-  workflowId      String
-  lastUpdateId    String?
-  lastTriggeredAt DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+model Node {
+  id                                     String                      @id
+  createdAt                              DateTime                    @default(now())
+  updatedAt                              DateTime
+  name                                   String
+  type                                   NodeType
+  position                               Json
+  data                                   Json                        @default("{}")
+  workflowId                             String
+  credentialId                           String?
+  connectionFromNodeIdToNode Connection[]                @relation("Connection_fromNodeIdToNode")
+  connectionToNodeIdToNode   Connection[]                @relation("Connection_toNodeIdToNode")
+  GmailTriggerState                      GmailTriggerState?
+  GoogleCalendarSubscription             GoogleCalendarSubscription?
+  Credential                             Credential?                 @relation(fields: [credentialId], references: [id])
+  Workflows                              Workflows                   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  OneDriveTriggerState                   OneDriveTriggerState?
+  OutlookTriggerState                    OutlookTriggerState?
+  TelegramTriggerState                   TelegramTriggerState?
+}
 
-  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+model OneDriveSubscription {
+  id             String    @id
+  userId         String    @unique
+  subscriptionId String?
+  expiresAt      DateTime?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OneDriveTriggerState {
+  id              String    @id
+  nodeId          String    @unique
+  workflowId      String
+  lastDeltaLink   String?
+  lastTriggeredAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  Node            Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  Workflows       Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
 }
 
 model OutlookSubscription {
-  id             String    @id @default(cuid())
+  id             String    @id
   userId         String    @unique
   emailAddress   String
   subscriptionId String?
   expiresAt      DateTime?
   lastSyncedAt   DateTime?
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt      DateTime
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([emailAddress])
 }
 
 model OutlookTriggerState {
-  id              String    @id @default(cuid())
+  id              String    @id
   nodeId          String    @unique
   workflowId      String
   lastMessageId   String?
   lastTriggeredAt DateTime?
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime
+  Node            Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  Workflows       Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
 }
 
-model OneDriveSubscription {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  subscriptionId String?
-  expiresAt      DateTime?
-  lastSyncedAt   DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model OneDriveTriggerState {
-  id              String    @id @default(cuid())
+model TelegramTriggerState {
+  id              String    @id
   nodeId          String    @unique
   workflowId      String
-  lastDeltaLink   String?
+  lastUpdateId    String?
   lastTriggeredAt DateTime?
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  node     Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-  workflow Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime
+  Node            Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  Workflows       Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
+}
+
+model Webhook {
+  id            String          @id
+  name          String
+  provider      WebhookProvider
+  url           String
+  signingSecret String?
+  description   String?
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  userId        String
+  subaccountId  String?
+  subaccount    Subaccount?     @relation(fields: [subaccountId], references: [id])
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([subaccountId])
+}
+
+model Workflows {
+  id                         String                       @id
+  name                       String
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime
+  userId                     String
+  archived                   Boolean                      @default(false)
+  isTemplate                 Boolean                      @default(false)
+  description                String?
+  subaccountId               String?
+  bundleInputs               Json?
+  bundleOutputs              Json?
+  isBundle                   Boolean                      @default(false)
+  organizationId             String?
+  Connection                 Connection[]
+  Execution                  Execution[]
+  GmailTriggerState          GmailTriggerState[]
+  GoogleCalendarSubscription GoogleCalendarSubscription[]
+  Node                       Node[]
+  OneDriveTriggerState       OneDriveTriggerState[]
+  OutlookTriggerState        OutlookTriggerState[]
+  TelegramTriggerState       TelegramTriggerState[]
+  organization               Organization?                @relation(fields: [organizationId], references: [id])
+  subaccount                 Subaccount?                  @relation(fields: [subaccountId], references: [id])
+  user                       User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  form                       Form[]
+
+  @@index([isBundle])
+  @@index([organizationId])
+  @@index([subaccountId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Activity {
+  id             String         @id
+  organizationId String
+  subaccountId   String?
+  userId         String
+  type           ActivityType
+  action         ActivityAction
+  entityType     String
+  entityId       String
+  entityName     String
+  changes        Json?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime       @default(now())
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@index([organizationId, entityType, entityId])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId])
+  @@index([type])
+  @@index([userId])
+}
+
+model BankTransferSettings {
+  id              String       @id
+  organizationId  String
+  subaccountId    String?      @unique
+  enabled         Boolean      @default(false)
+  bankName        String?
+  accountName     String?
+  accountNumber   String?
+  routingNumber   String?
+  iban            String?
+  swiftBic        String?
+  bankAddress     Json?
+  accountType     String?
+  currency        String?      @default("GBP")
+  instructions    String?
+  referenceFormat String?
+  autoReminders   Boolean      @default(true)
+  reminderDays    Json?
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime
+  sortCode        String?
+  transferType    String?      @default("UK_DOMESTIC")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount      Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, subaccountId])
+  @@index([enabled])
+  @@index([organizationId])
+  @@index([subaccountId])
+}
+
+model BillingRule {
+  id             String       @id
+  organizationId String
+  subaccountId   String?
+  name           String
+  description    String?
+  billingModel   BillingModel
+  config         Json
+  autoGenerate   Boolean      @default(false)
+  generateDay    Int?
+  defaultTerms   String?
+  defaultNotes   String?
+  defaultDueDays Int          @default(30)
+  defaultTaxRate Decimal?     @db.Decimal(5, 2)
+  isActive       Boolean      @default(true)
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+
+  @@index([isActive])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId])
+}
+
+model Contact {
+  id                String              @id
+  subaccountId      String?
+  logo              String?
+  name              String
+  companyName       String?
+  email             String?
+  position          String?
+  phone             String?
+  country           String?
+  city              String?
+  score             Int?                @default(0)
+  type              ContactType         @default(LEAD)
+  source            String?
+  website           String?
+  linkedin          String?
+  tags              String[]            @default([])
+  lastInteractionAt DateTime?
+  notes             String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime
+  lifecycleStage    LifecycleStage?
+  organizationId    String
+  metadata          Json?
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount        Subaccount?         @relation(fields: [subaccountId], references: [id])
+  contactAssignee  ContactAssignee[]
+  dealContact      DealContact[]
+  formSubmission   FormSubmission[]
+  rota              Rota[]
+  studioBooking    StudioBooking[]
+  studioMembership StudioMembership[]
+  timeLog          TimeLog[]
+
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId, email])
+}
+
+model ContactAssignee {
+  id                 String            @id
+  contactId          String
+  subaccountMemberId String
+  assignedAt         DateTime          @default(now())
+  contact            Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  subaccountMember  SubaccountMember @relation(fields: [subaccountMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, subaccountMemberId])
+}
+
+model Deal {
+  id              String          @id
+  subaccountId    String?
+  name            String
+  value           Decimal?        @db.Decimal(12, 2)
+  currency        String?         @default("USD")
+  deadline        DateTime?
+  source          String?
+  tags            String[]        @default([])
+  description     String?
+  lastActivityAt  DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime
+  pipelineId      String?
+  pipelineStageId String?
+  organizationId  String
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline        Pipeline?       @relation(fields: [pipelineId], references: [id])
+  pipelineStage  PipelineStage? @relation(fields: [pipelineStageId], references: [id])
+  subaccount      Subaccount?     @relation(fields: [subaccountId], references: [id])
+  dealContact    DealContact[]
+  dealMember     DealMember[]
+  rota            Rota[]
+  timeLog        TimeLog[]
+
+  @@index([organizationId, subaccountId])
+  @@index([pipelineId])
+  @@index([subaccountId, pipelineStageId])
+}
+
+model DealContact {
+  id        String  @id
+  dealId    String
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  deal      Deal    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, contactId])
+}
+
+model DealMember {
+  id                 String            @id
+  dealId             String
+  subaccountMemberId String
+  assignedAt         DateTime          @default(now())
+  deal               Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  subaccountMember  SubaccountMember @relation(fields: [subaccountMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, subaccountMemberId])
+}
+
+model Form {
+  id                     String                   @id
+  organizationId         String
+  subaccountId           String?
+  name                   String
+  description            String?
+  status                 FormStatus               @default(DRAFT)
+  isMultiStep            Boolean                  @default(false)
+  showProgress           Boolean                  @default(true)
+  submitUrl              String?
+  successMessage         String                   @default("Thank you for your submission!")
+  redirectUrl            String?
+  workflowId             String?
+  stylePresetId          String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  publishedAt            DateTime?
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  globalStylePreset    GlobalStylePreset?     @relation(fields: [stylePresetId], references: [id])
+  subaccount             Subaccount?              @relation(fields: [subaccountId], references: [id])
+  Workflows              Workflows?               @relation(fields: [workflowId], references: [id])
+  formStep              FormStep[]
+  formSubmission        FormSubmission[]
+  smartSectionInstance SmartSectionInstance[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([subaccountId])
+  @@index([workflowId])
+}
+
+model FormField {
+  id             String        @id
+  stepId         String
+  type           FormFieldType
+  label          String
+  placeholder    String?
+  helpText       String?
+  required       Boolean       @default(false)
+  validation     Json?
+  options        Json?
+  defaultValue   String?
+  showConditions Json?
+  order          Int           @default(0)
+  styles         Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime
+  formStep      FormStep     @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([stepId])
+}
+
+model FormStep {
+  id             String       @id
+  formId         String
+  name           String
+  order          Int          @default(0)
+  showConditions Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+  formField     FormField[]
+  form           Form         @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId])
+}
+
+model FormSubmission {
+  id          String   @id
+  formId      String
+  data        Json
+  contactId   String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmTerm     String?
+  utmContent  String?
+  ipAddress   String?
+  userAgent   String?
+  referrer    String?
+  submittedAt DateTime @default(now())
+  contact     Contact? @relation(fields: [contactId], references: [id])
+  form        Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([formId])
+  @@index([submittedAt])
+}
+
+model Funnel {
+  id                       String                     @id
+  name                     String
+  description              String?
+  status                   FunnelStatus               @default(DRAFT)
+  organizationId           String
+  subaccountId             String?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime
+  publishedAt              DateTime?
+  stylePresetId            String?
+  customDomain             String?
+  domainType               FunnelDomainType           @default(SUBDOMAIN)
+  domainVerified           Boolean                    @default(false)
+  subdomain                String?
+  organization             Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  globalStylePreset      GlobalStylePreset?       @relation(fields: [stylePresetId], references: [id])
+  subaccount               Subaccount?                @relation(fields: [subaccountId], references: [id])
+  funnelAnalytics         FunnelAnalytics[]
+  funnelPage              FunnelPage[]
+  funnelPixelIntegration FunnelPixelIntegration[]
+
+  @@index([customDomain])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([status])
+  @@index([subaccountId])
+  @@index([subdomain])
+}
+
+model FunnelAnalytics {
+  id             String       @id
+  funnelId       String
+  pageId         String?
+  pageViews      Int          @default(0)
+  uniqueVisitors Int          @default(0)
+  leads          Int          @default(0)
+  conversions    Int          @default(0)
+  date           DateTime     @db.Date
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+  funnel         Funnel       @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  funnelPage    FunnelPage? @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([funnelId, pageId, date])
+  @@index([funnelId, date])
+  @@index([pageId, date])
+}
+
+model FunnelBlock {
+  id                     String                   @id
+  pageId                 String?
+  parentBlockId          String?
+  type                   FunnelBlockType
+  props                  Json                     @default("{}")
+  styles                 Json                     @default("{}")
+  order                  Int                      @default(0)
+  visible                Boolean                  @default(true)
+  locked                 Boolean                  @default(false)
+  targetWorkflowId       String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  smartSectionId         String?
+  smartSectionInstanceId String?                  @unique
+  funnelPage            FunnelPage?             @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  funnelBlock           FunnelBlock?            @relation("funnel_blockTofunnel_block", fields: [parentBlockId], references: [id], onDelete: Cascade)
+  otherFunnelBlock     FunnelBlock[]           @relation("funnel_blockTofunnel_block")
+  smartSection          SmartSection?           @relation(fields: [smartSectionId], references: [id], onDelete: Cascade)
+  smartSectionInstance SmartSectionInstance?  @relation(fields: [smartSectionInstanceId], references: [id], onDelete: Cascade)
+  funnelBlockAnalytics FunnelBlockAnalytics[]
+  funnelBlockEvent     FunnelBlockEvent?
+  funnelBreakpoint      FunnelBreakpoint[]
+
+  @@index([pageId])
+  @@index([pageId, order])
+  @@index([pageId, parentBlockId, order])
+  @@index([parentBlockId])
+  @@index([smartSectionId])
+  @@index([smartSectionId, order])
+  @@index([smartSectionInstanceId])
+}
+
+model FunnelBlockAnalytics {
+  id             String       @id
+  blockId        String
+  views          Int          @default(0)
+  clicks         Int          @default(0)
+  engagementTime Int          @default(0)
+  date           DateTime     @db.Date
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+  funnelBlock   FunnelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, date])
+  @@index([blockId, date])
+}
+
+model FunnelBlockEvent {
+  id           String       @id
+  blockId      String       @unique
+  eventType    String
+  eventName    String?
+  parameters   Json?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime
+  funnelBlock FunnelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@index([blockId])
+}
+
+model FunnelBreakpoint {
+  id           String       @id
+  blockId      String
+  device       DeviceType
+  styles       Json         @default("{}")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime
+  funnelBlock FunnelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  @@unique([blockId, device])
+  @@index([blockId])
+}
+
+model FunnelPage {
+  id                     String                   @id
+  funnelId               String
+  name                   String
+  slug                   String
+  order                  Int                      @default(0)
+  isPublished            Boolean                  @default(false)
+  metaTitle              String?
+  metaDescription        String?
+  metaImage              String?
+  customCss              String?
+  customJs               String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  funnelAnalytics       FunnelAnalytics[]
+  funnelBlock           FunnelBlock[]
+  funnel                 Funnel                   @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  smartSectionInstance SmartSectionInstance[]
+
+  @@unique([funnelId, slug])
+  @@index([funnelId])
+  @@index([funnelId, order])
+}
+
+  model FunnelPixelIntegration {
+  id        String        @id
+  funnelId  String
+  provider  PixelProvider
+  pixelId   String
+  enabled   Boolean       @default(true)
+  metadata  Json?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime
+  funnel    Funnel        @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+
+  @@unique([funnelId, provider])
+  @@index([funnelId])
+}
+
+model GlobalStylePreset {
+  id              String       @id
+  organizationId  String
+  subaccountId    String?
+  name            String
+  description     String?
+  primaryColor    String       @default("#3b82f6")
+  secondaryColor  String       @default("#8b5cf6")
+  accentColor     String       @default("#f59e0b")
+  backgroundColor String       @default("#ffffff")
+  textColor       String       @default("#1f2937")
+  mutedColor      String       @default("#6b7280")
+  borderColor     String       @default("#e5e7eb")
+  fontFamily      String       @default("Inter, system-ui, sans-serif")
+  headingFont     String       @default("Inter, system-ui, sans-serif")
+  fontSize        Json         @default("{\"lg\": 18, \"sm\": 14, \"xl\": 20, \"2xl\": 24, \"3xl\": 30, \"4xl\": 36, \"base\": 16}")
+  fontWeight      Json         @default("{\"bold\": 700, \"medium\": 500, \"normal\": 400, \"semibold\": 600}")
+  lineHeight      Json         @default("{\"tight\": 1.25, \"normal\": 1.5, \"relaxed\": 1.75}")
+  spacing         Json         @default("{\"lg\": 24, \"md\": 16, \"sm\": 8, \"xl\": 32, \"xs\": 4, \"2xl\": 48, \"3xl\": 64}")
+  borderRadius    Json         @default("{\"lg\": 12, \"md\": 8, \"sm\": 4, \"xl\": 16, \"full\": 9999, \"none\": 0}")
+  buttonPresets   Json         @default("{\"outline\": {\"bg\": \"transparent\", \"text\": \"#3b82f6\", \"border\": \"2px solid #3b82f6\", \"padding\": \"12px 24px\", \"borderRadius\": 8}, \"primary\": {\"bg\": \"#3b82f6\", \"text\": \"#ffffff\", \"padding\": \"12px 24px\", \"borderRadius\": 8}, \"secondary\": {\"bg\": \"#8b5cf6\", \"text\": \"#ffffff\", \"padding\": \"12px 24px\", \"borderRadius\": 8}}")
+  shadows         Json         @default("{\"lg\": \"0 10px 15px rgba(0,0,0,0.1)\", \"md\": \"0 4px 6px rgba(0,0,0,0.1)\", \"sm\": \"0 1px 2px rgba(0,0,0,0.05)\", \"xl\": \"0 20px 25px rgba(0,0,0,0.1)\"}")
+  isDefault       Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime
+  form            Form[]
+  funnel          Funnel[]
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount      Subaccount?  @relation(fields: [subaccountId], references: [id])
+
+  @@index([organizationId])
+  @@index([subaccountId])
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  email          String
+  role           String?
+  status         String
+  expiresAt      DateTime
+  inviterId      String
+  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id                     String              @id
+  organizationId         String
+  subaccountId           String?
+  invoiceNumber          String              @unique
+  contactId              String?
+  contactName            String
+  contactEmail           String?
+  contactAddress         Json?
+  title                  String?
+  type                   InvoiceType         @default(SENT)
+  status                 InvoiceStatus       @default(DRAFT)
+  billingModel           BillingModel        @default(CUSTOM)
+  issueDate              DateTime            @default(now())
+  dueDate                DateTime
+  paidAt                 DateTime?
+  subtotal               Decimal             @db.Decimal(12, 2)
+  taxRate                Decimal?            @db.Decimal(5, 2)
+  taxAmount              Decimal             @default(0) @db.Decimal(12, 2)
+  discountAmount         Decimal             @default(0) @db.Decimal(12, 2)
+  total                  Decimal             @db.Decimal(12, 2)
+  amountPaid             Decimal             @default(0) @db.Decimal(12, 2)
+  amountDue              Decimal             @db.Decimal(12, 2)
+  currency               String              @default("USD")
+  notes                  String?
+  internalNotes          String?
+  termsConditions        String?
+  stripeInvoiceId        String?             @unique
+  stripePaymentIntentId  String?
+  xeroInvoiceId          String?
+  lastReminderSentAt     DateTime?
+  reminderCount          Int                 @default(0)
+  metadata               Json?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime
+  templateId             String?
+  bankTransferNotes      String?
+  bankTransferProof      String?
+  bankTransferStatus     BankTransferStatus?
+  bankTransferVerifiedAt DateTime?
+  bankTransferVerifiedBy String?
+  documentUrl            String? // PDF or document proof of invoice
+  documentName           String? // Original filename of the uploaded document
+  paymentMethods         PaymentMethod[]     @default([])
+  organization           Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceTemplate       InvoiceTemplate?   @relation(fields: [templateId], references: [id])
+  invoiceLineItem      InvoiceLineItem[]
+  invoicePayment        InvoicePayment[]
+  invoiceReminder       InvoiceReminder[]
+  timeLog               TimeLog[]
+
+  @@index([contactId])
+  @@index([dueDate])
+  @@index([invoiceNumber])
+  @@index([issueDate])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([organizationId, type])
+  @@index([status])
+  @@index([subaccountId])
+  @@index([templateId])
+  @@index([type])
+}
+
+model InvoiceLineItem {
+  id          String   @id
+  invoiceId   String
+  description String
+  quantity    Decimal  @db.Decimal(10, 2)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  amount      Decimal  @db.Decimal(12, 2)
+  timeLogId   String?
+  order       Int      @default(0)
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([timeLogId])
+}
+
+model InvoicePayment {
+  id              String        @id
+  invoiceId       String
+  amount          Decimal       @db.Decimal(12, 2)
+  currency        String        @default("USD")
+  method          PaymentMethod
+  paidAt          DateTime      @default(now())
+  stripePaymentId String?
+  xeroPaymentId   String?
+  referenceNumber String?
+  notes           String?
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime
+  invoice         Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([paidAt])
+}
+
+model InvoiceReminder {
+  id          String    @id
+  invoiceId   String
+  sentAt      DateTime  @default(now())
+  sentTo      String
+  subject     String
+  message     String
+  opened      Boolean   @default(false)
+  openedAt    DateTime?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  daysOverdue Int?
+  isDunning   Boolean   @default(false)
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@index([isDunning])
+  @@index([sentAt])
+}
+
+model InvoiceTemplate {
+  id             String    @id
+  organizationId String
+  subaccountId   String?
+  name           String
+  description    String?
+  isDefault      Boolean   @default(false)
+  isSystem       Boolean   @default(false)
+  layout         Json
+  styles         Json
+  variables      Json?
+  thumbnailUrl   String?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime
+  invoice        Invoice[]
+
+  @@index([isDefault])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId])
+}
+
+model Member {
+  id             String                 @id
+  organizationId String
+  userId         String
+  createdAt      DateTime
+  role           OrganizationMemberRole @default(viewer)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id                              String    @id
+  userId                          String
+  organizationId                  String?
+  subaccountId                    String?
+  type                            String
+  title                           String
+  message                         String
+  data                            Json?
+  entityType                      String?
+  entityId                        String?
+  actorId                         String?
+  read                            Boolean   @default(false)
+  readAt                          DateTime?
+  createdAt                       DateTime  @default(now())
+  userNotificationActorIdTouser User?     @relation("notification_actorIdTouser", fields: [actorId], references: [id])
+  userNotificationUserIdTouser  User      @relation("notification_userIdTouser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([userId, createdAt])
+  @@index([userId, read])
+}
+
+model NotificationPreference {
+  id           String   @id
+  userId       String   @unique
+  preferences  Json     @default("{}")
+  emailEnabled Boolean  @default(true)
+  emailDigest  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Organization {
+  id                     String                   @id
+  name                   String
+  slug                   String                   @unique
+  logo                   String?
+  createdAt              DateTime
+  metadata               String?
+  accentColor            String?
+  brandColor             String?
+  businessAddress        Json?
+  businessEmail          String?
+  businessPhone          String?
+  taxId                  String?
+  website                String?
+  dunningDays            Json?
+  dunningEnabled         Boolean                  @default(true)
+  AILog                  AILog[]
+  Workflows              Workflows[]
+  bankTransferSettings BankTransferSettings[]
+  contact                Contact[]
+  deal                   Deal[]
+  form                   Form[]
+  funnel                 Funnel[]
+  globalStylePreset    GlobalStylePreset[]
+  invitation             Invitation[]
+  invoice                Invoice[]
+  member                 Member[]
+  pipeline               Pipeline[]
+  qrCode                QRCode[]
+  recurringInvoice      RecurringInvoice[]
+  rota                   Rota[]
+  smartSection          SmartSection[]
+  stripeConnection      StripeConnection[]
+  studioClass           StudioClass[]
+  subaccount             Subaccount[]
+  subaccountModule      SubaccountModule[]
+  timeLog               TimeLog[]
+  worker                 Worker[]
+  shiftSwapRequest      ShiftSwapRequest[]
+  workerAvailability    WorkerAvailability[]
+  timeOffRequest        TimeOffRequest[]
+  overtimeTracking      OvertimeTracking[]
+  payrollRun            PayrollRun[]
+  workerPayment         WorkerPayment[]
+}
+
+model PaymentIntegration {
+  id             String    @id
+  organizationId String
+  subaccountId   String?
+  provider       String
+  credentials    Json
+  config         Json?
+  isActive       Boolean   @default(true)
+  lastSyncedAt   DateTime?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime
+
+  @@unique([organizationId, provider])
+  @@unique([subaccountId, provider])
+  @@index([organizationId])
+  @@index([subaccountId])
+}
+
+model Pipeline {
+  id             String           @id
+  subaccountId   String?
+  name           String
+  description    String?
+  isActive       Boolean          @default(true)
+  isDefault      Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime
+  organizationId String
+  deal           Deal[]
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount     Subaccount?      @relation(fields: [subaccountId], references: [id])
+  pipelineStage PipelineStage[]
+
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId, isActive])
+}
+
+model PipelineStage {
+  id          String   @id
+  pipelineId  String
+  name        String
+  position    Int
+  probability Int      @default(0)
+  rottingDays Int?
+  color       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  deal        Deal[]
+  pipeline    Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, position])
+  @@index([pipelineId])
+}
+
+model QRCode {
+  id             String       @id
+  subaccountId   String?
+  name           String
+  code           String       @unique
+  dealId         String?
+  location       Json?
+  enabled        Boolean      @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount     Subaccount?  @relation(fields: [subaccountId], references: [id])
+
+  @@index([code])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([subaccountId])
+}
+
+model RecurringInvoice {
+  id                           String                         @id
+  organizationId               String
+  subaccountId                 String?
+  name                         String
+  description                  String?
+  status                       RecurringInvoiceStatus         @default(ACTIVE)
+  contactId                    String?
+  contactName                  String
+  contactEmail                 String?
+  contactAddress               Json?
+  billingModel                 BillingModel                   @default(RETAINER)
+  templateId                   String?
+  frequency                    RecurringFrequency
+  interval                     Int                            @default(1)
+  startDate                    DateTime
+  endDate                      DateTime?
+  nextRunDate                  DateTime
+  dayOfMonth                   Int?
+  dayOfWeek                    Int?
+  lineItems                    Json
+  subtotal                     Decimal                        @db.Decimal(12, 2)
+  taxRate                      Decimal?                       @db.Decimal(5, 2)
+  taxAmount                    Decimal                        @default(0) @db.Decimal(12, 2)
+  discountAmount               Decimal                        @default(0) @db.Decimal(12, 2)
+  total                        Decimal                        @db.Decimal(12, 2)
+  currency                     String                         @default("USD")
+  dueDays                      Int                            @default(30)
+  notes                        String?
+  termsConditions              String?
+  autoSend                     Boolean                        @default(false)
+  sendReminders                Boolean                        @default(false)
+  lastRunDate                  DateTime?
+  invoicesGenerated            Int                            @default(0)
+  metadata                     Json?
+  createdAt                    DateTime                       @default(now())
+  updatedAt                    DateTime
+  organization                 Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recurringInvoiceGeneration RecurringInvoiceGeneration[]
+
+  @@index([frequency])
+  @@index([nextRunDate])
+  @@index([organizationId])
+  @@index([status])
+  @@index([subaccountId])
+}
+
+model RecurringInvoiceGeneration {
+  id                 String            @id
+  recurringInvoiceId String
+  invoiceId          String            @unique
+  generatedAt        DateTime          @default(now())
+  periodStart        DateTime
+  periodEnd          DateTime
+  recurringInvoice  RecurringInvoice @relation(fields: [recurringInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([recurringInvoiceId])
+}
+
+model Rota {
+  id              String       @id
+  organizationId  String
+  subaccountId    String?
+  workerId        String
+  contactId       String?
+  companyName     String?
+  dealId          String?
+  startTime       DateTime
+  endTime         DateTime
+  title           String?
+  description     String?
+  location        String?
+  status          RotaStatus   @default(SCHEDULED)
+  hourlyRate      Decimal?     @db.Decimal(10, 2)
+  currency        String?      @default("GBP")
+  billable        Boolean      @default(true)
+  notes           String?
+  customFields    Json?
+  isRecurring     Boolean      @default(false)
+  recurrenceRule  String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime
+  magicLinkSentAt DateTime?
+  color           String?      @default("blue")
+  actualEndTime   DateTime?
+  actualHours     Decimal?     @db.Decimal(10, 2)
+  actualStartTime DateTime?
+  actualValue     Decimal?     @db.Decimal(10, 2)
+  scheduledHours  Decimal?     @db.Decimal(10, 2)
+  scheduledValue  Decimal?     @db.Decimal(10, 2)
+  contact         Contact?     @relation(fields: [contactId], references: [id])
+  deal            Deal?        @relation(fields: [dealId], references: [id])
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount      Subaccount?  @relation(fields: [subaccountId], references: [id])
+  worker          Worker       @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  shiftSwapRequest ShiftSwapRequest[]
+
+  @@index([contactId])
+  @@index([organizationId])
+  @@index([organizationId, workerId, startTime])
+  @@index([organizationId, workerId, status])
+  @@index([startTime])
+  @@index([status])
+  @@index([subaccountId])
+  @@index([workerId])
+  @@index([workerId, startTime, endTime])
+}
+
+model Session {
+  id                   String    @id
+  expiresAt            DateTime
+  token                String    @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  activeOrganizationId String?
+  activeSubaccountId   String?
+  isOnline             Boolean   @default(true)
+  lastActivityAt       DateTime? @default(now())
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model SmartSection {
+  id                     String                   @id
+  organizationId         String
+  subaccountId           String?
+  name                   String
+  description            String?
+  category               String?
+  thumbnail              String?
+  blockStructure         Json                     @default("[]")
+  usageCount             Int                      @default(0)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  funnelBlock           FunnelBlock[]
+  organization           Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount             Subaccount?              @relation(fields: [subaccountId], references: [id])
+  smartSectionInstance SmartSectionInstance[]
+
+  @@index([category])
+  @@index([organizationId])
+  @@index([subaccountId])
+}
+
+model SmartSectionInstance {
+  id            String        @id
+  sectionId     String
+  funnelPageId  String?
+  formId        String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime
+  order         Int           @default(0)
+  funnelBlock  FunnelBlock?
+  form          Form?         @relation(fields: [formId], references: [id], onDelete: Cascade)
+  funnelPage   FunnelPage?  @relation(fields: [funnelPageId], references: [id], onDelete: Cascade)
+  smartSection SmartSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([formId])
+  @@index([funnelPageId])
+  @@index([sectionId])
+}
+
+model StripeConnection {
+  id                    String       @id
+  organizationId        String
+  subaccountId          String?      @unique
+  stripeAccountId       String       @unique
+  accountType           String
+  accessToken           String?
+  refreshToken          String?
+  isActive              Boolean      @default(true)
+  chargesEnabled        Boolean      @default(false)
+  payoutsEnabled        Boolean      @default(false)
+  detailsSubmitted      Boolean      @default(false)
+  email                 String?
+  businessName          String?
+  country               String?
+  currency              String?
+  applicationFeePercent Decimal?     @db.Decimal(5, 2)
+  applicationFeeFixed   Decimal?     @db.Decimal(10, 2)
+  metadata              Json?
+  lastSyncedAt          DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount            Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, subaccountId])
+  @@index([organizationId])
+  @@index([stripeAccountId])
+  @@index([subaccountId])
+}
+
+model StudioBooking {
+  id                 String              @id
+  classId            String
+  contactId          String
+  externalId         String?
+  status             StudioBookingStatus @default(BOOKED)
+  bookedAt           DateTime            @default(now())
+  checkedInAt        DateTime?
+  cancelledAt        DateTime?
+  notes              String?
+  cancellationReason String?
+  metadata           Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime
+  studioClass        StudioClass        @relation(fields: [classId], references: [id], onDelete: Cascade)
+  contact            Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([classId])
+  @@index([contactId])
+  @@index([externalId])
+  @@index([status])
+}
+
+model StudioClass {
+  id             String           @id
+  subaccountId   String?
+  externalId     String?
+  name           String
+  description    String?
+  instructorName String?
+  location       String?
+  startTime      DateTime
+  endTime        DateTime
+  maxCapacity    Int?
+  bookedCount    Int              @default(0)
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime
+  organizationId String
+  studioBooking  StudioBooking[]
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount     Subaccount?      @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+
+  @@index([externalId])
+  @@index([organizationId])
+  @@index([startTime])
+  @@index([subaccountId])
+}
+
+model StudioMembership {
+  id           String                 @id
+  contactId    String
+  externalId   String?
+  name         String
+  type         String?
+  status       StudioMembershipStatus @default(ACTIVE)
+  startDate    DateTime
+  endDate      DateTime?
+  renewalDate  DateTime?
+  totalClasses Int?
+  usedClasses  Int?                   @default(0)
+  price        Float?
+  currency     String?                @default("USD")
+  metadata     Json?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime
+  contact      Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId])
+  @@index([endDate])
+  @@index([externalId])
+  @@index([status])
+}
+
+model Subaccount {
+  id                     String                  @id
+  organizationId         String
+  companyName            String
+  website                String?
+  billingEmail           String?
+  phone                  String?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  state                  String?
+  postalCode             String?
+  country                String?
+  timezone               String?                 @default("UTC")
+  createdByUserId        String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime
+  industry               String?
+  logo                   String?
+  slug                   String?
+  accentColor            String?
+  brandColor             String?
+  businessEmail          String?
+  businessPhone          String?
+  taxId                  String?
+  dunningDays            Json?
+  dunningEnabled         Boolean                 @default(true)
+  AILog                  AILog[]
+  Credential             Credential[]
+  Execution              Execution[]  
+  Webhook                Webhook[]
+  Workflows              Workflows[]
+  bankTransferSettings BankTransferSettings?
+  contact                Contact[]
+  deal                   Deal[]
+  form                   Form[]
+  funnel                 Funnel[]
+  globalStylePreset    GlobalStylePreset[]
+  pipeline               Pipeline[]
+  qrCode                QRCode[]
+  rota                   Rota[]
+  smartSection          SmartSection[]
+  stripeConnection      StripeConnection?
+  studioClass           StudioClass[]
+  user                   User?                   @relation(fields: [createdByUserId], references: [id])
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccountMember      SubaccountMember[]
+  subaccountModule      SubaccountModule[]
+  timeLog               TimeLog[]
+  worker                 Worker[]
+  shiftSwapRequest      ShiftSwapRequest[]
+  timeOffRequest        TimeOffRequest[]
+  payrollRun            PayrollRun[]
+  workerPayment         WorkerPayment[]
+
+  @@index([organizationId])
+}
+
+model SubaccountMember {
+  id               String               @id
+  subaccountId     String
+  userId           String
+  role             SubaccountMemberRole @default(STANDARD)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime
+  contactAssignee ContactAssignee[]
+  dealMember      DealMember[]
+  subaccount       Subaccount           @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([subaccountId, userId])
+}
+
+model SubaccountModule {
+  id             String        @id
+  subaccountId   String?
+  moduleType     ModuleType
+  enabled        Boolean       @default(false)
+  config         Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, moduleType])
+  @@unique([subaccountId, moduleType])
+  @@index([organizationId, enabled])
+  @@index([subaccountId, enabled])
+}
+
+model TimeLog {
+  id               String        @id
+  subaccountId     String?
+  contactId        String?
+  dealId           String?
+  startTime        DateTime
+  endTime          DateTime?
+  duration         Int?
+  breakDuration    Int?
+  checkInMethod    CheckInMethod @default(MANUAL)
+  checkInLocation  Json?
+  checkOutLocation Json?
+  qrCodeId         String?
+  title            String?
+  description      String?
+  status           TimeLogStatus @default(DRAFT)
+  billable         Boolean       @default(true)
+  hourlyRate       Decimal?      @db.Decimal(10, 2)
+  totalAmount      Decimal?      @db.Decimal(12, 2)
+  currency         String?       @default("USD")
+  submittedAt      DateTime?
+  submittedBy      String?
+  approvedAt       DateTime?
+  approvedBy       String?
+  rejectedAt       DateTime?
+  rejectedBy       String?
+  rejectionReason  String?
+  invoiceId        String?
+  customFields     Json?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime
+  workerId         String?
+  organizationId   String
+  descriptionMode  String?       @default("single")
+  sections         Json?
+  isOvertime       Boolean?      @default(false)
+  overtimeHours    Decimal?      @db.Decimal(6, 2)
+  complianceFlags  Json?         // Break violations, weekly limit exceeded, etc.
+  contact          Contact?      @relation(fields: [contactId], references: [id])
+  deal             Deal?         @relation(fields: [dealId], references: [id])
+  invoice          Invoice?      @relation(fields: [invoiceId], references: [id])
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?   @relation(fields: [subaccountId], references: [id])
+  worker           Worker?       @relation(fields: [workerId], references: [id])
+
+  @@index([organizationId, contactId])
+  @@index([organizationId, dealId])
+  @@index([organizationId])
+  @@index([organizationId, startTime])
+  @@index([organizationId, status])
+  @@index([organizationId, subaccountId])
+  @@index([organizationId, workerId])
+  @@index([organizationId, workerId, startTime])
+  @@index([status, invoiceId])
+  @@index([subaccountId])
+  @@index([workerId, status])
+}
+
+model User {
+  id                                      String                       @id
+  name                                    String
+  email                                   String                       @unique
+  emailVerified                           Boolean                      @default(false)
+  image                                   String?
+  createdAt                               DateTime                     @default(now())
+  updatedAt                               DateTime                     @default(now())
+  status                                  UserStatus                   @default(ONLINE)
+  statusMessage                           String?
+  AILog                                   AILog[]
+  Apps                                    Apps[]
+  Credential                              Credential[]
+  GmailSubscription                       GmailSubscription?
+  GoogleCalendarSubscription              GoogleCalendarSubscription[]
+  OneDriveSubscription                    OneDriveSubscription?
+  OutlookSubscription                     OutlookSubscription?
+  Webhook                                 Webhook[]
+  Workflows                               Workflows[]
+  account                                 Account[]
+  activity                                Activity[]
+  invitation                              Invitation[]
+  member                                  Member[]
+  notificationActorIdTouser Notification[]               @relation("notification_actorIdTouser")
+  notificationUserIdTouser  Notification[]               @relation("notification_userIdTouser")
+  notificationPreference                 NotificationPreference?
+  session                                 Session[]
+  subaccount                              Subaccount[]
+  subaccountMember                       SubaccountMember[]
+  userPresence                           UserPresence?
+}
+
+model UserPresence {
+  id             String   @id
+  userId         String   @unique
+  organizationId String?
+  subaccountId   String?
+  status         String   @default("offline")
+  lastSeenAt     DateTime @default(now())
+  lastActivityAt DateTime @default(now())
+  userAgent      String?
+  ipAddress      String?
+  updatedAt      DateTime
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([userId, status])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now())
+}
+
+model Worker {
+  id                       String            @id
+  subaccountId             String?
+  name                     String
+  email                    String?
+  phone                    String?
+  employeeId               String?
+  portalToken              String?           @unique
+  portalTokenExpiry        DateTime?
+  lastLoginAt              DateTime?
+  hourlyRate               Decimal?          @db.Decimal(10, 2)
+  currency                 String?           @default("GBP")
+  role                     String?
+  isActive                 Boolean           @default(true)
+  customFields             Json?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime
+  organizationId           String
+  addressLine1             String?
+  addressLine2             String?
+  bankAccountName          String?
+  bankAccountNumber        String?
+  bankSortCode             String?
+  city                     String?
+  country                  String?           @default("United Kingdom")
+  county                   String?
+  dateOfBirth              DateTime?
+  emergencyContactEmail    String?
+  emergencyContactName     String?
+  emergencyContactPhone    String?
+  emergencyContactRelation String?
+  firstName                String?
+  gender                   String?
+  hasOwnTransport          Boolean           @default(false)
+  languages                String[]          @default([])
+  lastName                 String?
+  maxHoursPerWeek          Int?
+  nationalInsuranceNumber  String?
+  onboardingCompleted      Boolean           @default(false)
+  onboardingCompletedAt    DateTime?
+  postcode                 String?
+
+  // Payroll & Tax Configuration
+  taxCode                  String?           @default("1257L") // UK tax code
+  studentLoanPlan          String?                              // Plan 1, 2, 4, or Postgraduate
+  pensionSchemeEnrolled    Boolean           @default(false)
+  pensionContributionRate  Decimal?          @default(5) @db.Decimal(5, 2) // Employee contribution %
+  employerPensionRate      Decimal?          @default(3) @db.Decimal(5, 2) // Employer contribution %
+  housingAllowance         Decimal           @default(0) @db.Decimal(10, 2)
+  transportAllowance       Decimal           @default(0) @db.Decimal(10, 2)
+  mealAllowance            Decimal           @default(0) @db.Decimal(10, 2)
+  otherAllowances          Decimal           @default(0) @db.Decimal(10, 2)
+  preferredShiftTypes      String[]          @default([])
+  profilePhoto             String?
+  qualifications           String[]          @default([])
+  sessionToken             String?           @unique
+  sessionTokenExpiry       DateTime?
+  skills                   String[]          @default([])
+  travelRadius             Int?
+  rota                     Rota[]
+  timeLog                 TimeLog[]
+  organization             Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount               Subaccount?       @relation(fields: [subaccountId], references: [id])
+  workerDocument          WorkerDocument[]
+  shiftSwapRequester      ShiftSwapRequest[] @relation("swap_requester")
+  shiftSwapTarget         ShiftSwapRequest[] @relation("swap_target")
+  workerAvailability      WorkerAvailability[]
+  timeOffRequest          TimeOffRequest[]
+  overtimeTracking        OvertimeTracking[]
+  workerPayment           WorkerPayment[]
+  payrollRunWorker        PayrollRunWorker[]
+
+  @@index([email])
+  @@index([organizationId])
+  @@index([organizationId, subaccountId])
+  @@index([phone])
+  @@index([portalToken])
+  @@index([sessionToken])
+  @@index([subaccountId])
+}
+
+model WorkerDocument {
+  id                     String               @id
+  workerId               String
+  type                   WorkerDocumentType
+  name                   String
+  description            String?
+  fileUrl                String?
+  fileName               String?
+  fileSize               Int?
+  mimeType               String?
+  documentNumber         String?
+  issueDate              DateTime?
+  expiryDate             DateTime?
+  issuingAuthority       String?
+  status                 WorkerDocumentStatus @default(PENDING_UPLOAD)
+  reviewedAt             DateTime?
+  reviewedBy             String?
+  rejectionReason        String?
+  expiryNotificationSent Boolean              @default(false)
+  expiryNotificationDate DateTime?
+  metadata               Json?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime
+  worker                 Worker               @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([expiryDate])
+  @@index([status])
+  @@index([type])
+  @@index([workerId])
+  @@index([workerId, status])
+  @@index([workerId, type])
+}
+
+model ShiftSwapRequest {
+  id                   String              @id @default(cuid())
+  organizationId       String
+  subaccountId         String?
+  rotaId               String
+  requesterId          String              // Worker requesting the swap
+  targetWorkerId       String?             // Worker being asked to swap (null = open to all)
+  status               ShiftSwapStatus     @default(PENDING)
+  reason               String?
+  requestedAt          DateTime            @default(now())
+  respondedAt          DateTime?
+  respondedBy          String?             // Admin or worker who responded
+  adminApprovedAt      DateTime?
+  adminApprovedBy      String?
+  adminRejectedAt      DateTime?
+  adminRejectedBy      String?
+  rejectionReason      String?
+  expiresAt            DateTime?           // Auto-expire after X days
+  notificationsSent    Boolean             @default(false)
+  metadata             Json?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  rota                 Rota                @relation(fields: [rotaId], references: [id], onDelete: Cascade)
+  requester            Worker              @relation("swap_requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  targetWorker         Worker?             @relation("swap_target", fields: [targetWorkerId], references: [id], onDelete: Cascade)
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount           Subaccount?         @relation(fields: [subaccountId], references: [id])
+
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([rotaId])
+  @@index([requesterId])
+  @@index([targetWorkerId])
+  @@index([status])
+  @@index([organizationId, status])
+  @@index([requestedAt])
+}
+
+model WorkerAvailability {
+  id             String   @id @default(cuid())
+  workerId       String
+  organizationId String
+  dayOfWeek      Int      // 0=Sunday, 1=Monday, ..., 6=Saturday
+  startTime      String   // Time in "HH:mm" format (e.g., "09:00")
+  endTime        String   // Time in "HH:mm" format (e.g., "17:00")
+  isRecurring    Boolean  @default(true)
+  isActive       Boolean  @default(true)
+  effectiveFrom  DateTime @default(now())
+  effectiveTo    DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  worker         Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+  @@index([organizationId])
+  @@index([dayOfWeek])
+  @@index([workerId, dayOfWeek, isActive])
+}
+
+model TimeOffRequest {
+  id              String            @id @default(cuid())
+  workerId        String
+  organizationId  String
+  subaccountId    String?
+  type            TimeOffType       @default(VACATION)
+  startDate       DateTime
+  endDate         DateTime
+  startHalfDay    Boolean           @default(false)  // True if half-day at start
+  endHalfDay      Boolean           @default(false)  // True if half-day at end
+  totalDays       Decimal           @db.Decimal(4, 1) // Can be 0.5, 1.0, 1.5, etc.
+  reason          String?
+  status          ApprovalStatus    @default(PENDING)
+  requestedAt     DateTime          @default(now())
+  approvedAt      DateTime?
+  approvedBy      String?
+  rejectedAt      DateTime?
+  rejectedBy      String?
+  rejectionReason String?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancellationReason String?
+  notes           String?
+  attachments     Json?             // URLs to supporting documents
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  worker          Worker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount      Subaccount?       @relation(fields: [subaccountId], references: [id])
+
+  @@index([workerId])
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@index([workerId, status])
+  @@index([organizationId, status])
+}
+
+model OvertimeTracking {
+  id              String   @id @default(cuid())
+  workerId        String
+  organizationId  String
+  weekStartDate   DateTime // Monday of the week
+  weekEndDate     DateTime // Sunday of the week
+  regularHours    Decimal  @db.Decimal(6, 2)
+  overtimeHours   Decimal  @db.Decimal(6, 2)
+  totalHours      Decimal  @db.Decimal(6, 2)
+  weeklyLimit     Decimal? @db.Decimal(6, 2) // Configured weekly limit (e.g., 40 or 48)
+  isOverLimit     Boolean  @default(false)
+  complianceFlags Json?    // Array of compliance issues
+  calculatedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, weekStartDate])
+  @@index([workerId])
+  @@index([organizationId])
+  @@index([weekStartDate])
+  @@index([isOverLimit])
+  @@index([workerId, weekStartDate])
+}
+
+enum AILogStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ActivityAction {
+  CREATED
+  UPDATED
+  DELETED
+  ASSIGNED
+  UNASSIGNED
+  STAGE_CHANGED
+  STATUS_CHANGED
+  COMPLETED
+  ARCHIVED
+  RESTORED
+}
+
+enum ActivityType {
+  CONTACT
+  DEAL
+  WORKFLOW
+  EXECUTION
+  PIPELINE
+  TASK
+  EMAIL
+  CALL
+  MEETING
+  NOTE
+  WORKER
+  TIME_LOG
+  INVOICE
+  CREDENTIAL
+  WEBHOOK
+  INTEGRATION
+  SUBACCOUNT
+  ORGANIZATION
+}
+
+enum AppProvider {
+  GOOGLE_CALENDAR
+  GMAIL
+  GOOGLE
+  GOOGLE_DRIVE
+  GOOGLE_FORMS
+  TELEGRAM
+  MICROSOFT
+  OUTLOOK
+  ONEDRIVE
+  MINDBODY
+  SLACK
+  DISCORD
+}
+
+enum BankTransferStatus {
+  PENDING
+  PROOF_UPLOADED
+  VERIFIED
+  REJECTED
+}
+
+enum BillingModel {
+  HOURLY
+  PER_SHIFT
+  WEEKLY_ROLLUP
+  MONTHLY_ROLLUP
+  RETAINER
+  PROJECT_MILESTONE
+  SUBSCRIPTION
+  CUSTOM
+}
+
+enum CheckInMethod {
+  MANUAL
+  QR_CODE
+  GPS
+  BIOMETRIC
+  NFC
+}
+
+enum ContactType {
+  LEAD
+  PROSPECT
+  CUSTOMER
+  CHURN
+  CLOSED
 }
 
 enum CredentialType {
@@ -281,91 +1910,124 @@ enum CredentialType {
   GEMINI
   OPENAI
   TELEGRAM_BOT
+  MINDBODY
 }
 
-enum WebhookProvider {
-  SLACK
-  DISCORD
-  STRIPE
+enum DeviceType {
+  DESKTOP
+  TABLET
+  MOBILE
+}
+
+enum ExecutionStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum FormFieldType {
+  SHORT_TEXT
+  LONG_TEXT
+  EMAIL
+  PHONE
+  NUMBER
+  URL
+  DATE
+  TIME
+  DATETIME
+  SELECT
+  RADIO
+  CHECKBOX
+  MULTI_SELECT
+  FILE_UPLOAD
+  RATING
+  SLIDER
+  SIGNATURE
+  PAYMENT
+}
+
+enum FormStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum FunnelBlockType {
+  CONTAINER
+  ONE_COLUMN
+  TWO_COLUMN
+  THREE_COLUMN
+  SECTION
+  HEADING
+  PARAGRAPH
+  LABEL
+  RICH_TEXT
+  IMAGE
+  VIDEO
+  ICON
+  INPUT
+  TEXTAREA
+  SELECT
+  CHECKBOX
+  BUTTON
+  FORM
+  CARD
+  FAQ
+  TESTIMONIAL
+  PRICING
+  FEATURE_GRID
+  IFRAME
+  CUSTOM_HTML
+  SCRIPT
+  POPUP
+  COUNTDOWN_TIMER
+  STICKY_BAR
+}
+
+enum FunnelDomainType {
+  SUBDOMAIN
   CUSTOM
 }
 
-model Credential {
-  id        String         @id @default(cuid())
-  name      String
-  value     String
-  type      CredentialType
-  metadata  Json?
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  subaccountId String?
-  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  Node Node[]
-
-  @@index([subaccountId])
+enum FunnelStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
 }
 
-model Webhook {
-  id          String          @id @default(cuid())
-  name        String
-  provider    WebhookProvider
-  url         String
-  signingSecret String?
-  description String?
-  metadata    Json?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-
-  userId String
-  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  subaccountId String?
-  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  @@index([subaccountId])
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PAID
+  PARTIALLY_PAID
+  OVERDUE
+  CANCELLED
 }
 
-model Workflows {
-  id   String @id @default(cuid())
-  name String
-  description String?
+enum InvoiceType {
+  SENT      // Invoices you send to clients
+  RECEIVED  // Invoices you receive from contractors/vendors
+}
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum LifecycleStage {
+  SUBSCRIBER
+  LEAD
+  MQL
+  SQL
+  OPPORTUNITY
+  CUSTOMER
+  EVANGELIST
+}
 
-  archived   Boolean @default(false)
-  isTemplate Boolean @default(false)
-
-  // Bundle workflow configuration
-  isBundle Boolean @default(false)
-  bundleInputs Json? // Define input parameters for bundle workflows
-  bundleOutputs Json? // Define output parameters for bundle workflows
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-
-  subaccountId String?
-  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  nodes       Node[]
-  connections Connection[]
-  executions  Execution[]
-  googleCalendarSubscriptions GoogleCalendarSubscription[]
-  gmailTriggerStates          GmailTriggerState[]
-  telegramTriggerStates       TelegramTriggerState[]
-  outlookTriggerStates        OutlookTriggerState[]
-  oneDriveTriggerStates       OneDriveTriggerState[]
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@index([isBundle])
+enum ModuleType {
+  TIME_TRACKING
+  INVOICING
+  INVENTORY
+  BOOKING_CALENDAR
+  DOCUMENT_SIGNING
+  PROJECT_MANAGEMENT
+  PILATES_STUDIO
 }
 
 enum NodeType {
@@ -399,156 +2061,105 @@ enum NodeType {
   CONTACT_DELETED_TRIGGER
   CONTACT_TYPE_CHANGED_TRIGGER
   CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER
-  // Logic Nodes
   IF_ELSE
   SWITCH
   LOOP
   SET_VARIABLE
   STOP_WORKFLOW
-  // Bundle Workflow
   BUNDLE_WORKFLOW
-  // Microsoft Integration
   OUTLOOK_TRIGGER
   OUTLOOK_EXECUTION
   ONEDRIVE_TRIGGER
   ONEDRIVE_EXECUTION
-}
-
-model Node {
-  id String @id @default(cuid())
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  name     String
-  type     NodeType
-  position Json
-  data     Json     @default("{}")
-
-  outputConnections Connection[] @relation("FromNode")
-  inputConnections  Connection[] @relation("ToNode")
-
-  workflowId String
-  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-
-  credentialId String?
-  credential   Credential? @relation(fields: [credentialId], references: [id])
-
-  googleCalendarSubscription GoogleCalendarSubscription?
-  gmailTriggerState          GmailTriggerState?
-  telegramTriggerState       TelegramTriggerState?
-  outlookTriggerState        OutlookTriggerState?
-  oneDriveTriggerState       OneDriveTriggerState?
-}
-
-model Connection {
-  id String @id @default(cuid())
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  fromNodeId String
-  fromNode   Node   @relation("FromNode", fields: [fromNodeId], references: [id], onDelete: Cascade)
-
-  toNodeId String
-  toNode   Node   @relation("ToNode", fields: [toNodeId], references: [id], onDelete: Cascade)
-
-  fromOutput String @default("main")
-  toInput    String @default("main")
-
-  workflowId String
-  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-
-  @@unique([fromNodeId, toNodeId, fromOutput, toInput])
-}
-
-enum ExecutionStatus {
-  RUNNING
-  SUCCESS
-  FAILED
-}
-
-enum AILogStatus {
-  PENDING
-  RUNNING
-  COMPLETED
-  FAILED
-}
-
-model AILog {
-  id String @id @default(cuid())
-
-  title       String
-  description String?
-  intent      String?
-  userMessage String   @db.Text
-  status      AILogStatus @default(RUNNING)
-
-  error      String? @db.Text
-  result     Json?
-
-  createdAt   DateTime  @default(now())
-  completedAt DateTime?
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-
-  subaccountId String?
-  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  @@index([userId])
-  @@index([organizationId])
-  @@index([subaccountId])
-}
-
-model Execution {
-  id String @id @default(cuid())
-
-  startedAt   DateTime  @default(now())
-  completedAt DateTime?
-
-  status     ExecutionStatus @default(RUNNING)
-  error      String?         @db.Text
-  errorStack String?         @db.Text
-
-  inngestEventId String @unique
-
-  output Json?
-
-  workflowId String
-  workflow   Workflows @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-
-  subaccountId String?
-  subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  @@index([subaccountId])
-}
-
-model Organization {
-  id          String       @id
-  name        String
-  slug        String
-  logo        String?
-  createdAt   DateTime
-  metadata    String?
-  members     Member[]
-  invitations Invitation[]
-  subaccounts Subaccount[]
-  contacts    Contact[]
-  deals       Deal[]
-  pipelines   Pipeline[]
-  workflows   Workflows[]
-  aiLogs      AILog[]
-  modules     SubaccountModule[]
-  workers     Worker[]
-  timeLogs    TimeLog[]
-  qrCodes     QRCode[]
-
-  @@unique([slug])
-  @@map("organization")
+  GOOGLE_CALENDAR_EVENT_CREATED
+  GOOGLE_CALENDAR_EVENT_UPDATED
+  GOOGLE_CALENDAR_EVENT_DELETED
+  GOOGLE_DRIVE_FILE_CREATED
+  GOOGLE_DRIVE_FILE_UPDATED
+  GOOGLE_DRIVE_FILE_DELETED
+  GOOGLE_DRIVE_FOLDER_CREATED
+  GOOGLE_CALENDAR_CREATE_EVENT
+  GOOGLE_CALENDAR_UPDATE_EVENT
+  GOOGLE_CALENDAR_DELETE_EVENT
+  GOOGLE_CALENDAR_FIND_AVAILABLE_TIMES
+  GMAIL_SEND_EMAIL
+  GMAIL_REPLY_TO_EMAIL
+  GMAIL_SEARCH_EMAILS
+  GMAIL_ADD_LABEL
+  GOOGLE_DRIVE_UPLOAD_FILE
+  GOOGLE_DRIVE_DOWNLOAD_FILE
+  GOOGLE_DRIVE_MOVE_FILE
+  GOOGLE_DRIVE_DELETE_FILE
+  GOOGLE_DRIVE_CREATE_FOLDER
+  GOOGLE_FORM_READ_RESPONSES
+  GOOGLE_FORM_CREATE_RESPONSE
+  OUTLOOK_NEW_EMAIL
+  OUTLOOK_EMAIL_MOVED
+  OUTLOOK_EMAIL_DELETED
+  ONEDRIVE_FILE_CREATED
+  ONEDRIVE_FILE_UPDATED
+  ONEDRIVE_FILE_DELETED
+  OUTLOOK_CALENDAR_EVENT_CREATED
+  OUTLOOK_CALENDAR_EVENT_UPDATED
+  OUTLOOK_CALENDAR_EVENT_DELETED
+  OUTLOOK_SEND_EMAIL
+  OUTLOOK_REPLY_TO_EMAIL
+  OUTLOOK_MOVE_EMAIL
+  OUTLOOK_SEARCH_EMAILS
+  ONEDRIVE_UPLOAD_FILE
+  ONEDRIVE_DOWNLOAD_FILE
+  ONEDRIVE_MOVE_FILE
+  ONEDRIVE_DELETE_FILE
+  OUTLOOK_CALENDAR_CREATE_EVENT
+  OUTLOOK_CALENDAR_UPDATE_EVENT
+  OUTLOOK_CALENDAR_DELETE_EVENT
+  SLACK_NEW_MESSAGE
+  SLACK_MESSAGE_REACTION
+  SLACK_CHANNEL_JOINED
+  DISCORD_NEW_MESSAGE
+  DISCORD_NEW_REACTION
+  DISCORD_USER_JOINED
+  TELEGRAM_NEW_MESSAGE
+  TELEGRAM_COMMAND_RECEIVED
+  SLACK_SEND_MESSAGE
+  SLACK_UPDATE_MESSAGE
+  SLACK_SEND_DM
+  SLACK_UPLOAD_FILE
+  DISCORD_SEND_MESSAGE
+  DISCORD_EDIT_MESSAGE
+  DISCORD_SEND_EMBED
+  DISCORD_SEND_DM
+  TELEGRAM_SEND_MESSAGE
+  TELEGRAM_SEND_PHOTO
+  TELEGRAM_SEND_DOCUMENT
+  FIND_CONTACTS
+  ADD_TAG_TO_CONTACT
+  REMOVE_TAG_FROM_CONTACT
+  DEAL_CREATED_TRIGGER
+  DEAL_UPDATED_TRIGGER
+  DEAL_DELETED_TRIGGER
+  DEAL_STAGE_CHANGED_TRIGGER
+  MOVE_DEAL_STAGE
+  ADD_DEAL_NOTE
+  APPOINTMENT_CREATED_TRIGGER
+  APPOINTMENT_CANCELLED_TRIGGER
+  SCHEDULE_APPOINTMENT
+  UPDATE_APPOINTMENT
+  CANCEL_APPOINTMENT
+  STRIPE_PAYMENT_SUCCEEDED
+  STRIPE_PAYMENT_FAILED
+  STRIPE_SUBSCRIPTION_CREATED
+  STRIPE_SUBSCRIPTION_UPDATED
+  STRIPE_SUBSCRIPTION_CANCELLED
+  STRIPE_CREATE_CHECKOUT_SESSION
+  STRIPE_CREATE_INVOICE
+  STRIPE_SEND_INVOICE
+  STRIPE_REFUND_PAYMENT
+  GEMINI_GENERATE_TEXT
+  GEMINI_SUMMARISE
+  GEMINI_TRANSFORM
+  GEMINI_CLASSIFY
+  EXECUTE_WORKFLOW
 }
 
 enum OrganizationMemberRole {
@@ -559,79 +2170,59 @@ enum OrganizationMemberRole {
   viewer
 }
 
-model Member {
-  id             String       @id
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role           OrganizationMemberRole      @default(viewer)
-  createdAt      DateTime
-
-  @@map("member")
+enum PaymentMethod {
+  STRIPE
+  MANUAL
+  XERO
+  BANK_TRANSFER
 }
 
-model Invitation {
-  id             String       @id
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  email          String
-  role           String?
-  status         String
-  expiresAt      DateTime
-  inviterId      String
-  user           User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
-
-  @@map("invitation")
+enum PixelProvider {
+  META_PIXEL
+  GOOGLE_ANALYTICS
+  TIKTOK_PIXEL
+  CUSTOM
 }
 
-model Subaccount {
-  id              String       @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+enum RecurringFrequency {
+  DAILY
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  QUARTERLY
+  SEMIANNUALLY
+  ANNUALLY
+}
 
-  logo        String?
-  slug String?
+enum RecurringInvoiceStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
 
-  // Basic company profile
-  companyName     String
-  website         String?
-  billingEmail    String?
-  phone           String?
-  addressLine1    String?
-  addressLine2    String?
-  city            String?
-  state           String?
-  postalCode      String?
-  country         String?
-  timezone        String?      @default("UTC")
-  industry        String?
+enum RotaStatus {
+  SCHEDULED
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
 
-  // Admin/creator
-  createdByUserId String?
-  createdBy       User?        @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+enum StudioBookingStatus {
+  BOOKED
+  ATTENDED
+  CANCELLED
+  NO_SHOW
+  LATE_CANCEL
+}
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  workflows   Workflows[]
-  credentials Credential[]
-  webhooks    Webhook[]
-  executions  Execution[]
-  members     SubaccountMember[]
-  contacts    Contact[]
-  deals       Deal[]
-  pipelines   Pipeline[]
-  aiLogs      AILog[]
-
-  // Modules
-  modules     SubaccountModule[]
-  timeLogs    TimeLog[]
-  qrCodes     QRCode[]
-  workers     Worker[]
-
-  @@map("subaccount")
-  @@index([organizationId])
+enum StudioMembershipStatus {
+  ACTIVE
+  INACTIVE
+  CANCELLED
+  EXPIRED
+  PAUSED
 }
 
 enum SubaccountMemberRole {
@@ -643,536 +2234,247 @@ enum SubaccountMemberRole {
   VIEWER
 }
 
-model SubaccountMember {
-  id           String      @id @default(cuid())
-  subaccountId String
-  subaccount   Subaccount  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role         SubaccountMemberRole      @default(STANDARD)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-
-  contactAssignees ContactAssignee[]
-  dealMembers DealMember[]
-
-  @@unique([subaccountId, userId])
-  @@map("subaccount_member")
+enum TimeLogStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  INVOICED
 }
 
-enum ContactType {
-  LEAD
-  PROSPECT
-  CUSTOMER
-  CHURN
-  CLOSED
+enum UserStatus {
+  ONLINE
+  WORKING
+  DO_NOT_DISTURB
+  AWAY
+  OFFLINE
 }
 
-enum LifecycleStage {
-  SUBSCRIBER
-  LEAD
-  MQL
-  SQL
-  OPPORTUNITY
-  CUSTOMER
-  EVANGELIST
+enum WebhookProvider {
+  SLACK
+  DISCORD
+  STRIPE
+  CUSTOM
 }
 
-model Contact {
+enum WorkerDocumentStatus {
+  PENDING_UPLOAD
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum WorkerDocumentType {
+  PASSPORT
+  DRIVING_LICENCE
+  NATIONAL_ID
+  VISA
+  RIGHT_TO_WORK
+  BIRTH_CERTIFICATE
+  DBS_CERTIFICATE
+  DBS_UPDATE_SERVICE
+  PROOF_OF_ADDRESS
+  PROOF_OF_NI
+  QUALIFICATION
+  CERTIFICATION
+  TRAINING_CERTIFICATE
+  FIRST_AID_CERTIFICATE
+  FOOD_HYGIENE
+  MANUAL_HANDLING
+  SAFEGUARDING
+  CONTRACT
+  SIGNED_POLICY
+  REFERENCE
+  HEALTH_DECLARATION
+  FIT_NOTE
+  VACCINATION_RECORD
+  OCCUPATIONAL_HEALTH
+  PHOTO
+  OTHER
+}
+
+enum ShiftSwapStatus {
+  PENDING
+  WORKER_ACCEPTED
+  WORKER_REJECTED
+  ADMIN_APPROVED
+  ADMIN_REJECTED
+  CANCELLED
+  EXPIRED
+}
+
+enum TimeOffType {
+  VACATION
+  SICK
+  PERSONAL
+  BEREAVEMENT
+  PARENTAL
+  UNPAID
+  COMPENSATORY
+  PUBLIC_HOLIDAY
+  OTHER
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum WorkerPaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CHEQUE
+  PAYPAL
+  STRIPE
+  OTHER
+}
+
+enum WorkerPaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+// Payroll Run - represents a batch payment period
+model PayrollRun {
+  id                String            @id @default(cuid())
+  organizationId    String
+  subaccountId      String?
+  periodStart       DateTime
+  periodEnd         DateTime
+  paymentDate       DateTime
+  status            PayrollRunStatus  @default(DRAFT)
+  totalGrossPay     Decimal           @db.Decimal(12, 2)
+  totalDeductions   Decimal           @default(0) @db.Decimal(12, 2)
+  totalNetPay       Decimal           @db.Decimal(12, 2)
+  currency          String            @default("GBP")
+  notes             String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  processedBy       String?
+  processedAt       DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  createdBy         String
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount        Subaccount?       @relation(fields: [subaccountId], references: [id])
+  payrollRunWorkers PayrollRunWorker[]
+  workerPayments    WorkerPayment[]
+
+  @@index([organizationId])
+  @@index([subaccountId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@index([paymentDate])
+}
+
+// Link table between PayrollRun and Workers
+model PayrollRunWorker {
+  id            String      @id @default(cuid())
+  payrollRunId  String
+  workerId      String
+  regularHours  Decimal     @db.Decimal(8, 2)
+  overtimeHours Decimal     @default(0) @db.Decimal(8, 2)
+  regularPay    Decimal     @db.Decimal(12, 2)
+  overtimePay   Decimal     @default(0) @db.Decimal(12, 2)
+  bonuses       Decimal     @default(0) @db.Decimal(12, 2)
+
+  // Allowances
+  housingAllowance    Decimal @default(0) @db.Decimal(12, 2)
+  transportAllowance  Decimal @default(0) @db.Decimal(12, 2)
+  mealAllowance       Decimal @default(0) @db.Decimal(12, 2)
+  otherAllowances     Decimal @default(0) @db.Decimal(12, 2)
+
+  // Tax Deductions
+  incomeTax           Decimal @default(0) @db.Decimal(12, 2)
+  nationalInsurance   Decimal @default(0) @db.Decimal(12, 2)
+  pensionContribution Decimal @default(0) @db.Decimal(12, 2)
+  studentLoan         Decimal @default(0) @db.Decimal(12, 2)
+
+  // Other Deductions
+  otherDeductions     Decimal @default(0) @db.Decimal(12, 2)
+  deductions          Decimal @default(0) @db.Decimal(12, 2) // Total deductions
+
+  // Totals
+  grossPay      Decimal     @db.Decimal(12, 2)
+  netPay        Decimal     @db.Decimal(12, 2)
+
+  // Year-to-Date tracking
+  ytdGrossPay   Decimal?    @db.Decimal(12, 2)
+  ytdTax        Decimal?    @db.Decimal(12, 2)
+  ytdNI         Decimal?    @db.Decimal(12, 2)
+  ytdNetPay     Decimal?    @db.Decimal(12, 2)
+
+  notes         String?
+  payslipUrl    String?     // URL to generated payslip PDF
+  payslipSentAt DateTime?   // When payslip was emailed
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  payrollRun    PayrollRun  @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  worker        Worker      @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([payrollRunId, workerId])
+  @@index([payrollRunId])
+  @@index([workerId])
+}
+
+// Individual worker payment record
+model WorkerPayment {
   id               String        @id @default(cuid())
+  workerId         String
+  payrollRunId     String?
   organizationId   String
-  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   subaccountId     String?
-  subaccount       Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-  logo             String?
-  name             String
-  companyName      String?
-  email            String?
-  position         String?
-  phone            String?
-  country          String?
-  city             String?
-  score            Int?          @default(0)
-  type             ContactType   @default(LEAD)
-  lifecycleStage   LifecycleStage?
-  source           String?
-  website          String?
-  linkedin         String?
-  tags             String[]      @default([])
-  lastInteractionAt DateTime?
+  periodStart      DateTime
+  periodEnd        DateTime
+  paymentDate      DateTime
+  grossAmount      Decimal       @db.Decimal(12, 2)
+  deductions       Decimal       @default(0) @db.Decimal(12, 2)
+  netAmount        Decimal       @db.Decimal(12, 2)
+  currency         String        @default("GBP")
+  paymentMethod    WorkerPaymentMethod @default(BANK_TRANSFER)
+  paymentStatus    WorkerPaymentStatus @default(PENDING)
+  paymentReference String?       // Bank transfer reference, check number, etc.
+  bankAccountName  String?
+  bankAccountNumber String?
+  bankSortCode     String?
   notes            String?
+  paidBy           String?
+  paidAt           DateTime?
+  failureReason    String?
+  metadata         Json?         // Store breakdown: {regularHours, overtimeHours, bonuses, etc.}
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
+  worker           Worker        @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  payrollRun       PayrollRun?   @relation(fields: [payrollRunId], references: [id])
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?   @relation(fields: [subaccountId], references: [id])
 
-  assignees        ContactAssignee[]
-  deals            DealContact[]
-  timeLogs         TimeLog[]
-
-  @@index([organizationId, subaccountId])
-  @@index([subaccountId, email])
-  @@map("contact")
-}
-
-model ContactAssignee {
-  id                  String           @id @default(cuid())
-  contactId           String
-  contact             Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  subaccountMemberId  String
-  subaccountMember    SubaccountMember @relation(fields: [subaccountMemberId], references: [id], onDelete: Cascade)
-  assignedAt          DateTime         @default(now())
-
-  @@unique([contactId, subaccountMemberId])
-  @@map("contact_assignee")
-}
-
-model Deal {
-  id               String         @id @default(cuid())
-  organizationId   String
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountId     String?
-  subaccount       Subaccount?    @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-  pipelineId       String?
-  pipeline         Pipeline?      @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
-  pipelineStageId  String?
-  pipelineStage    PipelineStage? @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
-  name             String
-  value            Decimal?       @db.Decimal(12, 2)
-  currency         String?        @default("USD")
-  deadline         DateTime?
-  source           String?
-  tags             String[]       @default([])
-  description      String?
-  lastActivityAt   DateTime?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
-
-  members  DealMember[]
-  contacts DealContact[]
-  timeLogs TimeLog[]
-
-  @@index([organizationId, subaccountId])
-  @@index([subaccountId, pipelineStageId])
-  @@index([pipelineId])
-  @@map("deal")
-}
-
-model DealMember {
-  id                 String           @id @default(cuid())
-  dealId             String
-  deal               Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  subaccountMemberId String
-  subaccountMember   SubaccountMember @relation(fields: [subaccountMemberId], references: [id], onDelete: Cascade)
-  assignedAt         DateTime         @default(now())
-
-  @@unique([dealId, subaccountMemberId])
-  @@map("deal_member")
-}
-
-model DealContact {
-  id        String   @id @default(cuid())
-  dealId    String
-  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  contactId String
-  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
-
-  @@unique([dealId, contactId])
-  @@map("deal_contact")
-}
-
-model Pipeline {
-  id             String          @id @default(cuid())
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountId   String?
-  subaccount     Subaccount?     @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-  name           String
-  description  String?
-  isActive     Boolean         @default(true)
-  isDefault    Boolean         @default(false)
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-
-  stages PipelineStage[]
-  deals  Deal[]
-
-  @@index([organizationId, subaccountId])
-  @@index([subaccountId, isActive])
-  @@map("pipeline")
-}
-
-model PipelineStage {
-  id           String   @id @default(cuid())
-  pipelineId   String
-  pipeline     Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
-  name         String
-  position     Int
-  probability  Int      @default(0) // 0-100 percentage for forecasting
-  rottingDays  Int?     // Days before deal is considered stale
-  color        String?  // Hex color for visual differentiation
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  deals Deal[]
-
-  @@unique([pipelineId, position])
-  @@index([pipelineId])
-  @@map("pipeline_stage")
-}
-
-model Notification {
-  id             String    @id @default(cuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Context
-  organizationId String?
-  subaccountId   String?
-
-  // Notification content
-  type           String    // WORKFLOW_CREATED, CONTACT_UPDATED, etc.
-  title          String
-  message        String
-  data           Json?     // Additional metadata
-
-  // Entity reference
-  entityType     String?   // workflow, contact, deal, pipeline, invitation
-  entityId       String?
-
-  // Actor (who performed the action)
-  actorId        String?
-  actor          User?     @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
-
-  // Read status
-  read           Boolean   @default(false)
-  readAt         DateTime?
-
-  createdAt      DateTime  @default(now())
-
-  @@index([userId, read])
-  @@index([userId, createdAt])
+  @@index([workerId])
+  @@index([payrollRunId])
   @@index([organizationId])
   @@index([subaccountId])
-  @@map("notification")
+  @@index([paymentStatus])
+  @@index([paymentDate])
+  @@index([periodStart, periodEnd])
 }
 
-model UserPresence {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Context
-  organizationId String?
-  subaccountId   String?
-
-  // Presence data
-  status         String    @default("offline") // online, offline, away
-  lastSeenAt     DateTime  @default(now())
-  lastActivityAt DateTime  @default(now())
-
-  // Session info
-  userAgent      String?
-  ipAddress      String?
-
-  updatedAt      DateTime  @updatedAt
-
-  @@index([userId, status])
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@map("user_presence")
-}
-
-model NotificationPreference {
-  id     String @id @default(cuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Notification type preferences (JSON object with type: boolean)
-  preferences Json @default("{}")
-
-  // Email notification preferences
-  emailEnabled Boolean @default(true)
-  emailDigest  Boolean @default(false) // Daily digest instead of instant
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("notification_preference")
-}
-
-// ============================================================================
-// ACTIVITY TIMELINE
-// ============================================================================
-
-enum ActivityType {
-  CONTACT
-  DEAL
-  WORKFLOW
-  EXECUTION
-  PIPELINE
-  TASK
-  EMAIL
-  CALL
-  MEETING
-  NOTE
-  WORKER
-  TIME_LOG
-  INVOICE
-  CREDENTIAL
-  WEBHOOK
-  INTEGRATION
-  SUBACCOUNT
-  ORGANIZATION
-}
-
-enum ActivityAction {
-  CREATED
-  UPDATED
-  DELETED
-  ASSIGNED
-  UNASSIGNED
-  STAGE_CHANGED
-  STATUS_CHANGED
-  COMPLETED
-  ARCHIVED
-  RESTORED
-}
-
-model Activity {
-  id             String         @id @default(cuid())
-  organizationId String
-  subaccountId   String?
-
-  // Actor (who performed the action)
-  userId         String
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Activity details
-  type           ActivityType
-  action         ActivityAction
-  entityType     String         // "contact", "deal", "workflow", etc. (lowercase for flexibility)
-  entityId       String
-  entityName     String         // For display (e.g., contact name, deal title)
-
-  // Changes (for updates)
-  changes        Json?          // { field: { old: "x", new: "y" } }
-  metadata       Json?          // Additional context data
-
-  // Context
-  ipAddress      String?
-  userAgent      String?
-
-  createdAt      DateTime       @default(now())
-
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@index([userId])
-  @@index([entityType, entityId])
-  @@index([type])
-  @@index([createdAt])
-  @@index([organizationId, subaccountId])
-  @@index([organizationId, entityType, entityId])
-  @@map("activity")
-}
-
-// ============================================================================
-// MODULE SYSTEM
-// ============================================================================
-
-enum ModuleType {
-  TIME_TRACKING
-  INVOICING
-  INVENTORY
-  BOOKING_CALENDAR
-  DOCUMENT_SIGNING
-  PROJECT_MANAGEMENT
-}
-
-model SubaccountModule {
-  id            String      @id @default(cuid())
-
-  // Can be scoped to either organization or subaccount
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  subaccountId  String?
-  subaccount    Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
-
-  moduleType    ModuleType
-  enabled       Boolean     @default(false)
-  config        Json?       // Module-specific configuration
-
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-
-  @@unique([organizationId, moduleType])
-  @@unique([subaccountId, moduleType])
-  @@index([organizationId, enabled])
-  @@index([subaccountId, enabled])
-  @@map("subaccount_module")
-}
-
-// ============================================================================
-// TIME TRACKING MODULE
-// ============================================================================
-
-enum CheckInMethod {
-  MANUAL
-  QR_CODE
-  GPS
-  BIOMETRIC
-  NFC
-}
-
-enum TimeLogStatus {
-  DRAFT        // Clock-in recorded, not yet clocked out
-  SUBMITTED    // Clock-out completed
-  APPROVED     // Manager approved
-  REJECTED     // Manager rejected
-  INVOICED     // Included in an invoice
-}
-
-model TimeLog {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountId   String?
-  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  // Worker association (separate from CRM contacts)
-  workerId      String?
-  worker        Worker?     @relation(fields: [workerId], references: [id], onDelete: SetNull)
-
-  // Legacy: Keep contactId for backwards compatibility (will be migrated)
-  contactId     String?
-  contact       Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
-
-  // Job/Shift/Project association
-  dealId        String?
-  deal          Deal?       @relation(fields: [dealId], references: [id], onDelete: SetNull)
-
-  // Time data
-  startTime     DateTime
-  endTime       DateTime?
-  duration      Int?        // Duration in minutes (calculated)
-  breakDuration Int?        // Break time in minutes
-
-  // Location & check-in method
-  checkInMethod   CheckInMethod  @default(MANUAL)
-  checkInLocation Json?          // { lat: number, lng: number, address?: string }
-  checkOutLocation Json?         // { lat: number, lng: number, address?: string }
-  qrCodeId        String?        // If checked in via QR code
-
-  // Work details
-  title           String?        // e.g., "Morning Shift", "Client Site Visit"
-  description     String?        // Notes about the work done
-  status          TimeLogStatus  @default(DRAFT)
-
-  // Billing
-  billable        Boolean        @default(true)
-  hourlyRate      Decimal?       @db.Decimal(10, 2)
-  totalAmount     Decimal?       @db.Decimal(12, 2)
-  currency        String?        @default("USD")
-
-  // Approval workflow
-  submittedAt     DateTime?
-  submittedBy     String?        // UserId who submitted (could be worker or admin)
-  approvedAt      DateTime?
-  approvedBy      String?        // UserId who approved
-  rejectedAt      DateTime?
-  rejectedBy      String?        // UserId who rejected
-  rejectionReason String?
-
-  // Invoice linking
-  invoiceId       String?        // Will be added when invoice module is built
-
-  // Custom fields (for industry-specific data)
-  customFields    Json?
-
-  // Metadata
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@index([organizationId, subaccountId])
-  @@index([organizationId, workerId])
-  @@index([organizationId, contactId])
-  @@index([organizationId, dealId])
-  @@index([organizationId, status])
-  @@index([organizationId, startTime])
-  @@map("time_log")
-}
-
-// QR Code for quick check-ins at specific locations/sites
-model QRCode {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountId   String?
-  subaccount     Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  name          String      // e.g., "Warehouse A", "Client Site - Downtown"
-  code          String      @unique // The actual QR code value (UUID)
-
-  // Optional associations
-  dealId        String?     // Associate QR with a specific job/site
-  location      Json?       // { lat, lng, address }
-
-  enabled       Boolean     @default(true)
-  expiresAt     DateTime?   // Optional expiration
-
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@index([organizationId, subaccountId])
-  @@index([code])
-  @@map("qr_code")
-}
-
-// Worker - Separate from CRM users, for time tracking portal
-model Worker {
-  id              String        @id @default(cuid())
-  organizationId  String
-  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountId    String?
-  subaccount      Subaccount?   @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
-
-  // Basic info
-  name            String
-  email           String?
-  phone           String?
-  employeeId      String?     // Optional employee/reference number
-
-  // Portal authentication
-  portalToken     String?     @unique // Hashed magic link token
-  portalTokenExpiry DateTime? // Token expiration
-  lastLoginAt     DateTime?
-
-  // Worker details
-  hourlyRate      Decimal?    @db.Decimal(10, 2)
-  currency        String?     @default("USD")
-  role            String?     // e.g., "Carer", "Cleaner", "Guard"
-
-  // Status
-  isActive        Boolean     @default(true)
-
-  // Relations
-  timeLogs        TimeLog[]
-
-  // Custom fields
-  customFields    Json?
-
-  // Metadata
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  @@index([organizationId])
-  @@index([subaccountId])
-  @@index([organizationId, subaccountId])
-  @@index([email])
-  @@index([phone])
-  @@index([portalToken])
-  @@map("worker")
-}

@@ -12,7 +12,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
 import { Eye, MoreHorizontal, Trash } from "lucide-react";
 import * as React from "react";
-import { useQueryState, parseAsString } from "nuqs";
+import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -304,6 +304,10 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
   const [params, setParams] = useLogsParams();
   const [rowSelection, setRowSelection] = React.useState({});
 
+  // Pagination state
+  const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
+  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+
   // Client filter for all-clients view
   const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
     "subaccountId",
@@ -342,6 +346,8 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.logs.list.queryOptions({
+      page,
+      pageSize,
       search: params.search || undefined,
       statuses:
         params.statuses && params.statuses.length > 0
@@ -443,13 +449,27 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
     [setParams]
   );
 
+  const handlePageChange = React.useCallback(
+    (newPage: number) => void setPage(newPage),
+    [setPage]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      void setPageSize(newPageSize);
+      void setPage(1);
+    },
+    [setPageSize, setPage]
+  );
+
   const handleCreatedAtChange = React.useCallback(
     (start?: Date, end?: Date) => {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setCreatedAtStartStr(start ? toYMD(start) : "");
       void setCreatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setCreatedAtStartStr, setCreatedAtEndStr]
+    [setCreatedAtStartStr, setCreatedAtEndStr, setPage]
   );
 
   const handleCompletedAtChange = React.useCallback(
@@ -457,15 +477,17 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setCompletedAtStartStr(start ? toYMD(start) : "");
       void setCompletedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setCompletedAtStartStr, setCompletedAtEndStr]
+    [setCompletedAtStartStr, setCompletedAtEndStr, setPage]
   );
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyAllFilters = React.useCallback(
@@ -476,8 +498,9 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
         intents: filters.intents,
         userIds: filters.userIds,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleClearFilters = React.useCallback(() => {
@@ -491,12 +514,14 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
     void setCreatedAtEndStr("");
     void setCompletedAtStartStr("");
     void setCompletedAtEndStr("");
+    void setPage(1);
   }, [
     setParams,
     setCreatedAtStartStr,
     setCreatedAtEndStr,
     setCompletedAtStartStr,
     setCompletedAtEndStr,
+    setPage,
   ]);
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -547,6 +572,14 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
         enableRowSelection
         rowSelection={rowSelection}
         onRowSelectionChange={setRowSelection}
+        pagination={{
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages,
+          pageSize: data.pagination.pageSize,
+          totalItems: data.pagination.totalItems,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
+        }}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
             No AI logs found. <br /> Logs will appear here after AI assistant

@@ -37,7 +37,7 @@ export const UpgradeModal = ({ open, onOpenChange }: UpgradeModalProps) => {
         <AlertDialogFooter className="px-6 pb-4">
           <AlertDialogCancel> Cancel </AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => authClient.checkout({ slug: "pro" })}
+            onClick={() => (authClient as any).checkout({ slug: "pro" })}
           >
             Upgrade now
           </AlertDialogAction>

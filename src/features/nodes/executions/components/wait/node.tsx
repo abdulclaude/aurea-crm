@@ -50,7 +50,7 @@ export const WaitNode: React.FC<NodeProps<WaitNodeType>> = memo((props) => {
     nodeId: props.id,
     channel: WAIT_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchWaitRealtimeToken,
+    refreshToken: fetchWaitRealtimeToken as any,
   });
 
   const handleOpenSettings = () => {

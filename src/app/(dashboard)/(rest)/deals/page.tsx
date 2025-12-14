@@ -31,7 +31,12 @@ export default function DealsPage() {
     ...trpc.contacts.count.queryOptions(),
   });
 
+  const { data: pipelineCount = 0 } = useQuery({
+    ...trpc.pipelines.count.queryOptions(),
+  });
+
   const hasContacts = contactCount > 0;
+  const hasPipelines = pipelineCount > 0;
 
   // Define tabs based on context
   const tabs = isAgencyLevel
@@ -67,6 +72,12 @@ export default function DealsPage() {
         ) : (
           <Badge className="text-xs rounded-full px-3 py-1.5 bg-rose-600 text-white ring ring-black/10 shadow-sm">
             Cannot make any deals until a contact has been added
+          </Badge>
+        )}
+
+        {!hasPipelines && (
+          <Badge className="text-xs rounded-full px-3 py-1.5 bg-rose-600 text-white ring ring-black/10 shadow-sm">
+            Cannot make any deals until a pipeline has been created
           </Badge>
         )}
       </div>

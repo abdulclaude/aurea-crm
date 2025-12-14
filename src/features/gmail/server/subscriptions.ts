@@ -31,7 +31,7 @@ export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
     if (!gmailApp) {
       await stopGmailWatchForUser(userId);
       await prisma.gmailTriggerState.deleteMany({
-        where: { workflow: { userId } },
+        where: { Workflows: { userId } },
       });
       return;
     }
@@ -39,7 +39,7 @@ export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
     const nodes = await prisma.node.findMany({
       where: {
         type: NodeType.GMAIL_TRIGGER,
-        workflow: {
+        Workflows: {
           userId,
           archived: false,
           isTemplate: false,
@@ -56,13 +56,13 @@ export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
       const activeNodeIds = nodes.map((node) => node.id);
       await prisma.gmailTriggerState.deleteMany({
         where: {
-          workflow: { userId },
+          Workflows: { userId },
           nodeId: { notIn: activeNodeIds },
         },
       });
     } else {
       await prisma.gmailTriggerState.deleteMany({
-        where: { workflow: { userId } },
+        where: { Workflows: { userId } },
       });
     }
 
@@ -87,7 +87,7 @@ export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
 export async function removeGmailSubscriptionsForUser(userId: string) {
   await stopGmailWatchForUser(userId);
   await prisma.gmailTriggerState.deleteMany({
-    where: { workflow: { userId } },
+    where: { Workflows: { userId } },
   });
 }
 
@@ -135,7 +135,7 @@ export async function processGmailNotification({
   const nodes = await prisma.node.findMany({
     where: {
       type: NodeType.GMAIL_TRIGGER,
-      workflow: {
+      Workflows: {
         userId: subscription.userId,
         archived: false,
         isTemplate: false,
@@ -249,10 +249,13 @@ async function maybeTriggerWorkflowFromNode({
       workflowId: node.workflowId,
     },
     create: {
+      id: crypto.randomUUID(),
       nodeId: node.id,
       workflowId: node.workflowId,
       lastMessageId: latestId,
       lastTriggeredAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   });
 }
@@ -316,12 +319,15 @@ async function ensureGmailWatch({
       lastSyncedAt: new Date(),
     },
     create: {
+      id: crypto.randomUUID(),
       userId,
       emailAddress,
       labelIds: normalizedLabels,
       topicName,
       historyId: payload?.historyId,
       expiresAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   });
 }

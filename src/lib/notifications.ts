@@ -95,7 +95,7 @@ export async function getNotificationRecipients(
           user: {
             include: {
               notificationPreference: true,
-              subaccountMemberships: {
+              subaccountMember: {
                 where: { subaccountId },
               },
             },
@@ -105,7 +105,7 @@ export async function getNotificationRecipients(
 
       for (const member of agencyMembers) {
         // Only add if they have a subaccount membership (assigned to this client)
-        if (member.user.subaccountMemberships.length > 0) {
+        if (member.user && member.user.subaccountMember.length > 0) {
           // Avoid duplicates
           if (!recipients.find((r) => r.userId === member.userId)) {
             recipients.push({
@@ -182,6 +182,7 @@ export async function createNotification(
   // Create notifications in database
   const notifications = await db.notification.createMany({
     data: filteredRecipients.map((recipient) => ({
+      id: crypto.randomUUID(),
       userId: recipient.userId,
       organizationId: organizationId ?? undefined,
       subaccountId: subaccountId ?? undefined,
@@ -192,6 +193,8 @@ export async function createNotification(
       entityType,
       entityId,
       actorId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     })),
   });
 

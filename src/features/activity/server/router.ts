@@ -259,6 +259,7 @@ export const activityRouter = createTRPCRouter({
 
       const activity = await prisma.activity.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId: ctx.orgId,
           subaccountId: ctx.subaccountId ?? null,
           userId: ctx.auth.user.id,
@@ -269,6 +270,7 @@ export const activityRouter = createTRPCRouter({
           entityName: input.entityName,
           changes: input.changes as any,
           metadata: input.metadata as any,
+          createdAt: new Date(),
         },
         include: {
           user: {

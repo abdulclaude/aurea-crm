@@ -178,7 +178,7 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
 
     for (const parentWf of parentWorkflows) {
       // Find the bundle workflow node in this parent
-      const bundleNode = parentWf.nodes.find((n) => {
+      const bundleNode = parentWf.Node.find((n: any) => {
         if (n.type !== NodeType.BUNDLE_WORKFLOW) return false;
         const data = n.data as Record<string, any>;
         return data?.bundleWorkflowId === workflowId;
@@ -196,8 +196,8 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
         if (visited.has(nodeId)) continue;
         visited.add(nodeId);
 
-        const incomingEdges = parentWf.connections.filter(
-          (e) => e.toNodeId === nodeId
+        const incomingEdges = parentWf.Connection.filter(
+          (e: any) => e.toNodeId === nodeId
         );
         for (const edge of incomingEdges) {
           upstreamNodeIds.add(edge.fromNodeId);
@@ -209,7 +209,7 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
       const workflowContext: Record<string, any> = {};
 
       for (const nodeId of upstreamNodeIds) {
-        const node = parentWf.nodes.find((n) => n.id === nodeId);
+        const node = parentWf.Node.find((n: any) => n.id === nodeId);
         if (!node) continue;
 
         const nodeData = node.data as any;

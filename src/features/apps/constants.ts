@@ -9,8 +9,23 @@ export const GMAIL_REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
 ];
 
+export const GOOGLE_FORMS_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/forms.responses.readonly",
+  "https://www.googleapis.com/auth/forms.body.readonly",
+];
+
+export const GOOGLE_DRIVE_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive",
+];
+
 export const GOOGLE_FULL_REQUIRED_SCOPES = Array.from(
-  new Set([...GOOGLE_CALENDAR_REQUIRED_SCOPES, ...GMAIL_REQUIRED_SCOPES])
+  new Set([
+    ...GOOGLE_CALENDAR_REQUIRED_SCOPES,
+    ...GMAIL_REQUIRED_SCOPES,
+    ...GOOGLE_FORMS_REQUIRED_SCOPES,
+    ...GOOGLE_DRIVE_REQUIRED_SCOPES,
+  ])
 );
 
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -19,6 +34,16 @@ export const GOOGLE_CALENDAR_SCOPES = [
 ];
 
 export const GMAIL_SCOPES = [...GOOGLE_BASE_SCOPES, ...GMAIL_REQUIRED_SCOPES];
+
+export const GOOGLE_FORMS_SCOPES = [
+  ...GOOGLE_BASE_SCOPES,
+  ...GOOGLE_FORMS_REQUIRED_SCOPES,
+];
+
+export const GOOGLE_DRIVE_SCOPES = [
+  ...GOOGLE_BASE_SCOPES,
+  ...GOOGLE_DRIVE_REQUIRED_SCOPES,
+];
 
 export const GOOGLE_FULL_SCOPES = [
   ...GOOGLE_BASE_SCOPES,

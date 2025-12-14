@@ -51,7 +51,7 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               subaccountId: true,
               organizationId: true,
@@ -60,13 +60,13 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
         },
       });
 
-      if (!node?.workflow?.organizationId) {
+      if (!node?.Workflows?.organizationId) {
         throw new NonRetriableError(
           "Create Contact Node error: This workflow must be in an organization context to create contacts."
         );
       }
 
-      return node.workflow;
+      return node.Workflows;
     });
 
     // Compile all fields with Handlebars
@@ -106,6 +106,8 @@ export const createContactExecutor: NodeExecutor<CreateContactData> = async ({
     const contact = await step.run("create-contact", async () => {
       return await prisma.contact.create({
         data: {
+          id: crypto.randomUUID(),
+          updatedAt: new Date(),
           subaccountId: workflow.subaccountId || null,
           organizationId: workflow.organizationId!,
           name,

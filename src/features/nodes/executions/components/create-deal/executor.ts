@@ -54,7 +54,7 @@ export const createDealExecutor: NodeExecutor<
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               subaccountId: true,
               organizationId: true,
@@ -63,13 +63,13 @@ export const createDealExecutor: NodeExecutor<
         },
       });
 
-      if (!node?.workflow?.organizationId) {
+      if (!node?.Workflows?.organizationId) {
         throw new NonRetriableError(
           "Create Deal Node error: This workflow must be in an organization context to create deals."
         );
       }
 
-      return node.workflow;
+      return node.Workflows;
     });
 
     // Compile all fields with Handlebars
@@ -112,6 +112,7 @@ export const createDealExecutor: NodeExecutor<
     const deal = await step.run("create-deal", async () => {
       return await prisma.deal.create({
         data: {
+          id: crypto.randomUUID(),
           subaccountId: workflow.subaccountId || null,
           organizationId: workflow.organizationId!,
           name,
@@ -123,8 +124,11 @@ export const createDealExecutor: NodeExecutor<
           pipelineId: pipelineId || null,
           pipelineStageId: pipelineStageId || null,
           tags: [],
-          contacts: contactIds.length > 0 ? {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          dealContact: contactIds.length > 0 ? {
             create: contactIds.map(contactId => ({
+              id: crypto.randomUUID(),
               contactId,
             })),
           } : undefined,
@@ -132,7 +136,7 @@ export const createDealExecutor: NodeExecutor<
         include: {
           pipeline: true,
           pipelineStage: true,
-          contacts: {
+          dealContact: {
             include: {
               contact: true,
             },

@@ -57,6 +57,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ContactType, LifecycleStage } from "@prisma/client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
+import { ContactMindbodySection } from "./contact-mindbody-section";
 
 const formSchema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -103,6 +104,7 @@ interface ContactEditSheetProps {
     linkedin?: string | null;
     tags: string[];
     notes?: string | null;
+    metadata?: unknown;
     assignees: Array<{ id: string; name: string | null; image: string | null }>;
   };
 }
@@ -468,6 +470,9 @@ export function ContactEditSheet({
                     </div>
                   </AccordionContent>
                 </AccordionItem>
+
+                {/* Mindbody Integration Section */}
+                <ContactMindbodySection contact={contact} />
 
                 <div className="px-6 space-y-4 pt-4">
                   <FormField

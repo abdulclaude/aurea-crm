@@ -66,7 +66,7 @@ export const GeminiNode: React.FC<NodeProps<GeminiNodeType>> = memo((props) => {
     nodeId: props.id,
     channel: GEMINI_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGeminiRealtimeToken,
+    refreshToken: fetchGeminiRealtimeToken as any,
   });
 
   const handleOpenSettings = () => {

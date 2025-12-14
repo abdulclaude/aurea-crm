@@ -14,7 +14,7 @@ const executionScopeWhere = (ctx: {
   auth: { user: { id: string } };
   subaccountId?: string | null;
 }) => ({
-  workflow: {
+  Workflows: {
     userId: ctx.auth.user.id,
     subaccountId: ctx.subaccountId ?? null,
   },
@@ -31,7 +31,7 @@ export const executionsRouter = createTRPCRouter({
           ...executionScopeWhere(ctx),
         },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               id: true,
               name: true,
@@ -48,7 +48,7 @@ export const executionsRouter = createTRPCRouter({
         startedAt: "desc",
       },
       include: {
-        workflow: {
+        Workflows: {
           select: {
             id: true,
             name: true,
@@ -81,7 +81,7 @@ export const executionsRouter = createTRPCRouter({
             startedAt: "desc",
           },
           include: {
-            workflow: {
+            Workflows: {
               select: {
                 id: true,
                 name: true,

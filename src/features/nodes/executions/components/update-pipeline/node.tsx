@@ -51,7 +51,7 @@ export const UpdatePipelineNode: React.FC<
     nodeId: props.id,
     channel: UPDATE_PIPELINE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchUpdatePipelineRealtimeToken,
+    refreshToken: fetchUpdatePipelineRealtimeToken as any,
   });
 
   const handleOpenSettings = () => {

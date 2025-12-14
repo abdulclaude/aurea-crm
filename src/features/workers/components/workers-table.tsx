@@ -12,6 +12,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
 import {
   Edit,
+  Eye,
   Link as LinkIcon,
   MoreHorizontal,
   Send,
@@ -48,7 +49,10 @@ type RouterOutput = inferRouterOutputs<AppRouter>;
 type WorkerRow = RouterOutput["workers"]["list"]["items"][number];
 
 const SORTABLE_COLUMNS = new Set(["createdAt", "name", "hourlyRate"]);
+
 const WORKERS_DEFAULT_SORT = "createdAt.desc";
+
+const FIXED_COLUMNS = ["select", "name"];
 
 const sortValueToState = (value?: string): SortingState => {
   const sort = value || WORKERS_DEFAULT_SORT;
@@ -111,8 +115,10 @@ const workerColumns: ColumnDef<WorkerRow>[] = [
         )}
       </div>
     ),
-    enableHiding: false,
+    enableHiding: false, // ← cannot hide
     enableSorting: false,
+    enableColumnFilter: false,
+    enableResizing: false,
   },
   {
     id: "contact",
@@ -198,13 +204,13 @@ const workerColumns: ColumnDef<WorkerRow>[] = [
     },
   },
   {
-    id: "timeLogs",
-    accessorKey: "_count.timeLogs",
+    id: "timeLog",
+    accessorKey: "_count.timeLog",
     header: "Logs",
     meta: { label: "Time Logs" },
     cell: ({ row }) => (
       <span className="text-xs font-medium">
-        {row.original._count?.timeLogs || 0}
+        {row.original._count?.timeLog || 0}
       </span>
     ),
   },
@@ -229,7 +235,7 @@ const workerColumns: ColumnDef<WorkerRow>[] = [
   },
 ];
 
-const PRIMARY_COLUMN_ID = "select";
+// const PRIMARY_COLUMN_ID = "select";
 const WORKER_COLUMN_IDS = workerColumns.map(
   (column, index) => (column.id ?? `column-${index}`) as string
 );
@@ -330,6 +336,17 @@ function WorkerActionsCell({ row }: { row: { original: WorkerRow } }) {
             className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
+              window.location.href = `/workers/${row.original.id}`;
+            }}
+          >
+            <Eye className="mr-0.5 size-3.5" />
+            View Details
+          </DropdownMenuItem>
+          <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
+          <DropdownMenuItem
+            className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
               handleSendEmail(
                 row.original.id,
                 row.original.name,
@@ -392,32 +409,31 @@ function WorkerActionsCell({ row }: { row: { original: WorkerRow } }) {
 }
 
 // Helper functions for column management
-function normalizeColumnOrder(
-  order: string[],
-  defaults: string[],
-  fixedFirst?: string
-) {
+function normalizeColumnOrder(order: string[], defaults: string[]) {
+  const fixed = ["select", "name"];
   const seen = new Set<string>();
   const next: string[] = [];
 
-  // Add fixed first column
-  if (fixedFirst && defaults.includes(fixedFirst)) {
-    seen.add(fixedFirst);
-    next.push(fixedFirst);
+  // Always enforce fixed order first
+  for (const id of fixed) {
+    if (defaults.includes(id)) {
+      seen.add(id);
+      next.push(id);
+    }
   }
 
-  // Add columns from order (excluding fixed first)
+  // Add user-selected order, excluding fixed columns
   for (const id of order) {
     if (!defaults.includes(id)) continue;
-    if (fixedFirst && id === fixedFirst) continue;
+    if (fixed.includes(id)) continue;
     if (seen.has(id)) continue;
     seen.add(id);
     next.push(id);
   }
 
-  // Add any missing columns from defaults (excluding fixed first)
+  // Add any missing columns
   for (const id of defaults) {
-    if (fixedFirst && id === fixedFirst) continue;
+    if (fixed.includes(id)) continue;
     if (!seen.has(id)) {
       seen.add(id);
       next.push(id);
@@ -470,6 +486,8 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.workers.list.queryOptions({
+      page: params.page,
+      pageSize: params.pageSize,
       search: params.search || undefined,
       roles: params.roles && params.roles.length > 0 ? params.roles : undefined,
       isActive: params.isActive ?? undefined,
@@ -513,11 +531,8 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
     if (typeof window === "undefined") {
       return;
     }
-    const next = normalizeColumnOrder(
-      order,
-      WORKER_COLUMN_IDS,
-      PRIMARY_COLUMN_ID
-    );
+    const next = normalizeColumnOrder(order, WORKER_COLUMN_IDS);
+
     if (shallowEqualArrays(next, WORKER_COLUMN_IDS)) {
       window.localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
       return;
@@ -532,11 +547,8 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
       if (!stored) return;
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) {
-        const next = normalizeColumnOrder(
-          parsed,
-          WORKER_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
-        );
+        const next = normalizeColumnOrder(parsed, WORKER_COLUMN_IDS);
+
         setColumnOrder(next);
       }
     } catch {
@@ -565,7 +577,7 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
 
   const handleSearchChange = React.useCallback(
     (search: string) => {
-      setParams((prev) => ({ ...prev, search }));
+      setParams((prev) => ({ ...prev, search, page: 1 }));
     },
     [setParams]
   );
@@ -586,6 +598,7 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
     }) => {
       setParams((prev) => ({
         ...prev,
+        page: 1, // Reset to page 1 on filter change
         roles: filters.roles,
         isActive: filters.status,
         rateMin: filters.rateMin ?? null,
@@ -599,9 +612,24 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
     (start?: Date, end?: Date) => {
       setParams((prev) => ({
         ...prev,
+        page: 1, // Reset to page 1 on filter change
         createdAfter: start ? start.toISOString() : "",
         createdBefore: end ? end.toISOString() : "",
       }));
+    },
+    [setParams]
+  );
+
+  const handlePageChange = React.useCallback(
+    (newPage: number) => {
+      setParams((prev) => ({ ...prev, page: newPage }));
+    },
+    [setParams]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      setParams((prev) => ({ ...prev, pageSize: newPageSize, page: 1 }));
     },
     [setParams]
   );
@@ -624,11 +652,8 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
     (updater: Updater<ColumnOrderState>) => {
       setColumnOrder((previous) => {
         const resolved = resolveUpdater(updater, previous);
-        const next = normalizeColumnOrder(
-          resolved,
-          WORKER_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
-        );
+        const next = normalizeColumnOrder(resolved, WORKER_COLUMN_IDS);
+
         persistColumnOrder(next);
         return next;
       });
@@ -685,6 +710,14 @@ export function WorkersTable({ scope = "agency" }: WorkersTableProps) {
               onSubaccountIdChange={setSelectedSubaccountId}
             />
           ),
+        }}
+        pagination={{
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages,
+          pageSize: data.pagination.pageSize,
+          totalItems: data.pagination.totalItems,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
         }}
       />
     </div>

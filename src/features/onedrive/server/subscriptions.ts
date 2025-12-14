@@ -36,7 +36,7 @@ export async function syncOneDriveWorkflowSubscriptions({
     if (!oneDriveApp) {
       await stopOneDriveWatchForUser(userId);
       await prisma.oneDriveTriggerState.deleteMany({
-        where: { workflow: { userId } },
+        where: { Workflows: { userId } },
       });
       return;
     }
@@ -44,7 +44,7 @@ export async function syncOneDriveWorkflowSubscriptions({
     const nodes = await prisma.node.findMany({
       where: {
         type: NodeType.ONEDRIVE_TRIGGER,
-        workflow: {
+        Workflows: {
           userId,
           archived: false,
           isTemplate: false,
@@ -61,13 +61,13 @@ export async function syncOneDriveWorkflowSubscriptions({
       const activeNodeIds = nodes.map((node) => node.id);
       await prisma.oneDriveTriggerState.deleteMany({
         where: {
-          workflow: { userId },
+          Workflows: { userId },
           nodeId: { notIn: activeNodeIds },
         },
       });
     } else {
       await prisma.oneDriveTriggerState.deleteMany({
-        where: { workflow: { userId } },
+        where: { Workflows: { userId } },
       });
     }
 
@@ -88,7 +88,7 @@ export async function syncOneDriveWorkflowSubscriptions({
 export async function removeOneDriveSubscriptionsForUser(userId: string) {
   await stopOneDriveWatchForUser(userId);
   await prisma.oneDriveTriggerState.deleteMany({
-    where: { workflow: { userId } },
+    where: { Workflows: { userId } },
   });
 }
 
@@ -136,7 +136,7 @@ export async function processOneDriveNotification({
   const nodes = await prisma.node.findMany({
     where: {
       type: NodeType.ONEDRIVE_TRIGGER,
-      workflow: {
+      Workflows: {
         userId: subscription.userId,
         archived: false,
         isTemplate: false,
@@ -257,13 +257,18 @@ async function maybeTriggerWorkflowFromNode({
     update: {
       lastDeltaLink: latestId,
       lastTriggeredAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
       workflowId: node.workflowId,
     },
     create: {
+        id: crypto.randomUUID(),
       nodeId: node.id,
       workflowId: node.workflowId,
       lastDeltaLink: latestId,
       lastTriggeredAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   });
 }
@@ -314,12 +319,17 @@ async function ensureOneDriveSubscription({
     update: {
       subscriptionId: subscription.id,
       expiresAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
       lastSyncedAt: new Date(),
     },
     create: {
+        id: crypto.randomUUID(),
       userId,
       subscriptionId: subscription.id,
       expiresAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     },
   });
 }

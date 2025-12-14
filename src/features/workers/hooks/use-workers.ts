@@ -52,3 +52,54 @@ export const useSendMagicLinkEmail = () => {
   const trpc = useTRPC();
   return useMutation(trpc.workers.sendMagicLinkEmail.mutationOptions({}));
 };
+
+// Portal-specific hooks
+export const useWorkerFullProfile = (workerId: string) => {
+  const trpc = useTRPC();
+  return useSuspenseQuery(trpc.workers.getFullProfile.queryOptions({ workerId }));
+};
+
+export const useUpdateWorkerProfile = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.workers.updateProfile.mutationOptions({}));
+};
+
+export const useWorkerDocuments = (workerId: string) => {
+  const trpc = useTRPC();
+  return useSuspenseQuery(trpc.workers.getDocuments.queryOptions({ workerId }));
+};
+
+export const useCreateDocument = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.workers.createDocument.mutationOptions({}));
+};
+
+export const useDeleteDocument = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.workers.deleteDocument.mutationOptions({}));
+};
+
+export const useWorkerDashboard = (workerId: string) => {
+  const trpc = useTRPC();
+  return useSuspenseQuery(trpc.workers.getDashboard.queryOptions({ workerId }));
+};
+
+export const useWorkerSchedule = (workerId: string, startDate: Date, endDate: Date) => {
+  const trpc = useTRPC();
+  return useSuspenseQuery(trpc.workers.getSchedule.queryOptions({ workerId, startDate, endDate }));
+};
+
+export const useWorkerTimeLogs = (workerId: string, startDate: Date, endDate: Date) => {
+  const trpc = useTRPC();
+  return useSuspenseQuery(trpc.workers.getTimeLogs.queryOptions({ workerId, startDate, endDate }));
+};
+
+export const useClockIn = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.workers.clockIn.mutationOptions({}));
+};
+
+export const useClockOut = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.workers.clockOut.mutationOptions({}));
+};

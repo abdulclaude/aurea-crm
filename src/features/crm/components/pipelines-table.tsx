@@ -13,7 +13,7 @@ import { format } from "date-fns";
 import { Eye, MoreHorizontal, Pencil, Trash } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
-import { useQueryState, parseAsString } from "nuqs";
+import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -376,6 +376,10 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
   const [params, setParams] = usePipelinesParams();
   const [rowSelection, setRowSelection] = React.useState({});
 
+  // Pagination state
+  const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
+  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+
   // Client filter for "all-clients" scope (agency viewing all client data)
   const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
     "subaccountId",
@@ -418,6 +422,8 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
 
   const { data, isFetching } = useSuspenseQuery(
     trpc.pipelines.list.queryOptions({
+      page,
+      pageSize,
       search: params.search || undefined,
       isActive: params.isActive ?? undefined,
       stages:
@@ -526,25 +532,41 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
     [setParams]
   );
 
+  const handlePageChange = React.useCallback(
+    (newPage: number) => void setPage(newPage),
+    [setPage]
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (newPageSize: number) => {
+      void setPageSize(newPageSize);
+      void setPage(1);
+    },
+    [setPageSize, setPage]
+  );
+
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleActiveFilterChange = React.useCallback(
     (isActive: boolean | null) => {
       setParams((prev) => ({ ...prev, isActive }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleSortChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, sort: value }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleCreatedAtChange = React.useCallback(
@@ -552,8 +574,9 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setCreatedAtStartStr(start ? toYMD(start) : "");
       void setCreatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setCreatedAtStartStr, setCreatedAtEndStr]
+    [setCreatedAtStartStr, setCreatedAtEndStr, setPage]
   );
 
   const handleUpdatedAtChange = React.useCallback(
@@ -561,8 +584,9 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       const toYMD = (d: Date) => d.toISOString().slice(0, 10);
       void setUpdatedAtStartStr(start ? toYMD(start) : "");
       void setUpdatedAtEndStr(end ? toYMD(end) : "");
+      void setPage(1);
     },
-    [setUpdatedAtStartStr, setUpdatedAtEndStr]
+    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage]
   );
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -608,8 +632,9 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
         ...prev,
         dealsValueCurrency: currency,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   const handleApplyAllFilters = React.useCallback(
@@ -634,8 +659,9 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
         winRateMin: filters.winRateMin,
         winRateMax: filters.winRateMax,
       }));
+      void setPage(1);
     },
-    [setParams]
+    [setParams, setPage]
   );
 
   // Extract unique stages and contacts from all pipelines
@@ -686,6 +712,14 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
         enableRowSelection
         rowSelection={rowSelection}
         onRowSelectionChange={setRowSelection}
+        pagination={{
+          currentPage: data.pagination.currentPage,
+          totalPages: data.pagination.totalPages,
+          pageSize: data.pagination.pageSize,
+          totalItems: data.pagination.totalItems,
+          onPageChange: handlePageChange,
+          onPageSizeChange: handlePageSizeChange,
+        }}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
             No pipelines have been created yet. <br /> Start by creating a

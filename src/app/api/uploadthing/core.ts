@@ -64,6 +64,93 @@ export const uploadRouter = {
       });
       return { url: file.ufsUrl };
     }),
+  workerProfilePhoto: f({
+    image: {
+      maxFileSize: "4MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(async () => {
+      // Allow anyone for now; wire to real auth later
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] worker profile photo upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+      });
+      return { url: file.ufsUrl };
+    }),
+  workerDocument: f({
+    pdf: {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+    image: {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+    "application/msword": {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(async () => {
+      // Allow anyone for now; wire to real auth later
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] worker document upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+        fileName: file.name,
+        fileSize: file.size,
+      });
+      return {
+        url: file.ufsUrl,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+      };
+    }),
+  invoiceDocument: f({
+    pdf: {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+    image: {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(async () => {
+      // Allow anyone for now; wire to real auth later
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] invoice document upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+        fileName: file.name,
+        fileSize: file.size,
+      });
+      return {
+        url: file.ufsUrl,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+      };
+    }),
 } satisfies FileRouter;
 
 export type UploadRouter = typeof uploadRouter;

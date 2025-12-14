@@ -50,7 +50,7 @@ export const OutlookNode: React.FC<NodeProps<OutlookNodeType>> = memo((props) =>
     nodeId: props.id,
     channel: OUTLOOK_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchOutlookRealtimeToken,
+    refreshToken: fetchOutlookRealtimeToken as any,
   });
 
   const handleSubmit = (values: OutlookExecutionFormValues) => {

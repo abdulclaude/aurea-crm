@@ -135,6 +135,7 @@ const credentialLogos: Record<CredentialType, string> = {
   [CredentialType.OPENAI]: "/logos/openai.svg",
   [CredentialType.ANTHROPIC]: "/logos/anthropic.svg",
   [CredentialType.TELEGRAM_BOT]: "/logos/telegram.svg",
+  [CredentialType.MINDBODY]: "/logos/mindbody.svg",
 };
 
 // credential Item

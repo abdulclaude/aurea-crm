@@ -28,8 +28,8 @@ export const workersRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
       z.object({
-        limit: z.number().min(1).max(100).default(50),
-        cursor: z.string().optional(),
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(20),
         search: z.string().optional(),
         isActive: z.boolean().optional(),
         roles: z.array(z.string()).optional(),
@@ -103,29 +103,33 @@ export const workersRouter = createTRPCRouter({
         }
       }
 
+      // Get total count for pagination
+      const totalItems = await prisma.worker.count({ where });
+
       const workers = await prisma.worker.findMany({
         where,
-        take: input.limit + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
+        skip: (input.page - 1) * input.pageSize,
+        take: input.pageSize,
         orderBy: { createdAt: "desc" },
         include: {
           _count: {
             select: {
-              timeLogs: true,
+              timeLog: true,
             },
           },
         },
       });
 
-      let nextCursor: string | undefined;
-      if (workers.length > input.limit) {
-        const nextItem = workers.pop();
-        nextCursor = nextItem?.id;
-      }
+      const totalPages = Math.ceil(totalItems / input.pageSize);
 
       return {
         items: workers,
-        nextCursor,
+        pagination: {
+          currentPage: input.page,
+          totalPages,
+          pageSize: input.pageSize,
+          totalItems,
+        },
       };
     }),
 
@@ -147,7 +151,7 @@ export const workersRouter = createTRPCRouter({
           subaccountId: ctx.subaccountId ?? null,
         },
         include: {
-          timeLogs: {
+          timeLog: {
             take: 10,
             orderBy: { startTime: "desc" },
             include: {
@@ -203,6 +207,7 @@ export const workersRouter = createTRPCRouter({
 
       const worker = await prisma.worker.create({
         data: {
+          id: crypto.randomUUID(),
           organizationId: ctx.orgId,
           subaccountId: ctx.subaccountId ?? null,
           name: input.name,
@@ -212,6 +217,8 @@ export const workersRouter = createTRPCRouter({
           hourlyRate: input.hourlyRate,
           currency: input.currency,
           role: input.role,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         },
       });
 
@@ -588,5 +595,916 @@ export const workersRouter = createTRPCRouter({
       }
 
       return worker;
+    }),
+
+  // Get full worker profile (Portal side)
+  getFullProfile: baseProcedure
+    .input(z.object({ workerId: z.string() }))
+    .query(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      if (!worker.isActive) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Worker account is inactive",
+        });
+      }
+
+      return worker;
+    }),
+
+  // Update worker profile (Portal side)
+  updateProfile: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        email: z.string().email().optional(),
+        phone: z.string().optional(),
+        dateOfBirth: z.date().optional(),
+        gender: z.string().optional(),
+        addressLine1: z.string().optional(),
+        addressLine2: z.string().optional(),
+        city: z.string().optional(),
+        county: z.string().optional(),
+        postcode: z.string().optional(),
+        country: z.string().optional(),
+        emergencyContactName: z.string().optional(),
+        emergencyContactRelation: z.string().optional(),
+        emergencyContactPhone: z.string().optional(),
+        emergencyContactEmail: z.string().email().optional(),
+        hasOwnTransport: z.boolean().optional(),
+        maxHoursPerWeek: z.number().optional(),
+        travelRadius: z.number().optional(),
+        skills: z.array(z.string()).optional(),
+        languages: z.array(z.string()).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { workerId, ...updateData } = input;
+
+      const worker = await prisma.worker.findUnique({
+        where: { id: workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      if (!worker.isActive) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Worker account is inactive",
+        });
+      }
+
+      // Auto-update name if firstName/lastName provided
+      const name =
+        updateData.firstName && updateData.lastName
+          ? `${updateData.firstName} ${updateData.lastName}`
+          : worker.name;
+
+      const updated = await prisma.worker.update({
+        where: { id: workerId },
+        data: {
+          ...updateData,
+          name,
+        },
+      });
+
+      return updated;
+    }),
+
+  // Update worker profile photo (Portal side)
+  updateProfilePhoto: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        profilePhoto: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      if (!worker.isActive) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Worker account is inactive",
+        });
+      }
+
+      const updated = await prisma.worker.update({
+        where: { id: input.workerId },
+        data: {
+          profilePhoto: input.profilePhoto,
+        },
+      });
+
+      return updated;
+    }),
+
+  // Get worker documents (Portal side)
+  getDocuments: baseProcedure
+    .input(z.object({ workerId: z.string() }))
+    .query(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const documents = await prisma.workerDocument.findMany({
+        where: { workerId: input.workerId },
+        orderBy: { createdAt: "desc" },
+      });
+
+      return documents;
+    }),
+
+  // Create worker document (Portal side)
+  createDocument: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        type: z.string(),
+        name: z.string(),
+        description: z.string().optional(),
+        documentNumber: z.string().optional(),
+        issueDate: z.date().optional(),
+        expiryDate: z.date().optional(),
+        issuingAuthority: z.string().optional(),
+        fileUrl: z.string().optional(),
+        fileName: z.string().optional(),
+        fileSize: z.number().optional(),
+        mimeType: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const { workerId, ...documentData } = input;
+
+      const worker = await prisma.worker.findUnique({
+        where: { id: workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      // Determine status based on whether file is uploaded
+      const status = documentData.fileUrl ? "PENDING_REVIEW" : "PENDING_UPLOAD";
+
+      const document = await prisma.workerDocument.create({
+        data: {
+          id: crypto.randomUUID(),
+          workerId,
+          type: documentData.type as any,
+          name: documentData.name,
+          description: documentData.description,
+          documentNumber: documentData.documentNumber,
+          issueDate: documentData.issueDate,
+          expiryDate: documentData.expiryDate,
+          issuingAuthority: documentData.issuingAuthority,
+          fileUrl: documentData.fileUrl,
+          fileName: documentData.fileName,
+          fileSize: documentData.fileSize,
+          mimeType: documentData.mimeType,
+          status,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      return document;
+    }),
+
+  // Upload file to existing document (Portal side)
+  uploadDocumentFile: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        documentId: z.string(),
+        fileUrl: z.string(),
+        fileName: z.string(),
+        fileSize: z.number(),
+        mimeType: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const document = await prisma.workerDocument.findFirst({
+        where: {
+          id: input.documentId,
+          workerId: input.workerId,
+        },
+      });
+
+      if (!document) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Document not found",
+        });
+      }
+
+      const updated = await prisma.workerDocument.update({
+        where: { id: input.documentId },
+        data: {
+          fileUrl: input.fileUrl,
+          fileName: input.fileName,
+          fileSize: input.fileSize,
+          mimeType: input.mimeType,
+          status: "PENDING_REVIEW",
+          updatedAt: new Date(),
+        },
+      });
+
+      return updated;
+    }),
+
+  // Delete worker document (Portal side)
+  deleteDocument: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        documentId: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const document = await prisma.workerDocument.findFirst({
+        where: {
+          id: input.documentId,
+          workerId: input.workerId,
+        },
+      });
+
+      if (!document) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Document not found",
+        });
+      }
+
+      await prisma.workerDocument.delete({
+        where: { id: input.documentId },
+      });
+
+      return { success: true };
+    }),
+
+  // Approve worker document (Admin side)
+  approveDocument: protectedProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        documentId: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You must be in an organization context",
+        });
+      }
+
+      // Verify worker belongs to organization
+      const worker = await prisma.worker.findFirst({
+        where: {
+          id: input.workerId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
+        },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const document = await prisma.workerDocument.findFirst({
+        where: {
+          id: input.documentId,
+          workerId: input.workerId,
+        },
+      });
+
+      if (!document) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Document not found",
+        });
+      }
+
+      const updated = await prisma.workerDocument.update({
+        where: { id: input.documentId },
+        data: {
+          status: "APPROVED",
+          reviewedAt: new Date(),
+          reviewedBy: ctx.auth.user.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "worker_document",
+        entityId: updated.id,
+        entityName: updated.name,
+        metadata: {
+          workerId: input.workerId,
+          workerName: worker.name,
+          documentType: updated.type,
+          action: "approved",
+        },
+        posthogProperties: {
+          document_type: updated.type,
+          action: "approved",
+        },
+      });
+
+      return updated;
+    }),
+
+  // Reject worker document (Admin side)
+  rejectDocument: protectedProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        documentId: z.string(),
+        rejectionReason: z.string(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You must be in an organization context",
+        });
+      }
+
+      // Verify worker belongs to organization
+      const worker = await prisma.worker.findFirst({
+        where: {
+          id: input.workerId,
+          organizationId: ctx.orgId,
+          subaccountId: ctx.subaccountId ?? null,
+        },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const document = await prisma.workerDocument.findFirst({
+        where: {
+          id: input.documentId,
+          workerId: input.workerId,
+        },
+      });
+
+      if (!document) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Document not found",
+        });
+      }
+
+      const updated = await prisma.workerDocument.update({
+        where: { id: input.documentId },
+        data: {
+          status: "REJECTED",
+          rejectionReason: input.rejectionReason,
+          reviewedAt: new Date(),
+          reviewedBy: ctx.auth.user.id,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Log analytics
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        subaccountId: ctx.subaccountId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "worker_document",
+        entityId: updated.id,
+        entityName: updated.name,
+        metadata: {
+          workerId: input.workerId,
+          workerName: worker.name,
+          documentType: updated.type,
+          action: "rejected",
+          rejectionReason: input.rejectionReason,
+        },
+        posthogProperties: {
+          document_type: updated.type,
+          action: "rejected",
+        },
+      });
+
+      return updated;
+    }),
+
+  // Get dashboard data (Portal side)
+  getDashboard: baseProcedure
+    .input(z.object({ workerId: z.string() }))
+    .query(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      // Get active time log
+      const activeTimeLog = await prisma.timeLog.findFirst({
+        where: {
+          workerId: input.workerId,
+          endTime: null,
+        },
+      });
+
+      // Get today's shifts
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const todayShifts = await prisma.rota.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: today,
+            lt: tomorrow,
+          },
+        },
+        orderBy: { startTime: "asc" },
+      });
+
+      // Get upcoming shifts (next 5)
+      const upcomingShifts = await prisma.rota.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: new Date(),
+          },
+        },
+        orderBy: { startTime: "asc" },
+        take: 5,
+      });
+
+      // Get recent time logs (last 5)
+      const recentTimeLogs = await prisma.timeLog.findMany({
+        where: {
+          workerId: input.workerId,
+        },
+        orderBy: { startTime: "desc" },
+        take: 5,
+      });
+
+      // Get pending documents
+      const pendingDocuments = await prisma.workerDocument.findMany({
+        where: {
+          workerId: input.workerId,
+          status: "PENDING_UPLOAD",
+        },
+      });
+
+      // Get expiring documents (within 30 days)
+      const thirtyDaysFromNow = new Date();
+      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+      const expiringDocuments = await prisma.workerDocument.findMany({
+        where: {
+          workerId: input.workerId,
+          expiryDate: {
+            lte: thirtyDaysFromNow,
+            gte: new Date(),
+          },
+        },
+      });
+
+      // Week stats
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+
+      const weekLogs = await prisma.timeLog.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: weekStart,
+          },
+        },
+      });
+
+      const totalMinutes = weekLogs.reduce((acc, log) => acc + (log.duration || 0), 0);
+      const earnings = weekLogs
+        .filter((log) => log.status === "APPROVED" || log.status === "INVOICED")
+        .reduce((acc, log) => acc + Number(log.totalAmount || 0), 0);
+
+      const weekShifts = await prisma.rota.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: weekStart,
+          },
+        },
+      });
+
+      return {
+        worker,
+        activeTimeLog,
+        todayShifts,
+        upcomingShifts,
+        recentTimeLogs,
+        pendingDocuments,
+        expiringDocuments,
+        weekStats: {
+          totalMinutes,
+          earnings,
+          shiftsCount: weekShifts.length,
+        },
+      };
+    }),
+
+  // Get schedule (Portal side)
+  getSchedule: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        startDate: z.date(),
+        endDate: z.date(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const shifts = await prisma.rota.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: input.startDate,
+            lte: input.endDate,
+          },
+        },
+        include: {
+          contact: {
+            select: {
+              id: true,
+              name: true,
+              companyName: true,
+            },
+          },
+        },
+        orderBy: { startTime: "asc" },
+      });
+
+      return { shifts };
+    }),
+
+  // Get time logs (Portal side)
+  getTimeLogs: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        startDate: z.date(),
+        endDate: z.date(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const items = await prisma.timeLog.findMany({
+        where: {
+          workerId: input.workerId,
+          startTime: {
+            gte: input.startDate,
+            lte: input.endDate,
+          },
+        },
+        orderBy: { startTime: "desc" },
+      });
+
+      return { items };
+    }),
+
+  // Clock in (Portal side)
+  clockIn: baseProcedure
+    .input(z.object({ workerId: z.string() }))
+    .mutation(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      // Check if already clocked in
+      const existing = await prisma.timeLog.findFirst({
+        where: {
+          workerId: input.workerId,
+          endTime: null,
+        },
+      });
+
+      if (existing) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Already clocked in",
+        });
+      }
+
+      const timeLog = await prisma.timeLog.create({
+        data: {
+          id: crypto.randomUUID(),
+          organizationId: worker.organizationId,
+          subaccountId: worker.subaccountId,
+          workerId: input.workerId,
+          startTime: new Date(),
+          checkInMethod: "MANUAL",
+          status: "DRAFT",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      return timeLog;
+    }),
+
+  // Clock out (Portal side)
+  clockOut: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        timeLogId: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const worker = await prisma.worker.findUnique({
+        where: { id: input.workerId },
+      });
+
+      if (!worker) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Worker not found",
+        });
+      }
+
+      const timeLog = await prisma.timeLog.findFirst({
+        where: {
+          id: input.timeLogId,
+          workerId: input.workerId,
+        },
+      });
+
+      if (!timeLog) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Time log not found",
+        });
+      }
+
+      if (timeLog.endTime) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Already clocked out",
+        });
+      }
+
+      const endTime = new Date();
+      const duration = Math.floor(
+        (endTime.getTime() - new Date(timeLog.startTime).getTime()) / 1000 / 60,
+      );
+
+      const updated = await prisma.timeLog.update({
+        where: { id: timeLog.id },
+        data: {
+          endTime,
+          duration,
+          status: "SUBMITTED",
+        },
+      });
+
+      return updated;
+    }),
+
+  // Get earnings data for worker portal
+  getEarnings: baseProcedure
+    .input(
+      z.object({
+        workerId: z.string(),
+        startDate: z.date(),
+        endDate: z.date(),
+      })
+    )
+    .query(async ({ input }) => {
+      const { workerId, startDate, endDate } = input;
+
+      // Fetch all time logs for the period
+      const timeLogs = await prisma.timeLog.findMany({
+        where: {
+          workerId,
+          startTime: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        include: {
+          contact: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: {
+          startTime: "desc",
+        },
+      });
+
+      // Fetch related invoices
+      const invoices = await prisma.invoice.findMany({
+        where: {
+          timeLog: {
+            some: {
+              workerId,
+              startTime: {
+                gte: startDate,
+                lte: endDate,
+              },
+            },
+          },
+        },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          status: true,
+          total: true,
+          amountPaid: true,
+          issueDate: true,
+          dueDate: true,
+        },
+        orderBy: {
+          issueDate: "desc",
+        },
+      });
+
+      // Calculate statistics
+      const stats = {
+        totalMinutes: 0,
+        approvedMinutes: 0,
+        submittedMinutes: 0,
+        draftMinutes: 0,
+        overtimeMinutes: 0,
+        totalEarnings: 0,
+        approvedEarnings: 0,
+        submittedEarnings: 0,
+        draftEarnings: 0,
+        pendingEarnings: 0,
+        overtimeEarnings: 0,
+        paidAmount: 0,
+        pendingPaymentAmount: 0,
+        notInvoicedAmount: 0,
+        paidInvoicesCount: 0,
+        pendingInvoicesCount: 0,
+        notInvoicedLogsCount: 0,
+      };
+
+      for (const log of timeLogs) {
+        const minutes = log.duration || 0;
+        const amount = Number(log.totalAmount || 0);
+
+        stats.totalMinutes += minutes;
+        stats.totalEarnings += amount;
+
+        if (log.status === "APPROVED") {
+          stats.approvedMinutes += minutes;
+          stats.approvedEarnings += amount;
+        } else if (log.status === "SUBMITTED") {
+          stats.submittedMinutes += minutes;
+          stats.submittedEarnings += amount;
+        } else if (log.status === "DRAFT") {
+          stats.draftMinutes += minutes;
+          stats.draftEarnings += amount;
+        }
+
+        if (log.isOvertime) {
+          stats.overtimeMinutes += Number(log.overtimeHours || 0) * 60;
+          // Calculate overtime earnings (could be time-and-a-half)
+          const overtimeRate = Number(log.hourlyRate || 0) * 1.5;
+          stats.overtimeEarnings += (Number(log.overtimeHours || 0) * overtimeRate);
+        }
+
+        if (!log.invoiceId) {
+          stats.notInvoicedAmount += amount;
+          stats.notInvoicedLogsCount += 1;
+        }
+      }
+
+      // Calculate payment stats from invoices
+      for (const invoice of invoices) {
+        if (invoice.status === "PAID") {
+          stats.paidAmount += Number(invoice.amountPaid);
+          stats.paidInvoicesCount += 1;
+        } else {
+          stats.pendingPaymentAmount += Number(invoice.total) - Number(invoice.amountPaid);
+          stats.pendingInvoicesCount += 1;
+        }
+      }
+
+      stats.pendingEarnings = stats.submittedEarnings + stats.draftEarnings;
+
+      return {
+        stats,
+        timeLogs,
+        invoices,
+      };
     }),
 });

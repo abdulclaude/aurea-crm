@@ -73,7 +73,7 @@ export async function processTelegramUpdate({
     where: {
       type: NodeType.TELEGRAM_TRIGGER,
       credentialId,
-      workflow: {
+      Workflows: {
         userId,
         archived: false,
         isTemplate: false,
@@ -145,10 +145,13 @@ export async function processTelegramUpdate({
         workflowId: node.workflowId,
       },
       create: {
+        id: crypto.randomUUID(),
         nodeId: node.id,
         workflowId: node.workflowId,
         lastUpdateId: incomingUpdateId,
         lastTriggeredAt: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
       },
     });
   }

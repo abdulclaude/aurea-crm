@@ -56,7 +56,7 @@ export const UpdateContactNode: React.FC<NodeProps<UpdateContactNodeType>> =
       nodeId: props.id,
       channel: UPDATE_CONTACT_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchUpdateContactRealtimeToken,
+      refreshToken: fetchUpdateContactRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

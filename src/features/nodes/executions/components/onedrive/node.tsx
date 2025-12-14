@@ -50,7 +50,7 @@ export const OneDriveNode: React.FC<NodeProps<OneDriveNodeType>> = memo((props) 
     nodeId: props.id,
     channel: ONEDRIVE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchOneDriveRealtimeToken,
+    refreshToken: fetchOneDriveRealtimeToken as any,
   });
 
   const handleSubmit = (values: OneDriveExecutionFormValues) => {

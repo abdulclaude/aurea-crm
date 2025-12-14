@@ -50,7 +50,7 @@ export const updatePipelineExecutor: NodeExecutor<
       const node = await prisma.node.findUnique({
         where: { id: nodeId },
         include: {
-          workflow: {
+          Workflows: {
             select: {
               subaccountId: true,
               organizationId: true,
@@ -59,13 +59,13 @@ export const updatePipelineExecutor: NodeExecutor<
         },
       });
 
-      if (!node?.workflow?.organizationId) {
+      if (!node?.Workflows?.organizationId) {
         throw new NonRetriableError(
           "Update Pipeline Node error: This workflow must be in an organization context."
         );
       }
 
-      return node.workflow;
+      return node.Workflows;
     });
 
     const dealId = decode(Handlebars.compile(data.dealId)(context));

@@ -3,6 +3,8 @@
 import { useQueryStates, parseAsString, parseAsArrayOf, parseAsInteger } from "nuqs";
 
 export type TimeLogsParams = {
+  page: number;
+  pageSize: number;
   search?: string;
   workers?: string[];
   deals?: string[];
@@ -20,6 +22,8 @@ export type TimeLogsParams = {
 export function useTimeLogsParams() {
   return useQueryStates(
     {
+      page: parseAsInteger.withDefault(1),
+      pageSize: parseAsInteger.withDefault(20),
       search: parseAsString.withDefault(""),
       workers: parseAsArrayOf(parseAsString).withDefault([]),
       deals: parseAsArrayOf(parseAsString).withDefault([]),

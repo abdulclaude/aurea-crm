@@ -58,7 +58,7 @@ export const DiscordNode: React.FC<NodeProps<DiscordNodeType>> = memo(
       nodeId: props.id,
       channel: DISCORD_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchDiscordRealtimeToken,
+      refreshToken: fetchDiscordRealtimeToken as any,
     });
 
     const handleOpenSettings = () => {

@@ -12,6 +12,7 @@ import { IconEar as WebhooksIcon } from "central-icons/IconEar";
 import { IconPlugin2 as AppsIcon } from "central-icons/IconPlugin2";
 import { IconCreditCard2 as BillingIcon } from "central-icons/IconCreditCard2";
 import { IconPlugin1 as ModulesIcon } from "central-icons/IconPlugin1";
+import { Palette as StylesIcon, Paintbrush as BrandingIcon, AlertCircle as DunningIcon, CreditCard as PaymentsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -50,6 +51,21 @@ const settingsNavSections = [
     ],
   },
   {
+    title: "Design",
+    items: [
+      {
+        title: "Branding",
+        href: "/settings/branding",
+        icon: BrandingIcon,
+      },
+      {
+        title: "Styles",
+        href: "/settings/styles",
+        icon: StylesIcon,
+      },
+    ],
+  },
+  {
     title: "Integrations",
     items: [
       {
@@ -78,9 +94,19 @@ const settingsNavSections = [
     title: "Payments",
     items: [
       {
+        title: "Payment Methods",
+        href: "/settings/payments",
+        icon: PaymentsIcon,
+      },
+      {
         title: "Billing",
         href: "/settings/billing",
         icon: BillingIcon,
+      },
+      {
+        title: "Dunning",
+        href: "/settings/dunning",
+        icon: DunningIcon,
       },
     ],
   },

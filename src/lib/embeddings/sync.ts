@@ -36,7 +36,7 @@ export async function syncSubaccountEmbeddings(
   const contacts = await prisma.contact.findMany({
     where: { subaccountId },
     include: {
-      assignees: {
+      contactAssignee: {
         include: {
           subaccountMember: {
             include: { user: true },
@@ -65,7 +65,7 @@ export async function syncSubaccountEmbeddings(
       country: contact.country,
       city: contact.city,
       notes: contact.notes,
-      assignees: contact.assignees
+      assignees: contact.contactAssignee
         .map((a) => a.subaccountMember.user?.name)
         .filter(Boolean),
     };
@@ -90,14 +90,14 @@ export async function syncSubaccountEmbeddings(
     include: {
       pipeline: true,
       pipelineStage: true,
-      members: {
+      dealMember: {
         include: {
           subaccountMember: {
             include: { user: true },
           },
         },
       },
-      contacts: {
+      dealContact: {
         include: { contact: true },
       },
     },
@@ -116,10 +116,10 @@ export async function syncSubaccountEmbeddings(
       tags: deal.tags,
       description: deal.description,
       deadline: deal.deadline?.toISOString(),
-      members: deal.members
+      members: deal.dealMember
         .map((m) => m.subaccountMember.user?.name)
         .filter(Boolean),
-      contacts: deal.contacts.map((c) => c.contact.name),
+      contacts: deal.dealContact.map((c) => c.contact.name),
     };
 
     documents.push({
@@ -140,7 +140,7 @@ export async function syncSubaccountEmbeddings(
   const pipelines = await prisma.pipeline.findMany({
     where: { subaccountId },
     include: {
-      stages: {
+      pipelineStage: {
         orderBy: { position: "asc" },
       },
     },
@@ -154,7 +154,7 @@ export async function syncSubaccountEmbeddings(
       description: pipeline.description,
       isActive: pipeline.isActive,
       isDefault: pipeline.isDefault,
-      stages: pipeline.stages.map((s) => ({
+      stages: pipeline.pipelineStage.map((s) => ({
         name: s.name,
         probability: s.probability,
         rottingDays: s.rottingDays,
@@ -179,17 +179,17 @@ export async function syncSubaccountEmbeddings(
   const workflows = await prisma.workflows.findMany({
     where: { subaccountId },
     include: {
-      nodes: true,
+      Node: true,
     },
   });
 
   log(`Found ${workflows.length} workflows`);
 
   for (const workflow of workflows) {
-    const triggerNodes = workflow.nodes.filter((n) =>
+    const triggerNodes = workflow.Node.filter((n) =>
       n.type.includes("TRIGGER")
     );
-    const executionNodes = workflow.nodes.filter(
+    const executionNodes = workflow.Node.filter(
       (n) => !n.type.includes("TRIGGER")
     );
 
@@ -200,7 +200,7 @@ export async function syncSubaccountEmbeddings(
       isTemplate: workflow.isTemplate,
       triggerTypes: triggerNodes.map((n) => n.type),
       executionTypes: executionNodes.map((n) => n.type),
-      nodeCount: workflow.nodes.length,
+      nodeCount: workflow.Node.length,
     };
 
     documents.push({
