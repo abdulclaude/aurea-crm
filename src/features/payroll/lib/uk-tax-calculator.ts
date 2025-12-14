@@ -23,17 +23,17 @@ const NI_THRESHOLDS = {
 
 // Student Loan thresholds (2024/2025) - Annual amounts
 const STUDENT_LOAN_THRESHOLDS = {
-  plan1: 22015,     // Plan 1 (pre-2012)
-  plan2: 27295,     // Plan 2 (2012-2023)
-  plan4: 31395,     // Plan 4 (Scotland)
-  postgrad: 21000,  // Postgraduate
+  plan1: 22015,         // Plan 1 (pre-2012)
+  plan2: 27295,         // Plan 2 (2012-2023)
+  plan4: 31395,         // Plan 4 (Scotland)
+  postgraduate: 21000,  // Postgraduate
 };
 
 const STUDENT_LOAN_RATES = {
-  plan1: 0.09,      // 9%
-  plan2: 0.09,      // 9%
-  plan4: 0.09,      // 9%
-  postgrad: 0.06,   // 6%
+  plan1: 0.09,          // 9%
+  plan2: 0.09,          // 9%
+  plan4: 0.09,          // 9%
+  postgraduate: 0.06,   // 6%
 };
 
 interface TaxCalculationInput {

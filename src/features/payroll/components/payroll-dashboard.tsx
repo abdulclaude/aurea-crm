@@ -14,8 +14,12 @@ import { toast } from "sonner";
 import { PayrollRunsTable } from "./payroll-runs-table";
 import { PayrollWorkersTable } from "./payroll-workers-table";
 
-function formatCurrency(amount: number): string {
-  return `£${amount.toFixed(2)}`;
+function formatCurrency(amount: number | { toNumber?: () => number }): string {
+  // Handle Prisma Decimal type
+  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+    return `£${amount.toNumber().toFixed(2)}`;
+  }
+  return `£${Number(amount).toFixed(2)}`;
 }
 
 export function PayrollDashboard() {

@@ -19,7 +19,11 @@ interface PayrollRunDetailsProps {
   onBack?: () => void;
 }
 
-function formatCurrency(amount: number | string): string {
+function formatCurrency(amount: number | string | { toNumber?: () => number }): string {
+  // Handle Prisma Decimal type
+  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+    return `£${amount.toNumber().toFixed(2)}`;
+  }
   return `£${Number(amount).toFixed(2)}`;
 }
 

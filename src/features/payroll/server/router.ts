@@ -123,6 +123,12 @@ export const payrollRouter = createTRPCRouter({
               },
             },
           },
+          _count: {
+            select: {
+              payrollRunWorkers: true,
+              workerPayments: true,
+            },
+          },
         },
       });
 

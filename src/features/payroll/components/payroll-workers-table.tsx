@@ -13,8 +13,12 @@ import type { AppRouter } from "@/trpc/routers/_app";
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type PayrollWorkerRow = RouterOutput["payroll"]["calculatePayroll"]["workers"][number];
 
-function formatCurrency(amount: number): string {
-  return `£${amount.toFixed(2)}`;
+function formatCurrency(amount: number | { toNumber?: () => number }): string {
+  // Handle Prisma Decimal type
+  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+    return `£${amount.toNumber().toFixed(2)}`;
+  }
+  return `£${Number(amount).toFixed(2)}`;
 }
 
 function formatHours(hours: number): string {

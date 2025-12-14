@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/db";
-import type { PayrollRunWorker, Worker, PayrollRun } from "@/generated/prisma";
+import prisma from "@/lib/db";
+import type { PayrollRunWorker, Worker, PayrollRun } from "@prisma/client";
 
 interface PayslipData {
   worker: Worker;
@@ -27,7 +27,11 @@ export function generatePayslipHTML(data: PayslipData): string {
   const periodEnd = new Date(payrollRun.periodEnd).toLocaleDateString("en-GB");
   const paymentDate = new Date(payrollRun.paymentDate).toLocaleDateString("en-GB");
 
-  const formatCurrency = (amount: number | string) => {
+  const formatCurrency = (amount: number | string | { toNumber?: () => number }) => {
+    // Handle Prisma Decimal type
+    if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+      return `£${amount.toNumber().toFixed(2)}`;
+    }
     return `£${Number(amount).toFixed(2)}`;
   };
 
