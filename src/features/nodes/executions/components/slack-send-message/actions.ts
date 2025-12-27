@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { slackSendMessageChannel } from "@/inngest/channels/slack-send-message";
 
-export async function fetchSlackSendMessageRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type SlackSendMessageToken = Realtime.Token<
+  typeof slackSendMessageChannel,
+  ["status"]
+>;
+
+export async function fetchSlackSendMessageRealtimeToken(): Promise<SlackSendMessageToken> {
+  return getSubscriptionToken(inngest, {
+    channel: slackSendMessageChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

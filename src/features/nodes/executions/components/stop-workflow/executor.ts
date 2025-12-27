@@ -1,9 +1,12 @@
 import type { NodeExecutor } from "@/features/executions/types";
 import type { StopWorkflowFormValues } from "./dialog";
+import { stopWorkflowChannel } from "@/inngest/channels/stop-workflow";
 
 export const stopWorkflowExecutor: NodeExecutor = async (params) => {
-  const { data, context } = params;
+  const { data, context, nodeId, publish } = params;
   const config = data as StopWorkflowFormValues;
+
+  await publish(stopWorkflowChannel().status({ nodeId, status: "loading" }));
 
   // Resolve variables in reason if provided
   let resolvedReason = config.reason || "Workflow stopped";
@@ -35,6 +38,8 @@ export const stopWorkflowExecutor: NodeExecutor = async (params) => {
     // Set a flag to stop workflow execution
     shouldStop: true,
   };
+
+  await publish(stopWorkflowChannel().status({ nodeId, status: "success" }));
 
   return newContext;
 };

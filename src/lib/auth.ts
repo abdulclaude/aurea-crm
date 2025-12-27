@@ -86,7 +86,14 @@ export const auth = betterAuth({
     discord: {
       clientId: process.env.DISCORD_CLIENT_ID ?? "",
       clientSecret: process.env.DISCORD_CLIENT_SECRET ?? "",
-      scopes: ["identify", "email", "guilds", "messages.read"],
+      scopes: [
+        "identify",
+        "email",
+        "guilds",
+        "messages.read",
+        "guilds.members.read",
+        "bot",
+      ],
     },
   },
   account: {

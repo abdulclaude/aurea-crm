@@ -8,6 +8,9 @@ import {
   type DealDeletedTriggerFormValues,
 } from "./dialog";
 import { BanknoteX as BanknoteXIcon } from "lucide-react";
+import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
+import { DEAL_DELETED_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/deal-deleted-trigger";
+import { fetchDealDeletedTriggerRealtimeToken } from "./actions";
 
 type DealDeletedTriggerNodeData = Partial<DealDeletedTriggerFormValues>;
 type DealDeletedTriggerNodeType = Node<DealDeletedTriggerNodeData>;
@@ -19,6 +22,13 @@ export const DealDeletedTriggerNode: React.FC<
   const { setNodes } = useReactFlow();
 
   const data = props.data || {};
+
+  const nodeStatus = useNodeStatus({
+    nodeId: props.id,
+    channel: DEAL_DELETED_TRIGGER_CHANNEL_NAME,
+    topic: "status",
+    refreshToken: fetchDealDeletedTriggerRealtimeToken,
+  });
 
   const handleSubmit = (values: DealDeletedTriggerFormValues) => {
     setNodes((nodes) =>
@@ -52,6 +62,7 @@ export const DealDeletedTriggerNode: React.FC<
         icon={BanknoteXIcon}
         name="Deal deleted"
         description="Triggers when a deal is deleted"
+        status={nodeStatus}
         onSettings={() => setDialogOpen(true)}
         onDoubleClick={() => setDialogOpen(true)}
       />

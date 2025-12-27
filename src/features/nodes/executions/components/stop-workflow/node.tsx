@@ -7,6 +7,9 @@ import { StopWorkflowDialog, type StopWorkflowFormValues } from "./dialog";
 import { IconStop } from "central-icons/IconStop";
 import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
 import { useWorkflowContext } from "@/features/editor/store/workflow-context";
+import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
+import { STOP_WORKFLOW_CHANNEL_NAME } from "@/inngest/channels/stop-workflow";
+import { fetchStopWorkflowRealtimeToken } from "./actions";
 
 type StopWorkflowNodeData = StopWorkflowFormValues;
 type StopWorkflowNodeType = Node<StopWorkflowNodeData>;
@@ -40,6 +43,13 @@ export const StopWorkflowNode: React.FC<NodeProps<StopWorkflowNodeType>> = memo(
       });
     }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
+    const nodeStatus = useNodeStatus({
+      nodeId: props.id,
+      channel: STOP_WORKFLOW_CHANNEL_NAME,
+      topic: "status",
+      refreshToken: fetchStopWorkflowRealtimeToken,
+    });
+
     const handleSubmit = (values: StopWorkflowFormValues) => {
       setNodes((nodes) =>
         nodes.map((node) => {
@@ -72,6 +82,7 @@ export const StopWorkflowNode: React.FC<NodeProps<StopWorkflowNodeType>> = memo(
           icon={IconStop}
           name="Stop Workflow"
           description={getDisplayText()}
+          status={nodeStatus}
           onSettings={() => setDialogOpen(true)}
           onDoubleClick={() => setDialogOpen(true)}
         />

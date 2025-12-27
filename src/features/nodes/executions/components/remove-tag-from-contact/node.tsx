@@ -1,20 +1,20 @@
 "use client";
 
-import { memo, useMemo, useState } from "react";
+import { memo, useState, useMemo } from "react";
 import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
+
 import { BaseExecutionNode } from "@/features/nodes/executions/base-execution-node";
-import {
-  RemoveTagFromContactDialog,
-  type RemoveTagFromContactFormValues,
-} from "./dialog";
+import { RemoveTagFromContactDialog, type RemoveTagFromContactFormValues } from "./dialog";
 import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
+
 import { fetchRemoveTagFromContactRealtimeToken } from "./actions";
 import { REMOVE_TAG_FROM_CONTACT_CHANNEL_NAME } from "@/inngest/channels/remove-tag-from-contact";
 import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
+import { IconTag as RemoveTagIcon } from "central-icons/IconTag";
 import { useWorkflowContext } from "@/features/editor/store/workflow-context";
-import { Tag } from "lucide-react";
 
-type RemoveTagFromContactNodeData = Partial<RemoveTagFromContactFormValues>;
+type RemoveTagFromContactNodeData = RemoveTagFromContactFormValues;
+
 type RemoveTagFromContactNodeType = Node<RemoveTagFromContactNodeData>;
 
 export const RemoveTagFromContactNode: React.FC<NodeProps<RemoveTagFromContactNodeType>> =
@@ -23,7 +23,14 @@ export const RemoveTagFromContactNode: React.FC<NodeProps<RemoveTagFromContactNo
     const { setNodes, getNodes, getEdges } = useReactFlow();
     const workflowContext = useWorkflowContext();
 
-    const data = props.data || {};
+    const nodeData = props.data;
+
+    const currentNodeData = useMemo(() => {
+      if (!dialogOpen) return nodeData;
+      const nodes = getNodes();
+      const currentNode = nodes.find((n) => n.id === props.id);
+      return (currentNode?.data as RemoveTagFromContactNodeData) || nodeData;
+    }, [dialogOpen, getNodes, props.id, nodeData]);
 
     const variables = useMemo(() => {
       if (!dialogOpen) return [];
@@ -37,8 +44,8 @@ export const RemoveTagFromContactNode: React.FC<NodeProps<RemoveTagFromContactNo
       });
     }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
-    const description = data.tag
-      ? `Remove tag: ${data.tag}`
+    const description = nodeData?.tag
+      ? `Remove tag: ${nodeData.tag}`
       : "Not configured";
 
     const nodeStatus = useNodeStatus({
@@ -48,19 +55,25 @@ export const RemoveTagFromContactNode: React.FC<NodeProps<RemoveTagFromContactNo
       refreshToken: fetchRemoveTagFromContactRealtimeToken as any,
     });
 
+    const handleOpenSettings = () => {
+      setDialogOpen(true);
+    };
+
     const handleSubmit = (values: RemoveTagFromContactFormValues) => {
       setNodes((nodes) =>
-        nodes.map((node) =>
-          node.id === props.id
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  ...values,
-                },
-              }
-            : node
-        )
+        nodes.map((node) => {
+          if (node.id === props.id) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                ...values,
+              },
+            };
+          }
+
+          return node;
+        })
       );
     };
 
@@ -70,18 +83,19 @@ export const RemoveTagFromContactNode: React.FC<NodeProps<RemoveTagFromContactNo
           open={dialogOpen}
           onOpenChange={setDialogOpen}
           onSubmit={handleSubmit}
-          defaultValues={data}
+          defaultValues={currentNodeData}
           variables={variables}
         />
 
         <BaseExecutionNode
           {...props}
-          icon={Tag}
-          name="Remove tag from contact"
+          id={props.id}
+          icon={RemoveTagIcon}
+          name="Remove Tag from Contact"
           description={description}
           status={nodeStatus}
-          onSettings={() => setDialogOpen(true)}
-          onDoubleClick={() => setDialogOpen(true)}
+          onSettings={handleOpenSettings}
+          onDoubleClick={handleOpenSettings}
         />
       </>
     );

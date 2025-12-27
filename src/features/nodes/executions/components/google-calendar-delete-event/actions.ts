@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { googleCalendarDeleteEventChannel } from "@/inngest/channels/google-calendar-delete-event";
 
-export async function fetchGoogleCalendarDeleteEventRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type GoogleCalendarDeleteEventToken = Realtime.Token<
+  typeof googleCalendarDeleteEventChannel,
+  ["status"]
+>;
+
+export async function fetchGoogleCalendarDeleteEventRealtimeToken(): Promise<GoogleCalendarDeleteEventToken> {
+  return getSubscriptionToken(inngest, {
+    channel: googleCalendarDeleteEventChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { googleCalendarCreateEventChannel } from "@/inngest/channels/google-calendar-create-event";
 
-export async function fetchGoogleCalendarCreateEventRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type GoogleCalendarCreateEventToken = Realtime.Token<
+  typeof googleCalendarCreateEventChannel,
+  ["status"]
+>;
+
+export async function fetchGoogleCalendarCreateEventRealtimeToken(): Promise<GoogleCalendarCreateEventToken> {
+  return getSubscriptionToken(inngest, {
+    channel: googleCalendarCreateEventChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

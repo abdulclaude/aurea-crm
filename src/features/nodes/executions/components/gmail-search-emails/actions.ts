@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { gmailSearchEmailsChannel } from "@/inngest/channels/gmail-search-emails";
 
-export async function fetchGmailSearchEmailsRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type GmailSearchEmailsToken = Realtime.Token<
+  typeof gmailSearchEmailsChannel,
+  ["status"]
+>;
+
+export async function fetchGmailSearchEmailsRealtimeToken(): Promise<GmailSearchEmailsToken> {
+  return getSubscriptionToken(inngest, {
+    channel: gmailSearchEmailsChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

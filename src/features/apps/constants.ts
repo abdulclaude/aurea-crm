@@ -63,3 +63,26 @@ export const MICROSOFT_SCOPES = [
   ...MICROSOFT_BASE_SCOPES,
   ...MICROSOFT_REQUIRED_SCOPES,
 ];
+
+// Slack scopes
+export const SLACK_REQUIRED_SCOPES = [
+  "channels:read",
+  "channels:write",
+  "chat:write",
+  "files:write",
+  "users:read",
+];
+
+export const SLACK_SCOPES = SLACK_REQUIRED_SCOPES;
+
+// Discord scopes
+export const DISCORD_REQUIRED_SCOPES = [
+  "identify",
+  "email",
+  "guilds",
+  "messages.read",
+  "guilds.members.read",
+  "bot",
+];
+
+export const DISCORD_SCOPES = DISCORD_REQUIRED_SCOPES;

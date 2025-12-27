@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect } from "react";
+
 import {
   Sheet,
   ResizableSheetContent,
@@ -13,6 +12,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
+
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Form,
   FormControl,
@@ -22,6 +24,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { VariableInput } from "@/components/tiptap/variable-input";
@@ -32,10 +35,11 @@ const formSchema = z.object({
     .string()
     .min(1, { message: "Variable name is required." })
     .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
-      message: "Variable name must start with a letter or underscore.",
+      message:
+        "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
     }),
-  contactId: z.string().min(1, { message: "Contact ID is required." }),
-  tag: z.string().min(1, { message: "Tag is required." }),
+  contactId: z.string().min(1, "Contact ID is required"),
+  tag: z.string().min(1, "Tag is required"),
 });
 
 export type RemoveTagFromContactFormValues = z.infer<typeof formSchema>;
@@ -58,7 +62,7 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      variableName: defaultValues.variableName || "untaggedContact",
+      variableName: defaultValues.variableName || "updatedContact",
       contactId: defaultValues.contactId || "",
       tag: defaultValues.tag || "",
     },
@@ -67,7 +71,7 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
-        variableName: defaultValues.variableName || "untaggedContact",
+        variableName: defaultValues.variableName || "updatedContact",
         contactId: defaultValues.contactId || "",
         tag: defaultValues.tag || "",
       });
@@ -83,9 +87,9 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-white/5">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
-          <SheetTitle>Remove tag from contact configuration</SheetTitle>
+          <SheetTitle>Remove Tag from Contact Configuration</SheetTitle>
           <SheetDescription>
-            Remove a tag from an existing contact in your CRM
+            Remove a tag from an existing contact in your CRM.
           </SheetDescription>
         </SheetHeader>
 
@@ -101,15 +105,13 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
               name="variableName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Variable name</FormLabel>
+                  <FormLabel>Variable Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="untaggedContact" {...field} />
+                    <Input placeholder="updatedContact" {...field} />
                   </FormControl>
-                  <FormDescription className="text-[11px] mt-1">
-                    Access the updated contact: <br />
-                    <span className="text-primary font-medium tracking-wide">
-                      {`@${field.value || "untaggedContact"}`}
-                    </span>
+                  <FormDescription>
+                    Reference the updated contact in other nodes using this
+                    variable name.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -124,14 +126,16 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
                   <FormLabel>Contact ID</FormLabel>
                   <FormControl>
                     <VariableInput
-                      placeholder="contact123 or @contactVariable.id"
-                      value={field.value || ""}
+                      value={field.value}
                       onChange={field.onChange}
+                      placeholder="@contact.id or contact ID"
+                      className="h-13"
                       variables={variables}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs">
-                    The ID of the contact to remove the tag from
+                  <FormDescription>
+                    The ID of the contact to remove the tag from. Use
+                    @contact.id from previous nodes.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -146,14 +150,16 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
                   <FormLabel>Tag</FormLabel>
                   <FormControl>
                     <VariableInput
-                      placeholder="VIP or @tagVariable"
-                      value={field.value || ""}
+                      value={field.value}
                       onChange={field.onChange}
+                      placeholder="vip or @variables"
+                      className="h-13"
                       variables={variables}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs">
-                    The tag to remove from the contact
+                  <FormDescription>
+                    The tag to remove from the contact (e.g., "vip",
+                    "newsletter", "unsubscribed").
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -161,7 +167,11 @@ export const RemoveTagFromContactDialog: React.FC<Props> = ({
             />
 
             <SheetFooter className="px-0 pb-4">
-              <Button type="submit" className="w-max ml-auto" variant="gradient">
+              <Button
+                type="submit"
+                className="w-max ml-auto"
+                variant="gradient"
+              >
                 Save changes
               </Button>
             </SheetFooter>

@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { googleDriveDownloadFileChannel } from "@/inngest/channels/google-drive-download-file";
 
-export async function fetchGoogleDriveDownloadFileRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type GoogleDriveDownloadFileToken = Realtime.Token<
+  typeof googleDriveDownloadFileChannel,
+  ["status"]
+>;
+
+export async function fetchGoogleDriveDownloadFileRealtimeToken(): Promise<GoogleDriveDownloadFileToken> {
+  return getSubscriptionToken(inngest, {
+    channel: googleDriveDownloadFileChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

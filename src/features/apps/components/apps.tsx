@@ -11,6 +11,8 @@ import {
   useSyncGmailApp,
   useSyncGoogleApp,
   useSyncMicrosoftApp,
+  useSyncSlackApp,
+  useSyncDiscordApp,
 } from "../hooks/use-apps";
 import { useTRPC } from "@/trpc/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -31,10 +33,14 @@ import {
   GOOGLE_CALENDAR_SCOPES,
   GOOGLE_FULL_SCOPES,
   MICROSOFT_SCOPES,
+  SLACK_SCOPES,
+  DISCORD_SCOPES,
 } from "@/features/apps/constants";
 
 import { IconPlusSmall as PlusIcon } from "central-icons/IconPlusSmall";
+import { IconSettingsGear3 as SettingsIcon } from "central-icons/IconSettingsGear3";
 import { cn } from "@/lib/utils";
+import { AppChannelSetupDialog } from "./app-channel-setup-dialog";
 
 export const AppsContainer = ({ children }: { children: React.ReactNode }) => {
   return (
@@ -89,13 +95,7 @@ const appsCatalog: AppCatalogItem[] = [
     description:
       "Send messages, upload files, and respond to channel events in your Slack workspace.",
     icon: "/logos/slack.svg",
-    scopes: [
-      "channels:read",
-      "channels:write",
-      "chat:write",
-      "files:write",
-      "users:read",
-    ],
+    scopes: SLACK_SCOPES,
     authProvider: "slack",
   },
   {
@@ -105,7 +105,7 @@ const appsCatalog: AppCatalogItem[] = [
     description:
       "Send messages, embeds, and respond to server events in your Discord community.",
     icon: "/logos/discord.svg",
-    scopes: ["identify", "email", "guilds", "messages.read"],
+    scopes: DISCORD_SCOPES,
     authProvider: "discord",
   },
 ] as const;
@@ -124,9 +124,17 @@ export const AppsList = () => {
     useSyncGoogleApp();
   const { mutate: syncMicrosoftMutate, isPending: isSyncingMicrosoft } =
     useSyncMicrosoftApp();
+  const { mutate: syncSlackMutate, isPending: isSyncingSlack } =
+    useSyncSlackApp();
+  const { mutate: syncDiscordMutate, isPending: isSyncingDiscord } =
+    useSyncDiscordApp();
   const [connectingProvider, setConnectingProvider] =
     useState<AppProvider | null>(null);
   const [hasInitialSync, setHasInitialSync] = useState(false);
+  const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
+  const [configureProvider, setConfigureProvider] = useState<
+    AppProvider.DISCORD | AppProvider.SLACK | null
+  >(null);
 
   // Refetch both apps list and connected providers
   const refetchApps = () => {
@@ -154,12 +162,20 @@ export const AppsList = () => {
     syncMicrosoftMutate(undefined, {
       onSettled: () => refetchApps(),
     });
+    syncSlackMutate(undefined, {
+      onSettled: () => refetchApps(),
+    });
+    syncDiscordMutate(undefined, {
+      onSettled: () => refetchApps(),
+    });
   }, [
     hasInitialSync,
     syncGoogleCalendarMutate,
     syncGmailMutate,
     syncGoogleWorkspaceMutate,
     syncMicrosoftMutate,
+    syncSlackMutate,
+    syncDiscordMutate,
     refetchApps,
   ]);
 
@@ -171,16 +187,22 @@ export const AppsList = () => {
       [AppProvider.GMAIL]: syncGmailMutate,
       [AppProvider.GOOGLE]: syncGoogleWorkspaceMutate,
       [AppProvider.MICROSOFT]: syncMicrosoftMutate,
+      [AppProvider.SLACK]: syncSlackMutate,
+      [AppProvider.DISCORD]: syncDiscordMutate,
     }),
     [
       syncGoogleCalendarMutate,
       syncGmailMutate,
       syncGoogleWorkspaceMutate,
       syncMicrosoftMutate,
+      syncSlackMutate,
+      syncDiscordMutate,
     ]
   );
 
-  const syncLoadingByProvider: Partial<Record<AppProvider, boolean | undefined>> = {
+  const syncLoadingByProvider: Partial<
+    Record<AppProvider, boolean | undefined>
+  > = {
     [AppProvider.GOOGLE_CALENDAR]: isSyncingGoogleCalendar,
     [AppProvider.GMAIL]: isSyncingGmail,
     [AppProvider.GOOGLE]: isSyncingGoogle,
@@ -188,8 +210,8 @@ export const AppsList = () => {
     [AppProvider.MICROSOFT]: isSyncingMicrosoft,
     [AppProvider.OUTLOOK]: undefined,
     [AppProvider.ONEDRIVE]: undefined,
-    [AppProvider.SLACK]: undefined,
-    [AppProvider.DISCORD]: undefined,
+    [AppProvider.SLACK]: isSyncingSlack,
+    [AppProvider.DISCORD]: isSyncingDiscord,
     [AppProvider.MINDBODY]: undefined,
   };
 
@@ -246,32 +268,63 @@ export const AppsList = () => {
                 </div>
               </div>
 
-              <Button
-                variant={isConnected ? "outline" : "gradient"}
-                disabled={isSyncing || isConnecting || isConnected}
-                onClick={() => {
-                  if (isConnected) {
-                    toast.info(`${app.title} is already connected.`);
-                    return;
-                  }
-                  handleConnect(
-                    app.provider,
-                    app.authProvider,
-                    app.scopes,
-                    app.title
-                  );
-                }}
-                className={cn(
-                  "absolute right-6 w-max",
-                  isConnected ? "h-max! p-1.5! px-3!" : "  right-6 p-1.5! h-max"
-                )}
-              >
-                {isConnected ? "Connected" : <PlusIcon className="size-4" />}
-              </Button>
+              <div className="absolute right-6 flex gap-2">
+                {isConnected &&
+                  (app.provider === AppProvider.DISCORD ||
+                    app.provider === AppProvider.SLACK) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setConfigureProvider(
+                          app.provider as
+                            | AppProvider.DISCORD
+                            | AppProvider.SLACK
+                        );
+                        setConfigureDialogOpen(true);
+                      }}
+                      className="h-max! p-1.5!"
+                    >
+                      <SettingsIcon className="size-4" />
+                    </Button>
+                  )}
+                <Button
+                  variant={isConnected ? "outline" : "gradient"}
+                  disabled={isSyncing || isConnecting || isConnected}
+                  onClick={() => {
+                    if (isConnected) {
+                      toast.info(`${app.title} is already connected.`);
+                      return;
+                    }
+                    handleConnect(
+                      app.provider,
+                      app.authProvider,
+                      app.scopes,
+                      app.title
+                    );
+                  }}
+                  className={cn(
+                    "w-max",
+                    isConnected ? "h-max! p-1.5! px-3!" : "p-1.5! h-max"
+                  )}
+                >
+                  {isConnected ? "Connected" : <PlusIcon className="size-4" />}
+                </Button>
+              </div>
             </CardContent>
           </Card>
         );
       })}
+      {configureProvider && (
+        <AppChannelSetupDialog
+          open={configureDialogOpen}
+          onOpenChange={setConfigureDialogOpen}
+          provider={configureProvider}
+          onSuccess={() => {
+            refetchApps();
+          }}
+        />
+      )}
     </div>
   );
 };

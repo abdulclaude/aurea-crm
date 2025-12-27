@@ -9,6 +9,9 @@ import {
   type DealCreatedTriggerFormValues,
 } from "./dialog";
 import { IconCoinsAdd as CreateDealIcon } from "central-icons/IconCoinsAdd";
+import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
+import { DEAL_CREATED_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/deal-created-trigger";
+import { fetchDealCreatedTriggerRealtimeToken } from "./actions";
 
 type DealCreatedTriggerNodeData = Partial<DealCreatedTriggerFormValues>;
 type DealCreatedTriggerNodeType = Node<DealCreatedTriggerNodeData>;
@@ -20,6 +23,13 @@ export const DealCreatedTriggerNode: React.FC<
   const { setNodes } = useReactFlow();
 
   const data = props.data || {};
+
+  const nodeStatus = useNodeStatus({
+    nodeId: props.id,
+    channel: DEAL_CREATED_TRIGGER_CHANNEL_NAME,
+    topic: "status",
+    refreshToken: fetchDealCreatedTriggerRealtimeToken,
+  });
 
   const description = "Triggers when a deal is created";
 
@@ -58,6 +68,7 @@ export const DealCreatedTriggerNode: React.FC<
         icon={CreateDealIcon}
         name="Deal created"
         description={description}
+        status={nodeStatus}
         onSettings={handleOpen}
         onDoubleClick={handleOpen}
       />

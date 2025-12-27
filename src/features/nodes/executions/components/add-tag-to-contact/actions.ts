@@ -1,16 +1,19 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { addTagToContactChannel } from "@/inngest/channels/add-tag-to-contact";
 
-export async function fetchAddTagToContactRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type AddTagToContactToken = Realtime.Token<
+  typeof addTagToContactChannel,
+  ["status"]
+>;
+
+export async function fetchAddTagToContactRealtimeToken(): Promise<AddTagToContactToken> {
+  const token = await getSubscriptionToken(inngest, {
+    channel: addTagToContactChannel(),
+    topics: ["status"],
   });
 
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
+  return token;
 }

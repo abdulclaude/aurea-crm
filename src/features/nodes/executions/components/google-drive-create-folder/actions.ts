@@ -1,16 +1,17 @@
 "use server";
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { getSubscriptionToken, type Realtime } from "@inngest/realtime";
+import { inngest } from "@/inngest/client";
+import { googleDriveCreateFolderChannel } from "@/inngest/channels/google-drive-create-folder";
 
-export async function fetchGoogleDriveCreateFolderRealtimeToken() {
-  const session = await auth.api.getSession({
-    headers: await headers(),
+export type GoogleDriveCreateFolderToken = Realtime.Token<
+  typeof googleDriveCreateFolderChannel,
+  ["status"]
+>;
+
+export async function fetchGoogleDriveCreateFolderRealtimeToken(): Promise<GoogleDriveCreateFolderToken> {
+  return getSubscriptionToken(inngest, {
+    channel: googleDriveCreateFolderChannel(),
+    topics: ["status"],
   });
-
-  if (!session) {
-    return null;
-  }
-
-  return session.session.id;
 }

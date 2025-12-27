@@ -8,6 +8,9 @@ import {
   type DealUpdatedTriggerFormValues,
 } from "./dialog";
 import { IconRewrite as DealEditIcon } from "central-icons/IconRewrite";
+import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
+import { DEAL_UPDATED_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/deal-updated-trigger";
+import { fetchDealUpdatedTriggerRealtimeToken } from "./actions";
 
 type DealUpdatedTriggerNodeData = Partial<DealUpdatedTriggerFormValues>;
 type DealUpdatedTriggerNodeType = Node<DealUpdatedTriggerNodeData>;
@@ -19,6 +22,13 @@ export const DealUpdatedTriggerNode: React.FC<
   const { setNodes } = useReactFlow();
 
   const data = props.data || {};
+
+  const nodeStatus = useNodeStatus({
+    nodeId: props.id,
+    channel: DEAL_UPDATED_TRIGGER_CHANNEL_NAME,
+    topic: "status",
+    refreshToken: fetchDealUpdatedTriggerRealtimeToken,
+  });
 
   const handleSubmit = (values: DealUpdatedTriggerFormValues) => {
     setNodes((nodes) =>
@@ -52,6 +62,7 @@ export const DealUpdatedTriggerNode: React.FC<
         icon={DealEditIcon}
         name="Deal updated"
         description="Triggers when a deal is updated"
+        status={nodeStatus}
         onSettings={() => setDialogOpen(true)}
         onDoubleClick={() => setDialogOpen(true)}
       />

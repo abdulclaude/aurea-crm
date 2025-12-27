@@ -45,7 +45,7 @@ export const GmailSendEmailNode: React.FC<
     nodeId: props.id,
     channel: GMAIL_SEND_EMAIL_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGmailSendEmailRealtimeToken as any,
+    refreshToken: fetchGmailSendEmailRealtimeToken,
   });
 
   const handleSubmit = (values: GmailSendEmailFormValues) => {

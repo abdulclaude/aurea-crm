@@ -1,24 +1,20 @@
 import Handlebars from "handlebars";
-import { NonRetriableError } from "inngest";
 import type { NodeExecutor } from "@/features/executions/types";
+import { NonRetriableError } from "inngest";
 import { addTagToContactChannel } from "@/inngest/channels/add-tag-to-contact";
 import prisma from "@/lib/db";
 import { decode } from "html-entities";
 
-Handlebars.registerHelper("json", (context) => {
-  const jsonString = JSON.stringify(context, null, 2);
-  return new Handlebars.SafeString(jsonString);
-});
-
 type AddTagToContactData = {
-  variableName?: string;
   contactId: string;
   tag: string;
+  variableName?: string;
 };
 
 export const addTagToContactExecutor: NodeExecutor<AddTagToContactData> = async ({
   data,
   nodeId,
+  userId,
   context,
   step,
   publish,
@@ -26,56 +22,33 @@ export const addTagToContactExecutor: NodeExecutor<AddTagToContactData> = async 
   await publish(addTagToContactChannel().status({ nodeId, status: "loading" }));
 
   try {
-    if (!data.contactId || !data.tag) {
+    if (!data.contactId) {
       await publish(addTagToContactChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError(
-        "Add Tag to Contact: Contact ID and tag are required."
+        "Add Tag to Contact Node error: Contact ID is required."
       );
     }
 
-    // Get workflow context
-    const workflow = await step.run("get-workflow-context", async () => {
-      const node = await prisma.node.findUnique({
-        where: { id: nodeId },
-        include: {
-          Workflows: {
-            select: {
-              subaccountId: true,
-              organizationId: true,
-            },
-          },
-        },
-      });
+    if (!data.tag) {
+      await publish(addTagToContactChannel().status({ nodeId, status: "error" }));
+      throw new NonRetriableError(
+        "Add Tag to Contact Node error: Tag is required."
+      );
+    }
 
-      if (!node?.Workflows?.organizationId) {
-        throw new NonRetriableError(
-          "Add Tag to Contact: This workflow must be in an organization context."
-        );
-      }
-
-      return node.Workflows;
-    });
-
-    // Compile contactId and tag with Handlebars
+    // Compile fields with Handlebars
     const contactId = decode(Handlebars.compile(data.contactId)(context));
-    const tag = decode(Handlebars.compile(data.tag)(context));
+    const tag = decode(Handlebars.compile(data.tag)(context)).trim();
 
-    // Find contact and update tags
     const contact = await step.run("add-tag-to-contact", async () => {
+      // Fetch the current contact
       const existingContact = await prisma.contact.findUnique({
         where: { id: contactId },
       });
 
       if (!existingContact) {
         throw new NonRetriableError(
-          `Add Tag to Contact: Contact with ID ${contactId} not found.`
-        );
-      }
-
-      // Verify contact belongs to the same organization
-      if (existingContact.organizationId !== workflow.organizationId) {
-        throw new NonRetriableError(
-          "Add Tag to Contact: Contact does not belong to this organization."
+          `Add Tag to Contact Node error: Contact with ID ${contactId} not found.`
         );
       }
 
@@ -87,24 +60,9 @@ export const addTagToContactExecutor: NodeExecutor<AddTagToContactData> = async 
 
       return await prisma.contact.update({
         where: { id: contactId },
-        data: { tags: updatedTags },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          companyName: true,
-          position: true,
-          type: true,
-          lifecycleStage: true,
-          score: true,
-          tags: true,
-          website: true,
-          linkedin: true,
-          country: true,
-          city: true,
-          createdAt: true,
-          updatedAt: true,
+        data: {
+          tags: updatedTags,
+          updatedAt: new Date(),
         },
       });
     });
@@ -116,15 +74,9 @@ export const addTagToContactExecutor: NodeExecutor<AddTagToContactData> = async 
       ...(data.variableName
         ? {
             [data.variableName]: {
-              ...contact,
-              createdAt:
-                typeof contact.createdAt === "string"
-                  ? contact.createdAt
-                  : (contact.createdAt as Date).toISOString(),
-              updatedAt:
-                typeof contact.updatedAt === "string"
-                  ? contact.updatedAt
-                  : (contact.updatedAt as Date).toISOString(),
+              id: contact.id,
+              name: contact.name,
+              tags: contact.tags,
             },
           }
         : {}),

@@ -45,7 +45,7 @@ export const GmailSearchEmailsNode: React.FC<
     nodeId: props.id,
     channel: GMAIL_SEARCH_EMAILS_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGmailSearchEmailsRealtimeToken as any,
+    refreshToken: fetchGmailSearchEmailsRealtimeToken,
   });
 
   const handleSubmit = (values: GmailSearchEmailsFormValues) => {
