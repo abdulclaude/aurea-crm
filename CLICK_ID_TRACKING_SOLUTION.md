@@ -9,6 +9,7 @@
 ## Two Different Funnel Types
 
 ### 1. **Builder Funnels** (Built in Aurea CRM)
+
 - **Location**: `src/features/funnel-builder/`
 - **Deployment**: Pages rendered at `/f/[funnelId]/[slug]`
 - **SDK Loading**: Via script tags injected in `tracking-scripts.ts`
@@ -16,6 +17,7 @@
 - **Status**: ✅ Fixed in previous session (added SDK to tracking scripts)
 
 ### 2. **Custom Funnels** (External Next.js Projects like TTR)
+
 - **Location**: Separate projects (e.g., `~/Desktop/ttr`)
 - **Deployment**: Independent Next.js apps (port 3001 for TTR)
 - **SDK Loading**: NPM package `aurea-tracking-sdk` imported as dependency
@@ -25,17 +27,20 @@
 ## Solution Implemented
 
 ### Step 1: Rebuild SDK with Click ID Tracking
+
 ```bash
 cd /Users/abdul/Desktop/aurea-tracking-sdk
 npm run build
 ```
 
 **Output**:
+
 - `dist/index.js` (CJS) - 47.20 KB
 - `dist/index.mjs` (ESM) - 45.91 KB
 - `dist/index.d.ts` (TypeScript types) - 11.87 KB
 
 ### Step 2: Link SDK to TTR Project
+
 Instead of publishing to NPM, we used `npm link` for local development:
 
 ```bash
@@ -50,6 +55,7 @@ This makes TTR use the local SDK build instead of the NPM registry version.
 **Location**: `/Users/abdul/Desktop/aurea-tracking-sdk/src/index.ts:1184-1234`
 
 **How it works**:
+
 1. On SDK initialization, `extractClickIds()` runs
 2. Extracts `fbclid`, `gclid`, `ttclid`, `msclkid` from URL params
 3. Calls `storeClickIds()` if any found
@@ -57,12 +63,14 @@ This makes TTR use the local SDK build instead of the NPM registry version.
 5. Includes click IDs in all subsequent tracking events
 
 **Attribution Windows**:
+
 - Facebook (`fbclid`): 28 days
 - Google (`gclid`): 90 days
 - TikTok (`ttclid`): 28 days
 - Microsoft (`msclkid`): 30 days
 
 **Storage Format**:
+
 ```json
 {
   "fbclid": {
@@ -76,15 +84,16 @@ This makes TTR use the local SDK build instead of the NPM registry version.
 ## Current TTR Configuration
 
 ### Environment Variables (`/Users/abdul/Desktop/ttr/.env`)
+
 ```bash
 NEXT_PUBLIC_AUREA_FUNNEL_ID=27c30cbc-661f-450a-a227-9cdcc662c366
-NEXT_PUBLIC_AUREA_API_KEY=replace-with-a-scoped-public-key
 NEXT_PUBLIC_AUREA_API_URL=http://localhost:3000/api
 ```
 
 ### SDK Integration (`/Users/abdul/Desktop/ttr/src/components/aurea-tracking.tsx`)
 
 The component uses:
+
 ```typescript
 import { initAurea } from "aurea-tracking-sdk"; // NPM package (now linked locally)
 
@@ -104,6 +113,7 @@ const sdk = initAurea({
 ```
 
 ### SDK Loaded in Layout (`/Users/abdul/Desktop/ttr/src/app/layout.tsx:4,79`)
+
 ```tsx
 import { AureaTracking } from "@/components/aurea-tracking";
 
@@ -124,12 +134,14 @@ export default function RootLayout({ children }) {
 ### 1. Start Both Servers
 
 **Terminal 1 - Aurea CRM Backend (port 3000)**:
+
 ```bash
 cd /Users/abdul/Desktop/aurea-crm
 npm dev:all
 ```
 
 **Terminal 2 - TTR Funnel Frontend (port 3001)**:
+
 ```bash
 cd /Users/abdul/Desktop/ttr
 npm run dev
@@ -138,11 +150,13 @@ npm run dev
 ### 2. Test Click ID Tracking
 
 **Visit URL with Click ID**:
+
 ```
 http://localhost:3001/?fbclid=IwAR1test123
 ```
 
 **Expected Console Output**:
+
 ```
 [Aurea] Configuration: { hasApiKey: true, hasFunnelId: true, ... }
 [Aurea] Initializing SDK...
@@ -152,9 +166,11 @@ http://localhost:3001/?fbclid=IwAR1test123
 ```
 
 **Check localStorage**:
+
 1. Open DevTools → Application → Local Storage → `http://localhost:3001`
 2. Look for key: `aurea_click_ids`
 3. Value should be:
+
 ```json
 {
   "fbclid": {
@@ -166,6 +182,7 @@ http://localhost:3001/?fbclid=IwAR1test123
 ```
 
 **Check Session ID**:
+
 1. Look for key: `aurea_session_id`
 2. Should be a UUID: `ses_xxxxxxxxxxxxxxxxxxxxx`
 
@@ -180,12 +197,14 @@ http://localhost:3001/?fbclid=IwAR1test123
 ### 4. Verify Backend Receives Click IDs
 
 **Check Database** (FunnelSession table):
+
 ```bash
 cd /Users/abdul/Desktop/aurea-crm
 npx prisma studio
 ```
 
 Navigate to `FunnelSession` table and find the most recent session. Fields should be populated:
+
 - `firstFbclid`: `"IwAR1test123"`
 - `lastFbclid`: `"IwAR1test123"`
 - `sessionId`: Matches localStorage `aurea_session_id`
@@ -194,11 +213,13 @@ Navigate to `FunnelSession` table and find the most recent session. Fields shoul
 ### 5. Test Multiple Click IDs
 
 **Visit with Google Click ID**:
+
 ```
 http://localhost:3001/?gclid=EAIaIQobChMI...
 ```
 
 **Expected localStorage**:
+
 ```json
 {
   "fbclid": {
@@ -215,6 +236,7 @@ http://localhost:3001/?gclid=EAIaIQobChMI...
 ```
 
 **Database should show**:
+
 - `firstGclid`: `"EAIaIQobChMI..."`
 - `lastGclid`: `"EAIaIQobChMI..."`
 - `firstFbclid`: `"IwAR1test123"` (preserved from earlier)
@@ -223,11 +245,12 @@ http://localhost:3001/?gclid=EAIaIQobChMI...
 ### 6. Test Click ID Expiration
 
 **Manually edit localStorage**:
+
 ```javascript
 // In browser console
-const clickIds = JSON.parse(localStorage.getItem('aurea_click_ids'));
+const clickIds = JSON.parse(localStorage.getItem("aurea_click_ids"));
 clickIds.fbclid.expiresAt = Date.now() - 1000; // Expired 1 second ago
-localStorage.setItem('aurea_click_ids', JSON.stringify(clickIds));
+localStorage.setItem("aurea_click_ids", JSON.stringify(clickIds));
 
 // Refresh page
 location.reload();
@@ -240,6 +263,7 @@ location.reload();
 ### Issue: localStorage Not Being Created
 
 **Check 1: Is SDK Loaded?**
+
 ```javascript
 // In browser console
 console.log(window.aureaSDK);
@@ -247,36 +271,40 @@ console.log(window.aureaSDK);
 ```
 
 **Check 2: Are Environment Variables Set?**
+
 ```javascript
 // Add to aurea-tracking.tsx temporarily
 console.log({
   apiKey: process.env.NEXT_PUBLIC_AUREA_API_KEY,
   funnelId: process.env.NEXT_PUBLIC_AUREA_FUNNEL_ID,
-  apiUrl: process.env.NEXT_PUBLIC_AUREA_API_URL
+  apiUrl: process.env.NEXT_PUBLIC_AUREA_API_URL,
 });
 ```
 
 **Check 3: Is initAurea Running?**
 Look for console logs:
+
 - `[Aurea] Configuration: ...`
 - `[Aurea] Initializing SDK...`
 
 If missing, the `useEffect` in `aurea-tracking.tsx` isn't running.
 
 **Check 4: Is Click ID in URL?**
+
 ```javascript
 // In browser console
 const params = new URLSearchParams(window.location.search);
 console.log({
-  fbclid: params.get('fbclid'),
-  gclid: params.get('gclid'),
-  ttclid: params.get('ttclid')
+  fbclid: params.get("fbclid"),
+  gclid: params.get("gclid"),
+  ttclid: params.get("ttclid"),
 });
 ```
 
 ### Issue: SDK Using Old Version
 
 **Verify Link**:
+
 ```bash
 cd /Users/abdul/Desktop/ttr
 npm list aurea-tracking-sdk
@@ -284,12 +312,14 @@ npm list aurea-tracking-sdk
 ```
 
 **Verify Link Target**:
+
 ```bash
 ls -la /Users/abdul/Desktop/ttr/node_modules/aurea-tracking-sdk
 # Should show: aurea-tracking-sdk -> ../../aurea-tracking-sdk
 ```
 
 **Rebuild and Re-link**:
+
 ```bash
 cd /Users/abdul/Desktop/aurea-tracking-sdk
 npm run build
@@ -302,6 +332,7 @@ npm run dev
 ### Issue: Click IDs Not Saving to Database
 
 **Check API Endpoint**:
+
 ```javascript
 // In browser console (Network tab)
 // Look for POST requests to: http://localhost:3000/api/track/event
@@ -318,6 +349,7 @@ npm run dev
 ```
 
 **Check Backend Processing**:
+
 ```bash
 # In Aurea CRM terminal, look for Inngest logs:
 [Inngest] Function triggered: processTrackingEvent
@@ -326,9 +358,10 @@ npm run dev
 ```
 
 **Check Database Directly**:
+
 ```sql
 -- In Prisma Studio or SQL console
-SELECT 
+SELECT
   "sessionId",
   "firstFbclid",
   "lastFbclid",
@@ -344,6 +377,7 @@ LIMIT 5;
 ### Issue: TypeScript Errors in Aurea CRM
 
 **Symptom**: Errors like:
+
 ```
 Module '@prisma/client' has no exported member 'PixelProvider'
 FunnelPage, FunnelBlock not exported from prisma client
@@ -353,6 +387,7 @@ Click ID fields not recognized
 **Cause**: Prisma client cache is stale after schema changes.
 
 **Fix**:
+
 ```bash
 cd /Users/abdul/Desktop/aurea-crm
 npx prisma generate
@@ -362,6 +397,7 @@ npm dev:all
 ## File Locations Reference
 
 ### Aurea CRM (Backend)
+
 - **Click ID Migration**: `prisma/migrations/20251229180808_add_ad_platform_click_ids/`
 - **Event Processing**: `src/inngest/functions/process-tracking-events.ts:126-144`
 - **Conversion APIs**: `src/lib/ads/{meta,google,tiktok}/conversion-api.ts`
@@ -370,12 +406,14 @@ npm dev:all
 - **Public SDK**: `public/aurea-tracking-sdk.js`
 
 ### Aurea Tracking SDK (Standalone Package)
+
 - **Source Code**: `/Users/abdul/Desktop/aurea-tracking-sdk/src/index.ts`
 - **Click ID Tracking**: Lines 1184-1234 (extraction), 1856-1900 (storage)
 - **Build Output**: `dist/index.js`, `dist/index.mjs`, `dist/index.d.ts`
 - **Package**: `package.json` (version 1.5.4)
 
 ### TTR Custom Funnel
+
 - **Project Root**: `/Users/abdul/Desktop/ttr`
 - **SDK Integration**: `src/components/aurea-tracking.tsx`
 - **Layout**: `src/app/layout.tsx` (loads AureaTracking component)
@@ -409,6 +447,7 @@ The current setup with `npm link` works for local development but won't deploy t
 ### Option 3: Use Git Dependency (Alternative)
 
 Update `package.json` in TTR:
+
 ```json
 {
   "dependencies": {
@@ -446,11 +485,13 @@ Update `package.json` in TTR:
 ### 4. **Real Ad Platform Testing** (When Ready)
 
 **Prerequisites**:
+
 - Funded ad accounts (Meta, Google, TikTok)
 - Conversion API credentials configured in Aurea CRM
 - Production domain with HTTPS
 
 **Test Flow**:
+
 1. Run real ad campaign with tracking parameters
 2. Click ad → lands on TTR with click ID
 3. Complete purchase
@@ -472,42 +513,48 @@ See `AD_PLATFORM_TESTING_GUIDE.md` for detailed real ad testing instructions.
 
 ## Key Differences: Builder Funnels vs Custom Funnels
 
-| Feature | Builder Funnels | Custom Funnels (TTR) |
-|---------|----------------|---------------------|
-| **Location** | Aurea CRM project | Separate Next.js projects |
-| **SDK Loading** | Script tag injection | NPM package import |
-| **SDK Source** | `/public/aurea-tracking-sdk.js` | `node_modules/aurea-tracking-sdk/dist/` |
+| Feature           | Builder Funnels                         | Custom Funnels (TTR)                     |
+| ----------------- | --------------------------------------- | ---------------------------------------- |
+| **Location**      | Aurea CRM project                       | Separate Next.js projects                |
+| **SDK Loading**   | Script tag injection                    | NPM package import                       |
+| **SDK Source**    | `/public/aurea-tracking-sdk.js`         | `node_modules/aurea-tracking-sdk/dist/`  |
 | **Configuration** | Auto-injected via `tracking-scripts.ts` | Manual in `aurea-tracking.tsx` component |
-| **Deployment** | Same server as CRM | Independent deployment |
-| **Updates** | Copy dist file to `/public` | Update NPM package or re-link |
-| **Testing** | Visit `/f/[funnelId]/[slug]` | Visit custom domain (port 3001 locally) |
+| **Deployment**    | Same server as CRM                      | Independent deployment                   |
+| **Updates**       | Copy dist file to `/public`             | Update NPM package or re-link            |
+| **Testing**       | Visit `/f/[funnelId]/[slug]`            | Visit custom domain (port 3001 locally)  |
 
 ## Important Notes
 
 ### Click ID Attribution Logic
 
 **First Click Attribution**:
+
 - `firstFbclid` = First time a user visits with fbclid
 - Stored in localStorage and database
 - **Never overwritten** - preserves original traffic source
 
 **Last Click Attribution**:
+
 - `lastFbclid` = Most recent visit with fbclid
 - **Updated on every visit** with new click ID
 - Shows which ad re-engaged the user before conversion
 
 ### Example Scenario:
+
 1. **Day 1**: User clicks Facebook ad → `?fbclid=IwAR111`
+
    - `firstFbclid`: `IwAR111`
    - `lastFbclid`: `IwAR111`
 
 2. **Day 3**: User clicks Google ad → `?gclid=EAIaIQ222`
+
    - `firstFbclid`: `IwAR111` (unchanged)
    - `lastFbclid`: `IwAR111` (unchanged - different platform)
    - `firstGclid`: `EAIaIQ222`
    - `lastGclid`: `EAIaIQ222`
 
 3. **Day 5**: User clicks different Facebook ad → `?fbclid=IwAR333`
+
    - `firstFbclid`: `IwAR111` (unchanged - preserves first touch)
    - `lastFbclid`: `IwAR333` (updated - shows last touch)
    - `firstGclid`: `EAIaIQ222` (unchanged)
@@ -525,6 +572,7 @@ See `AD_PLATFORM_TESTING_GUIDE.md` for detailed real ad testing instructions.
 **Last Click** = Which ad convinced them to buy (conversion)
 
 Ad platforms use different attribution models:
+
 - **Meta**: Defaults to 7-day click, 1-day view (last click wins)
 - **Google**: Can use first click, last click, linear, time decay, position-based
 - **TikTok**: Defaults to 7-day click, 1-day view (last click wins)
@@ -537,7 +585,8 @@ By storing both, you let the ad platform decide attribution while maintaining hi
 
 **Root Cause**: TTR was using NPM package `aurea-tracking-sdk@1.5.4`, but the click ID tracking code was in the local source that hadn't been republished.
 
-**Solution**: 
+**Solution**:
+
 1. Rebuilt SDK with click tracking (`npm run build`)
 2. Linked local SDK to TTR (`npm link`)
 3. SDK now extracts click IDs from URL and stores in localStorage
