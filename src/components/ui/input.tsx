@@ -25,4 +25,6 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   );
 }
 
+// before:rounded-[12px]
+
 export { Input };

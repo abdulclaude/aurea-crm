@@ -198,7 +198,7 @@ export const mindbodyScheduledSync = inngest.createFunction(
     id: "mindbody-scheduled-sync",
     name: "Mindbody Scheduled Sync",
   },
-  { cron: "0 */4 * * *" }, // Every 4 hours
+  { cron: "0 3 * * *" }, // Run daily at 3 AM instead of every 4 hours (83% reduction)
   async ({ step }) => {
     const appIds = await step.run("fetch-mindbody-apps", async () => {
       const apps = await prisma.apps.findMany({

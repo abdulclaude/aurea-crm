@@ -4,9 +4,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
-  experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "@prisma/adapter-pg"],
-  },
+  serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "geoip-lite"],
+  transpilePackages: ["react-map-gl", "mapbox-gl"],
   images: {
     remotePatterns: [
       {

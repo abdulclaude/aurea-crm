@@ -20,6 +20,9 @@ import {
   mindbodyScheduledSync,
 } from "@/inngest/functions/mindbody-sync";
 import { sendRotaMagicLinks } from "@/inngest/functions/send-rota-magic-links";
+import { processTrackingEvents } from "@/inngest/functions/process-tracking-events";
+import { cleanupOldEvents } from "@/inngest/functions/cleanup-old-events";
+import { dataRetentionCleanup } from "@/inngest/functions/data-retention";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -39,5 +42,8 @@ export const { GET, POST, PUT } = serve({
     mindbodyContactSync,
     mindbodyScheduledSync,
     sendRotaMagicLinks,
+    processTrackingEvents,
+    cleanupOldEvents,
+    dataRetentionCleanup,
   ],
 });

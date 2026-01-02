@@ -336,7 +336,7 @@ export function DataTable<TData, TValue>({
   }, [globalFilter, searchInputValue, table, toolbar?.search]);
 
   return (
-    <div className={cn("space-y-6 max-w-screen w-full", className)}>
+    <div className={cn(" max-w-screen w-full", className)}>
       {hasToolbar && (
         <div className="flex items-center justify-between px-6 w-full min-w-0 flex-wrap gap-4">
           <div className="flex items-center gap-2 min-w-0 w-full">

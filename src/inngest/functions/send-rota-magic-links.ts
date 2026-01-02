@@ -12,7 +12,7 @@ const PRE_SHIFT_MINUTES = 5;
  */
 export const sendRotaMagicLinks = inngest.createFunction(
   { id: "send-rota-magic-links", retries: 0 },
-  { cron: "* * * * *" }, // Run every minute
+  { cron: "*/5 * * * *" }, // Run every 5 minutes (reduced from every minute)
   async () => {
     const now = new Date();
     const fiveMinutesFromNow = new Date(now.getTime() + PRE_SHIFT_MINUTES * 60 * 1000);

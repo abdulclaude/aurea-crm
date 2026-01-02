@@ -91,6 +91,9 @@ import {
   renewOneDriveSubscriptions,
 } from "@/features/onedrive/server/subscriptions";
 import { sendRotaMagicLinks } from "./functions/send-rota-magic-links";
+import { processTrackingEvents } from "./functions/process-tracking-events";
+import { cleanupOldEvents } from "./functions/cleanup-old-events";
+import { syncAdSpend } from "./functions/sync-ad-spend";
 
 export const executeWorkflow = inngest.createFunction(
   {
@@ -395,7 +398,7 @@ export const handleGoogleCalendarNotification = inngest.createFunction(
 
 export const renewGoogleCalendarSubscriptions = inngest.createFunction(
   { id: "google-calendar-renewal", retries: 0 },
-  { cron: "0 * * * *" },
+  { cron: "0 */6 * * *" }, // Run every 6 hours instead of hourly (4x reduction)
   async () => {
     const renewed = await renewExpiringGoogleCalendarSubscriptions();
     return { renewed };
@@ -421,7 +424,7 @@ export const handleGmailNotification = inngest.createFunction(
 
 export const renewGmailSubscriptionWatches = inngest.createFunction(
   { id: "gmail-renewal", retries: 0 },
-  { cron: "0 * * * *" },
+  { cron: "0 */6 * * *" }, // Run every 6 hours instead of hourly (4x reduction)
   async () => {
     const renewed = await renewGmailSubscriptions();
     return { renewed };
@@ -466,7 +469,7 @@ export const handleOutlookNotification = inngest.createFunction(
 
 export const renewOutlookSubscriptionWatches = inngest.createFunction(
   { id: "outlook-renewal", retries: 0 },
-  { cron: "0 * * * *" },
+  { cron: "0 */6 * * *" }, // Run every 6 hours instead of hourly (4x reduction)
   async () => {
     const renewed = await renewOutlookSubscriptions();
     return { renewed };
@@ -489,7 +492,7 @@ export const handleOneDriveNotification = inngest.createFunction(
 
 export const renewOneDriveSubscriptionWatches = inngest.createFunction(
   { id: "onedrive-renewal", retries: 0 },
-  { cron: "0 * * * *" },
+  { cron: "0 */6 * * *" }, // Run every 6 hours instead of hourly (4x reduction)
   async () => {
     const renewed = await renewOneDriveSubscriptions();
     return { renewed };

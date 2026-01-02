@@ -133,7 +133,7 @@ export const AppsList = () => {
   const [hasInitialSync, setHasInitialSync] = useState(false);
   const [configureDialogOpen, setConfigureDialogOpen] = useState(false);
   const [configureProvider, setConfigureProvider] = useState<
-    AppProvider.DISCORD | AppProvider.SLACK | null
+    typeof AppProvider.DISCORD | typeof AppProvider.SLACK | null
   >(null);
 
   // Refetch both apps list and connected providers
@@ -278,8 +278,8 @@ export const AppsList = () => {
                       onClick={() => {
                         setConfigureProvider(
                           app.provider as
-                            | AppProvider.DISCORD
-                            | AppProvider.SLACK
+                            | typeof AppProvider.DISCORD
+                            | typeof AppProvider.SLACK
                         );
                         setConfigureDialogOpen(true);
                       }}

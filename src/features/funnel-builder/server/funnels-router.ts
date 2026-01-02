@@ -44,7 +44,17 @@ export const funnelsRouter = createTRPCRouter({
         take: input.limit + 1,
         cursor: input.cursor ? { id: input.cursor } : undefined,
         orderBy: { updatedAt: "desc" },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          status: true,
+          funnelType: true,
+          externalUrl: true,
+          createdAt: true,
+          updatedAt: true,
+          organizationId: true,
+          subaccountId: true,
           _count: {
             select: { funnelPage: true },
           },

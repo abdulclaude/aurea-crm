@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { IconAnalytics as AnalyticsIcon } from "central-icons/IconAnalytics";
 import { IconCalendarClock as TimeLogsIcon } from "central-icons/IconCalendarClock";
@@ -28,30 +29,27 @@ import {
   RefreshCw,
   Clock,
   Banknote,
+  ChevronDown,
 } from "lucide-react";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 
 import {
   Sidebar,
   SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuButton,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { ChevronDown } from "lucide-react";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import AccountSwitcher from "@/features/organizations/components/account-switcher";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
@@ -115,6 +113,23 @@ const AppSidebar = () => {
 
   const { state: sidebarState } = useSidebar();
   const isIconMode = sidebarState === "collapsed";
+
+  // State for collapsible groups
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    General: true,
+    Automations: false,
+    Clients: false,
+    CRM: false,
+    "Shift tracking": false,
+    Builder: false,
+    Analytics: false,
+    "Pilates Studio": false,
+    Invoicing: false,
+  });
+
+  const toggleGroup = (groupTitle: string) => {
+    setOpenGroups((prev) => ({ ...prev, [groupTitle]: !prev[groupTitle] }));
+  };
 
   const { data: active } = useSuspenseQuery(
     trpc.organizations.getActive.queryOptions()
@@ -314,81 +329,147 @@ const AppSidebar = () => {
         </SidebarMenuItem>
       </SidebarHeader>
 
-      <SidebarContent className="bg-background text-primary flex flex-col pt-4">
-        {groupedMenuItems.map((group) => (
-          <Collapsible
-            key={group.title}
-            defaultOpen={false}
-            className="group/collapsible w-full"
-          >
-            <SidebarGroup className={cn(isIconMode && "px-1", "w-full")}>
-              <SidebarGroupLabel
-                className={cn(
-                  "text-primary/60 text-[11px] select-none group-data-[collapsible=icon]:hidden w-full",
-                  canSeeClients &&
-                    activeClient &&
-                    group.title === "Clients" &&
-                    "text-amber-200"
-                )}
-                asChild
-              >
-                <CollapsibleTrigger className="w-full flex items-center justify-between hover:text-primary/80 transition-colors">
-                  {group.title}
-                  <ChevronDown className="ml-auto size-3 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
-                </CollapsibleTrigger>
-              </SidebarGroupLabel>
+      <SidebarContent className={cn(
+        "bg-background text-primary flex flex-col flex-1 overflow-y-auto",
+        isIconMode ? "pt-4 gap-1 items-center" : "pt-4"
+      )}>
+        <AnimatePresence mode="wait">
+          {isIconMode ? (
+            // Icon mode: flatten all items into single column with animation
+            <motion.div
+              key="icon-mode"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              className="flex flex-col gap-1 items-center w-full"
+            >
+              {groupedMenuItems[0].items.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    tooltip={item.title}
+                    isActive={
+                      item.url === "/"
+                        ? pathname === "/"
+                        : pathname.startsWith(item.url)
+                    }
+                    asChild
+                    className={cn(
+                      "w-10 h-10 flex items-center justify-center rounded-sm transition duration-150 hover:bg-primary-foreground",
+                      pathname === item.url && "bg-primary-foreground"
+                    )}
+                  >
+                    <Link href={item.url} prefetch>
+                      <item.icon
+                        className={cn(
+                          "size-4 select-none text-primary/80 hover:text-primary",
+                          pathname === item.url &&
+                            "text-black hover:text-black"
+                        )}
+                      />
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </motion.div>
+          ) : (
+            // Expanded mode: show collapsible groups with animation
+            <motion.div
+              key="expanded-mode"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="w-full"
+            >
+              {groupedMenuItems.map((group) => {
+                const isOpen = openGroups[group.title];
 
-              <CollapsibleContent>
-                <SidebarGroupContent>
-                  <SidebarMenu className={cn("gap-1", isIconMode && "gap-2")}>
-                    {group.items.map((item) => (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                          tooltip={item.title}
-                          isActive={
-                            item.url === "/"
-                              ? pathname === "/"
-                              : pathname.startsWith(item.url)
-                          }
-                          asChild
-                          className={cn(
-                            "gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground!",
-                            pathname === item.url && "bg-primary-foreground!"
-                          )}
+                return (
+                  <div key={group.title} className="px-2 mb-2">
+                    <button
+                      onClick={() => toggleGroup(group.title)}
+                      className={cn(
+                        "text-primary/60 text-[11px] select-none px-2 py-2 mb-2 w-full flex items-center justify-between hover:text-primary/80 hover:bg-primary-foreground transition-colors rounded-sm",
+                        canSeeClients &&
+                          activeClient &&
+                          group.title === "Clients" &&
+                          "text-amber-200"
+                      )}
+                    >
+                      <span>{group.title}</span>
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 transition-transform duration-200",
+                          isOpen && "rotate-180"
+                        )}
+                      />
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2, ease: "easeInOut" }}
+                          style={{ overflow: "hidden" }}
                         >
-                          <Link
-                            href={item.url}
-                            prefetch
-                            className="group/menu-item"
-                          >
-                            <item.icon
-                              className={cn(
-                                "size-3.5 select-none text-primary/80 group-hover/menu-item:text-primary",
-                                pathname === item.url &&
-                                  "text-black group-hover/menu-item:text-black"
-                              )}
-                            />
+                          <div className="space-y-1">
+                            {group.items.map((item, index) => {
+                              const isActive =
+                                item.url === "/"
+                                  ? pathname === "/"
+                                  : pathname.startsWith(item.url);
+                              const Icon = item.icon;
 
-                            <span
-                              className={cn(
-                                "text-primary/80 group-hover/menu-item:text-primary font-medium tracking-tight",
-                                pathname === item.url &&
-                                  "text-black font-medium group-hover/menu-item:text-black",
-                                "group-data-[collapsible=icon]:sr-only"
-                              )}
-                            >
-                              {item.title}
-                            </span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </CollapsibleContent>
-            </SidebarGroup>
-          </Collapsible>
-        ))}
+                              return (
+                                <motion.div
+                                  key={item.title}
+                                  initial={{ opacity: 0, x: -10 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  exit={{ opacity: 0, x: -10 }}
+                                  transition={{
+                                    duration: 0.2,
+                                    delay: index * 0.03,
+                                  }}
+                                >
+                                  <Link
+                                    href={item.url}
+                                    className={cn(
+                                      "flex items-center gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground group/menu-item",
+                                      isActive && "bg-primary-foreground"
+                                    )}
+                                  >
+                                    <Icon
+                                      className={cn(
+                                        "size-3.5 select-none text-primary/80 group-hover/menu-item:text-primary flex-shrink-0",
+                                        isActive &&
+                                          "text-black group-hover/menu-item:text-black"
+                                      )}
+                                    />
+                                    <span
+                                      className={cn(
+                                        "text-primary/80 group-hover/menu-item:text-primary font-medium tracking-tight",
+                                        isActive &&
+                                          "text-black font-medium group-hover/menu-item:text-black"
+                                      )}
+                                    >
+                                      {item.title}
+                                    </span>
+                                  </Link>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </SidebarContent>
     </Sidebar>
   );

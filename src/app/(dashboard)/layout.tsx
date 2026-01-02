@@ -1,9 +1,8 @@
-import AppSidebar from "@/components/sidebar/app-sidebar";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import prisma from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { DashboardLayoutWrapper } from "@/components/dashboard-layout-wrapper";
 
 const Layout = async ({ children }: { children: React.ReactNode }) => {
   // Ensure the user has at least one organization or subaccount membership
@@ -26,12 +25,9 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset className="bg-accent/20 overflow-x-hidden">
-        {children}
-      </SidebarInset>
-    </SidebarProvider>
+    <DashboardLayoutWrapper>
+      {children}
+    </DashboardLayoutWrapper>
   );
 };
 

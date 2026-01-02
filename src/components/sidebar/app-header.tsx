@@ -9,8 +9,11 @@ import { NotificationBell } from "@/features/notifications/components/notificati
 
 import { IconChevronLeftMedium as ChevronLeftIcon } from "central-icons/IconChevronLeftMedium";
 import { cn } from "@/lib/utils";
+import { usePathname } from "next/navigation";
 
 const AppHeader = () => {
+  const pathname = usePathname();
+  const isAnalyticsPage = pathname.includes("/analytics");
   const trpc = useTRPC();
 
   const [isSwitching, setIsSwitching] = useState<string | "agency" | null>(
@@ -49,7 +52,7 @@ const AppHeader = () => {
     <>
       <header
         className={cn(
-          "flex h-14 shrink-0 items-center justify-end gap-2 bg-background text-primary border-b border-black/5 dark:border-white/5 px-4"
+          "flex h-14 shrink-0 items-center justify-end gap-2 bg-background text-primary border-b border-black/5 dark:border-white/5 px-4 w-full"
         )}
       >
         <NotificationBell />

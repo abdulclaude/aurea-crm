@@ -26,12 +26,14 @@ import {
   useUpdateDiscordMetadata,
   useUpdateSlackMetadata,
 } from "../hooks/use-apps";
-import { AppProvider } from "@prisma/client";
+import type { AppProvider } from "@prisma/client";
+
+type SupportedAppProvider = Extract<AppProvider, "DISCORD" | "SLACK">;
 
 type AppChannelSetupDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  provider: AppProvider.DISCORD | AppProvider.SLACK;
+  provider: SupportedAppProvider;
   onSuccess?: () => void;
 };
 
@@ -44,7 +46,7 @@ export const AppChannelSetupDialog = ({
   const [selectedGuildId, setSelectedGuildId] = useState<string>("");
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
 
-  const isDiscord = provider === AppProvider.DISCORD;
+  const isDiscord = provider === "DISCORD";
 
   // Discord queries - only fetch when Discord is selected
   const { data: discordGuilds, isLoading: isLoadingGuilds } =
@@ -185,7 +187,7 @@ export const AppChannelSetupDialog = ({
                         # {channel.name}
                       </SelectItem>
                     ))
-                  : slackChannels?.map((channel) => (
+                  : (slackChannels as Array<{ id: string; name: string; isPrivate: boolean }> | undefined)?.map((channel) => (
                       <SelectItem key={channel.id} value={channel.id}>
                         {channel.isPrivate ? "🔒" : "#"} {channel.name}
                       </SelectItem>

@@ -10,7 +10,7 @@ export const syncEmbeddingsDaily = inngest.createFunction(
     retries: 3,
   },
   {
-    cron: "0 2 * * *", // Run at 2 AM daily
+    cron: "0 2 * * 0", // Run at 2 AM weekly on Sundays (86% reduction)
   },
   async ({ step, logger }) => {
     const logs: string[] = [];

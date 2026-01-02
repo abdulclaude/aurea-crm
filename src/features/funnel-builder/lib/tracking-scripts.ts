@@ -108,6 +108,39 @@ export function generateCustomScript(script: string): TrackingScript {
 }
 
 /**
+ * Generate Aurea SDK tracking script (our own analytics)
+ */
+export function generateAureaSDKScript(funnelId: string): string {
+  const apiUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  
+  return `
+<!-- Aurea Tracking SDK -->
+<script src="${apiUrl}/aurea-tracking-sdk.js"></script>
+<script>
+  // Initialize Aurea SDK for analytics and conversion tracking
+  if (typeof window.initAurea === 'function') {
+    window.aurea = window.initAurea({
+      apiKey: 'funnel-${funnelId}',
+      funnelId: '${funnelId}',
+      apiUrl: '${apiUrl}/api/track',
+      debug: ${process.env.NODE_ENV === 'development'},
+      autoTrack: {
+        pageViews: true,
+        forms: true,
+        clicks: true,
+        scrollDepth: true,
+      },
+    });
+    console.log('[Aurea SDK] Initialized for funnel: ${funnelId}');
+  } else {
+    console.error('[Aurea SDK] Failed to load SDK script');
+  }
+</script>
+<!-- End Aurea Tracking SDK -->
+  `.trim();
+}
+
+/**
  * Generate all tracking scripts for a funnel
  */
 export function generateAllTrackingScripts(
@@ -116,9 +149,10 @@ export function generateAllTrackingScripts(
     pixelId: string;
     enabled: boolean;
     metadata?: Record<string, unknown> | null;
-  }>
+  }>,
+  funnelId?: string
 ): TrackingScript[] {
-  return integrations
+  const scripts = integrations
     .filter((integration) => integration.enabled)
     .map((integration) => {
       switch (integration.provider) {
@@ -138,6 +172,17 @@ export function generateAllTrackingScripts(
           );
       }
     });
+
+  // ALWAYS add Aurea SDK (our own tracking) at the beginning
+  if (funnelId) {
+    scripts.unshift({
+      provider: "CUSTOM" as PixelProvider,
+      pixelId: "aurea-sdk",
+      headScript: generateAureaSDKScript(funnelId),
+    });
+  }
+
+  return scripts;
 }
 
 /**

@@ -594,12 +594,26 @@ model Funnel {
   domainType               FunnelDomainType           @default(SUBDOMAIN)
   domainVerified           Boolean                    @default(false)
   subdomain                String?
+  
+  // External funnel fields
+  funnelType               FunnelType                 @default(INTERNAL)
+  isReadOnly               Boolean                    @default(false)
+  externalUrl              String?
+  externalDomains          String[]
+  apiKey                   String?                    @unique
+  trackingConfig           Json?
+  lastSyncedAt             DateTime?
+  externalMetadata         Json?
+  
   organization             Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   globalStylePreset      GlobalStylePreset?       @relation(fields: [stylePresetId], references: [id])
   subaccount               Subaccount?                @relation(fields: [subaccountId], references: [id])
   funnelAnalytics         FunnelAnalytics[]
   funnelPage              FunnelPage[]
   funnelPixelIntegration FunnelPixelIntegration[]
+  funnelEvent             FunnelEvent[]
+  funnelSession           FunnelSession[]
+  adSpend                 AdSpend[]
 
   @@index([customDomain])
   @@index([organizationId])
@@ -607,6 +621,8 @@ model Funnel {
   @@index([status])
   @@index([subaccountId])
   @@index([subdomain])
+  @@index([funnelType])
+  @@index([apiKey])
 }
 
 model FunnelAnalytics {
@@ -1021,6 +1037,8 @@ model Organization {
   overtimeTracking      OvertimeTracking[]
   payrollRun            PayrollRun[]
   workerPayment         WorkerPayment[]
+  adSpend               AdSpend[]
+  adPlatformCredential  AdPlatformCredential[]
 }
 
 model PaymentIntegration {
@@ -1422,6 +1440,10 @@ model Subaccount {
   timeOffRequest        TimeOffRequest[]
   payrollRun            PayrollRun[]
   workerPayment         WorkerPayment[]
+  funnelEvent           FunnelEvent[]
+  funnelSession         FunnelSession[]
+  adSpend               AdSpend[]
+  adPlatformCredential  AdPlatformCredential[]
 
   @@index([organizationId])
 }
@@ -1995,6 +2017,11 @@ enum FunnelStatus {
   ARCHIVED
 }
 
+enum FunnelType {
+  INTERNAL  // Built with Aurea funnel builder
+  EXTERNAL  // Custom external funnel
+}
+
 enum InvoiceStatus {
   DRAFT
   SENT
@@ -2475,6 +2502,492 @@ model WorkerPayment {
   @@index([paymentStatus])
   @@index([paymentDate])
   @@index([periodStart, periodEnd])
+}
+
+// Anonymous User Profiles for External Funnels
+model AnonymousUserProfile {
+  id          String   @id // anonymousId
+  displayName String
+  firstSeen   DateTime @default(now())
+  lastSeen    DateTime @default(now())
+  
+  // User identification (when user is identified via identify())
+  identifiedUserId String?  // Link to actual User when identified
+  identifiedAt     DateTime?
+  userProperties   Json     @default("{}")  // Name, email, custom traits
+  tags             String[] @default([])
+  
+  // Lifecycle stage
+  lifecycleStage   String?  // NEW, RETURNING, LOYAL, CHURNED
+  
+  // Stats
+  totalSessions Int      @default(0)
+  totalEvents   Int      @default(0)
+  
+  // Performance stats (average across all sessions)
+  avgExperienceScore Float?
+  avgEngagementRate  Float?
+  
+  // GDPR Compliance
+  consentGiven       Boolean   @default(false)
+  consentTimestamp   DateTime?
+  consentVersion     String?   @default("1.0")
+  dataRetentionDays  Int       @default(90)
+  deletionRequestedAt DateTime?
+  
+  // Relations
+  sessions FunnelSession[]
+  
+  @@index([identifiedUserId])
+  @@index([lifecycleStage])
+  @@index([consentGiven])
+  @@index([deletionRequestedAt])
+  @@map("anonymous_user_profiles")
+}
+
+// External Funnel Event Tracking
+model FunnelEvent {
+  id               String       @id @default(cuid())
+  
+  // Core identifiers
+  eventId          String       @unique
+  funnelId         String
+  subaccountId     String?
+  
+  // Event data
+  eventName        String
+  eventProperties  Json         @default("{}")
+  
+  // Session & User
+  sessionId        String
+  userId           String?
+  anonymousId      String?
+  
+  // Context
+  pageUrl          String?
+  pagePath         String?
+  pageTitle        String?
+  referrer         String?
+  
+  // UTM Parameters
+  utmSource        String?
+  utmMedium        String?
+  utmCampaign      String?
+  utmTerm          String?
+  utmContent       String?
+  
+  // Ad Platform Click IDs (for attribution)
+  fbclid           String?      @db.Text  // Facebook Click ID
+  fbp              String?      // Facebook Browser ID (_fbp cookie)
+  fbc              String?      @db.Text  // Facebook Click Cookie (_fbc)
+  gclid            String?      @db.Text  // Google Ads Click ID
+  gbraid           String?      @db.Text  // Google Ads iOS 14.5+ (App to Web)
+  wbraid           String?      @db.Text  // Google Ads iOS 14.5+ (Web to App)
+  dclid            String?      @db.Text  // Google Display & Video 360
+  ttclid           String?      @db.Text  // TikTok Click ID
+  ttp              String?      // TikTok Browser ID (_ttp cookie)
+  msclkid          String?      @db.Text  // Microsoft/Bing Click ID
+  twclid           String?      @db.Text  // Twitter/X Click ID
+  li_fat_id        String?      @db.Text  // LinkedIn First-party Ad Tracking
+  ScCid            String?      @db.Text  // Snapchat Click ID
+  epik             String?      @db.Text  // Pinterest Click ID
+  rdt_cid          String?      @db.Text  // Reddit Click ID
+  
+  // Device & Browser
+  userAgent        String?
+  deviceType       String?
+  browserName      String?
+  browserVersion   String?
+  osName           String?
+  osVersion        String?
+  screenWidth      Int?
+  screenHeight     Int?
+  
+  // Geographic
+  ipAddress        String?
+  countryCode      String?
+  countryName      String?
+  region           String?
+  city             String?
+  timezone         String?
+  
+  // Conversion tracking
+  isConversion     Boolean      @default(false)
+  conversionType   String?
+  revenue          Decimal?     @db.Decimal(10, 2)
+  currency         String?
+  orderId          String?
+  
+  // Funnel tracking (NEW)
+  funnelStage          String?      // awareness, interest, desire, checkout, purchase, abandoned
+  isMicroConversion    Boolean      @default(false) // Is this a micro-conversion event?
+  microConversionType  String?      // video_played, faq_opened, cta_section_viewed, etc.
+  microConversionValue Float?       // Impact score 0-100
+  eventCategory        String?      // viewing, engagement, intent, conversion, custom (user-defined)
+  eventDescription     String?      // User-defined description of what this event means
+  eventColor           String?      // Custom color for event (e.g., 'fuchsia' or full Tailwind classes)
+  
+  // Core Web Vitals (performance metrics)
+  lcp              Float?       // Largest Contentful Paint (ms)
+  inp              Float?       // Interaction to Next Paint (ms)
+  cls              Float?       // Cumulative Layout Shift (score)
+  fcp              Float?       // First Contentful Paint (ms)
+  ttfb             Float?       // Time to First Byte (ms)
+  vitalRating      String?      // good | needs-improvement | poor
+  
+  // First-touch UTM (from SDK persistence)
+  firstTouchUtmSource     String?
+  firstTouchUtmMedium     String?
+  firstTouchUtmCampaign   String?
+  firstTouchUtmTerm       String?
+  firstTouchUtmContent    String?
+  firstTouchTimestamp     DateTime?
+  
+  // Last-touch UTM (from SDK persistence)
+  lastTouchUtmSource      String?
+  lastTouchUtmMedium      String?
+  lastTouchUtmCampaign    String?
+  lastTouchUtmTerm        String?
+  lastTouchUtmContent     String?
+  lastTouchTimestamp      DateTime?
+  
+  // A/B Testing
+  abTestId                String?
+  abTestVariant           String?
+  
+  // Lead Scoring
+  leadScore               Float?
+  leadScoreGrade          String?   // cold, warm, hot, qualified
+  
+  // Engagement Tracking
+  engagementScore         Float?
+  engagementLevel         String?   // low, medium, high, very_high
+  
+  // Custom dimensions (stored as JSON)
+  customDimensions        Json?
+  
+  // Event source (client, webhook, server, cron)
+  eventSource             String?
+  
+  // Timestamps
+  timestamp        DateTime
+  serverTimestamp  DateTime     @default(now())
+  createdAt        DateTime     @default(now())
+  
+  // Relations
+  funnel           Funnel       @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+  
+  @@index([funnelId, timestamp])
+  @@index([sessionId])
+  @@index([userId, timestamp])
+  @@index([anonymousId])
+  @@index([subaccountId, timestamp])
+  @@index([eventName, funnelId])
+  @@index([isConversion, funnelId])
+  @@index([fbclid])
+  @@index([gclid])
+  @@index([ttclid])
+  @@index([msclkid])
+  @@index([abTestId])
+  @@index([leadScoreGrade])
+}
+
+model FunnelSession {
+  id               String       @id @default(cuid())
+  
+  sessionId        String       @unique
+  funnelId         String
+  subaccountId     String?
+  
+  // User identification
+  userId           String?
+  anonymousId      String?
+  profileId        String?
+  
+  // Session timing
+  startedAt        DateTime
+  endedAt          DateTime?
+  durationSeconds  Int?
+  activeTimeSeconds Int?        // Active time (excluding idle/hidden)
+  idleTimeSeconds  Int?         // Idle time
+  engagementRate   Float?       // (activeTime / duration) * 100
+  
+  // Performance aggregates (average Core Web Vitals for session)
+  avgLcp           Float?
+  avgInp           Float?
+  avgCls           Float?
+  avgFcp           Float?
+  avgTtfb          Float?
+  experienceScore  Int?         // 0-100 calculated score
+  
+  // Attribution (first touch)
+  firstSource      String?
+  firstMedium      String?
+  firstCampaign    String?
+  firstReferrer    String?
+  firstPageUrl     String?
+  
+  // Attribution (last touch)
+  lastSource       String?
+  lastMedium       String?
+  lastCampaign     String?
+  lastPageUrl      String?
+  
+  // Ad Platform Click IDs - First Touch (from first page visit)
+  firstFbclid      String?      @db.Text  // Facebook Click ID
+  firstGclid       String?      @db.Text  // Google Ads Click ID
+  firstTtclid      String?      @db.Text  // TikTok Click ID
+  firstMsclkid     String?      @db.Text  // Microsoft/Bing Click ID
+  firstTwclid      String?      @db.Text  // Twitter/X Click ID
+  firstLiFatId     String?      @db.Text  // LinkedIn Click ID
+  
+  // Ad Platform Click IDs - Last Touch (most recent before conversion)
+  lastFbclid       String?      @db.Text
+  lastGclid        String?      @db.Text
+  lastTtclid       String?      @db.Text
+  lastMsclkid      String?      @db.Text
+  lastTwclid       String?      @db.Text
+  lastLiFatId      String?      @db.Text
+  
+  // Google Enhanced Conversions (additional click IDs)
+  gbraid           String?      @db.Text  // Google Ads GBRAID
+  wbraid           String?      @db.Text  // Google Ads WBRAID
+  
+  // First-party cookies (for Conversion APIs)
+  fbp              String?      // Facebook Browser ID (_fbp cookie)
+  fbc              String?      @db.Text  // Facebook Click Cookie (_fbc)
+  ttp              String?      // TikTok Browser ID (_ttp cookie)
+  
+  // Platform that drove the conversion
+  conversionPlatform String?    // 'facebook', 'google', 'tiktok', 'microsoft', 'organic', 'direct'
+  
+  // Metrics
+  pageViews        Int          @default(0)
+  eventsCount      Int          @default(0)
+  
+  // Conversion
+  converted        Boolean      @default(false)
+  conversionValue  Decimal?     @db.Decimal(10, 2)
+  conversionType   String?
+  
+  // Funnel tracking (NEW - AIDA model)
+  currentStage       String?      // Current funnel stage: awareness, interest, desire, checkout, purchase, abandoned
+  stageHistory       Json         @default("[]") // Array of {stage, enteredAt} objects
+  
+  // Checkout tracking (NEW)
+  checkoutStartedAt  DateTime?    // When user clicked buy button
+  checkoutCompletedAt DateTime?   // When payment completed
+  checkoutDuration   Int?         // Seconds between checkout start and completion
+  isAbandoned        Boolean      @default(false) // Did user abandon checkout?
+  abandonedAt        DateTime?    // When checkout was abandoned
+  abandonReason      String?      // Why checkout was abandoned (page_close, timeout, etc.)
+  
+  // Attribution tracking (NEW - expanded)
+  firstTouchSource   String?      // First UTM source
+  lastTouchSource    String?      // Last UTM source before conversion
+  touchpoints        String[]     @default([]) // Array of all touchpoint sources
+  
+  // Session bridging (NEW - links pre/post checkout sessions)
+  linkedSessionId    String?      // Links to original session (for post-checkout returns)
+  linkedSession      FunnelSession? @relation("SessionBridge", fields: [linkedSessionId], references: [id], onDelete: SetNull)
+  bridgedSessions    FunnelSession[] @relation("SessionBridge")
+  
+  // Device & Location
+  ipAddress        String?
+  userAgent        String?
+  deviceType       String?      // Desktop, Mobile, Tablet
+  browserName      String?      // Chrome, Safari, Firefox, etc.
+  browserVersion   String?      // 120.0.6099.71
+  osName           String?      // Windows, macOS, iOS, Android, Linux
+  osVersion        String?      // 10, 14.2, etc.
+  countryCode      String?      // US, GB, CA, etc.
+  countryName      String?      // United States, United Kingdom, etc.
+  region           String?      // California, England, etc.
+  city             String?      // San Francisco, London, etc.
+  
+  // GDPR Compliance
+  consentGiven     Boolean      @default(false)
+  consentTimestamp DateTime?
+  consentVersion   String?      @default("1.0")
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  
+  funnel           Funnel       @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+  profile          AnonymousUserProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  webVitals        FunnelWebVital[]
+  
+  @@index([funnelId, startedAt])
+  @@index([userId])
+  @@index([anonymousId])
+  @@index([profileId])
+  @@index([subaccountId, startedAt])
+  @@index([converted, funnelId])
+  @@index([consentGiven])
+}
+
+// Dedicated Web Vitals tracking (separate from events for performance)
+model FunnelWebVital {
+  id              String   @id @default(cuid())
+  
+  // Core identifiers
+  funnelId        String
+  subaccountId    String?
+  sessionId       String
+  anonymousId     String?
+  
+  // Page context
+  pageUrl         String
+  pagePath        String
+  pageTitle       String?
+  
+  // Web Vital metric
+  metric          WebVitalMetric  // LCP, INP, CLS, FCP, TTFB
+  value           Float           // Metric value in appropriate unit
+  rating          WebVitalRating  // good, needs-improvement, poor
+  delta           Float?          // Change from previous measurement
+  id_metric       String?         // web-vitals library metric ID
+  
+  // Device context
+  deviceType      String?
+  browserName     String?
+  browserVersion  String?
+  osName          String?
+  osVersion       String?
+  screenWidth     Int?
+  screenHeight    Int?
+  
+  // Geographic
+  countryCode     String?
+  countryName     String?
+  region          String?
+  city            String?
+  
+  // Timestamps
+  timestamp       DateTime
+  createdAt       DateTime @default(now())
+  
+  // Relations
+  session         FunnelSession @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+  
+  @@index([funnelId, timestamp])
+  @@index([sessionId])
+  @@index([metric, rating])
+  @@index([subaccountId, timestamp])
+  @@index([anonymousId])
+  @@index([pageUrl, metric])
+}
+
+enum WebVitalMetric {
+  LCP   // Largest Contentful Paint
+  INP   // Interaction to Next Paint
+  CLS   // Cumulative Layout Shift
+  FCP   // First Contentful Paint
+  TTFB  // Time to First Byte
+  FID   // First Input Delay (legacy)
+}
+
+enum WebVitalRating {
+  GOOD
+  NEEDS_IMPROVEMENT
+  POOR
+}
+
+// Ad Spend Tracking (for ROAS calculation)
+model AdSpend {
+  id            String   @id @default(cuid())
+  
+  // Organization & Funnel
+  organizationId String
+  subaccountId   String?
+  funnelId       String?
+  
+  // Platform & Campaign
+  platform      String   // 'facebook', 'google', 'tiktok', 'microsoft', 'twitter', 'linkedin'
+  campaignId    String?  // Platform's campaign ID
+  campaignName  String?
+  adSetId       String?  // Facebook Ad Set / Google Ad Group ID
+  adSetName     String?
+  adId          String?  // Specific ad ID
+  adName        String?
+  
+  // Date & Metrics
+  date          DateTime @db.Date
+  spend         Decimal  @db.Decimal(10, 2)
+  currency      String   @default("USD")
+  impressions   Int?
+  clicks        Int?
+  conversions   Int?
+  revenue       Decimal? @db.Decimal(10, 2)
+  
+  // Calculated metrics (updated by background job)
+  cpc           Decimal? @db.Decimal(10, 2)  // Cost per click
+  cpm           Decimal? @db.Decimal(10, 2)  // Cost per 1000 impressions
+  ctr           Decimal? @db.Decimal(5, 2)   // Click-through rate (%)
+  conversionRate Decimal? @db.Decimal(5, 2)  // Conversion rate (%)
+  roas          Decimal? @db.Decimal(10, 2)  // Return on ad spend
+  
+  // Metadata
+  rawData       Json?    // Store raw API response for debugging
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount    Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+  funnel        Funnel?      @relation(fields: [funnelId], references: [id], onDelete: SetNull)
+  
+  @@unique([organizationId, platform, campaignId, date])
+  @@index([organizationId, date])
+  @@index([funnelId, date])
+  @@index([platform, date])
+}
+
+// Ad Platform Credentials (encrypted API keys)
+model AdPlatformCredential {
+  id              String   @id @default(cuid())
+  
+  // Organization
+  organizationId  String
+  subaccountId    String?
+  
+  // Platform
+  platform        String   // 'facebook', 'google', 'tiktok', 'microsoft', 'twitter', 'linkedin'
+  
+  // Credentials (encrypted)
+  accessToken     String?  @db.Text  // Encrypted access token
+  refreshToken    String?  @db.Text  // Encrypted refresh token
+  apiKey          String?  @db.Text  // Encrypted API key
+  apiSecret       String?  @db.Text  // Encrypted API secret
+  
+  // Platform-specific IDs
+  accountId       String?  // Ad account ID (e.g., act_123456)
+  pixelId         String?  // Pixel/Tag ID for conversion tracking
+  developerId     String?  // Developer token (Google Ads)
+  customerId      String?  // Customer ID (Google Ads)
+  
+  // Token expiration
+  expiresAt       DateTime?
+  
+  // Status
+  isActive        Boolean  @default(true)
+  lastSyncedAt    DateTime?
+  lastError       String?  @db.Text
+  
+  // Metadata
+  scopes          String[] @default([])  // OAuth scopes granted
+  metadata        Json?    // Platform-specific config
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount      Subaccount?  @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+  
+  @@unique([organizationId, platform, accountId])
+  @@index([organizationId, platform])
 }
 
 

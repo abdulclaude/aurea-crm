@@ -34,14 +34,15 @@ export interface PublishedPageData {
 export function generatePageHead(data: PublishedPageData): string {
   const { page, pixelIntegrations } = data;
 
-  // Generate tracking scripts
+  // Generate tracking scripts (including Aurea SDK)
   const trackingScripts = generateAllTrackingScripts(
     pixelIntegrations.map((integration) => ({
       provider: integration.provider,
       pixelId: integration.pixelId,
       enabled: integration.enabled,
       metadata: integration.metadata as Record<string, unknown> | null,
-    }))
+    })),
+    page.funnelId // Pass funnelId for Aurea SDK initialization
   );
 
   const scriptTags = trackingScripts.map((script) => script.headScript).join("\n");

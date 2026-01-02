@@ -17,6 +17,7 @@ import { modulesRouter } from "@/features/modules/server/router";
 import { workersRouter } from "@/features/workers/server/router";
 import { activityRouter } from "@/features/activity/server/router";
 import { analyticsRouter } from "@/features/analytics/server/analytics-router";
+import { adsRouter } from "@/features/analytics/server/ads-router";
 import { funnelsRouter } from "@/features/funnel-builder/server/funnels-router";
 import { integrationsRouter } from "@/features/funnel-builder/server/integrations-router";
 import { globalStylesRouter } from "@/features/global-styles/server/global-styles-router";
@@ -32,6 +33,8 @@ import { stripeConnectRouter } from "@/features/stripe-connect/server/router";
 import { shiftSwapsRouter } from "@/features/shift-swaps/server/router";
 import { availabilityRouter } from "@/features/availability/server/router";
 import { payrollRouter } from "@/features/payroll/server/router";
+import { externalFunnelsRouter } from "@/features/external-funnels/server/external-funnels-router";
+import { webVitalsRouter } from "@/features/external-funnels/server/web-vitals-router";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -54,6 +57,7 @@ export const appRouter = createTRPCRouter({
   workers: workersRouter,
   activity: activityRouter,
   analytics: analyticsRouter,
+  ads: adsRouter,
   funnels: funnelsRouter,
   funnelIntegrations: integrationsRouter,
   globalStyles: globalStylesRouter,
@@ -69,6 +73,8 @@ export const appRouter = createTRPCRouter({
   shiftSwaps: shiftSwapsRouter,
   availability: availabilityRouter,
   payroll: payrollRouter,
+  externalFunnels: externalFunnelsRouter,
+  webVitals: webVitalsRouter,
 });
 
 // export type definition of API
