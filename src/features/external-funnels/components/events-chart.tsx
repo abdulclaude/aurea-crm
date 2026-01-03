@@ -61,7 +61,7 @@ export function EventsChart({ funnelId }: EventsChartProps) {
   >("7d");
   const [view, setView] = useQueryState(
     "eventsView",
-    parseAsString.withDefault("table")
+    parseAsString.withDefault("chart")
   );
 
   const handleViewChange = React.useCallback(
@@ -77,7 +77,8 @@ export function EventsChart({ funnelId }: EventsChartProps) {
       timeRange,
     }),
     refetchInterval: 5000,
-    refetchIntervalInBackground: true,  });
+    refetchIntervalInBackground: true,
+  });
 
   const chartConfig = {
     totalEvents: {
@@ -161,7 +162,7 @@ export function EventsChart({ funnelId }: EventsChartProps) {
           {/* Bar Chart - Event Types */}
           {/* <EventTypeChart funnelId={funnelId} timeRange={timeRange} /> */}
 
-          <EventGeographyChart funnelId={funnelId} timeRange={timeRange} />
+          {/* <EventGeographyChart funnelId={funnelId} timeRange={timeRange} /> */}
 
           <OutboundLinksChart funnelId={funnelId} timeRange={timeRange} />
           <OutboundDomainsChart funnelId={funnelId} timeRange={timeRange} />

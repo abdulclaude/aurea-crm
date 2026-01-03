@@ -30,6 +30,9 @@ import {
   Clock,
   Banknote,
   ChevronDown,
+  Mail,
+  Send,
+  Globe,
 } from "lucide-react";
 
 import Link from "next/link";
@@ -120,6 +123,7 @@ const AppSidebar = () => {
     Automations: false,
     Clients: false,
     CRM: false,
+    Campaigns: false,
     "Shift tracking": false,
     Builder: false,
     Analytics: false,
@@ -185,6 +189,27 @@ const AppSidebar = () => {
         title: "Pipelines",
         icon: PipelinesIcon,
         url: "/pipelines",
+      },
+    ],
+  };
+
+  const campaignsMenuItem = {
+    title: "Campaigns",
+    items: [
+      {
+        title: "Campaigns",
+        icon: Send,
+        url: "/campaigns",
+      },
+      {
+        title: "Email Domains",
+        icon: Globe,
+        url: "/campaigns/domains",
+      },
+      {
+        title: "Templates",
+        icon: FileText,
+        url: "/campaigns/templates",
       },
     ],
   };
@@ -293,6 +318,7 @@ const AppSidebar = () => {
     ...baseMenuItems,
     builderMenuItem,
     crmMenuItem,
+    campaignsMenuItem,
     ...(isTimeTrackingEnabled ? [timeTrackingMenuItem] : []),
     ...(isInvoicingEnabled ? [invoicingMenuItem] : []),
     ...(isPilatesStudioEnabled ? [pilatesStudioMenuItem] : []),

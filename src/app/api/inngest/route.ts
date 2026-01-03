@@ -23,6 +23,7 @@ import { sendRotaMagicLinks } from "@/inngest/functions/send-rota-magic-links";
 import { processTrackingEvents } from "@/inngest/functions/process-tracking-events";
 import { cleanupOldEvents } from "@/inngest/functions/cleanup-old-events";
 import { dataRetentionCleanup } from "@/inngest/functions/data-retention";
+import { sendCampaign, checkScheduledCampaigns } from "@/inngest/functions/send-campaign";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -45,5 +46,7 @@ export const { GET, POST, PUT } = serve({
     processTrackingEvents,
     cleanupOldEvents,
     dataRetentionCleanup,
+    sendCampaign,
+    checkScheduledCampaigns,
   ],
 });

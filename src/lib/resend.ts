@@ -21,6 +21,8 @@ export const sendInvitationEmail = async ({
   role?: string;
   isSubaccount?: boolean;
 }) => {
+  const fromEnv = process.env.RESEND_FROM_EMAIL || "noreply@aureacrm.com";
+  const normalizedFrom = fromEnv.split("#")[0].trim();
   const subject = `You've been invited to join ${organizationName}`;
   const entityType = isSubaccount ? "client workspace" : "organization";
   const roleText = role ? ` as ${role}` : "";
@@ -92,7 +94,7 @@ If you didn't expect this invitation, you can safely ignore this email.
 
   try {
     const result = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || "noreply@aureacrm.com",
+      from: normalizedFrom || "noreply@abdallahkalenga.com",
       to,
       subject,
       html,

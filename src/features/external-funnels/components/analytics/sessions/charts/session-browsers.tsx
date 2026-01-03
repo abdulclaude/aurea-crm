@@ -11,9 +11,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, Chrome, Compass } from "lucide-react";
 import { motion, useInView } from "framer-motion";
+import { getBrowserIcon as getBrowserIconForType } from "@/constants/browsers";
 
 type SessionBrowsersChartProps = {
   funnelId: string;
@@ -39,26 +38,11 @@ export function SessionBrowsersChart({
     refetchIntervalInBackground: true,
   });
 
-  const trend = React.useMemo(() => {
-    if (!data || data.browsers.length === 0) return 0;
-
-    const chromeBrowser = data.browsers.find((b) =>
-      b.browser.toLowerCase().includes("chrome")
-    );
-
-    if (!chromeBrowser) return 0;
-
-    const chromePercentage = chromeBrowser.percentage;
-    const avgPercentage = 100 / data.browsers.length;
-
-    return chromePercentage - avgPercentage;
-  }, [data]);
-
   if (data.totalSessions === 0) {
     return (
       <Card className="rounded-none shadow-none border-x-0 border-t-0 md:col-span-1 pb-0">
         <CardHeader>
-          <CardTitle className="text-sm">Session browsers</CardTitle>
+          <CardTitle className="text-sm">Browsers</CardTitle>
           <CardDescription className="text-xs">
             No browser data available for the selected time range
           </CardDescription>
@@ -68,9 +52,7 @@ export function SessionBrowsersChart({
   }
 
   const getBrowserIcon = (browserName: string) => {
-    const name = browserName.toLowerCase();
-    if (name.includes("chrome")) return Chrome;
-    return Compass;
+    return getBrowserIconForType(browserName);
   };
 
   const getBrowserColor = (browserName: string) => {
@@ -106,27 +88,7 @@ export function SessionBrowsersChart({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-sm flex items-center gap-2">
-              Session Browsers
-              <Badge
-                variant="outline"
-                className={`${
-                  trend >= 0
-                    ? "text-green-500 bg-green-500/10"
-                    : "text-red-500 bg-red-500/10"
-                } border-none`}
-              >
-                {trend >= 0 ? (
-                  <TrendingUp className="h-4 w-4" />
-                ) : (
-                  <TrendingDown className="h-4 w-4" />
-                )}
-                <span>
-                  {trend >= 0 ? "+" : ""}
-                  {trend.toFixed(1)}%
-                </span>
-              </Badge>
-            </CardTitle>
+            <CardTitle className="text-sm">Browsers</CardTitle>
             <CardDescription className="text-xs">
               {data.totalSessions.toLocaleString()} sessions •{" "}
               {data.browsers.length.toLocaleString()} browsers
@@ -137,7 +99,6 @@ export function SessionBrowsersChart({
       <CardContent className="px-0">
         <div className="space-y-0">
           {data.browsers.map((browser, index) => {
-            const opacity = 1 - index * 0.12;
             const BrowserIcon = getBrowserIcon(browser.browser);
 
             return (
@@ -148,7 +109,6 @@ export function SessionBrowsersChart({
                   index < data.browsers.length - 1 &&
                     "border-b border-border/50"
                 )}
-                style={{ opacity: Math.max(opacity, 0.4) }}
               >
                 <motion.div
                   initial={{ width: 0 }}

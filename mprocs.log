@@ -48,3 +48,7 @@ not yet implemented
 ERROR [mprocs] Got panic. @info:panicked at src/app.rs:795:14:
 not yet implemented
 @stackTrace:disabled backtrace
+ERROR [mprocs::error] Error: channel closed
+ERROR [mprocs::error] Error: Input/output error (os error 5)
+ERROR [mprocs::error] Error: channel closed
+ERROR [mprocs::error] Error: channel closed

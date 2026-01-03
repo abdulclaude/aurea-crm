@@ -35,6 +35,9 @@ import { availabilityRouter } from "@/features/availability/server/router";
 import { payrollRouter } from "@/features/payroll/server/router";
 import { externalFunnelsRouter } from "@/features/external-funnels/server/external-funnels-router";
 import { webVitalsRouter } from "@/features/external-funnels/server/web-vitals-router";
+import { emailDomainsRouter } from "@/features/email-domains/server/routers";
+import { emailTemplatesRouter } from "@/features/email-templates/server/routers";
+import { campaignsRouter } from "@/features/campaigns/server/routers";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -75,6 +78,9 @@ export const appRouter = createTRPCRouter({
   payroll: payrollRouter,
   externalFunnels: externalFunnelsRouter,
   webVitals: webVitalsRouter,
+  emailDomains: emailDomainsRouter,
+  emailTemplates: emailTemplatesRouter,
+  campaigns: campaignsRouter,
 });
 
 // export type definition of API

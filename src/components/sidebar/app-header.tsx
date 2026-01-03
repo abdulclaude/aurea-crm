@@ -42,7 +42,7 @@ const AppHeader = () => {
       setIsSwitching(subaccountId ?? "agency");
       await setActiveSubaccount.mutateAsync({ subaccountId });
       // Hard reload to re-fetch session-bound data
-      window.location.reload();
+      window.location.href = "/dashboard";
     } finally {
       setIsSwitching(null);
     }
@@ -61,7 +61,7 @@ const AppHeader = () => {
 
       <div>
         {activeClient && activeOrg && (
-          <div className="flex items-center justify-center bg-foreground/50 text-primary px-3 py-4 h-full w-full gap-2.5 border-b border-black/5 dark:border-white/5 ">
+          <div className="flex items-center justify-center bg-white text-primary px-3 py-4 h-full w-full gap-2.5 border-b border-black/5 dark:border-white/5 ">
             <Button
               variant="ghost"
               onClick={() => handleSwitch(null)}

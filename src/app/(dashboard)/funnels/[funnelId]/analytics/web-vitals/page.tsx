@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { WebVitalsTab } from "@/features/external-funnels/components/web-vitals-tab";
+import { Separator } from "@/components/ui/separator";
 
 export default async function WebVitalsPage({
   params,
@@ -9,14 +10,18 @@ export default async function WebVitalsPage({
   const { funnelId } = await params;
   
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Web Vitals</h1>
-        <p className="text-muted-foreground">
+    <div className="">
+      <div className="p-6">
+        <h1 className="text-base md:text-lg text-primary font-semibold">
+          Web vitals
+        </h1>
+        <p className="text-xs md:text-xs text-primary/60">
           Core Web Vitals and page performance metrics
         </p>
       </div>
-      
+
+      <Separator />
+
       <Suspense fallback={<div>Loading web vitals...</div>}>
         <WebVitalsTab funnelId={funnelId} />
       </Suspense>

@@ -70,7 +70,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
       setIsSwitching(subaccountId ?? "agency");
       await setActiveSubaccount.mutateAsync({ subaccountId });
       // Hard reload to re-fetch session-bound data
-      window.location.reload();
+      window.location.href = "/dashboard";
     } finally {
       setIsSwitching(null);
     }

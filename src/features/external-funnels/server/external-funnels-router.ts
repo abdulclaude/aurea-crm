@@ -388,6 +388,86 @@ export const externalFunnelsRouter = createTRPCRouter({
     }),
 
   /**
+   * Get session locations for geography map
+   */
+  getGeographySessions: protectedProcedure
+    .input(
+      z.object({
+        funnelId: z.string(),
+        timeRange: z.enum(["7d", "30d", "90d"]).default("30d"),
+        limit: z.number().min(1).max(2000).default(1000),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const funnel = await db.funnel.findFirst({
+        where: {
+          id: input.funnelId,
+          organizationId: ctx.orgId!,
+          subaccountId: ctx.subaccountId ?? null,
+        },
+      });
+
+      if (!funnel) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Funnel not found",
+        });
+      }
+
+      const now = new Date();
+      const startDate = new Date();
+      switch (input.timeRange) {
+        case "7d":
+          startDate.setDate(now.getDate() - 7);
+          break;
+        case "30d":
+          startDate.setDate(now.getDate() - 30);
+          break;
+        case "90d":
+          startDate.setDate(now.getDate() - 90);
+          break;
+      }
+
+      const sessions = await db.funnelSession.findMany({
+        where: {
+          funnelId: input.funnelId,
+          startedAt: {
+            gte: startDate,
+            lte: now,
+          },
+        },
+        orderBy: { startedAt: "desc" },
+        take: input.limit,
+        include: {
+          profile: {
+            select: {
+              displayName: true,
+              totalSessions: true,
+              firstSeen: true,
+              identifiedUserId: true,
+              userProperties: true,
+            },
+          },
+        },
+      });
+
+      const sessionsWithNames = sessions.map((session) => ({
+        ...session,
+        visitorDisplayName:
+          session.profile?.displayName ||
+          session.userId ||
+          session.anonymousId ||
+          "Anonymous Visitor",
+        totalSessions: session.profile?.totalSessions ?? 1,
+        firstSeen: session.profile?.firstSeen || session.startedAt,
+      }));
+
+      return {
+        sessions: sessionsWithNames,
+      };
+    }),
+
+  /**
    * Get user profiles for a funnel (batch)
    */
   getUserProfiles: protectedProcedure
@@ -1539,8 +1619,7 @@ export const externalFunnelsRouter = createTRPCRouter({
           ...item,
           percentage: totalSessions > 0 ? Number(((item.sessions / totalSessions) * 100).toFixed(1)) : 0,
         }))
-        .sort((a, b) => b.sessions - a.sessions)
-        .slice(0, 20); // Top 20 cities
+        .sort((a, b) => b.sessions - a.sessions);
 
       return {
         countries,
@@ -3153,6 +3232,7 @@ export const externalFunnelsRouter = createTRPCRouter({
       const events = await db.funnelEvent.findMany({
         where: whereClause,
         select: {
+          sessionId: true,
           countryCode: true,
           countryName: true,
           city: true,
@@ -3160,6 +3240,51 @@ export const externalFunnelsRouter = createTRPCRouter({
           revenue: true,
         },
       });
+
+      const hasKnownGeo = (value?: string | null) =>
+        !!value && value !== "Unknown";
+
+      const missingGeoSessionIds = Array.from(
+        new Set(
+          events
+            .filter(
+              (event) =>
+                !hasKnownGeo(event.city) ||
+                !hasKnownGeo(event.countryCode) ||
+                !hasKnownGeo(event.countryName)
+            )
+            .map((event) => event.sessionId)
+            .filter(Boolean)
+        )
+      );
+
+      const sessionGeoMap = new Map<
+        string,
+        { countryCode?: string | null; countryName?: string | null; city?: string | null }
+      >();
+
+      if (missingGeoSessionIds.length > 0) {
+        const sessions = await db.funnelSession.findMany({
+          where: {
+            funnelId: input.funnelId,
+            sessionId: { in: missingGeoSessionIds },
+          },
+          select: {
+            sessionId: true,
+            countryCode: true,
+            countryName: true,
+            city: true,
+          },
+        });
+
+        for (const session of sessions) {
+          sessionGeoMap.set(session.sessionId, {
+            countryCode: session.countryCode,
+            countryName: session.countryName,
+            city: session.city,
+          });
+        }
+      }
 
       // Group by country
       const countryMap = new Map<string, {
@@ -3171,8 +3296,15 @@ export const externalFunnelsRouter = createTRPCRouter({
       }>();
 
       for (const event of events) {
-        const countryCode = event.countryCode || "Unknown";
-        const countryName = event.countryName || countryCode;
+        const fallback = sessionGeoMap.get(event.sessionId);
+        const countryCode =
+          (hasKnownGeo(event.countryCode)
+            ? event.countryCode
+            : fallback?.countryCode) || "Unknown";
+        const countryName =
+          (hasKnownGeo(event.countryName)
+            ? event.countryName
+            : fallback?.countryName) || countryCode;
 
         if (!countryMap.has(countryCode)) {
           countryMap.set(countryCode, {
@@ -3202,20 +3334,33 @@ export const externalFunnelsRouter = createTRPCRouter({
       // Group by city (top cities)
       const cityMap = new Map<string, {
         city: string;
+        countryCode: string;
         countryName: string;
         count: number;
         percentage: number;
       }>();
 
       for (const event of events) {
-        if (event.city) {
-          const cityKey = `${event.city}-${event.countryCode || "Unknown"}`;
-          const cityName = event.city;
-          const countryName = event.countryName || event.countryCode || "Unknown";
+        const fallback = sessionGeoMap.get(event.sessionId);
+        const resolvedCity = hasKnownGeo(event.city)
+          ? event.city
+          : fallback?.city;
+        if (resolvedCity) {
+          const countryCode =
+            (hasKnownGeo(event.countryCode)
+              ? event.countryCode
+              : fallback?.countryCode) || "Unknown";
+          const countryName =
+            (hasKnownGeo(event.countryName)
+              ? event.countryName
+              : fallback?.countryName) || countryCode;
+          const cityKey = `${resolvedCity}-${countryCode}`;
+          const cityName = resolvedCity;
 
           if (!cityMap.has(cityKey)) {
             cityMap.set(cityKey, {
               city: cityName,
+              countryCode,
               countryName,
               count: 0,
               percentage: 0,

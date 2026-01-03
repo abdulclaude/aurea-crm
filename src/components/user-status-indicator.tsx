@@ -167,7 +167,7 @@ function UserStatusIndicatorInner() {
       });
     }
 
-    window.location.reload();
+    window.location.href = "/dashboard";
   };
 
   // Check if user has premium subscription

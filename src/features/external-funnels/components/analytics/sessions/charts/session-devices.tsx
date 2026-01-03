@@ -11,16 +11,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { motion, useInView } from "framer-motion";
-import {
-  TrendingUp,
-  TrendingDown,
-  Smartphone,
-  Monitor,
-  Tablet,
-  HelpCircle,
-} from "lucide-react";
+import { getDeviceIcon as getDeviceIconForType } from "@/constants/devices";
 
 type SessionDevicesChartProps = {
   funnelId: string;
@@ -45,29 +37,12 @@ export function SessionDevicesChart({
     refetchInterval: 5000,
     refetchIntervalInBackground: true,  });
 
-  const trend = React.useMemo(() => {
-    if (!data || data.deviceTypes.length === 0) return 0;
-
-    const mobileDevice = data.deviceTypes.find(
-      (d) => d.deviceType.toLowerCase() === "mobile"
-    );
-    const desktopDevice = data.deviceTypes.find(
-      (d) => d.deviceType.toLowerCase() === "desktop"
-    );
-
-    if (!mobileDevice && !desktopDevice) return 0;
-
-    const mobilePercentage = mobileDevice?.percentage || 0;
-    const desktopPercentage = desktopDevice?.percentage || 0;
-
-    return mobilePercentage - desktopPercentage;
-  }, [data]);
 
   if (data.totalSessions === 0) {
     return (
       <Card className="rounded-none shadow-none border-l-0 border-t-0 md:col-span-1 pb-0">
         <CardHeader>
-          <CardTitle className="text-sm">Session devices</CardTitle>
+          <CardTitle className="text-sm">Devices</CardTitle>
           <CardDescription className="text-xs">
             No device data available for the selected time range
           </CardDescription>
@@ -77,11 +52,7 @@ export function SessionDevicesChart({
   }
 
   const getDeviceIcon = (deviceType: string) => {
-    const type = deviceType.toLowerCase();
-    if (type === "mobile") return Smartphone;
-    if (type === "desktop") return Monitor;
-    if (type === "tablet") return Tablet;
-    return HelpCircle;
+    return getDeviceIconForType(deviceType);
   };
 
   const getDeviceColor = (index: number, deviceType: string) => {
@@ -119,27 +90,7 @@ export function SessionDevicesChart({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-sm flex items-center gap-2">
-              Session Devices
-              <Badge
-                variant="outline"
-                className={`${
-                  trend >= 0
-                    ? "text-blue-500 bg-blue-500/10"
-                    : "text-purple-500 bg-purple-500/10"
-                } border-none`}
-              >
-                {trend >= 0 ? (
-                  <Smartphone className="h-4 w-4" />
-                ) : (
-                  <Monitor className="h-4 w-4" />
-                )}
-                <span>
-                  {trend >= 0 ? "+" : ""}
-                  {trend.toFixed(1)}%
-                </span>
-              </Badge>
-            </CardTitle>
+            <CardTitle className="text-sm">Devices</CardTitle>
             <CardDescription className="text-xs">
               {data.totalSessions.toLocaleString()} sessions •{" "}
               {data.deviceTypes.length.toLocaleString()} device types
@@ -150,7 +101,6 @@ export function SessionDevicesChart({
       <CardContent className="px-0">
         <div className="space-y-0">
           {data.deviceTypes.map((device, index) => {
-            const opacity = 1 - index * 0.12;
             const DeviceIcon = getDeviceIcon(device.deviceType);
 
             return (
@@ -161,7 +111,6 @@ export function SessionDevicesChart({
                   index < data.deviceTypes.length - 1 &&
                     "border-b border-border/50"
                 )}
-                style={{ opacity: Math.max(opacity, 0.4) }}
               >
                 <motion.div
                   initial={{ width: 0 }}

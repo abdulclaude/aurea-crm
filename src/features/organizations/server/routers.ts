@@ -254,7 +254,7 @@ export const organizationsRouter = createTRPCRouter({
   setActiveSubaccount: protectedProcedure
     .input(
       z.object({
-        subaccountId: z.string().cuid().nullable().optional(),
+        subaccountId: z.string().min(1).nullable().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {

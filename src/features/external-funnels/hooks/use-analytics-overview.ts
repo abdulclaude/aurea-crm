@@ -102,7 +102,7 @@ export function useAnalyticsOverview(funnelId: string, timeRange: "7d" | "30d" |
 }
 
 // Country coordinates mapping
-function getCountryCoordinates(code: string): { lat: number; lng: number } {
+export function getCountryCoordinates(code: string): { lat: number; lng: number } {
 	const coords: Record<string, { lat: number; lng: number }> = {
 		US: { lat: 37.0902, lng: -95.7129 },
 		GB: { lat: 55.3781, lng: -3.436 },

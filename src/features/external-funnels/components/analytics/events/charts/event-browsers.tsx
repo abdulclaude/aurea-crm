@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, Chrome, Compass } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
+import { getBrowserIcon as getBrowserIconForType } from "@/constants/browsers";
 import {
   Select,
   SelectContent,
@@ -83,10 +84,7 @@ export function EventBrowsersChart({
 
   // Get icon for browser
   const getBrowserIcon = (browserName: string) => {
-    const name = browserName.toLowerCase();
-
-    if (name.includes("chrome")) return Chrome;
-    return Compass; // Generic browser icon
+    return getBrowserIconForType(browserName);
   };
 
   // Get color for each browser based on name

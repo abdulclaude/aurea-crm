@@ -12,14 +12,8 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import {
-  TrendingUp,
-  TrendingDown,
-  Smartphone,
-  Monitor,
-  Tablet,
-  HelpCircle,
-} from "lucide-react";
+import { Monitor, Smartphone, TrendingUp, TrendingDown } from "lucide-react";
+import { getDeviceIcon as getDeviceIconForType } from "@/constants/devices";
 import {
   Select,
   SelectContent,
@@ -93,12 +87,7 @@ export function EventDevicesChart({
 
   // Get icon for device type
   const getDeviceIcon = (deviceType: string) => {
-    const type = deviceType.toLowerCase();
-
-    if (type === "mobile") return Smartphone;
-    if (type === "desktop") return Monitor;
-    if (type === "tablet") return Tablet;
-    return HelpCircle;
+    return getDeviceIconForType(deviceType);
   };
 
   // Get color for each device based on ranking

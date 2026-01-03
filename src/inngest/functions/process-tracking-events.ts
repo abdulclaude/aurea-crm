@@ -122,6 +122,62 @@ function parseUserAgent(userAgent?: string, screenWidth?: number, screenHeight?:
 	return parseUA(userAgent, screenWidth, screenHeight);
 }
 
+type GeoCoordinates = { latitude: number; longitude: number } | null;
+
+const normalizeCountryCode = (code?: string | null) => {
+  if (!code) return undefined;
+  const normalized = code.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (normalized === "UK") return "GB";
+  return normalized;
+};
+
+async function fetchCityCoordinates({
+  city,
+  region,
+  countryCode,
+  countryName,
+}: {
+  city: string;
+  region?: string | null;
+  countryCode?: string | null;
+  countryName?: string | null;
+}): Promise<GeoCoordinates> {
+  if (!city || city === "Unknown") return null;
+
+  try {
+    const normalizedCountryCode = normalizeCountryCode(countryCode);
+    const params = new URLSearchParams({
+      format: "json",
+      limit: "1",
+      city,
+    });
+    if (region) params.set("state", region);
+    if (countryName) params.set("country", countryName);
+    if (normalizedCountryCode) {
+      params.set("countrycodes", normalizedCountryCode.toLowerCase());
+    }
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+      {
+        headers: {
+          "User-Agent": "aurea-crm/1.0",
+        },
+      }
+    );
+    if (!response.ok) return null;
+    const results = (await response.json()) as { lat?: string; lon?: string }[];
+    if (!results?.length) return null;
+    const latitude = Number(results[0].lat);
+    const longitude = Number(results[0].lon);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    return { latitude, longitude };
+  } catch (error) {
+    console.error("[Geo] Failed to geocode city:", error);
+    return null;
+  }
+}
+
 export const processTrackingEvents = inngest.createFunction(
   {
     id: "process-tracking-events",
@@ -136,6 +192,8 @@ export const processTrackingEvents = inngest.createFunction(
       events: TrackingEvent[];
       ipAddress: string;
     };
+
+    const cityGeoCache = new Map<string, GeoCoordinates>();
 
     // Step 1: Parse and enrich events
     const enrichedEvents = await step.run("enrich-events", async () => {
@@ -437,6 +495,72 @@ export const processTrackingEvents = inngest.createFunction(
       return "NEW";
     };
 
+    const getCityCoordinates = async (
+      city?: string | null,
+      countryCode?: string | null,
+      countryName?: string | null,
+      region?: string | null
+    ): Promise<GeoCoordinates> => {
+      if (!city || city === "Unknown") return null;
+
+      const originalCountryCode = countryCode?.trim().toUpperCase();
+      const normalizedCountryCode = normalizeCountryCode(countryCode);
+      const normalizedCountryName = countryName?.trim();
+      if (!normalizedCountryCode && !normalizedCountryName && !originalCountryCode) {
+        return null;
+      }
+
+      const cacheKey = `${city.trim().toLowerCase()}||${
+        originalCountryCode ||
+        normalizedCountryCode ||
+        normalizedCountryName?.toLowerCase() ||
+        "unknown"
+      }||${region?.trim().toLowerCase() || ""}`;
+      if (cityGeoCache.has(cacheKey)) {
+        return cityGeoCache.get(cacheKey) || null;
+      }
+
+      const existing = await db.funnelSession.findFirst({
+        where: {
+          city,
+          ...(normalizedCountryName ? { countryName: normalizedCountryName } : {}),
+          ...(normalizedCountryCode || originalCountryCode
+            ? {
+                countryCode:
+                  normalizedCountryCode && originalCountryCode
+                    ? { in: [normalizedCountryCode, originalCountryCode] }
+                    : normalizedCountryCode || originalCountryCode,
+              }
+            : {}),
+          ...(region ? { region } : {}),
+          latitude: { not: null },
+          longitude: { not: null },
+        },
+        select: {
+          latitude: true,
+          longitude: true,
+        },
+      });
+
+      if (existing?.latitude && existing?.longitude) {
+        const coords = {
+          latitude: existing.latitude,
+          longitude: existing.longitude,
+        };
+        cityGeoCache.set(cacheKey, coords);
+        return coords;
+      }
+
+      const coords = await fetchCityCoordinates({
+        city,
+        region,
+        countryCode: normalizedCountryCode,
+        countryName: normalizedCountryName,
+      });
+      cityGeoCache.set(cacheKey, coords);
+      return coords;
+    };
+
     // Step 4: Update or create sessions
     await step.run("update-sessions", async () => {
       const sessionIds = [...new Set(enrichedEvents.map((e) => e.sessionId))];
@@ -536,6 +660,8 @@ export const processTrackingEvents = inngest.createFunction(
             countryName: true,
             region: true,
             city: true,
+            latitude: true,
+            longitude: true,
           },
         });
         
@@ -558,6 +684,11 @@ export const processTrackingEvents = inngest.createFunction(
           !hasKnownGeo(existingSession.countryCode) ||
           !hasKnownGeo(existingSession.countryName);
 
+        const shouldUpdateCoords =
+          isNewSession ||
+          !existingSession.latitude ||
+          !existingSession.longitude;
+
         const resolvedCountryCode = resolveGeoValue(
           firstEvent.countryCode,
           lastEvent.countryCode
@@ -573,6 +704,13 @@ export const processTrackingEvents = inngest.createFunction(
         const resolvedCity = resolveGeoValue(
           firstEvent.city,
           lastEvent.city
+        );
+
+        const cityCoordinates = await getCityCoordinates(
+          resolvedCity,
+          resolvedCountryCode,
+          resolvedCountryName,
+          resolvedRegion
         );
 
         // DEBUG: Log session creation data
@@ -696,6 +834,10 @@ export const processTrackingEvents = inngest.createFunction(
             countryName: resolvedCountryName,
             region: resolvedRegion,
             city: resolvedCity,
+            ...(cityCoordinates && {
+              latitude: cityCoordinates.latitude,
+              longitude: cityCoordinates.longitude,
+            }),
             
             // Attribution tracking (persisted UTM)
             firstTouchSource: firstEvent.firstTouchUtmSource,
@@ -749,6 +891,10 @@ export const processTrackingEvents = inngest.createFunction(
               countryName: resolvedCountryName,
               region: resolvedRegion,
               city: resolvedCity,
+            }),
+            ...(shouldUpdateCoords && cityCoordinates && {
+              latitude: cityCoordinates.latitude,
+              longitude: cityCoordinates.longitude,
             }),
             
             lastSource: lastSourceValue,

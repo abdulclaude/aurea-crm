@@ -194,7 +194,6 @@ export async function createNotification(
       entityId,
       actorId,
       createdAt: new Date(),
-      updatedAt: new Date(),
     })),
   });
 

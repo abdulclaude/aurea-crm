@@ -35,7 +35,7 @@ interface AnalyticsSidebarProps {
 
 const menuGroups = [
   {
-    title: "Data",
+    title: "Overview",
     items: [
       {
         title: "Events",
@@ -52,55 +52,45 @@ const menuGroups = [
         icon: Users,
         url: "/visitors",
       },
+      {
+        title: "Web Vitals",
+        icon: Zap,
+        url: "/web-vitals",
+      },
     ],
   },
   {
-    title: "Sources & Attribution",
+    title: "Acquisition",
     items: [
       {
-        title: "Traffic Sources",
+        title: "Sources",
         icon: Share2,
         url: "/sources",
       },
       {
-        title: "UTM Analytics",
+        title: "UTM Campaigns",
         icon: TrendingUp,
         url: "/utm",
       },
       {
-        title: "Ad Performance",
+        title: "Ads",
         icon: DollarSign,
         url: "/ads",
       },
     ],
   },
   {
-    title: "Technology",
+    title: "Audience",
     items: [
-      {
-        title: "Devices",
-        icon: MonitorSmartphone,
-        url: "/devices",
-      },
       {
         title: "Geography",
         icon: Globe,
         url: "/geography",
       },
-    ],
-  },
-  {
-    title: "Performance",
-    items: [
       {
-        title: "Performance",
-        icon: Gauge,
-        url: "/performance",
-      },
-      {
-        title: "Web Vitals",
-        icon: Zap,
-        url: "/web-vitals",
+        title: "Devices",
+        icon: MonitorSmartphone,
+        url: "/devices",
       },
     ],
   },
@@ -111,16 +101,6 @@ const menuGroups = [
         title: "Funnel Flow",
         icon: Target,
         url: "/funnel",
-      },
-    ],
-  },
-  {
-    title: "Monitoring",
-    items: [
-      {
-        title: "Real-time",
-        icon: Activity,
-        url: "/realtime",
       },
     ],
   },
@@ -161,16 +141,14 @@ export function AnalyticsSidebar({ params }: AnalyticsSidebarProps) {
         }
       }
     }
-    return "Data"; // Default to Data group if no match
+    return "Overview"; // Default to Overview group if no match
   };
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    Data: true,
-    "Sources & Attribution": false,
-    Technology: false,
-    Performance: false,
+    Overview: true,
+    Acquisition: false,
+    Audience: false,
     Conversions: false,
-    Monitoring: false,
   });
 
   // Update open groups when pathname changes to auto-open the group with the active page
@@ -178,12 +156,10 @@ export function AnalyticsSidebar({ params }: AnalyticsSidebarProps) {
   useEffect(() => {
     const currentGroup = getCurrentGroup(pathname, basePath);
     setOpenGroups({
-      Data: currentGroup === "Data",
-      "Sources & Attribution": currentGroup === "Sources & Attribution",
-      Technology: currentGroup === "Technology",
-      Performance: currentGroup === "Performance",
+      Overview: currentGroup === "Overview",
+      Acquisition: currentGroup === "Acquisition",
+      Audience: currentGroup === "Audience",
       Conversions: currentGroup === "Conversions",
-      Monitoring: currentGroup === "Monitoring",
     });
   }, [pathname, basePath]);
 

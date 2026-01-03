@@ -214,9 +214,9 @@ export function InviteMembersSection({
           </CardDescription>
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="px-0">
           {/* Tabs */}
-          <div className="flex gap-1 mb-4 border-b border-black/5 dark:border-white/5">
+          <div className="flex gap-1 mb-4 border-b border-black/5 dark:border-white/5 px-6 w-full">
             <button
               type="button"
               onClick={() => setActiveTab("pending")}
@@ -258,9 +258,9 @@ export function InviteMembersSection({
           </div>
 
           {/* Invitation Items */}
-          <div className="space-y-2 grid grid-cols-2 gap-2">
+          <div className="space-y-2 grid grid-cols-2 gap-2 w-full px-6">
             {filteredInvitations.length === 0 ? (
-              <div className="text-center py-8 text-xs text-primary/75">
+              <div className="text-center py-8 text-xs text-primary/75 w-full md:col-span-2">
                 No {activeTab} invitations
               </div>
             ) : (

@@ -392,38 +392,45 @@ model BillingRule {
 }
 
 model Contact {
-  id                String              @id
-  subaccountId      String?
-  logo              String?
-  name              String
-  companyName       String?
-  email             String?
-  position          String?
-  phone             String?
-  country           String?
-  city              String?
-  score             Int?                @default(0)
-  type              ContactType         @default(LEAD)
-  source            String?
-  website           String?
-  linkedin          String?
-  tags              String[]            @default([])
-  lastInteractionAt DateTime?
-  notes             String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime
-  lifecycleStage    LifecycleStage?
-  organizationId    String
-  metadata          Json?
-  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccount        Subaccount?         @relation(fields: [subaccountId], references: [id])
-  contactAssignee  ContactAssignee[]
-  dealContact      DealContact[]
-  formSubmission   FormSubmission[]
-  rota              Rota[]
-  studioBooking    StudioBooking[]
-  studioMembership StudioMembership[]
-  timeLog          TimeLog[]
+  id                   String              @id
+  subaccountId         String?
+  logo                 String?
+  name                 String
+  companyName          String?
+  email                String?
+  position             String?
+  phone                String?
+  country              String?
+  city                 String?
+  score                Int?                @default(0)
+  type                 ContactType         @default(LEAD)
+  source               String?
+  website              String?
+  linkedin             String?
+  tags                 String[]            @default([])
+  lastInteractionAt    DateTime?
+  notes                String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime
+  lifecycleStage       LifecycleStage?
+  organizationId       String
+  metadata             Json?
+  
+  // Email campaign fields
+  emailUnsubscribed    Boolean             @default(false)
+  emailUnsubscribedAt  DateTime?
+  
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount           Subaccount?         @relation(fields: [subaccountId], references: [id])
+  contactAssignee      ContactAssignee[]
+  dealContact          DealContact[]
+  formSubmission       FormSubmission[]
+  rota                 Rota[]
+  studioBooking        StudioBooking[]
+  studioMembership     StudioMembership[]
+  timeLog              TimeLog[]
+  campaignRecipient    CampaignRecipient[]
+  unsubscribeToken     UnsubscribeToken[]
 
   @@index([organizationId, subaccountId])
   @@index([subaccountId, email])
@@ -1011,34 +1018,38 @@ model Organization {
   dunningEnabled         Boolean                  @default(true)
   AILog                  AILog[]
   Workflows              Workflows[]
-  bankTransferSettings BankTransferSettings[]
+  bankTransferSettings   BankTransferSettings[]
   contact                Contact[]
   deal                   Deal[]
   form                   Form[]
   funnel                 Funnel[]
-  globalStylePreset    GlobalStylePreset[]
+  globalStylePreset      GlobalStylePreset[]
   invitation             Invitation[]
   invoice                Invoice[]
   member                 Member[]
   pipeline               Pipeline[]
-  qrCode                QRCode[]
-  recurringInvoice      RecurringInvoice[]
+  qrCode                 QRCode[]
+  recurringInvoice       RecurringInvoice[]
   rota                   Rota[]
-  smartSection          SmartSection[]
-  stripeConnection      StripeConnection[]
-  studioClass           StudioClass[]
+  smartSection           SmartSection[]
+  stripeConnection       StripeConnection[]
+  studioClass            StudioClass[]
   subaccount             Subaccount[]
-  subaccountModule      SubaccountModule[]
-  timeLog               TimeLog[]
+  subaccountModule       SubaccountModule[]
+  timeLog                TimeLog[]
   worker                 Worker[]
-  shiftSwapRequest      ShiftSwapRequest[]
-  workerAvailability    WorkerAvailability[]
-  timeOffRequest        TimeOffRequest[]
-  overtimeTracking      OvertimeTracking[]
-  payrollRun            PayrollRun[]
-  workerPayment         WorkerPayment[]
-  adSpend               AdSpend[]
-  adPlatformCredential  AdPlatformCredential[]
+  shiftSwapRequest       ShiftSwapRequest[]
+  workerAvailability     WorkerAvailability[]
+  timeOffRequest         TimeOffRequest[]
+  overtimeTracking       OvertimeTracking[]
+  payrollRun             PayrollRun[]
+  workerPayment          WorkerPayment[]
+  adSpend                AdSpend[]
+  adPlatformCredential   AdPlatformCredential[]
+  // Email campaigns
+  emailDomain            EmailDomain[]
+  emailTemplate          EmailTemplate[]
+  campaign               Campaign[]
 }
 
 model PaymentIntegration {
@@ -1418,32 +1429,36 @@ model Subaccount {
   Execution              Execution[]  
   Webhook                Webhook[]
   Workflows              Workflows[]
-  bankTransferSettings BankTransferSettings?
+  bankTransferSettings   BankTransferSettings?
   contact                Contact[]
   deal                   Deal[]
   form                   Form[]
   funnel                 Funnel[]
-  globalStylePreset    GlobalStylePreset[]
+  globalStylePreset      GlobalStylePreset[]
   pipeline               Pipeline[]
-  qrCode                QRCode[]
+  qrCode                 QRCode[]
   rota                   Rota[]
-  smartSection          SmartSection[]
-  stripeConnection      StripeConnection?
-  studioClass           StudioClass[]
+  smartSection           SmartSection[]
+  stripeConnection       StripeConnection?
+  studioClass            StudioClass[]
   user                   User?                   @relation(fields: [createdByUserId], references: [id])
   organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subaccountMember      SubaccountMember[]
-  subaccountModule      SubaccountModule[]
-  timeLog               TimeLog[]
+  subaccountMember       SubaccountMember[]
+  subaccountModule       SubaccountModule[]
+  timeLog                TimeLog[]
   worker                 Worker[]
-  shiftSwapRequest      ShiftSwapRequest[]
-  timeOffRequest        TimeOffRequest[]
-  payrollRun            PayrollRun[]
-  workerPayment         WorkerPayment[]
-  funnelEvent           FunnelEvent[]
-  funnelSession         FunnelSession[]
-  adSpend               AdSpend[]
-  adPlatformCredential  AdPlatformCredential[]
+  shiftSwapRequest       ShiftSwapRequest[]
+  timeOffRequest         TimeOffRequest[]
+  payrollRun             PayrollRun[]
+  workerPayment          WorkerPayment[]
+  funnelEvent            FunnelEvent[]
+  funnelSession          FunnelSession[]
+  adSpend                AdSpend[]
+  adPlatformCredential   AdPlatformCredential[]
+  // Email campaigns
+  emailDomain            EmailDomain[]
+  emailTemplate          EmailTemplate[]
+  campaign               Campaign[]
 
   @@index([organizationId])
 }
@@ -1933,6 +1948,7 @@ enum CredentialType {
   OPENAI
   TELEGRAM_BOT
   MINDBODY
+  RESEND
 }
 
 enum DeviceType {
@@ -2805,6 +2821,8 @@ model FunnelSession {
   countryName      String?      // United States, United Kingdom, etc.
   region           String?      // California, England, etc.
   city             String?      // San Francisco, London, etc.
+  latitude         Float?
+  longitude        Float?
   
   // GDPR Compliance
   consentGiven     Boolean      @default(false)
@@ -2990,4 +3008,227 @@ model AdPlatformCredential {
   @@index([organizationId, platform])
 }
 
+// =============================================================================
+// EMAIL CAMPAIGNS SYSTEM
+// =============================================================================
 
+// Email Domains - Client sending domains verified via Resend
+model EmailDomain {
+  id               String            @id @default(cuid())
+  organizationId   String
+  subaccountId     String?
+  
+  // Domain info
+  domain           String            // e.g., "mail.clienta.com"
+  resendDomainId   String?           // Resend's domain ID
+  status           EmailDomainStatus @default(PENDING)
+  
+  // DNS records (stored for display to client)
+  dnsRecords       Json?             // Array of { type, name, value, priority? }
+  
+  // Sending defaults
+  defaultFromName  String?           // e.g., "Client A"
+  defaultFromEmail String?           // e.g., "hello" (prefix before @)
+  defaultReplyTo   String?
+  
+  verifiedAt       DateTime?
+  lastCheckedAt    DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?       @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  campaigns        Campaign[]
+  
+  @@unique([domain])
+  @@index([organizationId, subaccountId])
+}
+
+enum EmailDomainStatus {
+  PENDING       // Domain added, awaiting DNS setup
+  VERIFYING     // Checking DNS records
+  VERIFIED      // Ready to send
+  FAILED        // Verification failed
+}
+
+// Email Templates - Reusable email designs
+model EmailTemplate {
+  id               String            @id @default(cuid())
+  organizationId   String
+  subaccountId     String?
+  
+  name             String
+  description      String?
+  
+  // Template type determines the React Email base component
+  type             EmailTemplateType @default(MARKETING)
+  
+  // User-editable content stored as JSON
+  // Structure: { subject, preheader, sections: [...] }
+  content          Json
+  
+  // Design settings: { primaryColor, logoUrl, fontFamily, etc. }
+  design           Json?
+  
+  // Template can be a "starter" that comes with the system
+  isSystemTemplate Boolean           @default(false)
+  
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount       Subaccount?       @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  campaigns        Campaign[]
+  
+  @@index([organizationId, subaccountId])
+}
+
+enum EmailTemplateType {
+  MARKETING       // Newsletter, promotional
+  ANNOUNCEMENT    // Product launch, updates
+  PLAIN           // Simple text-focused
+  CUSTOM          // Fully custom layout
+}
+
+// Campaigns - Email blasts to contacts
+model Campaign {
+  id                String              @id @default(cuid())
+  organizationId    String
+  subaccountId      String?
+  
+  // Basic info
+  name              String
+  status            CampaignStatus      @default(DRAFT)
+  
+  // Email content (can override template or be standalone)
+  templateId        String?
+  subject           String
+  preheaderText     String?             // Preview text in inbox
+  content           Json                // Same structure as EmailTemplate.content
+  
+  // Sender info
+  emailDomainId     String?
+  fromName          String?
+  fromEmail         String?             // Just the prefix, domain comes from EmailDomain
+  replyTo           String?
+  
+  // Targeting - which contacts to send to
+  segmentType       CampaignSegmentType @default(ALL)
+  segmentFilter     Json?               // Filter criteria based on segmentType
+  
+  // Scheduling
+  scheduledAt       DateTime?           // When to send (null = manual send)
+  sentAt            DateTime?           // When actually sent
+  
+  // Resend tracking
+  resendTemplateId  String?             // Optional Resend template ID
+  resendBroadcastId String?
+  
+  // Analytics (updated via webhooks)
+  totalRecipients   Int                 @default(0)
+  delivered         Int                 @default(0)
+  opened            Int                 @default(0)
+  clicked           Int                 @default(0)
+  bounced           Int                 @default(0)
+  complained        Int                 @default(0)  // Spam reports
+  unsubscribed      Int                 @default(0)
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subaccount        Subaccount?         @relation(fields: [subaccountId], references: [id], onDelete: Cascade)
+  emailDomain       EmailDomain?        @relation(fields: [emailDomainId], references: [id], onDelete: SetNull)
+  template          EmailTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  
+  // Track individual recipient events
+  recipients        CampaignRecipient[]
+  
+  @@index([organizationId, subaccountId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+enum CampaignStatus {
+  DRAFT           // Being edited
+  SCHEDULED       // Waiting for scheduledAt
+  QUEUED          // Picked up by Inngest, sending
+  SENDING         // Actively sending
+  SENT            // Completed
+  PAUSED          // Manually paused
+  FAILED          // Failed to send
+  CANCELLED       // Cancelled before sending
+}
+
+enum CampaignSegmentType {
+  ALL             // All contacts with email
+  BY_TYPE         // Filter by ContactType (LEAD, CUSTOMER, etc.)
+  BY_TAGS         // Filter by contact tags
+  BY_LIFECYCLE    // Filter by lifecycleStage
+  BY_COUNTRY      // Filter by country
+  CUSTOM          // Complex filter in segmentFilter JSON
+}
+
+// Campaign Recipients - Per-contact tracking
+model CampaignRecipient {
+  id              String                    @id @default(cuid())
+  campaignId      String
+  contactId       String
+  
+  // Resend email ID for this specific send
+  resendEmailId   String?
+  
+  // Event tracking
+  status          CampaignRecipientStatus   @default(PENDING)
+  deliveredAt     DateTime?
+  openedAt        DateTime?                 // First open
+  clickedAt       DateTime?                 // First click
+  bouncedAt       DateTime?
+  complainedAt    DateTime?
+  unsubscribedAt  DateTime?
+  
+  // Click tracking
+  clickCount      Int                       @default(0)
+  clickedLinks    Json?                     // Array of clicked URLs
+  
+  // Open tracking  
+  openCount       Int                       @default(0)
+  
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  
+  campaign        Campaign                  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact         Contact                   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@unique([campaignId, contactId])
+  @@index([contactId])
+  @@index([status])
+}
+
+enum CampaignRecipientStatus {
+  PENDING         // Not yet sent
+  SENT            // Sent to Resend
+  DELIVERED       // Confirmed delivered
+  OPENED          // Opened at least once
+  CLICKED         // Clicked at least once
+  BOUNCED         // Hard or soft bounce
+  COMPLAINED      // Marked as spam
+  UNSUBSCRIBED    // Clicked unsubscribe
+  FAILED          // Failed to send
+}
+
+// Unsubscribe Tokens - For secure unsubscribe links
+model UnsubscribeToken {
+  id              String    @id @default(cuid())
+  contactId       String
+  campaignId      String?   // Optional - which campaign triggered unsubscribe
+  token           String    @unique  // Secure random token
+  usedAt          DateTime?
+  expiresAt       DateTime  // Tokens expire after 1 year
+  createdAt       DateTime  @default(now())
+  
+  contact         Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  @@index([token])
+  @@index([contactId])
+}

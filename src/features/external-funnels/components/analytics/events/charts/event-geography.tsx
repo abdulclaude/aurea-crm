@@ -10,10 +10,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { TrendingUp, TrendingDown, Globe, MapPin } from "lucide-react";
+import { Globe } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -39,9 +45,6 @@ export function EventGeographyChart({
 }: EventGeographyChartProps) {
   const trpc = useTRPC();
   const [selectedEvent, setSelectedEvent] = React.useState<string | null>(null);
-  const [viewMode, setViewMode] = React.useState<"countries" | "cities">(
-    "countries"
-  );
   const ref = React.useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-50px" });
 
@@ -52,7 +55,8 @@ export function EventGeographyChart({
       timeRange,
     }),
     refetchInterval: 5000,
-    refetchIntervalInBackground: true,  });
+    refetchIntervalInBackground: true,
+  });
 
   // Get geography breakdown for selected event
   const { data: geographyData } = useSuspenseQuery({
@@ -62,31 +66,8 @@ export function EventGeographyChart({
       timeRange,
     }),
     refetchInterval: 5000,
-    refetchIntervalInBackground: true,  });
-
-  // Calculate trend (comparing top location vs rest)
-  const trend = React.useMemo(() => {
-    if (!geographyData) return 0;
-
-    if (viewMode === "countries" && geographyData.countries.length === 0)
-      return 0;
-    if (viewMode === "cities" && geographyData.cities.length === 0) return 0;
-
-    const topPercentage =
-      viewMode === "countries"
-        ? geographyData.countries[0]?.percentage || 0
-        : geographyData.cities[0]?.percentage || 0;
-
-    const totalLocations =
-      viewMode === "countries"
-        ? geographyData.totalCountries
-        : geographyData.totalCities;
-
-    const avgPercentage = 100 / totalLocations;
-
-    // Positive trend = top location dominates (good for targeting)
-    return topPercentage - avgPercentage;
-  }, [geographyData, viewMode]);
+    refetchIntervalInBackground: true,
+  });
 
   const eventGroups = React.useMemo(() => {
     const grouped = new Map<string, typeof eventsData.eventTypes>();
@@ -134,7 +115,7 @@ export function EventGeographyChart({
       return <Globe className="w-6 h-4" />;
     }
 
-    return <FlagComponent className="w-6 h-4 rounded-sm shadow-sm" />;
+    return <FlagComponent className="w-6 h-4 shadow-sm" />;
   };
 
   // Get color for each location based on ranking
@@ -160,8 +141,38 @@ export function EventGeographyChart({
     return colors[index % colors.length];
   };
 
-  const dataToDisplay =
-    viewMode === "countries" ? geographyData.countries : geographyData.cities;
+  const citiesByCountry = React.useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        countryCode: string;
+        countryName: string;
+        cities: typeof geographyData.cities;
+      }
+    >();
+
+    for (const city of geographyData.cities) {
+      const countryCode = city.countryCode || "Unknown";
+      const countryName = city.countryName || countryCode;
+      const key = `${countryCode}-${countryName}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          countryCode,
+          countryName,
+          cities: [],
+        });
+      }
+
+      map.get(key)!.cities.push(city);
+    }
+
+    for (const entry of map.values()) {
+      entry.cities.sort((a, b) => b.count - a.count);
+    }
+
+    return map;
+  }, [geographyData.cities]);
 
   return (
     <Card
@@ -177,37 +188,6 @@ export function EventGeographyChart({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* View Mode Toggle */}
-            <div className="flex items-center gap-0 border rounded-md overflow-hidden">
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "text-xs h-8 !px-2 rounded-none",
-                  viewMode === "countries" &&
-                    "bg-sky-400 hover:bg-sky-500 text-white hover:text-white"
-                )}
-                onClick={() => setViewMode("countries")}
-              >
-                <Globe className="size-3.5" />
-                Countries
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "text-xs !h-8 !px-2 rounded-none",
-                  viewMode === "cities" &&
-                    "bg-sky-400 hover:bg-sky-500 text-white hover:text-white"
-                )}
-                onClick={() => setViewMode("cities")}
-              >
-                <MapPin className="size-3.5" />
-                Cities
-              </Button>
-            </div>
-
             {/* Event Selector */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -253,23 +233,16 @@ export function EventGeographyChart({
 
       <CardContent className="px-0 py-0!">
         <div className="space-y-0">
-          {viewMode === "countries" ? (
-            // Countries View
-            <>
-              {geographyData.countries.map((country, index) => {
-                const opacity = 1 - index * 0.12; // Fade out as we go down
+          <Accordion type="single" collapsible>
+            {geographyData.countries.map((country, index) => {
+              const countryKey = `${country.countryCode}-${country.countryName}`;
+              const cities =
+                citiesByCountry.get(countryKey)?.cities ?? [];
+              const countryTotal = country.count || 0;
 
-                return (
-                  <div
-                    key={country.countryCode}
-                    className={cn(
-                      "relative flex items-center justify-between px-6 py-3 transition-all duration-150 hover:bg-accent/50 overflow-hidden",
-                      index < geographyData.countries.length - 1 &&
-                        "border-b border-border/50"
-                    )}
-                    style={{ opacity: Math.max(opacity, 0.4) }}
-                  >
-                    {/* Background fill based on percentage */}
+              return (
+                <AccordionItem key={countryKey} value={countryKey}>
+                  <AccordionTrigger className="relative overflow-hidden rounded-none px-6 py-3 [&>svg]:self-center">
                     <motion.div
                       initial={{ width: 0 }}
                       animate={
@@ -287,109 +260,102 @@ export function EventGeographyChart({
                         getBackgroundColor(index)
                       )}
                     />
-
-                    {/* Content */}
-                    <div className="relative flex items-center gap-3">
-                      {/* Country Flag */}
-                      <div
-                        className={cn(
-                          "flex items-center justify-center w-10 h-10 rounded-lg overflow-hidden",
-                          getLocationColor(index)
-                        )}
-                      >
-                        {getCountryFlag(country.countryCode)}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">
-                          {country.countryName}
+                    <div className="relative flex w-full items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center justify-center w-10 h-10">
+                          {getCountryFlag(country.countryCode)}
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {country.percentage.toFixed(1)}% of total
-                          {country.revenue > 0 &&
-                            ` • $${country.revenue.toLocaleString()} revenue`}
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium">
+                            {country.countryName}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {country.percentage.toFixed(1)}% of total
+                            {country.revenue > 0 &&
+                              ` • $${country.revenue.toLocaleString()} revenue`}
+                          </span>
                         </div>
                       </div>
-                    </div>
-
-                    <div className="relative text-right">
-                      <div className="text-2xl font-bold font-mono">
+                      <div className="text-sm font-semibold">
                         {country.count.toLocaleString()}
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </>
-          ) : (
-            // Cities View
-            <>
-              {geographyData.cities.map((city, index) => {
-                const opacity = 1 - index * 0.12; // Fade out as we go down
+                  </AccordionTrigger>
 
-                return (
-                  <div
-                    key={`${city.city}-${city.countryName}`}
-                    className={cn(
-                      "relative flex items-center justify-between px-6 py-3 transition-all duration-150 hover:bg-accent/50 overflow-hidden",
-                      index < geographyData.cities.length - 1 &&
-                        "border-b border-border/50"
+                  <AccordionContent className="py-0 h-full">
+                    {cities.length === 0 ? (
+                      <div className="px-6 py-3 text-xs text-muted-foreground">
+                        No city data available
+                      </div>
+                    ) : (
+                      <div className="space-y-0">
+                        {cities.map((city, cityIndex) => {
+                          const indexOffset = cityIndex + index * 4;
+                          const cityPercent =
+                            countryTotal > 0
+                              ? (city.count / countryTotal) * 100
+                              : 0;
+                          return (
+                            <div
+                              key={`${city.city}-${city.countryCode}`}
+                              className={cn(
+                                "relative flex items-center justify-between px-6 py-3 transition-all duration-150 hover:bg-accent/50 overflow-hidden",
+                                cityIndex < cities.length - 1 &&
+                                  "border-b border-border/50"
+                              )}
+                            >
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={
+                                  isInView
+                                    ? { width: `${cityPercent}%` }
+                                    : { width: 0 }
+                                }
+                                transition={{
+                                  duration: 0.8,
+                                  delay: indexOffset * 0.05,
+                                  ease: [0.25, 0.1, 0.25, 1],
+                                }}
+                                className={cn(
+                                  "absolute inset-y-0 left-0",
+                                  getBackgroundColor(indexOffset)
+                                )}
+                              />
+
+                              <div className="relative flex items-center gap-3">
+                                <div className="flex items-center justify-center w-10 h-10">
+                                  {getCountryFlag(city.countryCode)}
+                                </div>
+                                <div>
+                                  <div className="text-sm font-medium">
+                                    {city.city}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {cityPercent.toFixed(1)}% of country
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="relative text-right">
+                                <div className="text-2xl font-bold font-mono">
+                                  {city.count.toLocaleString()}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                    style={{ opacity: Math.max(opacity, 0.4) }}
-                  >
-                    {/* Background fill based on percentage */}
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={
-                        isInView
-                          ? { width: `${city.percentage}%` }
-                          : { width: 0 }
-                      }
-                      transition={{
-                        duration: 0.8,
-                        delay: index * 0.05,
-                        ease: [0.25, 0.1, 0.25, 1],
-                      }}
-                      className={cn(
-                        "absolute inset-y-0 left-0",
-                        getBackgroundColor(index)
-                      )}
-                    />
-
-                    {/* Content */}
-                    <div className="relative flex items-center gap-3">
-                      {/* City Icon */}
-                      <div
-                        className={cn(
-                          "flex items-center justify-center w-10 h-10 rounded-lg",
-                          getLocationColor(index)
-                        )}
-                      >
-                        <MapPin className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">{city.city}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {city.countryName} • {city.percentage.toFixed(1)}% of
-                          total
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="relative text-right">
-                      <div className="text-2xl font-bold font-mono">
-                        {city.count.toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          )}
+                  </AccordionContent>
+                </AccordionItem>
+              );
+            })}
+          </Accordion>
         </div>
 
-        {dataToDisplay.length === 0 && (
+        {geographyData.countries.length === 0 && (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-            No {viewMode === "countries" ? "country" : "city"} data available
+            No country data available
           </div>
         )}
       </CardContent>

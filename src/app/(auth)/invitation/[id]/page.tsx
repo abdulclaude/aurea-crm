@@ -192,7 +192,13 @@ function InvitationPageContent() {
         )} */}
 
         {/* Invitation Details */}
-        <div className="flex items-center gap-2 p-8 py-6 pb-5">
+        <div className="flex flex-col items-center gap-2 p-8 py-6 pb-5">
+          {invitation.subaccount && (
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
+              Client Workspace
+            </p>
+          )}
+
           <p className="text-base text-gray-600 dark:text-gray-400">
             <span className="font-semibold text-gray-900 dark:text-white">
               {invitation.inviter.name}
@@ -202,7 +208,7 @@ function InvitationPageContent() {
 
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center">
-              <Avatar className="size-6">
+              <Avatar className="size-5 text-xs">
                 <AvatarImage src={entityLogo ?? undefined} alt={entityName} />
                 <AvatarFallback className="bg-[#202e32] text-white">
                   {entityName[0]}
@@ -214,12 +220,6 @@ function InvitationPageContent() {
               {entityName}
             </p>
           </div>
-
-          {invitation.subaccount && (
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
-              Client Workspace
-            </p>
-          )}
         </div>
 
         <Separator className="bg-black/10 dark:bg-white/5" />

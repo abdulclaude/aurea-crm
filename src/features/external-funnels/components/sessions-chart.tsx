@@ -31,7 +31,7 @@ export function SessionsChart({ funnelId }: SessionsChartProps) {
   >("7d");
   const [view, setView] = useQueryState(
     "sessionsView",
-    parseAsString.withDefault("table")
+    parseAsString.withDefault("chart")
   );
 
   const handleViewChange = React.useCallback(
@@ -47,7 +47,8 @@ export function SessionsChart({ funnelId }: SessionsChartProps) {
       timeRange,
     }),
     refetchInterval: 5000,
-    refetchIntervalInBackground: true,  });
+    refetchIntervalInBackground: true,
+  });
 
   return (
     <div className="space-y-0">
@@ -96,8 +97,6 @@ export function SessionsChart({ funnelId }: SessionsChartProps) {
             timeRange={timeRange}
           />
           <SessionAvgDurationChart funnelId={funnelId} timeRange={timeRange} />
-          <SessionDevicesChart funnelId={funnelId} timeRange={timeRange} />
-          <SessionBrowsersChart funnelId={funnelId} timeRange={timeRange} />
           <SessionAvgPageViewsChart funnelId={funnelId} timeRange={timeRange} />
           <SessionExperienceScoreChart
             funnelId={funnelId}
