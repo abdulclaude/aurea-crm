@@ -10,6 +10,6 @@ export default defineConfig({
   },
 
   datasource: {
-    url: process.env.DIRECT_URL ?? "",
+    url: env("DIRECT_URL"),
   },
 });
