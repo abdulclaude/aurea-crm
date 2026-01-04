@@ -219,7 +219,8 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
       !sessionCoords && city !== "Unknown"
         ? cityCoordsByKey.get(`${city}-${countryCode}`) || null
         : null;
-    const coords = sessionCoords || cityCoords || getCountryCoordinates(countryCode);
+    const coords =
+      sessionCoords || cityCoords || getCountryCoordinates(countryCode);
     if (coords.lat == null || coords.lng == null) return null;
     const jittered = sessionCoords
       ? { lat: coords.lat, lng: coords.lng }
@@ -649,7 +650,7 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
         <Card className="ring-0 shadow-none border-y-0 rounded-none border-r-0 gap-2 justify-between">
           <CardHeader className="">
             <CardDescription className="text-xs font-medium">
-              Top country by conversions
+              Top country by sessions
             </CardDescription>
           </CardHeader>
           <CardContent>

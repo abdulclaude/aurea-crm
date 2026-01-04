@@ -38,14 +38,14 @@ function InvitesPageContent() {
     <div className=" py-8">
       <div className="px-6 ">
         <h1 className="text-lg font-semibold text-primary dark:text-white">
-          Team Invitations
+          Team invitations
         </h1>
 
         <p className="text-xs text-primary/60">
           Invite team members to join{" "}
           {activeSubaccount
             ? activeSubaccount.companyName
-            : activeOrg?.name ?? "Organization"}
+            : (activeOrg?.name ?? "Organization")}
         </p>
       </div>
 

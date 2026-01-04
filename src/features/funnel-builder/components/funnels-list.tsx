@@ -30,7 +30,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, MoreVertical, Pencil, Trash2, ExternalLink, Globe, Code, Sparkles } from "lucide-react";
+import {
+  Plus,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  ExternalLink,
+  Globe,
+  Code,
+  Sparkles,
+} from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { CreateFunnelDialog } from "./create-funnel-dialog";
 import { RegisterExternalFunnelDialog } from "@/features/external-funnels/components/register-external-funnel-dialog";
@@ -83,8 +92,12 @@ export function FunnelsList() {
   };
 
   const allFunnels = data?.funnels ?? [];
-  const builderFunnels = allFunnels.filter((f: any) => f.funnelType === FunnelType.INTERNAL || !f.funnelType);
-  const customFunnels = allFunnels.filter((f: any) => f.funnelType === FunnelType.EXTERNAL);
+  const builderFunnels = allFunnels.filter(
+    (f: any) => f.funnelType === FunnelType.INTERNAL || !f.funnelType
+  );
+  const customFunnels = allFunnels.filter(
+    (f: any) => f.funnelType === FunnelType.EXTERNAL
+  );
 
   const renderFunnelCard = (funnel: any, isCustom: boolean) => (
     <Card
@@ -108,10 +121,7 @@ export function FunnelsList() {
           </CardDescription>
         </div>
         <DropdownMenu>
-          <DropdownMenuTrigger
-            asChild
-            onClick={(e) => e.stopPropagation()}
-          >
+          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button variant="ghost" size="icon" className="h-8 w-8">
               <MoreVertical className="h-4 w-4" />
             </Button>
@@ -130,6 +140,7 @@ export function FunnelsList() {
             )}
             {funnel.externalUrl && (
               <DropdownMenuItem
+                className="font-medium"
                 onClick={(e) => {
                   e.stopPropagation();
                   if (funnel.externalUrl) {
@@ -137,31 +148,32 @@ export function FunnelsList() {
                   }
                 }}
               >
-                <ExternalLink className="mr-2 h-4 w-4" />
-                {isCustom ? "View Website" : "View Live"}
+                <ExternalLink className=" h-4 w-4" />
+                {isCustom ? "View website" : "View live"}
               </DropdownMenuItem>
             )}
             {isCustom && (
               <DropdownMenuItem
+                className="font-medium"
                 onClick={(e) => {
                   e.stopPropagation();
-                  router.push(`/funnels/${funnel.id}/analytics`);
+                  router.push(`/funnels/${funnel.id}/analytics/events`);
                 }}
               >
-                <Globe className="mr-2 h-4 w-4" />
-                View Analytics
+                <Globe className="h-4 w-4" />
+                View analytics
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
+              className="font-medium text-destructive hover:bg-rose-500 hover:text-white"
               onClick={(e) => {
                 e.stopPropagation();
                 setFunnelToDelete(funnel.id);
                 setDeleteDialogOpen(true);
               }}
-              className="text-destructive"
             >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Delete
+              <Trash2 className="h-4 w-4" />
+              Delete funnel
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -193,7 +205,11 @@ export function FunnelsList() {
   return (
     <>
       <div className="flex flex-col gap-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as any)}
+          className="w-full"
+        >
           <div className="flex items-center justify-between">
             <TabsList>
               <TabsTrigger value="builder" className="gap-2">
@@ -206,7 +222,10 @@ export function FunnelsList() {
               </TabsTrigger>
             </TabsList>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setRegisterExternalOpen(true)}>
+              <Button
+                variant="outline"
+                onClick={() => setRegisterExternalOpen(true)}
+              >
                 <Globe className="mr-2 h-4 w-4" />
                 Register Custom
               </Button>
@@ -224,10 +243,12 @@ export function FunnelsList() {
                   <div className="rounded-full bg-muted p-4 mb-4">
                     <Sparkles className="h-8 w-8 text-muted-foreground" />
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">No builder funnels yet</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    No builder funnels yet
+                  </h3>
                   <p className="text-sm text-muted-foreground mb-4 text-center max-w-md">
-                    Create your first funnel using our drag-and-drop builder to design
-                    high-converting landing pages and sales funnels.
+                    Create your first funnel using our drag-and-drop builder to
+                    design high-converting landing pages and sales funnels.
                   </p>
                   <Button onClick={() => setCreateDialogOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" />
@@ -237,7 +258,9 @@ export function FunnelsList() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {builderFunnels.map((funnel) => renderFunnelCard(funnel, false))}
+                {builderFunnels.map((funnel) =>
+                  renderFunnelCard(funnel, false)
+                )}
               </div>
             )}
           </TabsContent>
@@ -249,10 +272,13 @@ export function FunnelsList() {
                   <div className="rounded-full bg-muted p-4 mb-4">
                     <Code className="h-8 w-8 text-muted-foreground" />
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">No custom funnels yet</h3>
+                  <h3 className="text-lg font-semibold mb-2">
+                    No custom funnels yet
+                  </h3>
                   <p className="text-sm text-muted-foreground mb-4 text-center max-w-md">
-                    Register your custom-built funnels (Next.js, React, etc.) to track
-                    conversions, visitor behavior, and integrate with workflows.
+                    Register your custom-built funnels (Next.js, React, etc.) to
+                    track conversions, visitor behavior, and integrate with
+                    workflows.
                   </p>
                   <Button onClick={() => setRegisterExternalOpen(true)}>
                     <Globe className="mr-2 h-4 w-4" />

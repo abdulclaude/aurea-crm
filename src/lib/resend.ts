@@ -94,7 +94,7 @@ If you didn't expect this invitation, you can safely ignore this email.
 
   try {
     const result = await resend.emails.send({
-      from: normalizedFrom || "noreply@abdallahkalenga.com",
+      from: normalizedFrom || "noreply@aureamedia.co.uk",
       to,
       subject,
       html,

@@ -34,7 +34,7 @@ function InvitationPageContent() {
     isLoading,
   } = useQuery({
     ...trpc.organizations.getInvitation.queryOptions({ invitationId }),
-    enabled: !isSessionPending,
+    enabled: !isSessionPending && !success,
   });
 
   const acceptMutation = useMutation({
@@ -87,50 +87,13 @@ function InvitationPageContent() {
   useEffect(() => {
     if (success) {
       const timer = setTimeout(() => {
-        router.push("/dashboard");
-        window.location.reload();
-      }, 2000);
+        router.replace("/dashboard");
+        router.refresh();
+      }, 1200);
 
       return () => clearTimeout(timer);
     }
   }, [success, router]);
-
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center">
-          <LoaderIcon className="mx-auto h-8 w-8 animate-spin text-primary" />
-          <p className="mt-4 text-sm text-muted-foreground">
-            Loading invitation...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (fetchError) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
-        <div className="w-full max-w-md rounded-xl ring ring-rose-400/80 bg-white p-8 text-center shadow-xl">
-          <XIcon className="mx-auto h-16 w-16 text-red-500" />
-          <h1 className="mt-4 text-2xl font-bold text-gray-900 dark:text-white">
-            Invalid invitation
-          </h1>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {fetchError.message ||
-              "This invitation link is invalid or has expired."}
-          </p>
-          <Button
-            onClick={() => router.push("/dashboard")}
-            className="mt-6"
-            variant="outline"
-          >
-            Go to Dashboard
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   if (success) {
     return (
@@ -150,6 +113,41 @@ function InvitationPageContent() {
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-500">
             Redirecting you now...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center">
+          <LoaderIcon className="mx-auto h-8 w-8 animate-spin text-primary" />
+          <p className="mt-3 text-sm text-primary/75">Loading invitation...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+        <div className="w-full max-w-md rounded-xl ring ring-rose-400/80 bg-white p-8 text-center shadow-xl">
+          <XIcon className="mx-auto h-16 w-16 text-red-500" />
+          <h1 className="mt-4 text-2xl font-bold text-gray-900 dark:text-white">
+            Invalid invitation
+          </h1>
+          <p className="mt-2 text-sm text-primary/75 dark:text-gray-400">
+            {fetchError.message ||
+              "This invitation link is invalid or has expired."}
+          </p>
+          <Button
+            onClick={() => router.push("/dashboard")}
+            className="mt-6"
+            variant="outline"
+          >
+            Go to Dashboard
+          </Button>
         </div>
       </div>
     );
@@ -283,11 +281,11 @@ function InvitationPageContent() {
                 (session?.user && session.user.email !== invitation.email)
               }
               variant="gradient"
-              className="w-max h-8"
+              className="w-max h-8 font-medium"
             >
               {accepting ? (
                 <>
-                  <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />
+                  <LoaderIcon className="h-4 w-4 animate-spin" />
                   Accepting...
                 </>
               ) : !session?.user ? (

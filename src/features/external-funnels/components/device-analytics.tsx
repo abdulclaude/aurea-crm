@@ -109,8 +109,9 @@ export function DeviceAnalytics({ funnelId }: DeviceAnalyticsProps) {
           {/* Donut Chart - Device Type Distribution */}
 
           <div className="grid md:grid-cols-3">
-            <SessionDevicesChart funnelId={funnelId} timeRange={timeRange} />
             <SessionBrowsersChart funnelId={funnelId} timeRange={timeRange} />
+            <SessionDevicesChart funnelId={funnelId} timeRange={timeRange} />
+
             <SessionOperatingSystemsChart
               funnelId={funnelId}
               timeRange={timeRange}
