@@ -711,7 +711,7 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
         </div>
       ) : (
         <div className="">
-          <div className="w-full h-[1030px] overflow-hidden">
+          <div className="w-full h-[calc(100vh-240px)] min-h-[520px] overflow-hidden mb-6">
             <MapView
               center={[0, 40]}
               zoom={2}

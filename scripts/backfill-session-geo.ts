@@ -15,6 +15,7 @@ const limitArg = getArgValue("--limit");
 const sleepArg = getArgValue("--sleepMs");
 const updateLimit = limitArg ? Number(limitArg) : undefined;
 const sleepMs = sleepArg ? Number(sleepArg) : 1000;
+const shouldLogFailures = process.env.LOG_GEO_FAILURES === "1";
 
 if (updateLimit !== undefined && !Number.isFinite(updateLimit)) {
   console.warn(`[Backfill] Invalid --limit value: ${limitArg}`);
@@ -31,6 +32,34 @@ const normalizeCountryCode = (code?: string | null) => {
   return normalized;
 };
 
+const CITY_ALIASES: Record<string, string> = {
+  "águeda municipality": "Águeda",
+  "leicestershire": "Leicester",
+};
+
+const normalizeCityName = (city: string) => {
+  const trimmed = city.trim();
+  const lower = trimmed.toLowerCase();
+  if (CITY_ALIASES[lower]) return CITY_ALIASES[lower];
+
+  const suffixes = [
+    " municipality",
+    " county",
+    " province",
+    " region",
+    " district",
+    " governorate",
+  ];
+  for (const suffix of suffixes) {
+    if (lower.endsWith(suffix)) {
+      const withoutSuffix = trimmed.slice(0, -suffix.length).trim();
+      if (withoutSuffix) return withoutSuffix;
+    }
+  }
+
+  return trimmed;
+};
+
 const fetchCityCoordinates = async ({
   city,
   region,
@@ -42,36 +71,76 @@ const fetchCityCoordinates = async ({
   countryCode?: string | null;
   countryName?: string | null;
 }): Promise<GeoCoordinates> => {
-  try {
-    const normalizedCountryCode = normalizeCountryCode(countryCode);
-    const params = new URLSearchParams({
-      format: "json",
-      limit: "1",
-      city,
-    });
-    if (region) params.set("state", region);
-    if (countryName) params.set("country", countryName);
-    if (normalizedCountryCode) {
-      params.set("countrycodes", normalizedCountryCode.toLowerCase());
+  const normalizedCountryCode = normalizeCountryCode(countryCode);
+  const cleanRegion =
+    region && region.toLowerCase() !== "unknown" ? region : undefined;
+  const normalizedCity = normalizeCityName(city);
+
+  const tryLookup = async (params: URLSearchParams) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?${params.toString()}`,
+        {
+          headers: {
+            "User-Agent": "aurea-crm/1.0",
+          },
+        }
+      );
+      if (!response.ok) return null;
+      const results = (await response.json()) as { lat?: string; lon?: string }[];
+      if (!results?.length) return null;
+      const latitude = Number(results[0].lat);
+      const longitude = Number(results[0].lon);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+      return { latitude, longitude };
+    } catch {
+      return null;
     }
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-      {
-        headers: {
-          "User-Agent": "aurea-crm/1.0",
-        },
-      }
-    );
-    if (!response.ok) return null;
-    const results = (await response.json()) as { lat?: string; lon?: string }[];
-    if (!results?.length) return null;
-    const latitude = Number(results[0].lat);
-    const longitude = Number(results[0].lon);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-    return { latitude, longitude };
-  } catch {
-    return null;
+  };
+
+  const attempts: URLSearchParams[] = [];
+  const baseParams = new URLSearchParams({
+    format: "json",
+    limit: "1",
+    city: normalizedCity,
+  });
+
+  const withRegion = new URLSearchParams(baseParams);
+  if (cleanRegion) withRegion.set("state", cleanRegion);
+  if (countryName) withRegion.set("country", countryName);
+  if (normalizedCountryCode) {
+    withRegion.set("countrycodes", normalizedCountryCode.toLowerCase());
   }
+  attempts.push(withRegion);
+
+  const withoutRegion = new URLSearchParams(baseParams);
+  if (countryName) withoutRegion.set("country", countryName);
+  if (normalizedCountryCode) {
+    withoutRegion.set("countrycodes", normalizedCountryCode.toLowerCase());
+  }
+  attempts.push(withoutRegion);
+
+  if (countryName) {
+    const byNameOnly = new URLSearchParams(baseParams);
+    byNameOnly.set("country", countryName);
+    attempts.push(byNameOnly);
+  }
+
+  if (normalizedCountryCode) {
+    const byCodeOnly = new URLSearchParams(baseParams);
+    byCodeOnly.set("countrycodes", normalizedCountryCode.toLowerCase());
+    attempts.push(byCodeOnly);
+  }
+
+  attempts.push(new URLSearchParams(baseParams));
+
+  for (const params of attempts) {
+    const coords = await tryLookup(params);
+    if (coords) return coords;
+    await sleep(Number.isFinite(sleepMs) ? sleepMs : 1000);
+  }
+
+  return null;
 };
 
 const getCityKey = (city: string, countryKey: string, region?: string | null) =>
@@ -118,13 +187,14 @@ async function main() {
       normalizedCountryCode ||
       normalizedCountryName?.toLowerCase() ||
       "unknown";
-    const key = getCityKey(session.city, countryKey, session.region);
+    const normalizedCity = normalizeCityName(session.city);
+    const key = getCityKey(normalizedCity, countryKey, session.region);
 
     if (!cityGeoCache.has(key)) {
       const existing = await prisma.funnelSession.findFirst({
         where: {
           ...(funnelIdFilter ? { funnelId: funnelIdFilter } : {}),
-          city: session.city,
+          city: normalizedCity,
           ...(normalizedCountryName ? { countryName: normalizedCountryName } : {}),
           ...(normalizedCountryCode || originalCountryCode
             ? {
@@ -151,13 +221,17 @@ async function main() {
         });
       } else {
         const coords = await fetchCityCoordinates({
-          city: session.city,
+          city: normalizedCity,
           region: session.region,
           countryCode: normalizedCountryCode || originalCountryCode,
           countryName: normalizedCountryName,
         });
+        if (!coords && shouldLogFailures) {
+          console.warn(
+            `[Backfill] No coords for ${normalizedCity}, ${normalizedCountryName || normalizedCountryCode || originalCountryCode || "Unknown"}`
+          );
+        }
         cityGeoCache.set(key, coords);
-        await sleep(Number.isFinite(sleepMs) ? sleepMs : 1000);
       }
     }
 
