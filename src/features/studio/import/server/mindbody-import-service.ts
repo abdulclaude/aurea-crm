@@ -697,6 +697,7 @@ async function expandZipFile(
   datasets: CsvDataset[],
   documentFiles: UploadedImportFile[],
   warnings: ImportWarning[],
+  kindFilter?: Set<MindbodyFileKind>,
 ): Promise<void> {
   const archivePath = archiveFile.relativePath || archiveFile.name;
   const response = await fetch(archiveFile.url);
@@ -749,7 +750,7 @@ async function expandZipFile(
     const kind = classifyMindbodyFileName(entryPath);
 
     if (shouldImportMindbodyDocument(entryPath, kind)) {
-      documentFiles.push(entryFile);
+      if (!kindFilter || kindFilter.has(kind)) documentFiles.push(entryFile);
       return;
     }
 
@@ -812,6 +813,7 @@ async function expandZipFile(
       return;
     }
 
+    if (kindFilter && !kindFilter.has(kind)) return;
     csvEntries.push({ entry: params.entry, entryFile, entryPath, kind });
   };
 
@@ -839,7 +841,10 @@ async function expandZipFile(
   );
 }
 
-async function fetchCsvDatasets(files: UploadedImportFile[]): Promise<{
+async function fetchCsvDatasets(
+  files: UploadedImportFile[],
+  kindFilter?: Set<MindbodyFileKind>,
+): Promise<{
   datasets: CsvDataset[];
   documentFiles: UploadedImportFile[];
   warnings: ImportWarning[];
@@ -853,12 +858,12 @@ async function fetchCsvDatasets(files: UploadedImportFile[]): Promise<{
     const path = file.relativePath || file.name;
     const kind = classifyMindbodyFileName(path);
     if (isZipImportFile(file)) {
-      await expandZipFile(file, datasets, documentFiles, warnings);
+      await expandZipFile(file, datasets, documentFiles, warnings, kindFilter);
       continue;
     }
 
     if (shouldImportMindbodyDocument(path, kind)) {
-      documentFiles.push(file);
+      if (!kindFilter || kindFilter.has(kind)) documentFiles.push(file);
       continue;
     }
 
@@ -873,6 +878,7 @@ async function fetchCsvDatasets(files: UploadedImportFile[]): Promise<{
       continue;
     }
 
+    if (kindFilter && !kindFilter.has(kind)) continue;
     directCsvFiles.push({ file, kind });
   }
 
@@ -4694,195 +4700,6 @@ async function notifyImport(
   });
 }
 
-export async function processMindbodyImportJob(params: {
-  importJobId: string;
-  organizationId: string;
-  alreadyMarkedProcessing?: boolean;
-}): Promise<{ success: boolean; counters: ImportCounters; warnings: number; errors: number }> {
-  const job = await db.query.importJob.findFirst({
-    where: and(eq(importJob.id, params.importJobId), eq(importJob.organizationId, params.organizationId)),
-  });
-  if (!job) return { success: false, counters: {}, warnings: 0, errors: 1 };
-
-  const config = normalizeConfig(job.importConfig);
-  const state: ImportState = {
-    organizationId: params.organizationId,
-    locationId: job.locationId ?? null,
-    importedBy: job.importedBy,
-    dryRun: config.dryRun ?? false,
-    errors: [],
-    warnings: [],
-    counters: {},
-    clientIdsByMindbodyId: new Map(),
-    clientIdsByBarcodeId: new Map(),
-    clientIdsByEmail: new Map(),
-    locationIdsByExternalId: new Map(),
-    locationIdsByName: new Map(),
-    instructorIdsByTrainerId: new Map(),
-    staffMemberIdsByTrainerId: new Map(),
-    productIdsByExternalId: new Map(),
-    productIdsBySku: new Map(),
-    productTypesById: new Map(),
-    membershipIdsByContractId: new Map(),
-    membershipClientIdsById: new Map(),
-    classCreditIdsByExternalId: new Map(),
-    classCreditIdsByPaymentRefNo: new Map(),
-    paymentIdsByExternalId: new Map(),
-    paymentIdsByMindbodyPmtRefNo: new Map(),
-    paymentClientIdsById: new Map(),
-    saleLineItemIdsByExternalId: new Map(),
-    saleLineItemIdsByMindbodyPmtRefNo: new Map(),
-    saleLineItemClientIdsById: new Map(),
-    bookingIdsByExternalClientKey: new Map(),
-    bookingIdsByVisitRefNo: new Map(),
-    bookingPaymentKeys: new Set(),
-    classTypeIdsBySlug: new Map(),
-    visitClassIdsByKey: new Map(),
-    visitClientIdsByVisitRef: new Map(),
-    checkInKeys: new Set(),
-    clientDocumentSourcePaths: new Set(),
-    mindbodyWaiverTemplateId: null,
-    waiverSignatureKeys: new Set(),
-  };
-
-  try {
-    if (!params.alreadyMarkedProcessing && job.status === "PENDING") {
-      const [startedJob] = await db
-        .update(importJob)
-        .set({
-          status: "PROCESSING",
-          startedAt: job.startedAt ?? now(),
-          updatedAt: now(),
-        })
-        .where(
-          and(
-            eq(importJob.id, params.importJobId),
-            eq(importJob.organizationId, params.organizationId),
-            eq(importJob.status, "PENDING"),
-          ),
-        )
-        .returning({ id: importJob.id });
-
-      if (!startedJob) {
-        return { success: false, counters: {}, warnings: 0, errors: 0 };
-      }
-    }
-
-    await notifyImport("IMPORT_STARTED", state, params.importJobId, "Mindbody import has started.").catch(() => undefined);
-    const { datasets, documentFiles, warnings } = await fetchCsvDatasets(config.files ?? []);
-    state.warnings.push(...warnings);
-
-    const entityCounts: Record<string, number> = {};
-    for (const dataset of datasets) {
-      entityCounts[dataset.kind] = (entityCounts[dataset.kind] ?? 0) + dataset.rows.length;
-    }
-    entityCounts.documents = documentFiles.length;
-
-    await db
-      .update(importJob)
-      .set({
-        entityCounts,
-        sourceFilenames: (config.files ?? []).map((file) => file.relativePath || file.name),
-        missingFields: state.warnings.filter((warning) => warning.headers?.length),
-        updatedAt: now(),
-      })
-      .where(eq(importJob.id, params.importJobId));
-
-    const grouped = datasetsByKind(datasets);
-    for (const kind of CSV_KINDS_IN_ORDER) {
-      const group = grouped.get(kind) ?? [];
-      if (kind === "clients") {
-        if (group.length > 0) {
-          await importClients(state, datasets, params.importJobId);
-          await updateJobProgress(params.importJobId, state);
-        }
-        continue;
-      }
-
-      for (const dataset of group) {
-        if (kind === "locations") await importLocations(state, dataset);
-        if (kind === "trainers") {
-          await importStaffMembers(state, dataset);
-          await importTrainers(state, dataset);
-        }
-        if (kind === "products") await importProducts(state, dataset, params.importJobId);
-        if (kind === "clientAutopayContracts") await importContracts(state, dataset, params.importJobId);
-        if (kind === "clientPricingOptions") await importPricingOptions(state, dataset, params.importJobId);
-        if (kind === "visitData" || kind === "reservationData") await importVisits(state, dataset, params.importJobId);
-        if (kind === "payments") await importPayments(state, dataset, params.importJobId);
-        if (kind === "clientSales") await importSaleLineItems(state, dataset, params.importJobId);
-        if (kind === "visitPaymentLinking") await importVisitPaymentLinks(state, dataset, params.importJobId);
-        if (kind === "accountBalances") await importAccountBalances(state, dataset, params.importJobId);
-        if (kind === "notes") await importNotes(state, dataset, "notes");
-        if (kind === "contactLogs") await importNotes(state, dataset, "contactLogs");
-        if (kind === "appointmentNotes") await importAppointmentNotes(state, dataset);
-        if (kind === "clientRelationships") await importRelationships(state, dataset);
-        await updateJobProgress(params.importJobId, state);
-      }
-    }
-
-    const activeLocationId = await ensureOnboardingLocationContext(state, config.source);
-    if (activeLocationId && !job.locationId) {
-      await db
-        .update(importJob)
-        .set({ locationId: activeLocationId, updatedAt: now() })
-        .where(eq(importJob.id, params.importJobId));
-    }
-
-    await importDocuments(state, documentFiles);
-    await updateJobProgress(params.importJobId, state);
-
-    const status = state.errors.length > 0 && state.counters.clients?.processed === 0 ? "FAILED" : "COMPLETED";
-    await db
-      .update(importJob)
-      .set({
-        status,
-        completedAt: now(),
-        errorLog: state.errors.slice(0, 250),
-        warningLog: state.warnings.slice(0, 250),
-        missingFields: state.warnings.filter((warning) => warning.headers?.length).slice(0, 250),
-        updatedAt: now(),
-      })
-      .where(eq(importJob.id, params.importJobId));
-
-    if (state.warnings.some((warning) => warning.headers?.length)) {
-      await notifyImport(
-        "IMPORT_NEEDS_REVIEW",
-        state,
-        params.importJobId,
-        "Mindbody import completed with fields preserved in metadata that need first-class mapping review.",
-      ).catch(() => undefined);
-    }
-
-    await notifyImport(
-      status === "COMPLETED" ? "IMPORT_COMPLETED" : "IMPORT_FAILED",
-      state,
-      params.importJobId,
-      status === "COMPLETED" ? "Mindbody import completed." : "Mindbody import failed.",
-    ).catch(() => undefined);
-
-    return { success: status === "COMPLETED", counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
-  } catch (error) {
-    state.errors.push({
-      fileName: "Mindbody import",
-      entity: "import",
-      error: error instanceof Error ? error.message : "Unknown Mindbody import error",
-    });
-    await db
-      .update(importJob)
-      .set({
-        status: "FAILED",
-        completedAt: now(),
-        errorLog: state.errors,
-        warningLog: state.warnings,
-        updatedAt: now(),
-      })
-      .where(eq(importJob.id, params.importJobId));
-    await notifyImport("IMPORT_FAILED", state, params.importJobId, "Mindbody import failed.").catch(() => undefined);
-    return { success: false, counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
-  }
-}
-
 // ─── Multi-step import support ─────────────────────────────────────────
 
 export type ImportPhase = "clients" | "structure" | "activity" | "metadata" | "documents";
@@ -4893,6 +4710,15 @@ const PHASE_KINDS: Record<Exclude<ImportPhase, "documents">, MindbodyFileKind[]>
   activity: ["visitData", "reservationData", "payments", "clientSales", "visitPaymentLinking", "accountBalances"],
   metadata: ["notes", "contactLogs", "appointmentNotes", "clientRelationships"],
 };
+
+const PHASE_FETCH_KINDS: Record<Exclude<ImportPhase, "documents">, MindbodyFileKind[]> = {
+  clients: ["clients", "clientNotifications", "referrers", "clientTypes", "indexes", "notes"],
+  structure: ["locations", "trainers", "products", "clientAutopayContracts", "clientPricingOptions"],
+  activity: ["visitData", "reservationData", "payments", "clientSales", "visitPaymentLinking", "accountBalances"],
+  metadata: ["notes", "contactLogs", "appointmentNotes", "clientRelationships"],
+};
+
+const DOCUMENT_FETCH_KINDS = new Set<MindbodyFileKind>(["contractSignature", "clientFile", "saleImage"]);
 
 function createImportState(
   organizationId: string,
@@ -5036,6 +4862,8 @@ export async function runImportPhase(params: {
   importJobId: string;
   organizationId: string;
   phase: ImportPhase;
+  batchIndex?: number;
+  batchSize?: number;
 }): Promise<{ counters: ImportCounters; warnings: number; errors: number }> {
   const job = await db.query.importJob.findFirst({
     where: and(eq(importJob.id, params.importJobId), eq(importJob.organizationId, params.organizationId)),
@@ -5072,7 +4900,7 @@ export async function runImportPhase(params: {
       return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
     }
 
-    const { documentFiles } = await fetchCsvDatasets(config.files ?? []);
+    const { documentFiles } = await fetchCsvDatasets(config.files ?? [], DOCUMENT_FETCH_KINDS);
     await ensureOnboardingLocationContext(state, config.source);
     if (state.locationId && state.locationId !== job.locationId) {
       await db.update(importJob).set({ locationId: state.locationId, updatedAt: now() }).where(eq(importJob.id, params.importJobId));
@@ -5088,13 +4916,38 @@ export async function runImportPhase(params: {
     return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
   }
 
-  const { datasets } = await fetchCsvDatasets(config.files ?? []);
-  const grouped = datasetsByKind(datasets);
+  const fetchKinds = new Set<MindbodyFileKind>(PHASE_FETCH_KINDS[params.phase]);
+  const { datasets } = await fetchCsvDatasets(config.files ?? [], fetchKinds);
+
+  let processDatasets = datasets;
+  if (params.batchIndex !== undefined && params.batchSize !== undefined) {
+    const primaryKind = phaseKinds[0];
+    if (primaryKind) {
+      const primaryDatasets = datasets.filter((d) => d.kind === primaryKind);
+      const allRows = primaryDatasets.flatMap((d) => d.rows);
+      const start = params.batchIndex * params.batchSize;
+      const batchRows = allRows.slice(start, start + params.batchSize);
+      if (batchRows.length === 0) {
+        return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
+      }
+      processDatasets = [
+        ...datasets.filter((d) => d.kind !== primaryKind),
+        {
+          file: primaryDatasets[0]?.file ?? { name: primaryKind, url: "" },
+          kind: primaryKind,
+          headers: primaryDatasets[0]?.headers ?? [],
+          rows: batchRows,
+        },
+      ];
+    }
+  }
+
+  const grouped = datasetsByKind(processDatasets);
   const phaseKindSet = new Set<MindbodyFileKind>(phaseKinds);
 
   for (const kind of CSV_KINDS_IN_ORDER) {
     if (!phaseKindSet.has(kind)) continue;
-    await runEntityImport(state, kind, datasets, grouped, params.importJobId);
+    await runEntityImport(state, kind, processDatasets, grouped, params.importJobId);
   }
 
   await updateJobProgress(params.importJobId, state);

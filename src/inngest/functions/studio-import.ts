@@ -7,7 +7,6 @@ import {
   setupMindbodyImport,
   runImportPhase,
   completeMindbodyImport,
-  type ImportPhase,
 } from "@/features/studio/import/server/mindbody-import-service";
 import { parseCsv } from "@/features/studio/import/lib/mindbody-csv";
 
@@ -40,7 +39,7 @@ function mapRow(raw: Record<string, string>, mapping: Record<string, string>): I
   return result;
 }
 
-const IMPORT_PHASES: ImportPhase[] = ["clients", "structure", "activity", "metadata", "documents"];
+const CLIENT_BATCH_SIZE = 500;
 
 export const processStudioImport = inngest.createFunction(
   { id: "studio-import-process", retries: 1, concurrency: { limit: 2 } },
@@ -67,11 +66,38 @@ export const processStudioImport = inngest.createFunction(
 
       if (!setup.success) return { success: false, reason: "setup failed" };
 
-      for (const phase of IMPORT_PHASES) {
-        await step.run(`import-${phase}`, async () => {
-          return runImportPhase({ importJobId, organizationId, phase });
+      const clientCount = setup.entityCounts.clients ?? 0;
+      const clientBatches = clientCount > CLIENT_BATCH_SIZE
+        ? Math.ceil(clientCount / CLIENT_BATCH_SIZE)
+        : 1;
+
+      for (let i = 0; i < clientBatches; i++) {
+        const stepName = clientBatches === 1 ? "import-clients" : `import-clients-${i}`;
+        await step.run(stepName, async () => {
+          return runImportPhase({
+            importJobId,
+            organizationId,
+            phase: "clients",
+            ...(clientBatches > 1 ? { batchIndex: i, batchSize: CLIENT_BATCH_SIZE } : {}),
+          });
         });
       }
+
+      await step.run("import-structure", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "structure" });
+      });
+
+      await step.run("import-activity", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "activity" });
+      });
+
+      await step.run("import-metadata", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "metadata" });
+      });
+
+      await step.run("import-documents", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "documents" });
+      });
 
       const result = await step.run("complete-mindbody", async () => {
         return completeMindbodyImport({ importJobId, organizationId });
