@@ -8,7 +8,7 @@ import {
   runImportPhase,
   completeMindbodyImport,
 } from "@/features/studio/import/server/mindbody-import-service";
-import { parseCsv } from "@/features/studio/import/lib/mindbody-csv";
+import { parseCsv, type MindbodyFileKind } from "@/features/studio/import/lib/mindbody-csv";
 
 interface ImportRow {
   name?: string;
@@ -66,11 +66,36 @@ export const processStudioImport = inngest.createFunction(
 
       if (!setup.success) return { success: false, reason: "setup failed" };
 
-      await step.run("import-structure", async () => {
-        return runImportPhase({ importJobId, organizationId, phase: "structure" });
+      const ec = setup.entityCounts;
+      const k = (kinds: MindbodyFileKind[], fetchKinds?: MindbodyFileKind[]) => ({
+        kinds,
+        fetchKinds: fetchKinds ?? kinds,
       });
 
-      const clientCount = setup.entityCounts.clients ?? 0;
+      // ── Structure (locations first so other steps can resolve locationIds) ──
+
+      await step.run("import-locations", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "structure", ...k(["locations"]) });
+      });
+
+      await step.run("import-trainers", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "structure", ...k(["trainers"]) });
+      });
+
+      await step.run("import-products", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "structure", ...k(["products"]) });
+      });
+
+      await step.run("import-contracts", async () => {
+        return runImportPhase({
+          importJobId, organizationId, phase: "structure",
+          ...k(["clientAutopayContracts", "clientPricingOptions"]),
+        });
+      });
+
+      // ── Clients (batched) ──
+
+      const clientCount = ec.clients ?? 0;
       const clientBatches = clientCount > CLIENT_BATCH_SIZE
         ? Math.ceil(clientCount / CLIENT_BATCH_SIZE)
         : 1;
@@ -87,13 +112,47 @@ export const processStudioImport = inngest.createFunction(
         });
       }
 
-      await step.run("import-activity", async () => {
-        return runImportPhase({ importJobId, organizationId, phase: "activity" });
+      // ── Activity (per-kind) ──
+
+      await step.run("import-visits", async () => {
+        return runImportPhase({
+          importJobId, organizationId, phase: "activity",
+          ...k(["visitData", "reservationData"]),
+        });
       });
 
-      await step.run("import-metadata", async () => {
-        return runImportPhase({ importJobId, organizationId, phase: "metadata" });
+      await step.run("import-payments", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "activity", ...k(["payments"]) });
       });
+
+      await step.run("import-sales", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "activity", ...k(["clientSales"]) });
+      });
+
+      await step.run("import-linking", async () => {
+        return runImportPhase({
+          importJobId, organizationId, phase: "activity",
+          ...k(["visitPaymentLinking", "accountBalances"]),
+        });
+      });
+
+      // ── Metadata (per-kind) ──
+
+      await step.run("import-notes", async () => {
+        return runImportPhase({
+          importJobId, organizationId, phase: "metadata",
+          ...k(["notes", "contactLogs", "appointmentNotes"]),
+        });
+      });
+
+      await step.run("import-relationships", async () => {
+        return runImportPhase({
+          importJobId, organizationId, phase: "metadata",
+          ...k(["clientRelationships"]),
+        });
+      });
+
+      // ── Documents & completion ──
 
       await step.run("import-documents", async () => {
         return runImportPhase({ importJobId, organizationId, phase: "documents" });

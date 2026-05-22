@@ -4879,6 +4879,8 @@ export async function runImportPhase(params: {
   importJobId: string;
   organizationId: string;
   phase: ImportPhase;
+  kinds?: MindbodyFileKind[];
+  fetchKinds?: MindbodyFileKind[];
   batchIndex?: number;
   batchSize?: number;
 }): Promise<{ counters: ImportCounters; warnings: number; errors: number }> {
@@ -4931,14 +4933,14 @@ export async function runImportPhase(params: {
     return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
   }
 
-  const phaseKinds = PHASE_KINDS[params.phase];
+  const phaseKinds = params.kinds ?? PHASE_KINDS[params.phase];
   const hasData = phaseKinds.some((kind) => (jobEntityCounts[kind] ?? 0) > 0);
   if (!hasData) {
     return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
   }
 
-  const fetchKinds = new Set<MindbodyFileKind>(PHASE_FETCH_KINDS[params.phase]);
-  const { datasets } = await fetchCsvDatasets(config.files ?? [], fetchKinds);
+  const resolvedFetchKinds = new Set<MindbodyFileKind>(params.fetchKinds ?? PHASE_FETCH_KINDS[params.phase]);
+  const { datasets } = await fetchCsvDatasets(config.files ?? [], resolvedFetchKinds);
 
   let processDatasets = datasets;
   if (params.batchIndex !== undefined && params.batchSize !== undefined) {
