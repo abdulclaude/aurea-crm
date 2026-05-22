@@ -1,8 +1,8 @@
+import type { Metadata } from "next";
 import LoginForm from "@/features/auth/components/login-form";
 import { requireUnauth } from "@/lib/auth-utils";
-import Link from "next/link";
 
-import Image from "next/image";
+export const metadata: Metadata = { title: "Login" };
 
 const Login = async () => {
   await requireUnauth();

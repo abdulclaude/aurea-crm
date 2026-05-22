@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { db } from "@/db";
 import { member, locationMember } from "@/db/schema";
 import { auth } from "@/lib/auth";
@@ -6,6 +7,8 @@ import { redirect } from "next/navigation";
 import { DashboardLayoutWrapper } from "@/components/dashboard-layout-wrapper";
 import { HydrateClient, prefetch, trpc } from "@/trpc/server";
 import { count, eq } from "drizzle-orm";
+
+export const metadata: Metadata = { title: "Dashboard" };
 
 const Layout = async ({ children }: { children: React.ReactNode }) => {
   // Ensure the user has at least one organization or location membership

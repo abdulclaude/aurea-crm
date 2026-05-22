@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Substitutions | Aurea CRM",
+  title: "Substitutions",
   description: "Manage instructor substitution requests",
 };
 
