@@ -66,6 +66,10 @@ export const processStudioImport = inngest.createFunction(
 
       if (!setup.success) return { success: false, reason: "setup failed" };
 
+      await step.run("import-structure", async () => {
+        return runImportPhase({ importJobId, organizationId, phase: "structure" });
+      });
+
       const clientCount = setup.entityCounts.clients ?? 0;
       const clientBatches = clientCount > CLIENT_BATCH_SIZE
         ? Math.ceil(clientCount / CLIENT_BATCH_SIZE)
@@ -82,10 +86,6 @@ export const processStudioImport = inngest.createFunction(
           });
         });
       }
-
-      await step.run("import-structure", async () => {
-        return runImportPhase({ importJobId, organizationId, phase: "structure" });
-      });
 
       await step.run("import-activity", async () => {
         return runImportPhase({ importJobId, organizationId, phase: "activity" });

@@ -1463,6 +1463,23 @@ async function preloadExistingClientDocuments(
   );
 }
 
+async function preloadOrgLocations(state: ImportState): Promise<void> {
+  const locations = await db
+    .select({
+      id: locationTable.id,
+      externalId: locationTable.externalId,
+      companyName: locationTable.companyName,
+    })
+    .from(locationTable)
+    .where(eq(locationTable.organizationId, state.organizationId));
+
+  for (const loc of locations) {
+    if (loc.externalId) state.locationIdsByExternalId.set(loc.externalId, loc.id);
+    state.locationIdsByName.set(loc.companyName.toLowerCase(), loc.id);
+    if (!state.locationId) state.locationId = loc.id;
+  }
+}
+
 async function preloadExistingLocations(state: ImportState, rows: CsvRow[]): Promise<void> {
   const externalIds = uniqueNonEmpty(rows.map((row) => readField(row, "LocationID")));
   await runWithConcurrency(
@@ -4884,6 +4901,10 @@ export async function runImportPhase(params: {
     errors: existingErrors,
     warnings: existingWarnings,
   });
+
+  if (params.phase !== "structure") {
+    await preloadOrgLocations(state);
+  }
 
   const jobEntityCounts =
     job.entityCounts && typeof job.entityCounts === "object" && !Array.isArray(job.entityCounts)
