@@ -43,6 +43,10 @@ import {
   type MindbodyFileKind,
   type UploadedImportFile,
 } from "@/features/studio/import/lib/mindbody-csv";
+import {
+  deleteUploadThingFiles,
+  uploadedFilesFromImportConfig,
+} from "@/features/studio/import/server/uploadthing-files";
 
 type ImportWarning = {
   fileName: string;
@@ -5116,6 +5120,11 @@ export async function completeMindbodyImport(params: {
     params.importJobId,
     status === "COMPLETED" ? "Mindbody import completed." : "Mindbody import failed.",
   ).catch(() => undefined);
+
+  const filesToDelete = uploadedFilesFromImportConfig(job.importConfig);
+  if (filesToDelete.length > 0) {
+    await deleteUploadThingFiles(filesToDelete).catch(() => undefined);
+  }
 
   return { success: status === "COMPLETED" };
 }

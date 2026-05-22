@@ -87,6 +87,27 @@ export const processStudioImport = inngest.createFunction(
         return runImportPhase({ importJobId, organizationId, phase: "structure", ...k(["products"]) });
       });
 
+      // ── Clients (batched — must run before contracts/pricing which depend on clientIds) ──
+
+      const clientCount = ec.clients ?? 0;
+      const clientBatches = clientCount > CLIENT_BATCH_SIZE
+        ? Math.ceil(clientCount / CLIENT_BATCH_SIZE)
+        : 1;
+
+      for (let i = 0; i < clientBatches; i++) {
+        const stepName = clientBatches === 1 ? "import-clients" : `import-clients-${i}`;
+        await step.run(stepName, async () => {
+          return runImportPhase({
+            importJobId,
+            organizationId,
+            phase: "clients",
+            ...(clientBatches > 1 ? { batchIndex: i, batchSize: CLIENT_BATCH_SIZE } : {}),
+          });
+        });
+      }
+
+      // ── Contracts & pricing (depend on clients existing) ──
+
       const contractCount = ec.clientAutopayContracts ?? 0;
       const contractBatches = contractCount > STRUCTURE_BATCH_SIZE
         ? Math.ceil(contractCount / STRUCTURE_BATCH_SIZE)
@@ -115,25 +136,6 @@ export const processStudioImport = inngest.createFunction(
             importJobId, organizationId, phase: "structure",
             ...k(["clientPricingOptions"]),
             ...(pricingBatches > 1 ? { batchIndex: i, batchSize: STRUCTURE_BATCH_SIZE } : {}),
-          });
-        });
-      }
-
-      // ── Clients (batched) ──
-
-      const clientCount = ec.clients ?? 0;
-      const clientBatches = clientCount > CLIENT_BATCH_SIZE
-        ? Math.ceil(clientCount / CLIENT_BATCH_SIZE)
-        : 1;
-
-      for (let i = 0; i < clientBatches; i++) {
-        const stepName = clientBatches === 1 ? "import-clients" : `import-clients-${i}`;
-        await step.run(stepName, async () => {
-          return runImportPhase({
-            importJobId,
-            organizationId,
-            phase: "clients",
-            ...(clientBatches > 1 ? { batchIndex: i, batchSize: CLIENT_BATCH_SIZE } : {}),
           });
         });
       }
