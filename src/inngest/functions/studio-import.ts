@@ -3,7 +3,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { client, importJob } from "@/db/schema";
 import { createId } from "@paralleldrive/cuid2";
-import { processMindbodyImportJob } from "@/features/studio/import/server/mindbody-import-service";
+import {
+  setupMindbodyImport,
+  runImportPhase,
+  completeMindbodyImport,
+  type ImportPhase,
+} from "@/features/studio/import/server/mindbody-import-service";
 import { parseCsv } from "@/features/studio/import/lib/mindbody-csv";
 
 interface ImportRow {
@@ -35,6 +40,8 @@ function mapRow(raw: Record<string, string>, mapping: Record<string, string>): I
   return result;
 }
 
+const IMPORT_PHASES: ImportPhase[] = ["clients", "structure", "activity", "metadata", "documents"];
+
 export const processStudioImport = inngest.createFunction(
   { id: "studio-import-process", retries: 1, concurrency: { limit: 2 } },
   { event: "studio/import.process" },
@@ -54,38 +61,26 @@ export const processStudioImport = inngest.createFunction(
     if (job.status !== "PENDING") return { skipped: true, reason: "job already started" };
 
     if (job.source === "MINDBODY") {
-      const started = await step.run("mark-mindbody-processing", async () => {
-        const [updated] = await db
-          .update(importJob)
-          .set({
-            status: "PROCESSING",
-            startedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(importJob.id, importJobId),
-              eq(importJob.organizationId, organizationId),
-              eq(importJob.status, "PENDING"),
-            ),
-          )
-          .returning({ id: importJob.id });
-
-        return Boolean(updated);
+      const setup = await step.run("setup-mindbody", async () => {
+        return setupMindbodyImport({ importJobId, organizationId });
       });
 
-      if (!started) {
-        return { skipped: true, reason: "job could not be marked processing" };
+      if (!setup.success) return { success: false, reason: "setup failed" };
+
+      for (const phase of IMPORT_PHASES) {
+        await step.run(`import-${phase}`, async () => {
+          return runImportPhase({ importJobId, organizationId, phase });
+        });
       }
 
-      return step.run("process-mindbody-export", async () =>
-        processMindbodyImportJob({
-          importJobId,
-          organizationId,
-          alreadyMarkedProcessing: true,
-        }),
-      );
+      const result = await step.run("complete-mindbody", async () => {
+        return completeMindbodyImport({ importJobId, organizationId });
+      });
+
+      return { success: result.success };
     }
+
+    // ─── Generic CSV import (non-Mindbody) ───────────────────────────────
 
     await step.run("mark-processing", async () => {
       await db

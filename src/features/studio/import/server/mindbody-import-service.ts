@@ -58,7 +58,7 @@ type ImportError = {
   error: string;
 };
 
-type ImportCounters = Record<string, { total: number; processed: number; failed: number }>;
+export type ImportCounters = Record<string, { total: number; processed: number; failed: number }>;
 
 type MindbodyImportConfig = {
   files?: UploadedImportFile[];
@@ -4881,4 +4881,277 @@ export async function processMindbodyImportJob(params: {
     await notifyImport("IMPORT_FAILED", state, params.importJobId, "Mindbody import failed.").catch(() => undefined);
     return { success: false, counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
   }
+}
+
+// ─── Multi-step import support ─────────────────────────────────────────
+
+export type ImportPhase = "clients" | "structure" | "activity" | "metadata" | "documents";
+
+const PHASE_KINDS: Record<Exclude<ImportPhase, "documents">, MindbodyFileKind[]> = {
+  clients: ["clients"],
+  structure: ["locations", "trainers", "products", "clientAutopayContracts", "clientPricingOptions"],
+  activity: ["visitData", "reservationData", "payments", "clientSales", "visitPaymentLinking", "accountBalances"],
+  metadata: ["notes", "contactLogs", "appointmentNotes", "clientRelationships"],
+};
+
+function createImportState(
+  organizationId: string,
+  locationId: string | null,
+  importedBy: string,
+  dryRun: boolean,
+  seed?: { counters?: ImportCounters; errors?: ImportError[]; warnings?: ImportWarning[] },
+): ImportState {
+  return {
+    organizationId,
+    locationId,
+    importedBy,
+    dryRun,
+    errors: [...(seed?.errors ?? [])],
+    warnings: [...(seed?.warnings ?? [])],
+    counters: { ...(seed?.counters ?? {}) },
+    clientIdsByMindbodyId: new Map(),
+    clientIdsByBarcodeId: new Map(),
+    clientIdsByEmail: new Map(),
+    locationIdsByExternalId: new Map(),
+    locationIdsByName: new Map(),
+    instructorIdsByTrainerId: new Map(),
+    staffMemberIdsByTrainerId: new Map(),
+    productIdsByExternalId: new Map(),
+    productIdsBySku: new Map(),
+    productTypesById: new Map(),
+    membershipIdsByContractId: new Map(),
+    membershipClientIdsById: new Map(),
+    classCreditIdsByExternalId: new Map(),
+    classCreditIdsByPaymentRefNo: new Map(),
+    paymentIdsByExternalId: new Map(),
+    paymentIdsByMindbodyPmtRefNo: new Map(),
+    paymentClientIdsById: new Map(),
+    saleLineItemIdsByExternalId: new Map(),
+    saleLineItemIdsByMindbodyPmtRefNo: new Map(),
+    saleLineItemClientIdsById: new Map(),
+    bookingIdsByExternalClientKey: new Map(),
+    bookingIdsByVisitRefNo: new Map(),
+    bookingPaymentKeys: new Set(),
+    classTypeIdsBySlug: new Map(),
+    visitClassIdsByKey: new Map(),
+    visitClientIdsByVisitRef: new Map(),
+    checkInKeys: new Set(),
+    clientDocumentSourcePaths: new Set(),
+    mindbodyWaiverTemplateId: null,
+    waiverSignatureKeys: new Set(),
+  };
+}
+
+async function runEntityImport(
+  state: ImportState,
+  kind: MindbodyFileKind,
+  datasets: CsvDataset[],
+  grouped: Map<MindbodyFileKind, CsvDataset[]>,
+  importJobId: string,
+): Promise<void> {
+  const group = grouped.get(kind) ?? [];
+  if (kind === "clients") {
+    if (group.length > 0) await importClients(state, datasets, importJobId);
+    return;
+  }
+  for (const dataset of group) {
+    if (kind === "locations") await importLocations(state, dataset);
+    if (kind === "trainers") {
+      await importStaffMembers(state, dataset);
+      await importTrainers(state, dataset);
+    }
+    if (kind === "products") await importProducts(state, dataset, importJobId);
+    if (kind === "clientAutopayContracts") await importContracts(state, dataset, importJobId);
+    if (kind === "clientPricingOptions") await importPricingOptions(state, dataset, importJobId);
+    if (kind === "visitData" || kind === "reservationData") await importVisits(state, dataset, importJobId);
+    if (kind === "payments") await importPayments(state, dataset, importJobId);
+    if (kind === "clientSales") await importSaleLineItems(state, dataset, importJobId);
+    if (kind === "visitPaymentLinking") await importVisitPaymentLinks(state, dataset, importJobId);
+    if (kind === "accountBalances") await importAccountBalances(state, dataset, importJobId);
+    if (kind === "notes") await importNotes(state, dataset, "notes");
+    if (kind === "contactLogs") await importNotes(state, dataset, "contactLogs");
+    if (kind === "appointmentNotes") await importAppointmentNotes(state, dataset);
+    if (kind === "clientRelationships") await importRelationships(state, dataset);
+  }
+}
+
+export async function setupMindbodyImport(params: {
+  importJobId: string;
+  organizationId: string;
+  alreadyMarkedProcessing?: boolean;
+}): Promise<{
+  success: boolean;
+  entityCounts: Record<string, number>;
+  source?: "dashboard" | "onboarding";
+}> {
+  const job = await db.query.importJob.findFirst({
+    where: and(eq(importJob.id, params.importJobId), eq(importJob.organizationId, params.organizationId)),
+  });
+  if (!job) return { success: false, entityCounts: {} };
+
+  const config = normalizeConfig(job.importConfig);
+  const state = createImportState(params.organizationId, job.locationId, job.importedBy, config.dryRun ?? false);
+
+  if (!params.alreadyMarkedProcessing && job.status === "PENDING") {
+    const [started] = await db
+      .update(importJob)
+      .set({ status: "PROCESSING", startedAt: job.startedAt ?? now(), updatedAt: now() })
+      .where(
+        and(
+          eq(importJob.id, params.importJobId),
+          eq(importJob.organizationId, params.organizationId),
+          eq(importJob.status, "PENDING"),
+        ),
+      )
+      .returning({ id: importJob.id });
+    if (!started) return { success: false, entityCounts: {}, source: config.source };
+  }
+
+  await notifyImport("IMPORT_STARTED", state, params.importJobId, "Mindbody import has started.").catch(() => undefined);
+
+  const { datasets, documentFiles, warnings } = await fetchCsvDatasets(config.files ?? []);
+  state.warnings.push(...warnings);
+
+  const entityCounts: Record<string, number> = {};
+  for (const dataset of datasets) {
+    entityCounts[dataset.kind] = (entityCounts[dataset.kind] ?? 0) + dataset.rows.length;
+  }
+  entityCounts.documents = documentFiles.length;
+
+  await db
+    .update(importJob)
+    .set({
+      entityCounts,
+      sourceFilenames: (config.files ?? []).map((f) => f.relativePath || f.name),
+      missingFields: state.warnings.filter((w) => w.headers?.length),
+      warningLog: state.warnings.slice(0, 250),
+      updatedAt: now(),
+    })
+    .where(eq(importJob.id, params.importJobId));
+
+  return { success: true, entityCounts, source: config.source };
+}
+
+export async function runImportPhase(params: {
+  importJobId: string;
+  organizationId: string;
+  phase: ImportPhase;
+}): Promise<{ counters: ImportCounters; warnings: number; errors: number }> {
+  const job = await db.query.importJob.findFirst({
+    where: and(eq(importJob.id, params.importJobId), eq(importJob.organizationId, params.organizationId)),
+  });
+  if (!job) return { counters: {}, warnings: 0, errors: 0 };
+
+  const config = normalizeConfig(job.importConfig);
+
+  const existingCounters =
+    job.entityProgress && typeof job.entityProgress === "object" && !Array.isArray(job.entityProgress)
+      ? (job.entityProgress as ImportCounters)
+      : {};
+  const existingErrors = Array.isArray(job.errorLog) ? (job.errorLog as ImportError[]) : [];
+  const existingWarnings = Array.isArray(job.warningLog) ? (job.warningLog as ImportWarning[]) : [];
+
+  const state = createImportState(params.organizationId, job.locationId, job.importedBy, config.dryRun ?? false, {
+    counters: existingCounters,
+    errors: existingErrors,
+    warnings: existingWarnings,
+  });
+
+  const jobEntityCounts =
+    job.entityCounts && typeof job.entityCounts === "object" && !Array.isArray(job.entityCounts)
+      ? (job.entityCounts as Record<string, number>)
+      : {};
+
+  if (params.phase === "documents") {
+    if ((jobEntityCounts.documents ?? 0) === 0) {
+      await ensureOnboardingLocationContext(state, config.source);
+      if (state.locationId && state.locationId !== job.locationId) {
+        await db.update(importJob).set({ locationId: state.locationId, updatedAt: now() }).where(eq(importJob.id, params.importJobId));
+      }
+      await updateJobProgress(params.importJobId, state);
+      return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
+    }
+
+    const { documentFiles } = await fetchCsvDatasets(config.files ?? []);
+    await ensureOnboardingLocationContext(state, config.source);
+    if (state.locationId && state.locationId !== job.locationId) {
+      await db.update(importJob).set({ locationId: state.locationId, updatedAt: now() }).where(eq(importJob.id, params.importJobId));
+    }
+    await importDocuments(state, documentFiles);
+    await updateJobProgress(params.importJobId, state);
+    return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
+  }
+
+  const phaseKinds = PHASE_KINDS[params.phase];
+  const hasData = phaseKinds.some((kind) => (jobEntityCounts[kind] ?? 0) > 0);
+  if (!hasData) {
+    return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
+  }
+
+  const { datasets } = await fetchCsvDatasets(config.files ?? []);
+  const grouped = datasetsByKind(datasets);
+  const phaseKindSet = new Set<MindbodyFileKind>(phaseKinds);
+
+  for (const kind of CSV_KINDS_IN_ORDER) {
+    if (!phaseKindSet.has(kind)) continue;
+    await runEntityImport(state, kind, datasets, grouped, params.importJobId);
+  }
+
+  await updateJobProgress(params.importJobId, state);
+  return { counters: state.counters, warnings: state.warnings.length, errors: state.errors.length };
+}
+
+export async function completeMindbodyImport(params: {
+  importJobId: string;
+  organizationId: string;
+}): Promise<{ success: boolean }> {
+  const job = await db.query.importJob.findFirst({
+    where: and(eq(importJob.id, params.importJobId), eq(importJob.organizationId, params.organizationId)),
+  });
+  if (!job) return { success: false };
+
+  const counters =
+    job.entityProgress && typeof job.entityProgress === "object" && !Array.isArray(job.entityProgress)
+      ? (job.entityProgress as ImportCounters)
+      : {};
+  const errors = Array.isArray(job.errorLog) ? (job.errorLog as ImportError[]) : [];
+  const warnings = Array.isArray(job.warningLog) ? (job.warningLog as ImportWarning[]) : [];
+
+  const state = createImportState(params.organizationId, job.locationId, job.importedBy, false, {
+    counters,
+    errors,
+    warnings,
+  });
+
+  const status = errors.length > 0 && (counters.clients?.processed ?? 0) === 0 ? "FAILED" : "COMPLETED";
+
+  await db
+    .update(importJob)
+    .set({
+      status,
+      completedAt: now(),
+      errorLog: errors.slice(0, 250),
+      warningLog: warnings.slice(0, 250),
+      missingFields: warnings.filter((w) => w.headers?.length).slice(0, 250),
+      updatedAt: now(),
+    })
+    .where(eq(importJob.id, params.importJobId));
+
+  if (warnings.some((w) => w.headers?.length)) {
+    await notifyImport(
+      "IMPORT_NEEDS_REVIEW",
+      state,
+      params.importJobId,
+      "Mindbody import completed with fields preserved in metadata that need first-class mapping review.",
+    ).catch(() => undefined);
+  }
+
+  await notifyImport(
+    status === "COMPLETED" ? "IMPORT_COMPLETED" : "IMPORT_FAILED",
+    state,
+    params.importJobId,
+    status === "COMPLETED" ? "Mindbody import completed." : "Mindbody import failed.",
+  ).catch(() => undefined);
+
+  return { success: status === "COMPLETED" };
 }
