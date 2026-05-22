@@ -9,6 +9,7 @@ import {
   mindbodyScheduledSync,
 } from "@/inngest/functions/mindbody-sync";
 import { processTrackingEvents } from "@/inngest/functions/process-tracking-events";
+import { processStudioImport } from "@/inngest/functions/studio-import";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -20,5 +21,6 @@ export const { GET, POST, PUT } = serve({
     mindbodyClientSync,
     mindbodyScheduledSync,
     processTrackingEvents,
+    processStudioImport,
   ],
 });
