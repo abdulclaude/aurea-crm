@@ -63,56 +63,23 @@ const LoginForm = () => {
         onError: (ctx) => {
           toast.error(ctx.error.message);
         },
-      }
+      },
     );
   };
 
   const isPending = form.formState.isSubmitting;
 
   return (
-    <div className="flex flex-col gap-6 w-full">
-      <Card>
+    <div className="flex flex-col gap-6 items-center justify-center">
+      <Card className="w-lg">
         <CardHeader className="text-center">
-          <CardTitle> Welcome back </CardTitle>
-          <CardDescription> Login to continue </CardDescription>
+          <CardTitle> Log in </CardTitle>
         </CardHeader>
 
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)}>
               <div className="grid gap-6">
-                <div className="flex flex-col gap-4">
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    type="button"
-                    disabled={isPending}
-                  >
-                    <Image
-                      src="/logos/github.svg"
-                      height={16}
-                      width={16}
-                      alt="github"
-                    />
-                    Continue with Github
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    type="button"
-                    disabled={isPending}
-                  >
-                    <Image
-                      src="/logos/google.svg"
-                      height={16}
-                      width={16}
-                      alt="google"
-                    />
-                    Continue with Google
-                  </Button>
-                </div>
-
                 <div className="grid gap-6">
                   <FormField
                     control={form.control}
@@ -152,10 +119,31 @@ const LoginForm = () => {
                     )}
                   />
 
-                  <Button type="submit" className="w-full" disabled={isPending}>
-                    {" "}
-                    Login{" "}
-                  </Button>
+                  <div className="space-y-3">
+                    <Button
+                      type="submit"
+                      variant="success"
+                      className="w-full"
+                      disabled={isPending}
+                    >
+                      {" "}
+                      Log in{" "}
+                    </Button>
+
+                    <Button
+                      className="w-full"
+                      type="button"
+                      disabled={isPending}
+                    >
+                      <Image
+                        src="/logos/google.svg"
+                        height={16}
+                        width={16}
+                        alt="google"
+                      />
+                      Continue with Google
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="text-center text-sm">

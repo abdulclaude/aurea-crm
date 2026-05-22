@@ -315,30 +315,12 @@ function UserStatusIndicatorInner() {
               <UserIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
               <span className="text-xs font-medium">Profile</span>
             </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={() => router.push("/settings")}
-              className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
-            >
-              <SettingsIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
-              <span className="text-xs font-medium">Settings</span>
-            </DropdownMenuItem>
           </DropdownMenuGroup>
 
           <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
           {/* Premium & Affiliate */}
           <DropdownMenuGroup>
-            {!isPremium && (
-              <DropdownMenuItem
-                onClick={() => router.push("/settings/billing")}
-                className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
-              >
-                <UpgradeIcon className="size-3.5 shrink-0" />
-                <span className="text-xs font-medium">Upgrade to Pro</span>
-              </DropdownMenuItem>
-            )}
-
             <DropdownMenuItem
               onClick={() => router.push("/affiliate")}
               className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
@@ -384,7 +366,15 @@ function UserStatusIndicatorInner() {
           </DropdownMenuItem>
 
           <DropdownMenuItem
-            onClick={() => authClient.signOut()}
+            onClick={() =>
+              authClient.signOut({
+                fetchOptions: {
+                  onSuccess: () => {
+                    window.location.href = "/login";
+                  },
+                },
+              })
+            }
             className="flex items-center gap-3 cursor-pointer hover:bg-primary/5 hover:text-black group bg-transparent"
           >
             <LogOutIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
