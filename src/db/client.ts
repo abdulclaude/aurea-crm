@@ -12,7 +12,9 @@ export const dbSchema = {
 type DbSchema = typeof dbSchema;
 export type Database = NodePgDatabase<DbSchema>;
 
-const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+// Runtime traffic should use the pooled URL when one is configured.
+// DIRECT_URL is reserved for migration/admin paths that need a direct session.
+const connectionString = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
 
 if (!connectionString) {
   throw new Error("DATABASE_URL is missing");

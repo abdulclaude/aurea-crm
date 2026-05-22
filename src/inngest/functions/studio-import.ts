@@ -40,6 +40,7 @@ function mapRow(raw: Record<string, string>, mapping: Record<string, string>): I
 }
 
 const CLIENT_BATCH_SIZE = 500;
+const STRUCTURE_BATCH_SIZE = 2000;
 
 export const processStudioImport = inngest.createFunction(
   { id: "studio-import-process", retries: 1, concurrency: { limit: 2 } },
@@ -86,12 +87,37 @@ export const processStudioImport = inngest.createFunction(
         return runImportPhase({ importJobId, organizationId, phase: "structure", ...k(["products"]) });
       });
 
-      await step.run("import-contracts", async () => {
-        return runImportPhase({
-          importJobId, organizationId, phase: "structure",
-          ...k(["clientAutopayContracts", "clientPricingOptions"]),
+      const contractCount = ec.clientAutopayContracts ?? 0;
+      const contractBatches = contractCount > STRUCTURE_BATCH_SIZE
+        ? Math.ceil(contractCount / STRUCTURE_BATCH_SIZE)
+        : 1;
+
+      for (let i = 0; i < contractBatches; i++) {
+        const stepName = contractBatches === 1 ? "import-autopay-contracts" : `import-autopay-contracts-${i}`;
+        await step.run(stepName, async () => {
+          return runImportPhase({
+            importJobId, organizationId, phase: "structure",
+            ...k(["clientAutopayContracts"]),
+            ...(contractBatches > 1 ? { batchIndex: i, batchSize: STRUCTURE_BATCH_SIZE } : {}),
+          });
         });
-      });
+      }
+
+      const pricingCount = ec.clientPricingOptions ?? 0;
+      const pricingBatches = pricingCount > STRUCTURE_BATCH_SIZE
+        ? Math.ceil(pricingCount / STRUCTURE_BATCH_SIZE)
+        : 1;
+
+      for (let i = 0; i < pricingBatches; i++) {
+        const stepName = pricingBatches === 1 ? "import-pricing-options" : `import-pricing-options-${i}`;
+        await step.run(stepName, async () => {
+          return runImportPhase({
+            importJobId, organizationId, phase: "structure",
+            ...k(["clientPricingOptions"]),
+            ...(pricingBatches > 1 ? { batchIndex: i, batchSize: STRUCTURE_BATCH_SIZE } : {}),
+          });
+        });
+      }
 
       // ── Clients (batched) ──
 

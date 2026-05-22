@@ -1,6 +1,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
 import JSZip from "jszip";
+import { UTApi, UTFile } from "uploadthing/server";
 
 import { db } from "@/db";
 import {
@@ -135,9 +136,9 @@ const CSV_KINDS_IN_ORDER: MindbodyFileKind[] = [
 const MAX_ZIP_ENTRIES = 5000;
 const MAX_NESTED_ZIP_DEPTH = 2;
 const IMPORT_LOOKUP_CHUNK_SIZE = 1000;
-const IMPORT_LOOKUP_CONCURRENCY = 4;
+const IMPORT_LOOKUP_CONCURRENCY = 2;
 const IMPORT_WRITE_CHUNK_SIZE = 500;
-const IMPORT_WRITE_CONCURRENCY = 6;
+const IMPORT_WRITE_CONCURRENCY = 3;
 const IMPORT_PROGRESS_FLUSH_INTERVAL = 1000;
 const FILE_FETCH_CONCURRENCY = 4;
 const ZIP_ENTRY_READ_CONCURRENCY = 8;
@@ -855,6 +856,12 @@ async function fetchCsvDatasets(
   const directCsvFiles: Array<{ file: UploadedImportFile; kind: MindbodyFileKind }> = [];
 
   for (const file of files) {
+    if (file.name.startsWith("__zip_documents__")) {
+      if (kindFilter && ![...kindFilter].some((k) => DOCUMENT_FETCH_KINDS.has(k))) continue;
+      const realFile = { ...file, name: file.name.replace("__zip_documents__", "") };
+      await expandZipFile(realFile, datasets, documentFiles, warnings, kindFilter);
+      continue;
+    }
     const path = file.relativePath || file.name;
     const kind = classifyMindbodyFileName(path);
     if (isZipImportFile(file)) {
@@ -4818,6 +4825,79 @@ async function runEntityImport(
   }
 }
 
+function datasetToCsvText(dataset: CsvDataset): string {
+  const escapeCsvField = (value: string): string => {
+    if (value.includes('"') || value.includes(",") || value.includes("\n") || value.includes("\r")) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  };
+  const lines = [dataset.headers.map(escapeCsvField).join(",")];
+  for (const row of dataset.rows) {
+    lines.push(dataset.headers.map((h) => escapeCsvField(row[h] ?? "")).join(","));
+  }
+  return lines.join("\n");
+}
+
+const EXTRACT_UPLOAD_CONCURRENCY = 4;
+
+async function extractAndUploadCsvFiles(
+  datasets: CsvDataset[],
+  documentFiles: UploadedImportFile[],
+  originalFiles: UploadedImportFile[],
+): Promise<UploadedImportFile[]> {
+  const utapi = new UTApi();
+  const extractedFiles: UploadedImportFile[] = [];
+
+  const grouped = new Map<MindbodyFileKind, CsvDataset[]>();
+  for (const ds of datasets) {
+    const group = grouped.get(ds.kind) ?? [];
+    group.push(ds);
+    grouped.set(ds.kind, group);
+  }
+
+  const uploadTasks: Array<{ kind: MindbodyFileKind; csvText: string; fileName: string }> = [];
+  for (const [kind, group] of grouped) {
+    if (group.length === 1) {
+      uploadTasks.push({
+        kind,
+        csvText: datasetToCsvText(group[0]),
+        fileName: `${kind}.csv`,
+      });
+    } else {
+      for (let i = 0; i < group.length; i++) {
+        uploadTasks.push({
+          kind,
+          csvText: datasetToCsvText(group[i]),
+          fileName: `${kind}_${i}.csv`,
+        });
+      }
+    }
+  }
+
+  await runWithConcurrency(uploadTasks, EXTRACT_UPLOAD_CONCURRENCY, async (task) => {
+    const file = new UTFile([task.csvText], task.fileName, { type: "text/csv" });
+    const result = await utapi.uploadFiles(file);
+    if (result.error) return;
+    extractedFiles.push({
+      name: task.fileName,
+      url: result.data.ufsUrl,
+      uploadKey: result.data.key,
+      size: task.csvText.length,
+      type: "text/csv",
+    });
+  });
+
+  const zipFiles = originalFiles.filter((f) => isZipImportFile(f));
+  if (documentFiles.length > 0 && zipFiles.length > 0) {
+    for (const zf of zipFiles) {
+      extractedFiles.push({ ...zf, name: `__zip_documents__${zf.name}` });
+    }
+  }
+
+  return extractedFiles;
+}
+
 export async function setupMindbodyImport(params: {
   importJobId: string;
   organizationId: string;
@@ -4852,7 +4932,8 @@ export async function setupMindbodyImport(params: {
 
   await notifyImport("IMPORT_STARTED", state, params.importJobId, "Mindbody import has started.").catch(() => undefined);
 
-  const { datasets, documentFiles, warnings } = await fetchCsvDatasets(config.files ?? []);
+  const originalFiles = config.files ?? [];
+  const { datasets, documentFiles, warnings } = await fetchCsvDatasets(originalFiles);
   state.warnings.push(...warnings);
 
   const entityCounts: Record<string, number> = {};
@@ -4861,13 +4942,20 @@ export async function setupMindbodyImport(params: {
   }
   entityCounts.documents = documentFiles.length;
 
+  const hasZipFiles = originalFiles.some((f) => isZipImportFile(f));
+  let updatedFiles = originalFiles;
+  if (hasZipFiles && datasets.length > 0) {
+    updatedFiles = await extractAndUploadCsvFiles(datasets, documentFiles, originalFiles);
+  }
+
   await db
     .update(importJob)
     .set({
       entityCounts,
-      sourceFilenames: (config.files ?? []).map((f) => f.relativePath || f.name),
+      sourceFilenames: originalFiles.map((f) => f.relativePath || f.name),
       missingFields: state.warnings.filter((w) => w.headers?.length),
       warningLog: state.warnings.slice(0, 250),
+      importConfig: { ...config, files: updatedFiles },
       updatedAt: now(),
     })
     .where(eq(importJob.id, params.importJobId));

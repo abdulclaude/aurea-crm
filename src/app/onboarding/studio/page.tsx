@@ -1007,7 +1007,7 @@ export default function StudioOnboardingPage() {
                       <div className="flex gap-3">
                         <Button
                           type="button"
-                          variant="outline"
+                          variant="gradient"
                           onClick={goBack}
                           className="gap-1.5"
                         >

@@ -50,3 +50,32 @@ export async function readThroughRedisCache<T>({
 
   return value;
 }
+
+export async function deleteRedisCacheMatching(patterns: string[]): Promise<void> {
+  const redis = getCacheRedisClient();
+
+  if (!redis) {
+    return;
+  }
+
+  try {
+    for (const pattern of patterns) {
+      let cursor = "0";
+
+      do {
+        const [nextCursor, keys] = await redis.scan(cursor, {
+          match: pattern,
+          count: 100,
+        });
+
+        if (keys.length > 0) {
+          await redis.del(...keys);
+        }
+
+        cursor = nextCursor;
+      } while (cursor !== "0");
+    }
+  } catch (error) {
+    console.warn("Redis cache delete failed", { patterns, error });
+  }
+}
