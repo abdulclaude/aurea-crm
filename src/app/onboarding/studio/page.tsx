@@ -309,7 +309,7 @@ export default function StudioOnboardingPage() {
 
   useEffect(() => {
     if (!isSessionLoading && !session) {
-      router.replace("/sign-in?callbackUrl=/onboarding/studio");
+      router.replace("/login?callbackUrl=/onboarding/studio");
     }
   }, [session, isSessionLoading, router]);
 
