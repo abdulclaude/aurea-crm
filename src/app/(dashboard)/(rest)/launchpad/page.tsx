@@ -173,21 +173,13 @@ function CategorySection({ title, steps }: { title: string; steps: Step[] }) {
 export default function LaunchpadPage() {
   const trpc = useTRPC();
 
-  const { data: plans } = useQuery(
-    trpc.membershipPlans.list.queryOptions({ includeInactive: false }),
-  );
-  const { data: rooms } = useQuery(trpc.rooms.list.queryOptions());
-  const { data: classTypes } = useQuery(trpc.classTypes.list.queryOptions({}));
-  const { data: instructors } = useQuery(trpc.instructors.list.queryOptions({}));
-  const { data: classes } = useQuery(
-    trpc.studioClassesEnhanced.list.queryOptions({ pageSize: 1 }),
-  );
+  const { data: progress } = useQuery(trpc.launchpad.progress.queryOptions());
 
-  const hasPlans = (plans?.length ?? 0) > 0;
-  const hasRooms = (rooms?.length ?? 0) > 0;
-  const hasClassTypes = (classTypes?.length ?? 0) > 0;
-  const hasInstructors = (instructors?.items?.length ?? 0) > 0;
-  const hasClasses = (classes?.classes?.length ?? 0) > 0;
+  const hasPlans = progress?.hasMembershipPlans ?? false;
+  const hasRooms = progress?.hasRooms ?? false;
+  const hasClassTypes = progress?.hasClassTypes ?? false;
+  const hasInstructors = progress?.hasInstructors ?? false;
+  const hasClasses = progress?.hasClasses ?? false;
   const canScheduleClass = hasRooms && hasClassTypes && hasInstructors;
 
   const categories: Array<{ id: string; title: string; steps: Step[] }> = [

@@ -63,6 +63,7 @@ import { eventTypesRouter } from "@/features/bookings/server/event-types-router"
 import { calComCredentialsRouter } from "@/features/bookings/server/calcom-credentials-router";
 import { inboxRouter } from "@/features/inbox/server/router";
 import { seedRouter } from "@/features/studio/server/seed-router";
+import { launchpadRouter } from "@/features/studio/server/launchpad-router";
 // Phase 6 — SMS, Waivers, Spots, Policies, Retention, Intro Offers, Reports, Revenue
 import { smsRouter } from "@/features/sms/server/router";
 import { waiversRouter } from "@/features/waivers/server/router";
@@ -154,6 +155,7 @@ export const appRouter = createTRPCRouter({
   inbox: inboxRouter,
   // Seed data
   seed: seedRouter,
+  launchpad: launchpadRouter,
   // Phase 6 — SMS, Waivers, Spots, Policies, Retention, Intro Offers, Reports, Revenue
   sms: smsRouter,
   waivers: waiversRouter,

@@ -73,11 +73,11 @@ const locationsGroup: SidebarGroup = {
 
 function CompletionRing({ pct }: { pct: number }) {
   const size = 18;
-  const sw = 2;
-  const r = (size - sw) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - pct / 100);
-  const cx = size / 2;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - pct / 100);
+  const center = size / 2;
   const color = pct >= 66 ? "#14b8a6" : pct >= 33 ? "#f59e0b" : "#ef4444";
 
   return (
@@ -88,24 +88,24 @@ function CompletionRing({ pct }: { pct: number }) {
       className="shrink-0"
     >
       <circle
-        cx={cx}
-        cy={cx}
-        r={r}
+        cx={center}
+        cy={center}
+        r={radius}
         fill="none"
         stroke="#e5e7eb"
-        strokeWidth={sw}
+        strokeWidth={strokeWidth}
       />
       <circle
-        cx={cx}
-        cy={cx}
-        r={r}
+        cx={center}
+        cy={center}
+        r={radius}
         fill="none"
         stroke={color}
-        strokeWidth={sw}
-        strokeDasharray={circ}
+        strokeWidth={strokeWidth}
+        strokeDasharray={circumference}
         strokeDashoffset={offset}
         strokeLinecap="round"
-        transform={`rotate(-90 ${cx} ${cx})`}
+        transform={`rotate(-90 ${center} ${center})`}
         style={{ transition: "stroke-dashoffset 0.5s ease, stroke 0.5s ease" }}
       />
     </svg>
@@ -173,36 +173,11 @@ const AppSidebar = () => {
   const activeClient = active?.activeLocation ?? null;
 
   const enabled = !!activeClient;
-  const { data: lpPlans } = useQuery({
-    ...trpc.membershipPlans.list.queryOptions({ includeInactive: false }),
+  const { data: launchpadProgress } = useQuery({
+    ...trpc.launchpad.progress.queryOptions(),
     enabled,
   });
-  const { data: lpRooms } = useQuery({
-    ...trpc.rooms.list.queryOptions(),
-    enabled,
-  });
-  const { data: lpClassTypes } = useQuery({
-    ...trpc.classTypes.list.queryOptions({}),
-    enabled,
-  });
-  const { data: lpInstructors } = useQuery({
-    ...trpc.instructors.list.queryOptions({}),
-    enabled,
-  });
-  const { data: lpClasses } = useQuery({
-    ...trpc.studioClassesEnhanced.list.queryOptions({ pageSize: 1 }),
-    enabled,
-  });
-
-  const lpDone = [
-    true,
-    (lpRooms?.length ?? 0) > 0,
-    (lpClassTypes?.length ?? 0) > 0,
-    (lpInstructors?.items?.length ?? 0) > 0,
-    (lpPlans?.length ?? 0) > 0,
-    (lpClasses?.classes?.length ?? 0) > 0,
-  ].filter(Boolean).length;
-  const launchpadPct = enabled ? Math.round((lpDone / 6) * 100) : 0;
+  const launchpadPct = enabled ? (launchpadProgress?.percentage ?? 0) : 0;
 
   const instructorMenuItems: SidebarGroup[] = [
     {
@@ -366,11 +341,11 @@ const AppSidebar = () => {
       >
         {/* Launchpad — admin only, outside AnimatePresence for reliable rendering */}
         {!isInstructor && (
-          <div className="px-2 mb-1 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:mb-0">
+          <div className="mb-1 w-full px-2 group-data-[collapsible=icon]:mb-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
             <Link
               href="/launchpad"
               className={cn(
-                "relative flex items-center gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground group/lp",
+                "group/lp relative flex w-full items-center gap-x-2.5 rounded-sm px-2.5 py-2 text-xs transition duration-150 hover:bg-primary-foreground",
                 "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0",
                 pathname.startsWith("/launchpad") &&
                   "bg-primary-foreground",
@@ -382,15 +357,15 @@ const AppSidebar = () => {
                   pathname.startsWith("/launchpad") && "text-black",
                 )}
               />
-              <span
-                className={cn(
-                  "flex-1 text-primary/80 group-hover/lp:text-primary font-medium tracking-tight group-data-[collapsible=icon]:hidden",
-                  pathname.startsWith("/launchpad") && "text-black",
-                )}
-              >
-                Launchpad
-              </span>
-              <div className="group-data-[collapsible=icon]:hidden">
+              <div className="flex min-w-0 flex-1 items-center justify-between gap-2 group-data-[collapsible=icon]:hidden">
+                <span
+                  className={cn(
+                    "font-medium tracking-tight text-primary/80 group-hover/lp:text-primary",
+                    pathname.startsWith("/launchpad") && "text-black",
+                  )}
+                >
+                  Launchpad
+                </span>
                 <CompletionRing pct={launchpadPct} />
               </div>
               <svg

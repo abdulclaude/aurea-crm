@@ -11,6 +11,7 @@ import {
   studioPaymentLineItem,
   studioProduct,
 } from "@/db/schema";
+import { readThroughRedisCache } from "@/lib/redis/read-through-cache";
 
 const scopedConditions = <T extends { organizationId: typeof studioPayment.organizationId; locationId: typeof studioPayment.locationId }>({
   table,
@@ -74,22 +75,36 @@ export const revenueRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
 
+      const orgId = ctx.orgId;
       const now = new Date();
       const endDate = input.end ?? now;
       const daysBack = input.days ?? (Math.max(1, Math.ceil((endDate.getTime() - (input.start?.getTime() ?? endDate.getTime())) / 86_400_000)) || 30);
       const startDate = input.start ?? new Date(endDate.getTime() - daysBack * 86_400_000);
       const prevStart = new Date(startDate.getTime() - daysBack * 86_400_000);
-      const paymentScope = scopedConditions({
+      return readThroughRedisCache({
+        key: [
+          "revenue",
+          "v1",
+          "overview",
+          orgId,
+          ctx.locationId ?? "organization",
+          startDate.toISOString(),
+          endDate.toISOString(),
+          String(daysBack),
+        ].join(":"),
+        ttlSeconds: 2 * 60,
+        loader: async () => {
+          const paymentScope = scopedConditions({
         table: studioPayment,
-        organizationId: ctx.orgId,
+        organizationId: orgId,
         locationId: ctx.locationId ?? null,
       });
       const membershipScope = [
-        eq(studioMembership.organizationId, ctx.orgId),
+        eq(studioMembership.organizationId, orgId),
         ...(ctx.locationId ? [eq(studioMembership.locationId, ctx.locationId)] : []),
       ];
       const payoutScope = [
-        eq(instructorPayout.organizationId, ctx.orgId),
+        eq(instructorPayout.organizationId, orgId),
         ...(ctx.locationId ? [eq(instructorPayout.locationId, ctx.locationId)] : []),
       ];
 
@@ -144,7 +159,7 @@ export const revenueRouter = createTRPCRouter({
         .leftJoin(studioProduct, eq(studioPaymentLineItem.productId, studioProduct.id))
         .where(
           and(
-            eq(studioPaymentLineItem.organizationId, ctx.orgId),
+            eq(studioPaymentLineItem.organizationId, orgId),
             ctx.locationId ? eq(studioPaymentLineItem.locationId, ctx.locationId) : undefined,
             isNull(studioPaymentLineItem.deletedAt),
             gte(studioPaymentLineItem.soldAt, startDate),
@@ -206,25 +221,27 @@ export const revenueRouter = createTRPCRouter({
           : 0;
       }
 
-      return {
-        totalRevenue,
-        netRevenue,
-        totalPayouts,
-        revenueChange,
-        netRevenueChange,
-        arpmChange,
-        transactionChange,
-        transactionCount: currentPayments.length,
-        activeMemberships: activeMembershipCount,
-        arpm,
-        byType,
-        dailyRevenue: buildDailySeries({ startDate, endDate, values: dailyRevenue }),
-        dailyNetRevenue: buildDailySeries({ startDate, endDate, values: dailyNetRevenue }),
-        dailyArpm: buildDailySeries({ startDate, endDate, values: dailyArpm }),
-        dailyTransactions: buildDailySeries({ startDate, endDate, values: dailyTransactions })
-          .map((item) => ({ date: item.date, count: item.amount })),
-        currency: currentPayments[0]?.currency ?? "GBP",
-      };
+          return {
+            totalRevenue,
+            netRevenue,
+            totalPayouts,
+            revenueChange,
+            netRevenueChange,
+            arpmChange,
+            transactionChange,
+            transactionCount: currentPayments.length,
+            activeMemberships: activeMembershipCount,
+            arpm,
+            byType,
+            dailyRevenue: buildDailySeries({ startDate, endDate, values: dailyRevenue }),
+            dailyNetRevenue: buildDailySeries({ startDate, endDate, values: dailyNetRevenue }),
+            dailyArpm: buildDailySeries({ startDate, endDate, values: dailyArpm }),
+            dailyTransactions: buildDailySeries({ startDate, endDate, values: dailyTransactions })
+              .map((item) => ({ date: item.date, count: item.amount })),
+            currency: currentPayments[0]?.currency ?? "GBP",
+          };
+        },
+      });
     }),
 
   transactions: protectedProcedure

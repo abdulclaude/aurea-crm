@@ -36,6 +36,7 @@ import {
   studioMembership,
   studioPayment,
 } from "@/db/schema";
+import { readThroughRedisCache } from "@/lib/redis/read-through-cache";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 function requireOrg(ctx: { orgId: string | null }) {
@@ -86,6 +87,13 @@ const rangeInputSchema = z
   .optional();
 
 type RangeInput = z.infer<typeof rangeInputSchema>;
+type DashboardCacheContext = {
+  orgId: string | null;
+  locationId: string | null;
+};
+
+const DASHBOARD_RANGE_CACHE_SECONDS = 2 * 60;
+const DASHBOARD_METADATA_CACHE_SECONDS = 10 * 60;
 
 function resolveRange(input: RangeInput): { start: Date; end: Date; days: number; label: string } {
   const end = input?.end ?? new Date();
@@ -99,6 +107,84 @@ function resolveRange(input: RangeInput): { start: Date; end: Date; days: number
     days,
     label: days <= 31 && start.getDate() === 1 ? "current month" : `last ${days} days`,
   };
+}
+
+function dashboardCacheKey({
+  metric,
+  orgId,
+  locationId,
+  parts = [],
+}: {
+  metric: string;
+  orgId: string;
+  locationId: string | null;
+  parts?: string[];
+}): string {
+  return [
+    "studio-dashboard",
+    "v1",
+    metric,
+    orgId,
+    locationId ?? "organization",
+    ...parts,
+  ].join(":");
+}
+
+function cacheDashboardRangeMetric<T>({
+  ctx,
+  input,
+  metric,
+  loader,
+}: {
+  ctx: DashboardCacheContext;
+  input: RangeInput;
+  metric: string;
+  loader: (
+    orgId: string,
+    range: ReturnType<typeof resolveRange>,
+  ) => Promise<T>;
+}): Promise<T> {
+  const orgId = requireOrg(ctx);
+  const range = resolveRange(input);
+
+  return readThroughRedisCache({
+    key: dashboardCacheKey({
+      metric,
+      orgId,
+      locationId: ctx.locationId,
+      parts: [
+        range.start.toISOString(),
+        range.end.toISOString(),
+        String(range.days),
+      ],
+    }),
+    ttlSeconds: DASHBOARD_RANGE_CACHE_SECONDS,
+    loader: () => loader(orgId, range),
+  });
+}
+
+function cacheDashboardMetric<T>({
+  ctx,
+  metric,
+  ttlSeconds = DASHBOARD_RANGE_CACHE_SECONDS,
+  loader,
+}: {
+  ctx: DashboardCacheContext;
+  metric: string;
+  ttlSeconds?: number;
+  loader: (orgId: string) => Promise<T>;
+}): Promise<T> {
+  const orgId = requireOrg(ctx);
+
+  return readThroughRedisCache({
+    key: dashboardCacheKey({
+      metric,
+      orgId,
+      locationId: ctx.locationId,
+    }),
+    ttlSeconds,
+    loader: () => loader(orgId),
+  });
 }
 
 function previousRange(range: { start: Date; end: Date }) {
@@ -285,23 +371,25 @@ function activityLabel(row: {
 export const studioDashboardRouter = createTRPCRouter({
   summaryStats: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-    const orgId = requireOrg(ctx);
-    const range = resolveRange(input);
-    const previous = previousRange(range);
-    const { start: todayStart, end: todayEnd } = todayRange();
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "summary-stats",
+        loader: async (orgId, range) => {
+          const previous = previousRange(range);
+          const { start: todayStart, end: todayEnd } = todayRange();
 
-    const [
-      activeMemberships,
-      previousActiveMemberships,
-      todayClasses,
-      previousTodayClasses,
-      todayCheckIns,
-      previousTodayCheckIns,
-      rangeCheckIns,
-      previousRangeCheckIns,
-    ] =
-      await Promise.all([
+          const [
+            activeMemberships,
+            previousActiveMemberships,
+            todayClasses,
+            previousTodayClasses,
+            todayCheckIns,
+            previousTodayCheckIns,
+            rangeCheckIns,
+            previousRangeCheckIns,
+          ] = await Promise.all([
         db
           .select({ total: count() })
           .from(studioMembership)
@@ -385,31 +473,48 @@ export const studioDashboardRouter = createTRPCRouter({
               lt(checkIn.checkedInAt, previous.end)
             )
           ),
-      ]);
+          ]);
 
-    const activeCount = activeMemberships[0]?.total ?? 0;
-    const todayClassCount = todayClasses[0]?.total ?? 0;
-    const todayCheckInCount = todayCheckIns[0]?.total ?? 0;
-    const rangeCheckInCount = rangeCheckIns[0]?.total ?? 0;
+          const activeCount = activeMemberships[0]?.total ?? 0;
+          const todayClassCount = todayClasses[0]?.total ?? 0;
+          const todayCheckInCount = todayCheckIns[0]?.total ?? 0;
+          const rangeCheckInCount = rangeCheckIns[0]?.total ?? 0;
 
-    return {
-      activeMemberships: activeCount,
-      todayClasses: todayClassCount,
-      todayCheckIns: todayCheckInCount,
-      monthCheckIns: rangeCheckInCount,
-      rangeLabel: range.label,
-      membershipsChange: changePct(activeCount, previousActiveMemberships[0]?.total ?? 0),
-      classesChange: changePct(todayClassCount, previousTodayClasses[0]?.total ?? 0),
-      checkInsChange: changePct(todayCheckInCount, previousTodayCheckIns[0]?.total ?? 0),
-      visitsChange: changePct(rangeCheckInCount, previousRangeCheckIns[0]?.total ?? 0),
-    };
-  }),
+          return {
+            activeMemberships: activeCount,
+            todayClasses: todayClassCount,
+            todayCheckIns: todayCheckInCount,
+            monthCheckIns: rangeCheckInCount,
+            rangeLabel: range.label,
+            membershipsChange: changePct(
+              activeCount,
+              previousActiveMemberships[0]?.total ?? 0,
+            ),
+            classesChange: changePct(
+              todayClassCount,
+              previousTodayClasses[0]?.total ?? 0,
+            ),
+            checkInsChange: changePct(
+              todayCheckInCount,
+              previousTodayCheckIns[0]?.total ?? 0,
+            ),
+            visitsChange: changePct(
+              rangeCheckInCount,
+              previousRangeCheckIns[0]?.total ?? 0,
+            ),
+          };
+        },
+      }),
+    ),
 
   visitsOverTime: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "visits-over-time",
+        loader: async (orgId, range) => {
       const gran = pickGranularity(range.days);
       const { interval, format } = bucketSqlParts(gran);
       const bucket = sql<string>`to_char(date_trunc(${interval}, ${checkIn.checkedInAt}), ${format})`;
@@ -430,18 +535,23 @@ export const studioDashboardRouter = createTRPCRouter({
         .groupBy(bucket);
       const counts = new Map<string, number>();
       for (const row of rows) counts.set(row.bucket, row.total);
-      return bucketKeys(range.start, range.end, gran).map((key) => ({
-        label: bucketLabel(key, gran),
-        fullLabel: bucketFullLabel(key, gran),
-        visits: counts.get(key) ?? 0,
-      }));
-    }),
+          return bucketKeys(range.start, range.end, gran).map((key) => ({
+            label: bucketLabel(key, gran),
+            fullLabel: bucketFullLabel(key, gran),
+            visits: counts.get(key) ?? 0,
+          }));
+        },
+      }),
+    ),
 
   membershipsOverTime: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "memberships-over-time",
+        loader: async (orgId, range) => {
       const gran = pickGranularity(range.days);
       const { interval, format } = bucketSqlParts(gran);
       const bucket = sql<string>`to_char(date_trunc(${interval}, ${studioMembership.startDate}), ${format})`;
@@ -461,12 +571,14 @@ export const studioDashboardRouter = createTRPCRouter({
         .groupBy(bucket);
       const counts = new Map<string, number>();
       for (const row of rows) counts.set(row.bucket, row.total);
-      return bucketKeys(range.start, range.end, gran).map((key) => ({
-        label: bucketLabel(key, gran),
-        fullLabel: bucketFullLabel(key, gran),
-        newMemberships: counts.get(key) ?? 0,
-      }));
-    }),
+          return bucketKeys(range.start, range.end, gran).map((key) => ({
+            label: bucketLabel(key, gran),
+            fullLabel: bucketFullLabel(key, gran),
+            newMemberships: counts.get(key) ?? 0,
+          }));
+        },
+      }),
+    ),
 
   upcomingOccupancy: protectedProcedure.query(async ({ ctx }) => {
     const orgId = requireOrg(ctx);
@@ -587,9 +699,12 @@ export const studioDashboardRouter = createTRPCRouter({
 
   revenueOverTime: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "revenue-over-time",
+        loader: async (orgId, range) => {
       const gran = pickGranularity(range.days);
       const { interval, format } = bucketSqlParts(gran);
       const bucket = sql<string>`to_char(date_trunc(${interval}, ${studioPayment.createdAt}), ${format})`;
@@ -612,18 +727,23 @@ export const studioDashboardRouter = createTRPCRouter({
         .groupBy(bucket);
       const totals = new Map<string, number>();
       for (const row of rows) totals.set(row.bucket, amount(row.total));
-      return bucketKeys(range.start, range.end, gran).map((key) => ({
-        label: bucketLabel(key, gran),
-        fullLabel: bucketFullLabel(key, gran),
-        revenue: Math.round((totals.get(key) ?? 0) * 100) / 100,
-      }));
-    }),
+          return bucketKeys(range.start, range.end, gran).map((key) => ({
+            label: bucketLabel(key, gran),
+            fullLabel: bucketFullLabel(key, gran),
+            revenue: Math.round((totals.get(key) ?? 0) * 100) / 100,
+          }));
+        },
+      }),
+    ),
 
   revenueByCategory: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "revenue-by-category",
+        loader: async (orgId, range) => {
       const rows = await db
         .select({
           category: sql<string>`${studioPayment.type}::text`,
@@ -641,24 +761,29 @@ export const studioDashboardRouter = createTRPCRouter({
           ),
         )
         .groupBy(studioPayment.type);
-      return rows
-        .map((row) => ({
-          category: row.category,
-          revenue: amount(row.total),
-        }))
-        .map(({ category, revenue }) => ({
-          category,
-          label: category.replaceAll("_", " "),
-          revenue: Math.round(revenue * 100) / 100,
-        }))
-        .sort((a, b) => b.revenue - a.revenue);
-    }),
+          return rows
+            .map((row) => ({
+              category: row.category,
+              revenue: amount(row.total),
+            }))
+            .map(({ category, revenue }) => ({
+              category,
+              label: category.replaceAll("_", " "),
+              revenue: Math.round(revenue * 100) / 100,
+            }))
+            .sort((a, b) => b.revenue - a.revenue);
+        },
+      }),
+    ),
 
   revenueByWeekday: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "revenue-by-weekday",
+        loader: async (orgId, range) => {
       const weekdayExpr = sql<number>`extract(dow from ${studioPayment.createdAt})::int`;
       const rows = await db
         .select({
@@ -683,17 +808,22 @@ export const studioDashboardRouter = createTRPCRouter({
         const label = labels[row.weekday] ?? "Sun";
         totals.set(label, amount(row.total));
       }
-      return labels.map((day) => ({
-        day,
-        revenue: Math.round((totals.get(day) ?? 0) * 100) / 100,
-      }));
-    }),
+          return labels.map((day) => ({
+            day,
+            revenue: Math.round((totals.get(day) ?? 0) * 100) / 100,
+          }));
+        },
+      }),
+    ),
 
   totalRevenue: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "total-revenue",
+        loader: async (orgId, range) => {
       const previous = previousRange(range);
       const baseWhere = and(
         eq(studioPayment.organizationId, orgId),
@@ -713,17 +843,22 @@ export const studioDashboardRouter = createTRPCRouter({
       ]);
       const total = amount(currentAgg[0]?.total);
       const previousTotal = amount(previousAgg[0]?.total);
-      return {
-        total: Math.round(total * 100) / 100,
-        change: changePct(total, previousTotal),
-      };
-    }),
+          return {
+            total: Math.round(total * 100) / 100,
+            change: changePct(total, previousTotal),
+          };
+        },
+      }),
+    ),
 
   fitnessKpis: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "fitness-kpis",
+        loader: async (orgId, range) => {
       const previous = previousRange(range);
 
       const [
@@ -817,21 +952,29 @@ export const studioDashboardRouter = createTRPCRouter({
       const clientCount = clientAgg[0]?.total ?? 0;
       const churnedClients = clientAgg[0]?.churned ?? 0;
 
-      return {
-        arpm,
-        arpmChange: changePct(arpm, previousArpm),
-        noShowRate: noShowFor(currentClasses),
-        noShowChange: changePct(noShowFor(currentClasses), noShowFor(previousClasses)),
-        classUtilization: utilizationFor(currentClasses),
-        churnRate: pct(churnedClients, clientCount),
-      };
-    }),
+          return {
+            arpm,
+            arpmChange: changePct(arpm, previousArpm),
+            noShowRate: noShowFor(currentClasses),
+            noShowChange: changePct(
+              noShowFor(currentClasses),
+              noShowFor(previousClasses),
+            ),
+            classUtilization: utilizationFor(currentClasses),
+            churnRate: pct(churnedClients, clientCount),
+          };
+        },
+      }),
+    ),
 
   statSparklines: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "stat-sparklines",
+        loader: async (orgId, range) => {
       const gran = pickGranularity(range.days);
       const { interval, format } = bucketSqlParts(gran);
       const membershipBucket = sql<string>`to_char(date_trunc(${interval}, ${studioMembership.startDate}), ${format})`;
@@ -894,17 +1037,22 @@ export const studioDashboardRouter = createTRPCRouter({
       for (const row of revenue) revenueMap.set(row.bucket, amount(row.total));
       const keys = bucketKeys(range.start, range.end, gran);
 
-      return {
-        memberships: keys.map((key) => ({ v: membershipMap.get(key) ?? 0 })),
-        visits: keys.map((key) => ({ v: visitMap.get(key) ?? 0 })),
-        revenue: keys.map((key) => ({
-          v: Math.round((revenueMap.get(key) ?? 0) * 100) / 100,
-        })),
-      };
-    }),
+          return {
+            memberships: keys.map((key) => ({ v: membershipMap.get(key) ?? 0 })),
+            visits: keys.map((key) => ({ v: visitMap.get(key) ?? 0 })),
+            revenue: keys.map((key) => ({
+              v: Math.round((revenueMap.get(key) ?? 0) * 100) / 100,
+            })),
+          };
+        },
+      }),
+    ),
 
-  atRiskMembers: protectedProcedure.query(async ({ ctx }) => {
-    const orgId = requireOrg(ctx);
+  atRiskMembers: protectedProcedure.query(({ ctx }) =>
+    cacheDashboardMetric({
+      ctx,
+      metric: "at-risk-members",
+      loader: async (orgId) => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const expiringEnd = new Date();
@@ -943,7 +1091,7 @@ export const studioDashboardRouter = createTRPCRouter({
       }),
     ]);
 
-    return {
+        return {
       lapsed: clients
         .map((row) => ({
           id: row.id,
@@ -980,11 +1128,17 @@ export const studioDashboardRouter = createTRPCRouter({
           planName: string;
           endDate: string | null;
         }[];
-      };
-  }),
+          };
+      },
+    }),
+  ),
 
-  waitlistSummary: protectedProcedure.query(async ({ ctx }) => {
-    const orgId = requireOrg(ctx);
+  waitlistSummary: protectedProcedure.query(({ ctx }) =>
+    cacheDashboardMetric({
+      ctx,
+      metric: "waitlist-summary",
+      ttlSeconds: 60,
+      loader: async (orgId) => {
     const nowDate = new Date();
     const classes = await db.query.studioClass.findMany({
       where: and(
@@ -1018,7 +1172,7 @@ export const studioDashboardRouter = createTRPCRouter({
       }))
       .filter((row) => row.waitlistCount > 0);
 
-    return {
+        return {
       totalWaiting: rows.reduce((sum, row) => sum + row.waitlistCount, 0),
       classes: rows,
     } satisfies {
@@ -1033,14 +1187,19 @@ export const studioDashboardRouter = createTRPCRouter({
           classType: { name: string; color: string | null } | null;
           instructor: { name: string } | null;
         }[];
-      };
-  }),
+          };
+      },
+    }),
+  ),
 
   newMembersCount: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-    const orgId = requireOrg(ctx);
-    const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "new-members-count",
+        loader: async (orgId, range) => {
     const previous = previousRange(range);
     const [currentRows, previousRows] = await Promise.all([
       db
@@ -1052,15 +1211,24 @@ export const studioDashboardRouter = createTRPCRouter({
         .from(client)
         .where(and(...clientScope(orgId, ctx.locationId), gte(client.createdAt, previous.start), lt(client.createdAt, previous.end))),
     ]);
-    const current = currentRows[0]?.total ?? 0;
-    return { count: current, change: changePct(current, previousRows[0]?.total ?? 0), label: range.label };
-  }),
+          const current = currentRows[0]?.total ?? 0;
+          return {
+            count: current,
+            change: changePct(current, previousRows[0]?.total ?? 0),
+            label: range.label,
+          };
+        },
+      }),
+    ),
 
   expiringMembershipsCount: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "expiring-memberships-count",
+        loader: async (orgId, range) => {
       const nowDate = new Date();
       const rows = await db
         .select({ total: count() })
@@ -1073,14 +1241,19 @@ export const studioDashboardRouter = createTRPCRouter({
             lte(studioMembership.endDate, range.end),
           ),
         );
-      return { count: rows[0]?.total ?? 0 };
-    }),
+          return { count: rows[0]?.total ?? 0 };
+        },
+      }),
+    ),
 
   conversionOverview: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "conversion-overview",
+        loader: async (orgId, range) => {
       const previous = previousRange(range);
       const automationTypes = [
         "LEAD_CONVERTED",
@@ -1159,7 +1332,7 @@ export const studioDashboardRouter = createTRPCRouter({
       const automationCount = automations[0]?.total ?? 0;
       const previousAutomationCount = previousAutomations[0]?.total ?? 0;
 
-      return {
+          return {
         sankey: {
           nodes: [
             { name: "Inquiries" },
@@ -1182,14 +1355,19 @@ export const studioDashboardRouter = createTRPCRouter({
             previousAutomationCount,
           ),
         },
-      };
-    }),
+          };
+        },
+      }),
+    ),
 
   planGainLoss: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "plan-gain-loss",
+        loader: async (orgId, range) => {
       const previous = previousRange(range);
       const [gained, lost, previousGained, previousLost] = await Promise.all([
         db.select({ total: count() }).from(studioMembership).where(and(...membershipScope(orgId, ctx.locationId), gte(studioMembership.startDate, range.start), lt(studioMembership.startDate, range.end))),
@@ -1201,14 +1379,24 @@ export const studioDashboardRouter = createTRPCRouter({
       const currentLost = lost[0]?.total ?? 0;
       const currentNet = currentGained - currentLost;
       const previousNet = (previousGained[0]?.total ?? 0) - (previousLost[0]?.total ?? 0);
-      return { gained: currentGained, lost: currentLost, net: currentNet, change: changePct(currentNet, previousNet) };
-    }),
+          return {
+            gained: currentGained,
+            lost: currentLost,
+            net: currentNet,
+            change: changePct(currentNet, previousNet),
+          };
+        },
+      }),
+    ),
 
   classTypeUtilization: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "class-type-utilization",
+        loader: async (orgId, range) => {
       const classes = await db
         .select({
           classTypeId: studioClass.classTypeId,
@@ -1246,17 +1434,22 @@ export const studioDashboardRouter = createTRPCRouter({
         current.capacity += cls.maxCapacity ?? cls.booked;
         grouped.set(id, current);
       }
-      return Array.from(grouped.values()).map((row) => ({
-        ...row,
-        utilization: pct(row.booked, row.capacity),
-      }));
-    }),
+          return Array.from(grouped.values()).map((row) => ({
+            ...row,
+            utilization: pct(row.booked, row.capacity),
+          }));
+        },
+      }),
+    ),
 
   instructorUtilization: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "instructor-utilization",
+        loader: async (orgId, range) => {
       const classes = await db
         .select({
           instructorId: studioClass.instructorId,
@@ -1296,17 +1489,22 @@ export const studioDashboardRouter = createTRPCRouter({
         current.capacity += cls.maxCapacity ?? cls.booked;
         grouped.set(id, current);
       }
-      return Array.from(grouped.values()).map((row) => ({
-        ...row,
-        utilization: pct(row.booked, row.capacity),
-      }));
-    }),
+          return Array.from(grouped.values()).map((row) => ({
+            ...row,
+            utilization: pct(row.booked, row.capacity),
+          }));
+        },
+      }),
+    ),
 
   automationAttribution: protectedProcedure
     .input(rangeInputSchema)
-    .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const range = resolveRange(input);
+    .query(({ ctx, input }) =>
+      cacheDashboardRangeMetric({
+        ctx,
+        input,
+        metric: "automation-attribution",
+        loader: async (orgId, range) => {
       const workflowIdExpr = sql<string>`coalesce(${automationEvent.workflowId}, 'unattributed')`;
       const workflowNameExpr = sql<string>`case when ${workflowIdExpr} = 'unattributed' then 'Unattributed automation' else min(${automationEvent.name}) end`;
       const rows = await db
@@ -1328,48 +1526,61 @@ export const studioDashboardRouter = createTRPCRouter({
         )
         .groupBy(workflowIdExpr);
 
-      return rows
-        .map((row) => ({
-          workflowId: row.workflowId,
-          workflowName: row.workflowName,
-          conversions: row.conversions,
-          value: amount(row.value),
-        }))
-        .sort((a, b) => b.conversions - a.conversions);
-    }),
+          return rows
+            .map((row) => ({
+              workflowId: row.workflowId,
+              workflowName: row.workflowName,
+              conversions: row.conversions,
+              value: amount(row.value),
+            }))
+            .sort((a, b) => b.conversions - a.conversions);
+        },
+      }),
+    ),
 
   campaignPerformance: protectedProcedure
     .input(z.object({ days: z.number().default(30) }))
     .query(async ({ ctx, input }) => {
       const orgId = requireOrg(ctx);
-      const start = new Date();
-      start.setDate(start.getDate() - input.days);
+      return readThroughRedisCache({
+        key: dashboardCacheKey({
+          metric: "campaign-performance",
+          orgId,
+          locationId: ctx.locationId,
+          parts: [String(input.days)],
+        }),
+        ttlSeconds: DASHBOARD_RANGE_CACHE_SECONDS,
+        loader: async () => {
+          const start = new Date();
+          start.setDate(start.getDate() - input.days);
 
-      const rows = await db.query.campaign.findMany({
-        where: and(
-          eq(campaign.organizationId, orgId),
-          ctx.locationId ? eq(campaign.locationId, ctx.locationId) : undefined,
-          gte(campaign.createdAt, start)
-        ),
-        orderBy: desc(campaign.createdAt),
-        limit: 8,
+          const rows = await db.query.campaign.findMany({
+            where: and(
+              eq(campaign.organizationId, orgId),
+              ctx.locationId ? eq(campaign.locationId, ctx.locationId) : undefined,
+              gte(campaign.createdAt, start)
+            ),
+            orderBy: desc(campaign.createdAt),
+            limit: 8,
+          });
+
+          return rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            status: row.status,
+            totalRecipients: row.totalRecipients,
+            delivered: row.delivered,
+            opened: row.opened,
+            clicked: row.clicked,
+            openRate: row.delivered
+              ? Math.round((row.opened / row.delivered) * 100)
+              : 0,
+            clickRate: row.delivered
+              ? Math.round((row.clicked / row.delivered) * 100)
+              : 0,
+          }));
+        },
       });
-
-      return rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        status: row.status,
-        totalRecipients: row.totalRecipients,
-        delivered: row.delivered,
-        opened: row.opened,
-        clicked: row.clicked,
-        openRate: row.delivered
-          ? Math.round((row.opened / row.delivered) * 100)
-          : 0,
-        clickRate: row.delivered
-          ? Math.round((row.clicked / row.delivered) * 100)
-          : 0,
-      }));
     }),
 
   dataRange: protectedProcedure.query(async ({ ctx }) => {
@@ -1419,11 +1630,15 @@ export const studioDashboardRouter = createTRPCRouter({
     return { earliest };
   }),
 
-  activeDates: protectedProcedure.query(async ({ ctx }) => {
-    const orgId = requireOrg(ctx);
+  activeDates: protectedProcedure.query(({ ctx }) =>
+    cacheDashboardMetric({
+      ctx,
+      metric: "active-dates",
+      ttlSeconds: DASHBOARD_METADATA_CACHE_SECONDS,
+      loader: async (orgId) => {
     const locFilter = ctx.locationId;
 
-    const rows = await db.execute<{ d: string }>(sql`
+        const rows = await db.execute<{ d: string }>(sql`
       SELECT DISTINCT d FROM (
         SELECT date_trunc('day', ${studioClass.startTime})::date::text AS d
           FROM ${studioClass}
@@ -1443,6 +1658,8 @@ export const studioDashboardRouter = createTRPCRouter({
       ORDER BY d
     `);
 
-    return rows.rows.map((r) => r.d);
-  }),
+        return rows.rows.map((r) => r.d);
+      },
+    }),
+  ),
 });
