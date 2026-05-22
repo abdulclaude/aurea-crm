@@ -24,8 +24,8 @@ import {
 import { useCredentialsParams } from "../hooks/use-credentials-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
-import type { Credential } from "@prisma/client";
-import { CredentialType } from "@prisma/client";
+import type { Credential } from "@/db/types";
+import { CredentialType } from "@/db/enums";
 import Image from "next/image";
 
 const CredentialsList = () => {
@@ -137,6 +137,7 @@ const credentialLogos: Record<CredentialType, string> = {
   [CredentialType.TELEGRAM_BOT]: "/logos/telegram.svg",
   [CredentialType.MINDBODY]: "/logos/mindbody.svg",
   [CredentialType.RESEND]: "/logos/resend.svg",
+  [CredentialType.CAL_COM]: "/logos/calcom.svg",
 };
 
 // credential Item

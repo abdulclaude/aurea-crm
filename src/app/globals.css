@@ -56,16 +56,16 @@
   --spacing: 0.25rem;
   --shadow-2xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.05);
   --shadow-xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-sm: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow-md: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 2px 4px -1px hsl(0 0% 0% / 0.1);
-  --shadow-lg: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 4px 6px -1px hsl(0 0% 0% / 0.1);
-  --shadow-xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 8px 10px -1px hsl(0 0% 0% / 0.1);
+  --shadow-sm:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow-md:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-lg:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 4px 6px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xl:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 8px 10px -1px hsl(0 0% 0% / 0.1);
   --shadow-2xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.25);
   --tracking-normal: 0em;
 }
@@ -125,7 +125,8 @@
   --shadow-sm: var(--shadow-sm);
   --shadow-xs: var(--shadow-xs);
   --shadow-2xs: var(--shadow-2xs);
-  --shadow-highlight: inset 0px 0px 0px 1px var(--tw-shadow-color),
+  --shadow-highlight:
+    inset 0px 0px 0px 1px var(--tw-shadow-color),
     inset 0px 1px 0px var(--tw-shadow-color);
   --spacing: var(--spacing);
   --letter-spacing: var(--letter-spacing);
@@ -185,21 +186,22 @@
   --spacing: 0.25rem;
   --shadow-2xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.05);
   --shadow-xs: 0px 1px 3px 0px hsl(0 0% 0% / 0.05);
-  --shadow-sm: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 1px 2px -1px hsl(0 0% 0% / 0.1);
-  --shadow-md: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 2px 4px -1px hsl(0 0% 0% / 0.1);
-  --shadow-lg: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 4px 6px -1px hsl(0 0% 0% / 0.1);
-  --shadow-xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.1),
-    0px 8px 10px -1px hsl(0 0% 0% / 0.1);
+  --shadow-sm:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 1px 2px -1px hsl(0 0% 0% / 0.1);
+  --shadow-md:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 2px 4px -1px hsl(0 0% 0% / 0.1);
+  --shadow-lg:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 4px 6px -1px hsl(0 0% 0% / 0.1);
+  --shadow-xl:
+    0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 8px 10px -1px hsl(0 0% 0% / 0.1);
   --shadow-2xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.25);
 }
 
 .shadow-input {
-  box-shadow: 0px 1px 0px -1px var(--tw-shadow-color),
+  box-shadow:
+    0px 1px 0px -1px var(--tw-shadow-color),
     0px 1px 1px -1px var(--tw-shadow-color),
     0px 1px 2px -1px var(--tw-shadow-color),
     0px 2px 4px -2px var(--tw-shadow-color),
@@ -211,7 +213,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-black;
     letter-spacing: var(--tracking-normal);
     overflow-x: hidden;
   }

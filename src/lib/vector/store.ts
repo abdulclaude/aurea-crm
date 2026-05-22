@@ -67,15 +67,15 @@ export async function deleteVector(id: string): Promise<void> {
 }
 
 /**
- * Delete all vectors for a subaccount
+ * Delete all vectors for a location
  */
-export async function deleteVectorsBySubaccount(subaccountId: string): Promise<number> {
+export async function deleteVectorsByLocation(locationId: string): Promise<number> {
   const allIds = await redis.smembers(VECTOR_INDEX_KEY);
   let deleted = 0;
 
   for (const id of allIds) {
     const doc = await getVector(id);
-    if (doc?.metadata.subaccountId === subaccountId) {
+    if (doc?.metadata.locationId === locationId) {
       await deleteVector(id);
       deleted++;
     }
@@ -90,13 +90,13 @@ export async function deleteVectorsBySubaccount(subaccountId: string): Promise<n
 export async function searchVectors(
   queryEmbedding: number[],
   options: {
-    subaccountId: string;
+    locationId: string;
     topK?: number;
     threshold?: number;
     entityTypes?: string[];
   }
 ): Promise<SearchResult[]> {
-  const { subaccountId, topK = 10, threshold = 0.5, entityTypes } = options;
+  const { locationId, topK = 10, threshold = 0.5, entityTypes } = options;
 
   // Get all vector IDs
   const allIds = await redis.smembers(VECTOR_INDEX_KEY);
@@ -113,8 +113,8 @@ export async function searchVectors(
 
     if (!doc) continue;
 
-    // Filter by subaccount
-    if (doc.metadata.subaccountId !== subaccountId) continue;
+    // Filter by location
+    if (doc.metadata.locationId !== locationId) continue;
 
     // Filter by entity type if specified
     if (entityTypes && !entityTypes.includes(doc.metadata.entityType)) continue;
@@ -137,15 +137,15 @@ export async function searchVectors(
 }
 
 /**
- * Get all vectors for a subaccount
+ * Get all vectors for a location
  */
-export async function getVectorsBySubaccount(subaccountId: string): Promise<VectorDocument[]> {
+export async function getVectorsByLocation(locationId: string): Promise<VectorDocument[]> {
   const allIds = await redis.smembers(VECTOR_INDEX_KEY);
   const vectors: VectorDocument[] = [];
 
   for (const id of allIds) {
     const doc = await getVector(id);
-    if (doc?.metadata.subaccountId === subaccountId) {
+    if (doc?.metadata.locationId === locationId) {
       vectors.push(doc);
     }
   }
@@ -154,15 +154,15 @@ export async function getVectorsBySubaccount(subaccountId: string): Promise<Vect
 }
 
 /**
- * Get vector count for a subaccount
+ * Get vector count for a location
  */
-export async function getVectorCount(subaccountId: string): Promise<number> {
+export async function getVectorCount(locationId: string): Promise<number> {
   const allIds = await redis.smembers(VECTOR_INDEX_KEY);
   let count = 0;
 
   for (const id of allIds) {
     const doc = await getVector(id);
-    if (doc?.metadata.subaccountId === subaccountId) {
+    if (doc?.metadata.locationId === locationId) {
       count++;
     }
   }

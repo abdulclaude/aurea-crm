@@ -11,7 +11,8 @@ import {
   hiddenBlockIdsAtom,
 } from "../../lib/editor-store";
 import { getBlockDefinition } from "../../lib/block-registry";
-import type { FunnelBlock, FunnelBreakpoint, DeviceType } from "@prisma/client";
+import type { DeviceType } from "@/db/enums";
+import type { FunnelBlock, FunnelBreakpoint } from "@/db/types";
 import type { BlockProps, BlockStyles } from "../../types";
 import { useDroppable } from "@dnd-kit/core";
 import { useTRPC } from "@/trpc/client";

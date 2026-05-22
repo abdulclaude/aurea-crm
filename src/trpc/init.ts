@@ -1,30 +1,37 @@
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import {
+  member,
+  session,
+  location,
+  locationMember,
+  instructor as instructorTable,
+} from "@/db/schema";
 import { polarClient } from "@/lib/polar";
 import { updateSessionActivity } from "@/lib/activity-tracker";
 import { initTRPC, TRPCError } from "@trpc/server";
+import { and, asc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
 
 import superjson from "superjson";
+import { z } from "zod";
 
+// Used by server.tsx and direct callers — reads headers from Next.js async context
 export const createTRPCContext = cache(async () => {
-  /**
-   * @see: https://trpc.io/docs/server/context
-   */
-  return { userId: "user_123" };
+  const reqHeaders = await headers();
+  return { headers: reqHeaders };
 });
-// Avoid exporting the entire t-object
-// since it's not very descriptive.
-// For instance, the use of a t variable
-// is common in i18n libraries.
 
-const t = initTRPC.create({
-  /**
-   * @see https://trpc.io/docs/server/data-transformers
-   */
+const t = initTRPC.context<{ headers: Headers }>().create({
   transformer: superjson,
 });
+
+const InstructorProcedureInputSchema = z
+  .object({
+    instructorId: z.string().min(1),
+  })
+  .passthrough();
 
 // Base router and procedure helpers
 export const createTRPCRouter = t.router;
@@ -35,7 +42,7 @@ export const baseProcedure = t.procedure;
 // Authenticated procedure without requiring organization context
 export const authenticatedProcedure = baseProcedure.use(async ({ ctx, next }) => {
   const session = await auth.api.getSession({
-    headers: await headers(),
+    headers: ctx.headers,
   });
 
   if (!session) {
@@ -59,74 +66,111 @@ export const authenticatedProcedure = baseProcedure.use(async ({ ctx, next }) =>
 });
 
 export const protectedProcedure = authenticatedProcedure.use(async ({ ctx, next }) => {
-  const sessionRecord = await prisma.session.findUnique({
-    where: { token: ctx.auth.session.token },
-    select: {
-      activeOrganizationId: true,
-      activeSubaccountId: true,
-    },
-  });
+  const [sessionRecord] = await db
+    .select({
+      activeOrganizationId: session.activeOrganizationId,
+      activeLocationId: session.activeLocationId,
+    })
+    .from(session)
+    .where(eq(session.token, ctx.auth.session.token))
+    .limit(1);
 
   let orgId =
     sessionRecord?.activeOrganizationId ??
     ctx.auth.session.activeOrganizationId ??
     null;
-  let activeSubaccountId = sessionRecord?.activeSubaccountId ?? null;
+  let activeLocationId = sessionRecord?.activeLocationId ?? null;
 
   // If no orgId, try to find a fallback organization membership
   if (!orgId) {
-    const fallbackMembership = await prisma.member.findFirst({
-      where: { userId: ctx.auth.user.id },
-      orderBy: { createdAt: "asc" },
-    });
+    const [fallbackMembership] = await db
+      .select({ organizationId: member.organizationId })
+      .from(member)
+      .where(eq(member.userId, ctx.auth.user.id))
+      .orderBy(asc(member.createdAt))
+      .limit(1);
 
     if (fallbackMembership) {
       orgId = fallbackMembership.organizationId;
-      await prisma.session.update({
-        where: { token: ctx.auth.session.token },
-        data: { activeOrganizationId: orgId },
-      });
+      await db
+        .update(session)
+        .set({ activeOrganizationId: orgId })
+        .where(eq(session.token, ctx.auth.session.token));
     }
   }
 
-  // If still no orgId, check for subaccount-only membership
-  if (!orgId && !activeSubaccountId) {
-    const fallbackSubaccountMembership = await prisma.subaccountMember.findFirst({
-      where: { userId: ctx.auth.user.id },
-      include: { subaccount: true },
-      orderBy: { createdAt: "asc" },
-    });
+  // If still no orgId, check for location-only membership
+  if (!orgId && !activeLocationId) {
+    const [fallbackLocationMembership] = await db
+      .select({
+        locationId: locationMember.locationId,
+        organizationId: location.organizationId,
+      })
+      .from(locationMember)
+      .innerJoin(
+        location,
+        eq(locationMember.locationId, location.id)
+      )
+      .where(eq(locationMember.userId, ctx.auth.user.id))
+      .orderBy(asc(locationMember.createdAt))
+      .limit(1);
 
-    if (fallbackSubaccountMembership) {
-      activeSubaccountId = fallbackSubaccountMembership.subaccountId;
-      orgId = fallbackSubaccountMembership.subaccount.organizationId;
-      await prisma.session.update({
-        where: { token: ctx.auth.session.token },
-        data: {
-          activeSubaccountId,
+    if (fallbackLocationMembership) {
+      activeLocationId = fallbackLocationMembership.locationId;
+      orgId = fallbackLocationMembership.organizationId;
+      await db
+        .update(session)
+        .set({
+          activeLocationId,
           activeOrganizationId: orgId,
-        },
-      });
+        })
+        .where(eq(session.token, ctx.auth.session.token));
     }
   }
 
-  let activeSubaccount: Awaited<
-    ReturnType<typeof prisma.subaccount.findFirst>
-  > | null = null;
+  // Auto-lock instructors to their assigned studio location
+  const [instructorRecord] = await db
+    .select({
+      locationId: instructorTable.locationId,
+      organizationId: instructorTable.organizationId,
+    })
+    .from(instructorTable)
+    .where(eq(instructorTable.userId, ctx.auth.user.id))
+    .limit(1);
 
-  if (activeSubaccountId && orgId) {
-    activeSubaccount = await prisma.subaccount.findFirst({
-      where: {
-        id: activeSubaccountId,
-        organizationId: orgId,
-      },
-    });
+  if (instructorRecord?.locationId) {
+    if (activeLocationId !== instructorRecord.locationId) {
+      activeLocationId = instructorRecord.locationId;
+      orgId = instructorRecord.organizationId;
+      await db
+        .update(session)
+        .set({
+          activeLocationId: instructorRecord.locationId,
+          activeOrganizationId: instructorRecord.organizationId,
+        })
+        .where(eq(session.token, ctx.auth.session.token));
+    }
+  }
 
-    if (!activeSubaccount) {
-      await prisma.session.update({
-        where: { token: ctx.auth.session.token },
-        data: { activeSubaccountId: null },
-      });
+  let activeLocation: typeof location.$inferSelect | null = null;
+
+  if (activeLocationId && orgId) {
+    [activeLocation = null] = await db
+      .select()
+      .from(location)
+      .where(
+        and(
+          eq(location.id, activeLocationId),
+          eq(location.organizationId, orgId)
+        )
+      )
+      .limit(1);
+
+    if (!activeLocation) {
+      await db
+        .update(session)
+        .set({ activeLocationId: null })
+        .where(eq(session.token, ctx.auth.session.token));
     }
   }
 
@@ -134,54 +178,55 @@ export const protectedProcedure = authenticatedProcedure.use(async ({ ctx, next 
     ctx: {
       ...ctx,
       orgId,
-      subaccountId: activeSubaccount?.id ?? null,
-      subaccount: activeSubaccount,
+      locationId: activeLocation?.id ?? null,
+      location: activeLocation,
     },
   });
 });
 
-// Worker procedure for worker portal authentication (no Better Auth session)
-export const workerProcedure = baseProcedure.use(async ({ ctx, next, input }) => {
-  // Extract workerId from input - procedures using this MUST have workerId in their input
-  const workerId = (input as any)?.workerId;
+// Instructor procedure for instructor portal authentication (no Better Auth session)
+export const instructorProcedure = baseProcedure.use(async ({ ctx, next, input }) => {
+  const parsedInput = InstructorProcedureInputSchema.safeParse(input);
+  const instructorId = parsedInput.success ? parsedInput.data.instructorId : null;
 
-  if (!workerId) {
+  if (!instructorId) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Worker ID is required",
+      message: "Instructor ID is required",
     });
   }
 
-  // Verify the worker exists
-  const worker = await prisma.worker.findUnique({
-    where: { id: workerId },
-    select: {
-      id: true,
-      name: true,
-      subaccountId: true,
-      isActive: true,
-    },
-  });
+  // Verify the instructor exists
+  const [instructor] = await db
+    .select({
+      id: instructorTable.id,
+      name: instructorTable.name,
+      locationId: instructorTable.locationId,
+      isActive: instructorTable.isActive,
+    })
+    .from(instructorTable)
+    .where(eq(instructorTable.id, instructorId))
+    .limit(1);
 
-  if (!worker) {
+  if (!instructor) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Worker not found",
+      message: "Instructor not found",
     });
   }
 
-  if (!worker.isActive) {
+  if (!instructor.isActive) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: "Worker account is inactive",
+      message: "Instructor account is inactive",
     });
   }
 
   return next({
     ctx: {
       ...ctx,
-      worker,
-      subaccountId: worker.subaccountId,
+      instructor,
+      locationId: instructor.locationId,
     },
   });
 });

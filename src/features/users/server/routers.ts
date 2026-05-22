@@ -1,6 +1,9 @@
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
-import { UserStatus } from "@prisma/client";
+import { db } from "@/db";
+import { user as userTable } from "@/db/schema";
+import { UserStatus } from "@/db/enums";
+import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import z from "zod";
 
 export const usersRouter = createTRPCRouter({
@@ -12,41 +15,52 @@ export const usersRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const updatedUser = await prisma.user.update({
-        where: { id: ctx.auth.user.id },
-        data: {
+      const [updatedUser] = await db
+        .update(userTable)
+        .set({
           status: input.status,
           statusMessage: input.statusMessage ?? null,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(userTable.id, ctx.auth.user.id))
+        .returning();
+
+      if (!updatedUser) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
 
       return updatedUser;
     }),
 
   getStatus: protectedProcedure.query(async ({ ctx }) => {
-    const user = await prisma.user.findUnique({
-      where: { id: ctx.auth.user.id },
-      select: {
-        status: true,
-        statusMessage: true,
-      },
-    });
+    const [user] = await db
+      .select({
+        status: userTable.status,
+        statusMessage: userTable.statusMessage,
+      })
+      .from(userTable)
+      .where(eq(userTable.id, ctx.auth.user.id))
+      .limit(1);
 
-    return user;
+    return user ?? null;
   }),
 
   getProfile: protectedProcedure.query(async ({ ctx }) => {
-    const user = await prisma.user.findUnique({
-      where: { id: ctx.auth.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        image: true,
-      },
-    });
+    const [user] = await db
+      .select({
+        id: userTable.id,
+        name: userTable.name,
+        email: userTable.email,
+        image: userTable.image,
+      })
+      .from(userTable)
+      .where(eq(userTable.id, ctx.auth.user.id))
+      .limit(1);
 
-    return user;
+    return user ?? null;
   }),
 
   updateProfile: protectedProcedure
@@ -57,19 +71,27 @@ export const usersRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const user = await prisma.user.update({
-        where: { id: ctx.auth.user.id },
-        data: {
+      const [user] = await db
+        .update(userTable)
+        .set({
           ...(input.name !== undefined && { name: input.name }),
           ...(input.image !== undefined && { image: input.image }),
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(userTable.id, ctx.auth.user.id))
+        .returning({
+          id: userTable.id,
+          name: userTable.name,
+          email: userTable.email,
+          image: userTable.image,
+        });
+
+      if (!user) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "User not found",
+        });
+      }
 
       return user;
     }),

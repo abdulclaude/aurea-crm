@@ -47,7 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectTrigger } from "@/components/ui/select";
 import {
   AGENCY_ROLES,
-  SUBACCOUNT_ROLES,
+  LOCATION_ROLES,
 } from "@/features/organizations/members/constants";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
@@ -78,7 +78,7 @@ const sortOptions = [
   { value: "createdAt.asc", label: "Oldest first" },
 ];
 
-// Role options will be determined by context (agency vs subaccount)
+// Role options will be determined by context (agency vs location)
 
 const statusOptions = [
   { value: "ONLINE", label: "Online" },
@@ -115,21 +115,21 @@ export function MembersToolbar({
 
   // Get active context to determine which roles to show
   const { data: activeContext } = useSuspenseQuery(
-    trpc.organizations.getActive.queryOptions()
+    trpc.organizations.getActive.queryOptions(),
   );
-  const isSubaccountContext = !!activeContext?.activeSubaccountId;
+  const isLocationContext = !!activeContext?.activeLocationId;
 
   // Use the correct role options based on context
-  const roleOptions = isSubaccountContext ? SUBACCOUNT_ROLES : AGENCY_ROLES;
+  const roleOptions = isLocationContext ? LOCATION_ROLES : AGENCY_ROLES;
 
   // Fetch ALL members (unfiltered) for preview calculation
   const { data: allMembersData } = useSuspenseQuery(
-    trpc.organizations.listMembers.queryOptions({})
+    trpc.organizations.listMembers.queryOptions({}),
   );
 
   const allMembersUnfiltered = React.useMemo(
     () => allMembersData?.items || [],
-    [allMembersData]
+    [allMembersData],
   );
 
   React.useEffect(() => {
@@ -153,7 +153,7 @@ export function MembersToolbar({
     setStagedRoles((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -161,7 +161,7 @@ export function MembersToolbar({
     setStagedStatus((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -192,7 +192,7 @@ export function MembersToolbar({
     selectedRoles.length > 0 || selectedStatus.length > 0;
 
   return (
-    <div className="flex justify-between w-full items-center">
+    <div className="flex justify-between w-full items-center py-4">
       <div className="flex items-center gap-2 w-full">
         {/* Search with filters inside */}
 
@@ -211,7 +211,7 @@ export function MembersToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -230,9 +230,7 @@ export function MembersToolbar({
 
               {/* Role Filter */}
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  {isSubaccountContext ? "Subaccount Role" : "Agency Role"}
-                </DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger>Role</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent
                   className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-3 pt-2 w-[320px] ml-2.5"
                   alignOffset={-5}
@@ -248,7 +246,7 @@ export function MembersToolbar({
                           <Checkbox
                             checked={stagedRoles.includes(role.value)}
                             onCheckedChange={() => handleToggleRole(role.value)}
-                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                             onClick={(e) => e.stopPropagation()}
                           />
                           <span className="select-none font-medium">
@@ -293,7 +291,7 @@ export function MembersToolbar({
                           onCheckedChange={() =>
                             handleToggleStatus(status.value)
                           }
-                          className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                          className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                         />
                         <span className="select-none">{status.label}</span>
                       </div>
@@ -394,7 +392,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -404,22 +402,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -427,7 +425,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -438,7 +436,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -548,7 +546,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-primary-foreground/50 hover:text-black dark:hover:text-white",
-          !checked && "text-primary/80 dark:text-white/30"
+          !checked && "text-primary/80 dark:text-white/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -559,7 +557,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3.5 shrink-0 text-primary/80 dark:text-white transition",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate text-primary/80 hover:text-black dark:text-white">

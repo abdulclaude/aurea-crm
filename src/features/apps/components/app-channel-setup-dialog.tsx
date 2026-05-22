@@ -26,7 +26,7 @@ import {
   useUpdateDiscordMetadata,
   useUpdateSlackMetadata,
 } from "../hooks/use-apps";
-import type { AppProvider } from "@prisma/client";
+import type { AppProvider } from "@/db/enums";
 
 type SupportedAppProvider = Extract<AppProvider, "DISCORD" | "SLACK">;
 

@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckInMethod } from "@prisma/client";
+import { CheckInMethod } from "@/db/enums";
 import { useTRPC } from "@/trpc/client";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
@@ -42,8 +42,8 @@ import { IconCalendarClock as ClockIcon } from "central-icons/IconCalendarClock"
 import { IconQrCode } from "central-icons/IconQrCode";
 
 const clockInSchema = z.object({
-  workerId: z.string().min(1, "Worker is required"),
-  contactId: z.string().optional(),
+  instructorId: z.string().min(1, "Instructor is required"),
+  clientId: z.string().optional(),
   dealId: z.string().optional(),
   title: z.string().optional(),
   checkInMethod: z.nativeEnum(CheckInMethod),
@@ -58,24 +58,24 @@ export function ClockInForm() {
   const [currentTime, setCurrentTime] = useState<string>("");
   const [activeTab, setActiveTab] = useState<"manual" | "qr">("manual");
 
-  // Get workers
-  const { data: workersData } = useSuspenseQuery(
-    trpc.workers.list.queryOptions({ pageSize: 100 })
+  // Get instructors
+  const { data: instructorsData } = useSuspenseQuery(
+    trpc.instructors.list.queryOptions({ pageSize: 100 }),
   );
 
-  // Get contacts
-  const { data: contactsData } = useSuspenseQuery(
-    trpc.contacts.list.queryOptions({ limit: 100 })
+  // Get clients
+  const { data: clientsData } = useSuspenseQuery(
+    trpc.clients.list.queryOptions({ limit: 100 }),
   );
 
   // Get deals (jobs)
   const { data: dealsData } = useSuspenseQuery(
-    trpc.deals.list.queryOptions({ limit: 100 })
+    trpc.deals.list.queryOptions({ limit: 100 }),
   );
 
   // Get QR codes
   const { data: qrCodes = [] } = useSuspenseQuery(
-    trpc.timeTracking.listQRCodes.queryOptions()
+    trpc.timeTracking.listQRCodes.queryOptions(),
   );
 
   const form = useForm<ClockInFormData>({
@@ -94,7 +94,7 @@ export function ClockInForm() {
       onError: (error) => {
         toast.error(error.message);
       },
-    })
+    }),
   );
 
   // Update current time every second
@@ -114,7 +114,7 @@ export function ClockInForm() {
     <div className="p-6">
       <Card className="max-w-2xl mx-auto">
         <CardHeader>
-          <CardTitle>Clock In</CardTitle>
+          <CardTitle>Clock in</CardTitle>
           <CardDescription>
             Current time: <span className="font-mono">{currentTime}</span>
           </CardDescription>
@@ -127,7 +127,7 @@ export function ClockInForm() {
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="manual">
                 <ClockIcon className="mr-2 h-4 w-4" />
-                Manual Clock In
+                Manual clock in
               </TabsTrigger>
               <TabsTrigger value="qr">
                 <IconQrCode className="mr-2 h-4 w-4" />
@@ -149,23 +149,23 @@ export function ClockInForm() {
 
                   <FormField
                     control={form.control}
-                    name="workerId"
+                    name="instructorId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Worker</FormLabel>
+                        <FormLabel>Instructor</FormLabel>
                         <Select
                           onValueChange={field.onChange}
                           value={field.value}
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select a worker" />
+                              <SelectValue placeholder="Select a instructor" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {(workersData as any)?.items.map((worker: any) => (
-                              <SelectItem key={worker.id} value={worker.id}>
-                                {worker.name}
+                            {instructorsData.items.map((instructor) => (
+                              <SelectItem key={instructor.id} value={instructor.id}>
+                                {instructor.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -177,23 +177,23 @@ export function ClockInForm() {
 
                   <FormField
                     control={form.control}
-                    name="contactId"
+                    name="clientId"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Contact (Optional)</FormLabel>
+                        <FormLabel>Client (Optional)</FormLabel>
                         <Select
                           onValueChange={field.onChange}
                           value={field.value}
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Select a contact" />
+                              <SelectValue placeholder="Select a client" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {contactsData?.items.map((contact) => (
-                              <SelectItem key={contact.id} value={contact.id}>
-                                {contact.name}
+                            {clientsData?.items.map((client) => (
+                              <SelectItem key={client.id} value={client.id}>
+                                {client.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -257,7 +257,7 @@ export function ClockInForm() {
                         Clocking in...
                       </>
                     ) : (
-                      "Clock In"
+                      "Clock in"
                     )}
                   </Button>
                 </form>
@@ -265,80 +265,82 @@ export function ClockInForm() {
             </TabsContent>
 
             <TabsContent value="qr" className="mt-6">
-              <div className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="workerId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Worker</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select a worker" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {(workersData as any)?.items.map((worker: any) => (
-                            <SelectItem key={worker.id} value={worker.id}>
-                              {worker.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
+              <Form {...form}>
+                <div className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="instructorId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Instructor</FormLabel>
+                        <Select
+                          onValueChange={field.onChange}
+                          value={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a instructor" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {instructorsData.items.map((instructor) => (
+                              <SelectItem key={instructor.id} value={instructor.id}>
+                                {instructor.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <p className="text-sm text-primary/60">
+                    Select a QR code location to clock in:
+                  </p>
+
+                  {qrCodes.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-sm text-primary/60">
+                        No QR codes available.
+                      </p>
+                      <p className="text-xs text-primary/40 mt-1">
+                        Client your administrator to set up QR codes.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {qrCodes.map((qr) => (
+                        <Card
+                          key={qr.id}
+                          className="cursor-pointer hover:bg-primary-foreground/50 transition-colors"
+                          onClick={() => {
+                            if (!form.getValues("instructorId")) {
+                              toast.error("Please select a instructor first");
+                              return;
+                            }
+                            form.setValue("qrCodeId", qr.id);
+                            form.setValue("checkInMethod", CheckInMethod.QR_CODE);
+                            form.handleSubmit(onSubmit)();
+                          }}
+                        >
+                          <CardContent className="p-4 flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium">{qr.name}</p>
+                              {!qr.enabled && (
+                                <Badge variant="outline" className="mt-1 text-xs">
+                                  Disabled
+                                </Badge>
+                              )}
+                            </div>
+                            <IconQrCode className="h-6 w-6 text-primary/40" />
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
                   )}
-                />
-
-                <p className="text-sm text-primary/60">
-                  Select a QR code location to clock in:
-                </p>
-
-                {qrCodes.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-sm text-primary/60">
-                      No QR codes available.
-                    </p>
-                    <p className="text-xs text-primary/40 mt-1">
-                      Contact your administrator to set up QR codes.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid gap-3">
-                    {qrCodes.map((qr) => (
-                      <Card
-                        key={qr.id}
-                        className="cursor-pointer hover:bg-primary-foreground/50 transition-colors"
-                        onClick={() => {
-                          if (!form.getValues("workerId")) {
-                            toast.error("Please select a worker first");
-                            return;
-                          }
-                          form.setValue("qrCodeId", qr.id);
-                          form.setValue("checkInMethod", CheckInMethod.QR_CODE);
-                          form.handleSubmit(onSubmit)();
-                        }}
-                      >
-                        <CardContent className="p-4 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium">{qr.name}</p>
-                            {!qr.enabled && (
-                              <Badge variant="outline" className="mt-1 text-xs">
-                                Disabled
-                              </Badge>
-                            )}
-                          </div>
-                          <IconQrCode className="h-6 w-6 text-primary/40" />
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </div>
+                </div>
+              </Form>
             </TabsContent>
           </Tabs>
         </CardContent>

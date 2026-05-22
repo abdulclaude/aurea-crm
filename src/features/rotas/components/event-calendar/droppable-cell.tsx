@@ -11,7 +11,11 @@ interface DroppableCellProps {
   time?: number; // For week/day views, represents hours (e.g., 9.25 for 9:15)
   children?: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
   onClick?: () => void;
+  onMouseDown?: () => void;
+  onMouseEnter?: () => void;
+  isSelected?: boolean;
 }
 
 export function DroppableCell({
@@ -20,7 +24,11 @@ export function DroppableCell({
   time,
   children,
   className,
+  style,
   onClick,
+  onMouseDown,
+  onMouseEnter,
+  isSelected,
 }: DroppableCellProps) {
   const { activeEvent } = useCalendarDnd();
 
@@ -44,10 +52,14 @@ export function DroppableCell({
     <div
       ref={setNodeRef}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onMouseEnter={onMouseEnter}
       className={cn(
         "data-dragging:bg-accent flex h-full flex-col px-0.5 py-1 sm:px-1",
+        isSelected && "bg-primary/10",
         className,
       )}
+      style={style}
       title={formattedTime ? `${formattedTime}` : undefined}
       data-dragging={isOver && activeEvent ? true : undefined}
     >

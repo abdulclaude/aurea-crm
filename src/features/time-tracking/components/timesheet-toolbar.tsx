@@ -56,7 +56,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import RangeSlider from "@/components/ui/range-slider";
 import DateRangeFilter from "@/components/ui/date-range-filter";
 import { cn } from "@/lib/utils";
-import { TimeLogStatus } from "@prisma/client";
+import { TimeLogStatus } from "@/db/enums";
 
 export interface TimesheetToolbarProps {
   search: string;
@@ -69,7 +69,7 @@ export interface TimesheetToolbarProps {
   onColumnOrderChange: (order: ColumnOrderState) => void;
   initialColumnOrder: ColumnOrderState;
   // Filter props
-  selectedWorkers?: string[];
+  selectedInstructors?: string[];
   selectedDeals?: string[];
   selectedStatuses?: string[];
   startDate?: Date;
@@ -79,7 +79,7 @@ export interface TimesheetToolbarProps {
   selectedAmountMin?: number;
   selectedAmountMax?: number;
   onApplyAllFilters?: (filters: {
-    workers: string[];
+    instructors: string[];
     deals: string[];
     statuses: string[];
     durationMin?: number;
@@ -102,7 +102,7 @@ const sortOptions = [
   { value: "totalAmount.asc", label: "Lowest amount" },
 ];
 
-const PRIMARY_COLUMN_ID = "worker";
+const PRIMARY_COLUMN_ID = "instructor";
 
 const statusOptions = [
   { value: TimeLogStatus.DRAFT, label: "Working" },
@@ -122,7 +122,7 @@ export function TimesheetToolbar({
   columnOrder,
   onColumnOrderChange,
   initialColumnOrder,
-  selectedWorkers = [],
+  selectedInstructors = [],
   selectedDeals = [],
   selectedStatuses = [],
   startDate,
@@ -143,17 +143,17 @@ export function TimesheetToolbar({
 
   // Fetch all time logs for filter options and preview
   const { data: allTimeLogsData } = useSuspenseQuery(
-    trpc.timeTracking.list.queryOptions({})
+    trpc.timeTracking.list.queryOptions({}),
   );
 
   const allTimeLogs = React.useMemo(
     () => allTimeLogsData?.items || [],
-    [allTimeLogsData]
+    [allTimeLogsData],
   );
 
   // Staged filter states
-  const [stagedWorkers, setStagedWorkers] =
-    React.useState<string[]>(selectedWorkers);
+  const [stagedInstructors, setStagedInstructors] =
+    React.useState<string[]>(selectedInstructors);
   const [stagedDeals, setStagedDeals] = React.useState<string[]>(selectedDeals);
   const [stagedStatuses, setStagedStatuses] =
     React.useState<string[]>(selectedStatuses);
@@ -178,8 +178,8 @@ export function TimesheetToolbar({
   }, [search]);
 
   React.useEffect(() => {
-    setStagedWorkers(selectedWorkers);
-  }, [selectedWorkers]);
+    setStagedInstructors(selectedInstructors);
+  }, [selectedInstructors]);
 
   React.useEffect(() => {
     setStagedDeals(selectedDeals);
@@ -204,11 +204,11 @@ export function TimesheetToolbar({
     debouncedSearch(value);
   };
 
-  const handleToggleWorker = (workerId: string) => {
-    setStagedWorkers((prev) =>
-      prev.includes(workerId)
-        ? prev.filter((id) => id !== workerId)
-        : [...prev, workerId]
+  const handleToggleInstructor = (instructorId: string) => {
+    setStagedInstructors((prev) =>
+      prev.includes(instructorId)
+        ? prev.filter((id) => id !== instructorId)
+        : [...prev, instructorId],
     );
   };
 
@@ -216,7 +216,7 @@ export function TimesheetToolbar({
     setStagedDeals((prev) =>
       prev.includes(dealId)
         ? prev.filter((id) => id !== dealId)
-        : [...prev, dealId]
+        : [...prev, dealId],
     );
   };
 
@@ -224,23 +224,23 @@ export function TimesheetToolbar({
     setStagedStatuses((prev) =>
       prev.includes(status)
         ? prev.filter((s) => s !== status)
-        : [...prev, status]
+        : [...prev, status],
     );
   };
 
-  // Get unique workers and deals
-  const uniqueWorkers = React.useMemo(() => {
-    const workerMap = new Map<string, { id: string; name: string }>();
+  // Get unique instructors and deals
+  const uniqueInstructors = React.useMemo(() => {
+    const instructorMap = new Map<string, { id: string; name: string }>();
     allTimeLogs.forEach((log) => {
-      const worker = log.worker || log.contact;
-      if (worker) {
-        workerMap.set(worker.id, {
-          id: worker.id,
-          name: worker.name || "Unknown",
+      const instructor = log.instructor || log.client;
+      if (instructor) {
+        instructorMap.set(instructor.id, {
+          id: instructor.id,
+          name: instructor.name || "Unknown",
         });
       }
     });
-    return Array.from(workerMap.values());
+    return Array.from(instructorMap.values());
   }, [allTimeLogs]);
 
   const uniqueDeals = React.useMemo(() => {
@@ -285,10 +285,10 @@ export function TimesheetToolbar({
   // Calculate preview count
   const previewCount = React.useMemo(() => {
     const filtered = allTimeLogs.filter((log) => {
-      // Worker filter
-      if (stagedWorkers.length > 0) {
-        const workerId = log.worker?.id || log.contact?.id;
-        if (!workerId || !stagedWorkers.includes(workerId)) {
+      // Instructor filter
+      if (stagedInstructors.length > 0) {
+        const instructorId = log.instructor?.id || log.client?.id;
+        if (!instructorId || !stagedInstructors.includes(instructorId)) {
           return false;
         }
       }
@@ -347,7 +347,7 @@ export function TimesheetToolbar({
     return filtered.length;
   }, [
     allTimeLogs,
-    stagedWorkers,
+    stagedInstructors,
     stagedDeals,
     stagedStatuses,
     stagedDurationMin,
@@ -357,7 +357,7 @@ export function TimesheetToolbar({
   ]);
 
   const hasFiltersApplied =
-    selectedWorkers.length > 0 ||
+    selectedInstructors.length > 0 ||
     selectedDeals.length > 0 ||
     selectedStatuses.length > 0 ||
     typeof selectedDurationMin === "number" ||
@@ -366,14 +366,14 @@ export function TimesheetToolbar({
     typeof selectedAmountMax === "number";
 
   return (
-    <div className="flex justify-between w-full items-center">
+    <div className="flex justify-between w-full items-center pb-6">
       <div className="flex items-center gap-2 w-full">
         {/* Search with filters inside */}
         <div className="flex w-128 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 hover:text-black rounded-lg h-8.5">
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
 
           <Input
-            placeholder="Search time logs by worker, title, or job..."
+            placeholder="Search time logs by instructor, title, or job..."
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             className=" text-xs px-0 border-none bg-transparent! hover:bg-transparent w-128 pl-8"
@@ -384,7 +384,7 @@ export function TimesheetToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -401,28 +401,28 @@ export function TimesheetToolbar({
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
-              {/* Worker Filter */}
-              {uniqueWorkers.length > 0 && (
+              {/* Instructor Filter */}
+              {uniqueInstructors.length > 0 && (
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Worker</DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger>Instructor</DropdownMenuSubTrigger>
                   <DropdownMenuSubContent
                     className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-3 pt-2 w-[280px] ml-2.5"
                     alignOffset={-5}
                   >
                     <div className="max-h-64 overflow-auto pr-1">
-                      {uniqueWorkers.map((worker) => (
+                      {uniqueInstructors.map((instructor) => (
                         <div
-                          key={worker.id}
+                          key={instructor.id}
                           className="flex items-center gap-2 py-2 text-xs text-primary cursor-pointer rounded-lg group"
                         >
                           <Checkbox
-                            checked={stagedWorkers.includes(worker.id)}
+                            checked={stagedInstructors.includes(instructor.id)}
                             onCheckedChange={() =>
-                              handleToggleWorker(worker.id)
+                              handleToggleInstructor(instructor.id)
                             }
                             className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
-                          <span className="select-none">{worker.name}</span>
+                          <span className="select-none">{instructor.name}</span>
                         </div>
                       ))}
                     </div>
@@ -431,7 +431,7 @@ export function TimesheetToolbar({
                         className="flex-1 border border-black/10 dark:border-white/5 bg-background hover:bg-primary-foreground/50 hover:text-black text-xs text-black dark:text-white py-3 rounded-lg"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setStagedWorkers([]);
+                          setStagedInstructors([]);
                         }}
                       >
                         Clear
@@ -533,10 +533,10 @@ export function TimesheetToolbar({
                     ]}
                     onChange={([min, max]) => {
                       setStagedDurationMin(
-                        min === minDuration ? undefined : min
+                        min === minDuration ? undefined : min,
                       );
                       setStagedDurationMax(
-                        max === maxDuration ? undefined : max
+                        max === maxDuration ? undefined : max,
                       );
                     }}
                     bins={100}
@@ -600,7 +600,7 @@ export function TimesheetToolbar({
 
               {/* Date Range Filter */}
               <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Date Range</DropdownMenuSubTrigger>
+                <DropdownMenuSubTrigger>Date range</DropdownMenuSubTrigger>
                 <DropdownMenuSubContent alignOffset={-5}>
                   <DateRangeFilter
                     minDate={minDate}
@@ -618,7 +618,7 @@ export function TimesheetToolbar({
                   onClick={(e) => {
                     e.stopPropagation();
                     onApplyAllFilters?.({
-                      workers: stagedWorkers,
+                      instructors: stagedInstructors,
                       deals: stagedDeals,
                       statuses: stagedStatuses,
                       durationMin: stagedDurationMin,
@@ -710,7 +710,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -720,22 +720,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -743,7 +743,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -754,7 +754,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -861,7 +861,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-primary-foreground/50 hover:text-black dark:hover:text-white",
-          !checked && "text-primary/80 dark:text-white/30"
+          !checked && "text-primary/80 dark:text-white/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -872,7 +872,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3.5 shrink-0 text-primary/80 dark:text-white transition",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate text-primary/80 hover:text-black dark:text-white">

@@ -152,7 +152,7 @@ export default function BillingSettingsPage() {
             support team is here to help.
           </p>
           <Button variant="outline" size="sm">
-            Contact Support
+            Client Support
           </Button>
         </Card>
       </div>

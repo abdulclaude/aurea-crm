@@ -89,28 +89,28 @@ export interface EmailDesign {
 }
 
 // Variable placeholders that users can use in content:
-// {{contact.name}} - Full name
-// {{contact.firstName}} - First name (derived from name)
-// {{contact.email}} - Email address
-// {{contact.companyName}} - Company name
+// {{client.name}} - Full name
+// {{client.firstName}} - First name (derived from name)
+// {{client.email}} - Email address
+// {{client.companyName}} - Company name
 // {{unsubscribe_url}} - Unsubscribe link
 // {{view_in_browser_url}} - View in browser link
 
-export interface ContactVariables {
+export interface ClientVariables {
   name: string;
   firstName: string;
   email: string;
   companyName?: string;
 }
 
-export interface CampaignVariables extends ContactVariables {
+export interface CampaignVariables extends ClientVariables {
   unsubscribe_url: string;
   view_in_browser_url?: string;
 }
 
 // Segment filter types
 export interface SegmentFilter {
-  types?: string[]; // ContactType values
+  types?: string[]; // ClientType values
   tags?: string[];
   lifecycleStages?: string[]; // LifecycleStage values
   countries?: string[];

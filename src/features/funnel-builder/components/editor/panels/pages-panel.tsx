@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { activePageIdAtom } from "../../../lib/editor-store";
-import type { FunnelPage } from "@prisma/client";
+import type { FunnelPage } from "@/db/types";
 import { toast } from "sonner";
 
 interface PagesPanelProps {

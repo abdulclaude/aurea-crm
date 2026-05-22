@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { createId } from "@paralleldrive/cuid2";
 import { TRPCError } from "@trpc/server";
 import { Resend } from "resend";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import prisma from "@/lib/db";
-import { Prisma } from "@prisma/client";
+import { and, count, desc, eq, isNull, type SQL } from "drizzle-orm";
+import { db } from "@/db";
+import { campaign, emailDomain } from "@/db/schema";
 
 // Get the shared Resend client (uses system API key)
 function getResendClient() {
@@ -17,14 +19,11 @@ function getResendClient() {
 }
 
 export const emailDomainsRouter = createTRPCRouter({
-  // List all domains for the organization/subaccount
+  // List all domains for the organization/location
   list: protectedProcedure.query(async ({ ctx }) => {
-    const domains = await prisma.emailDomain.findMany({
-      where: {
-        organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? null,
-      },
-      orderBy: { createdAt: "desc" },
+    const domains = await db.query.emailDomain.findMany({
+      where: emailDomainScopeWhere(ctx.orgId!, ctx.locationId ?? null),
+      orderBy: [desc(emailDomain.createdAt)],
     });
 
     return domains;
@@ -34,12 +33,8 @@ export const emailDomainsRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const domain = await prisma.emailDomain.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const domain = await db.query.emailDomain.findFirst({
+        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
       });
 
       if (!domain) {
@@ -64,8 +59,8 @@ export const emailDomainsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       // Check if domain already exists
-      const existing = await prisma.emailDomain.findUnique({
-        where: { domain: input.domain },
+      const existing = await db.query.emailDomain.findFirst({
+        where: eq(emailDomain.domain, input.domain),
       });
 
       if (existing) {
@@ -90,33 +85,39 @@ export const emailDomainsRouter = createTRPCRouter({
       }
 
       // Store domain with DNS records
-      const domain = await prisma.emailDomain.create({
-        data: {
+      const [createdDomain] = await db
+        .insert(emailDomain)
+        .values({
+          id: createId(),
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
           domain: input.domain,
           resendDomainId: data?.id,
           status: "PENDING",
-          dnsRecords: data?.records ? (data.records as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          dnsRecords: data?.records ?? null,
           defaultFromName: input.defaultFromName,
           defaultFromEmail: input.defaultFromEmail,
           defaultReplyTo: input.defaultReplyTo,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .returning();
 
-      return domain;
+      if (!createdDomain) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to save email domain",
+        });
+      }
+
+      return createdDomain;
     }),
 
   // Verify domain DNS records
   verify: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await prisma.emailDomain.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const domain = await db.query.emailDomain.findFirst({
+        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
       });
 
       if (!domain) {
@@ -146,13 +147,14 @@ export const emailDomainsRouter = createTRPCRouter({
       }
 
       // Update status
-      await prisma.emailDomain.update({
-        where: { id: input.id },
-        data: {
+      await db
+        .update(emailDomain)
+        .set({
           status: "VERIFYING",
           lastCheckedAt: new Date(),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(emailDomain.id, input.id));
 
       return { success: true };
     }),
@@ -161,12 +163,8 @@ export const emailDomainsRouter = createTRPCRouter({
   checkStatus: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await prisma.emailDomain.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const domain = await db.query.emailDomain.findFirst({
+        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
       });
 
       if (!domain) {
@@ -206,15 +204,24 @@ export const emailDomainsRouter = createTRPCRouter({
       }
 
       // Update our database
-      const updatedDomain = await prisma.emailDomain.update({
-        where: { id: input.id },
-        data: {
+      const [updatedDomain] = await db
+        .update(emailDomain)
+        .set({
           status,
-          dnsRecords: (data?.records ?? domain.dnsRecords) as unknown as Prisma.InputJsonValue,
+          dnsRecords: data?.records ?? domain.dnsRecords,
           lastCheckedAt: new Date(),
           verifiedAt: status === "VERIFIED" ? new Date() : null,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(emailDomain.id, input.id))
+        .returning();
+
+      if (!updatedDomain) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update domain status",
+        });
+      }
 
       return updatedDomain;
     }),
@@ -230,12 +237,8 @@ export const emailDomainsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const domain = await prisma.emailDomain.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const domain = await db.query.emailDomain.findFirst({
+        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
       });
 
       if (!domain) {
@@ -245,14 +248,23 @@ export const emailDomainsRouter = createTRPCRouter({
         });
       }
 
-      const updatedDomain = await prisma.emailDomain.update({
-        where: { id: input.id },
-        data: {
+      const [updatedDomain] = await db
+        .update(emailDomain)
+        .set({
           defaultFromName: input.defaultFromName,
           defaultFromEmail: input.defaultFromEmail,
           defaultReplyTo: input.defaultReplyTo,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(emailDomain.id, input.id))
+        .returning();
+
+      if (!updatedDomain) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update domain",
+        });
+      }
 
       return updatedDomain;
     }),
@@ -261,12 +273,8 @@ export const emailDomainsRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await prisma.emailDomain.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const domain = await db.query.emailDomain.findFirst({
+        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
       });
 
       if (!domain) {
@@ -277,9 +285,11 @@ export const emailDomainsRouter = createTRPCRouter({
       }
 
       // Check if domain is used by any campaigns
-      const campaignsUsingDomain = await prisma.campaign.count({
-        where: { emailDomainId: input.id },
-      });
+      const [campaignCount] = await db
+        .select({ value: count() })
+        .from(campaign)
+        .where(eq(campaign.emailDomainId, input.id));
+      const campaignsUsingDomain = campaignCount?.value ?? 0;
 
       if (campaignsUsingDomain > 0) {
         throw new TRPCError({
@@ -299,10 +309,19 @@ export const emailDomainsRouter = createTRPCRouter({
       }
 
       // Delete from our database
-      await prisma.emailDomain.delete({
-        where: { id: input.id },
-      });
+      await db.delete(emailDomain).where(eq(emailDomain.id, input.id));
 
       return { success: true };
     }),
 });
+
+function emailDomainScopeWhere(organizationId: string, locationId: string | null): SQL | undefined {
+  return and(
+    eq(emailDomain.organizationId, organizationId),
+    locationId ? eq(emailDomain.locationId, locationId) : isNull(emailDomain.locationId)
+  );
+}
+
+function emailDomainOwnerWhere(id: string, organizationId: string, locationId: string | null): SQL | undefined {
+  return and(eq(emailDomain.id, id), emailDomainScopeWhere(organizationId, locationId));
+}

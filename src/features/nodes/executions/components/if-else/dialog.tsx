@@ -154,7 +154,7 @@ export const IfElseDialog: React.FC<Props> = ({
                   <FormLabel>Left Operand</FormLabel>
                   <FormControl>
                     <VariableInput
-                      placeholder="{{contact.email}}"
+                      placeholder="{{client.email}}"
                       value={field.value || ""}
                       onChange={field.onChange}
                       variables={variables}

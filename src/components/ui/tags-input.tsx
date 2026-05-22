@@ -108,12 +108,12 @@ export function TagsDisplay({ tags }: { tags: string[] }) {
   }
 
   return (
-    <div className="flex w-max relative -space-x-2">
+    <div className="flex w-max relative gap-1">
       {tags.slice(0, 1).map((tag) => (
         <Badge
           key={tag}
-          variant="secondary"
-          className="text-[11px] bg-[#202e32] border-black/10 text-white pr-2.5"
+          variant="outline"
+          className="text-[11px] w-fit text-violet-600 ring-violet-300 bg-violet-100 dark:border-violet-800"
         >
           {tag}
         </Badge>
@@ -121,8 +121,8 @@ export function TagsDisplay({ tags }: { tags: string[] }) {
 
       {tags.length > 1 && (
         <Badge
-          variant="secondary"
-          className="text-[10px] px-1.5 bg-[#202e32] text-white border-2 border-white "
+          variant="outline"
+          className="text-[11px] px-1.5 text-slate-600 ring-slate-300 bg-slate-100 dark:border-slate-700"
         >
           +{tags.length - 1}
         </Badge>

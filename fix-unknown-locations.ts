@@ -16,7 +16,9 @@ import { config } from "dotenv";
 config({ path: ".env" });
 config({ path: ".env.local", override: true });
 
-import db from "./src/lib/db";
+import { desc, eq, isNull, or } from "drizzle-orm";
+import { db, dbPool } from "./src/db";
+import { funnelSession } from "./src/db/schema";
 
 // Helper to check if IP is private/localhost
 function isPrivateIP(ip: string): boolean {
@@ -102,23 +104,19 @@ async function main() {
   console.log("🔍 Finding sessions with Unknown or LOCAL location data...\n");
   
   // Find all sessions with Unknown or LOCAL country codes
-  const sessionsToFix = await db.funnelSession.findMany({
-    where: {
-      OR: [
-        { countryCode: "Unknown" },
-        { countryCode: "LOCAL" },
-        { countryCode: null },
-      ],
-    },
-    select: {
+  const sessionsToFix = await db.query.funnelSession.findMany({
+    where: or(
+      eq(funnelSession.countryCode, "Unknown"),
+      eq(funnelSession.countryCode, "LOCAL"),
+      isNull(funnelSession.countryCode),
+    ),
+    columns: {
       id: true,
       sessionId: true,
       ipAddress: true,
       countryCode: true,
     },
-    orderBy: {
-      startedAt: "desc",
-    },
+    orderBy: desc(funnelSession.startedAt),
   });
   
   console.log(`📊 Found ${sessionsToFix.length} sessions to fix\n`);
@@ -155,16 +153,17 @@ async function main() {
       console.log(`📍 ${session.sessionId.substring(0, 12)}... → ${geoData.countryName} (${geoData.countryCode})`);
       
       // Update session
-      await db.funnelSession.update({
-        where: { id: session.id },
-        data: {
+      await db
+        .update(funnelSession)
+        .set({
           ipAddress: publicIP,
           countryCode: geoData.countryCode,
           countryName: geoData.countryName,
           region: geoData.region,
           city: geoData.city,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(funnelSession.id, session.id));
       
       fixed++;
     } else {
@@ -174,15 +173,16 @@ async function main() {
       if (geoData.countryCode !== "Unknown") {
         console.log(`🔄 ${session.sessionId.substring(0, 12)}... → ${geoData.countryName} (${geoData.countryCode})`);
         
-        await db.funnelSession.update({
-          where: { id: session.id },
-          data: {
+        await db
+          .update(funnelSession)
+          .set({
             countryCode: geoData.countryCode,
             countryName: geoData.countryName,
             region: geoData.region,
             city: geoData.city,
-          },
-        });
+            updatedAt: new Date(),
+          })
+          .where(eq(funnelSession.id, session.id));
         
         fixed++;
       } else {
@@ -204,4 +204,4 @@ async function main() {
 
 main()
   .catch(console.error)
-  .finally(() => db.$disconnect());
+  .finally(() => dbPool.end());

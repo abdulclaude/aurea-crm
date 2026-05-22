@@ -1,8 +1,20 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import prisma from "@/lib/db";
-import { generatePublishedPageHTML } from "@/features/funnel-builder/lib/published-funnel-renderer";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  funnelPage as funnelPageTable,
+  funnelPixelIntegration as funnelPixelIntegrationTable,
+  member,
+  session as sessionTable,
+  location,
+  locationMember,
+} from "@/db/schema";
+import {
+  generatePublishedPageHTML,
+  type PublishedPageData,
+} from "@/features/funnel-builder/lib/published-funnel-renderer";
 
 interface PreviewFunnelPageProps {
   params: Promise<{
@@ -28,34 +40,27 @@ export default async function PreviewFunnelPage({
   }
 
   // Get active organization from session record
-  const sessionRecord = await prisma.session.findUnique({
-    where: { token: session.session.token },
-    select: { activeOrganizationId: true },
+  const sessionRecord = await db.query.session.findFirst({
+    where: eq(sessionTable.token, session.session.token),
+    columns: { activeOrganizationId: true },
   });
 
   // Fetch page with all blocks (no status check for preview)
-  const page = await prisma.funnelPage.findFirst({
-    where: {
-      funnel: {
-        id: funnelId,
-      },
-      slug: slug,
-    },
-    include: {
+  const page = await db.query.funnelPage.findFirst({
+    where: and(eq(funnelPageTable.funnelId, funnelId), eq(funnelPageTable.slug, slug)),
+    with: {
       funnel: true,
-      funnelBlock: {
-        include: {
-          funnelBreakpoint: true,
-          funnelBlockEvent: true,
+      funnelBlocks: {
+        with: {
+          funnelBreakpoints: true,
+          funnelBlockEvents: true,
           smartSectionInstance: {
-            include: {
+            with: {
               smartSection: true,
             },
           },
         },
-        orderBy: {
-          order: "asc",
-        },
+        orderBy: (block) => [asc(block.order)],
       },
     },
   });
@@ -65,38 +70,51 @@ export default async function PreviewFunnelPage({
   }
 
   // Verify user has access to this funnel
-  // Check if user is a member of the organization or has access to a subaccount in this org
-  const hasMembership = await prisma.member.findFirst({
-    where: {
-      userId: session.user.id,
-      organizationId: page.funnel.organizationId,
-    },
+  // Check if user is a member of the organization or has access to a location in this org
+  const hasMembership = await db.query.member.findFirst({
+    where: and(
+      eq(member.userId, session.user.id),
+      eq(member.organizationId, page.funnel.organizationId)
+    ),
+    columns: { id: true },
   });
 
-  const hasSubaccountAccess = await prisma.subaccountMember.findFirst({
-    where: {
-      userId: session.user.id,
-      subaccount: {
-        organizationId: page.funnel.organizationId,
-      },
-    },
-  });
+  const [hasLocationAccess] = await db
+    .select({ id: locationMember.id })
+    .from(locationMember)
+    .innerJoin(location, eq(location.id, locationMember.locationId))
+    .where(
+      and(
+        eq(locationMember.userId, session.user.id),
+        eq(location.organizationId, page.funnel.organizationId)
+      )
+    )
+    .limit(1);
 
-  if (!hasMembership && !hasSubaccountAccess) {
+  if (!hasMembership && !hasLocationAccess) {
     notFound();
   }
 
   // Fetch pixel integrations for the funnel
-  const pixelIntegrations = await prisma.funnelPixelIntegration.findMany({
-    where: {
-      funnelId: funnelId,
-      enabled: true,
-    },
+  const pixelIntegrations = await db.query.funnelPixelIntegration.findMany({
+    where: and(
+      eq(funnelPixelIntegrationTable.funnelId, funnelId),
+      eq(funnelPixelIntegrationTable.enabled, true)
+    ),
   });
+
+  const renderPage: PublishedPageData["page"] = {
+    ...page,
+    blocks: page.funnelBlocks.map(({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
+      ...block,
+      breakpoints: funnelBreakpoints,
+      trackingEvent: funnelBlockEvents[0] ?? null,
+    })),
+  };
 
   // Generate complete HTML with tracking
   const html = generatePublishedPageHTML({
-    page: page as any,
+    page: renderPage,
     pixelIntegrations,
   });
 

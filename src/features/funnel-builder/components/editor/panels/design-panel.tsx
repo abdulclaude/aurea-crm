@@ -14,7 +14,7 @@ import {
   hiddenBlockIdsAtom,
 } from "../../../lib/editor-store";
 import { getBlockDefinition } from "../../../lib/block-registry";
-import type { FunnelBlock, FunnelBreakpoint } from "@prisma/client";
+import type { FunnelBlock, FunnelBreakpoint } from "@/db/types";
 
 type BlockWithChildren = FunnelBlock & {
   breakpoints: FunnelBreakpoint[];

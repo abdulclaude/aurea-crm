@@ -8,7 +8,7 @@ export default async function ClockInPage() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-2 p-6 pb-0">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Clock In</h1>
+          <h1 className="text-lg font-semibold text-primary">Clock in</h1>
           <p className="text-xs text-primary/75">
             Start tracking your time for a shift or job
           </p>

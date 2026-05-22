@@ -7,7 +7,7 @@ import { Settings, Paintbrush } from "lucide-react";
 import { selectedBlockIdAtom, propertiesPanelOpenAtom } from "../../lib/editor-store";
 import { PropertiesPanel } from "./panels/properties-panel";
 import { StylesPanel } from "./panels/styles-panel";
-import type { FunnelPage, FunnelBlock, FunnelBreakpoint } from "@prisma/client";
+import type { FunnelPage, FunnelBlock, FunnelBreakpoint } from "@/db/types";
 
 interface RightSidebarProps {
   page:

@@ -4,7 +4,7 @@ import { useAtom } from "jotai";
 import { useTRPC } from "@/trpc/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { DeviceType, FunnelBlockType } from "@prisma/client";
+import { DeviceType, FunnelBlockType } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
@@ -32,7 +32,7 @@ import {
 } from "../../lib/editor-store";
 import { BlockRenderer } from "./block-renderer";
 import { getBlockDefinition } from "../../lib/block-registry";
-import type { FunnelPage, FunnelBlock, FunnelBreakpoint } from "@prisma/client";
+import type { FunnelPage, FunnelBlock, FunnelBreakpoint } from "@/db/types";
 import { useState } from "react";
 
 interface EditorCanvasProps {

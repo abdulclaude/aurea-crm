@@ -17,23 +17,23 @@ interface PayslipDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payrollRunId: string;
-  workerId: string;
-  workerName: string;
+  instructorId: string;
+  instructorName: string;
 }
 
 export function PayslipDialog({
   open,
   onOpenChange,
   payrollRunId,
-  workerId,
-  workerName,
+  instructorId,
+  instructorName,
 }: PayslipDialogProps) {
   const trpc = useTRPC();
 
   const { data: payslip } = useSuspenseQuery(
     trpc.payroll.generatePayslip.queryOptions({
       payrollRunId,
-      workerId,
+      instructorId,
     })
   );
 
@@ -70,7 +70,7 @@ export function PayslipDialog({
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div>
-              <DialogTitle>Payslip - {workerName}</DialogTitle>
+              <DialogTitle>Payslip - {instructorName}</DialogTitle>
               <DialogDescription>
                 View and download payslip
               </DialogDescription>

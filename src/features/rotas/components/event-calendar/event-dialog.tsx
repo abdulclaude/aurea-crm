@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { RiCalendarLine, RiDeleteBinLine } from "@remixicon/react";
 import { format, isBefore } from "date-fns";
 
-import type { CalendarEvent, EventColor } from "@/features/rotas/components/event-calendar";
+import type {
+  CalendarEvent,
+  EventColor,
+} from "@/features/rotas/components/event-calendar";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -412,7 +415,7 @@ export function EventDialog({
             />
           </div>
           <fieldset className="space-y-4">
-            <legend className="text-foreground text-sm leading-none font-medium">
+            <legend className="text-black text-sm leading-none font-medium">
               Etiquette
             </legend>
             <RadioGroup

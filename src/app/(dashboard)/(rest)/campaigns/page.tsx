@@ -27,7 +27,7 @@ export default function CampaignsPage() {
         <div>
           <h1 className="text-lg font-semibold text-primary">Email Campaigns</h1>
           <p className="text-xs text-primary/75">
-            Create and send email campaigns to your contacts
+            Create and send email campaigns to your clients
           </p>
         </div>
 

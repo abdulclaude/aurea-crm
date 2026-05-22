@@ -1,6 +1,14 @@
 import { notFound } from "next/navigation";
-import prisma from "@/lib/db";
-import { generatePublishedPageHTML } from "@/features/funnel-builder/lib/published-funnel-renderer";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  funnelPage as funnelPageTable,
+  funnelPixelIntegration as funnelPixelIntegrationTable,
+} from "@/db/schema";
+import {
+  generatePublishedPageHTML,
+  type PublishedPageData,
+} from "@/features/funnel-builder/lib/published-funnel-renderer";
 import type { Metadata } from "next";
 
 interface PublishedFunnelPageProps {
@@ -18,17 +26,16 @@ export async function generateMetadata({
 }: PublishedFunnelPageProps): Promise<Metadata> {
   const { funnelId, slug } = await params;
 
-  const page = await prisma.funnelPage.findFirst({
-    where: {
+  const page = await db.query.funnelPage.findFirst({
+    where: and(eq(funnelPageTable.funnelId, funnelId), eq(funnelPageTable.slug, slug)),
+    with: {
       funnel: {
-        id: funnelId,
-        status: "PUBLISHED",
+        columns: { status: true },
       },
-      slug: slug,
     },
   });
 
-  if (!page) {
+  if (!page || page.funnel.status !== "PUBLISHED") {
     return {
       title: "Page Not Found",
     };
@@ -60,42 +67,46 @@ export default async function PublishedFunnelPage({
   const { funnelId, slug } = await params;
 
   // Fetch page with all blocks, breakpoints, tracking events
-  const page = await prisma.funnelPage.findFirst({
-    where: {
+  const page = await db.query.funnelPage.findFirst({
+    where: and(eq(funnelPageTable.funnelId, funnelId), eq(funnelPageTable.slug, slug)),
+    with: {
       funnel: {
-        id: funnelId,
-        status: "PUBLISHED",
+        columns: { status: true },
       },
-      slug: slug,
-    },
-    include: {
-      funnelBlock: {
-        include: {
-          funnelBreakpoint: true,
-          funnelBlockEvent: true,
+      funnelBlocks: {
+        with: {
+          funnelBreakpoints: true,
+          funnelBlockEvents: true,
         },
-        orderBy: {
-          order: "asc",
-        },
+        orderBy: (block) => [asc(block.order)],
       },
     },
   });
 
-  if (!page) {
+  if (!page || page.funnel.status !== "PUBLISHED") {
     notFound();
   }
 
   // Fetch pixel integrations for the funnel
-  const pixelIntegrations = await prisma.funnelPixelIntegration.findMany({
-    where: {
-      funnelId: funnelId,
-      enabled: true,
-    },
+  const pixelIntegrations = await db.query.funnelPixelIntegration.findMany({
+    where: and(
+      eq(funnelPixelIntegrationTable.funnelId, funnelId),
+      eq(funnelPixelIntegrationTable.enabled, true)
+    ),
   });
+
+  const renderPage: PublishedPageData["page"] = {
+    ...page,
+    blocks: page.funnelBlocks.map(({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
+      ...block,
+      breakpoints: funnelBreakpoints,
+      trackingEvent: funnelBlockEvents[0] ?? null,
+    })),
+  };
 
   // Generate complete HTML with tracking
   const html = generatePublishedPageHTML({
-    page: page as any,
+    page: renderPage,
     pixelIntegrations,
   });
 

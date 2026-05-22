@@ -1,25 +1,15 @@
 import { TRPCError } from "@trpc/server";
 import z from "zod";
-import type { Prisma } from "@prisma/client";
-import {
-  RecurringInvoiceStatus,
-  RecurringFrequency,
-  BillingModel,
-  ActivityAction,
-} from "@prisma/client";
+import { createId } from "@paralleldrive/cuid2";
+import { and, desc, eq, ilike, isNull, lt, or } from "drizzle-orm";
+import { RecurringInvoiceStatus, RecurringFrequency, BillingModel, ActivityAction } from "@/db/enums";
 
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { recurringInvoice as recurringInvoiceTable, recurringInvoiceGeneration } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { logAnalytics } from "@/lib/analytics-logger";
 
 const RECURRING_INVOICE_PAGE_SIZE = 20;
-
-const recurringInvoiceInclude = {
-  recurringInvoiceGeneration: {
-    orderBy: { generatedAt: "desc" as const },
-    take: 10,
-  },
-} satisfies Prisma.RecurringInvoiceInclude;
 
 // Zod schema for line items (matches Invoice structure)
 const lineItemSchema = z.object({
@@ -28,6 +18,7 @@ const lineItemSchema = z.object({
   unitPrice: z.number(),
   amount: z.number(),
 });
+type LineItem = z.infer<typeof lineItemSchema>;
 
 // Calculate next run date based on frequency
 function calculateNextRunDate(params: {
@@ -115,29 +106,34 @@ export const recurringInvoicesRouter = createTRPCRouter({
         });
       }
 
-      const where: Prisma.RecurringInvoiceWhereInput = {
-        organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? null,
-      };
+      const cursorItem = input.cursor
+        ? await db.query.recurringInvoice.findFirst({
+            where: eq(recurringInvoiceTable.id, input.cursor),
+            columns: { createdAt: true },
+          })
+        : null;
 
-      if (input.status) {
-        where.status = input.status;
-      }
+      const where = recurringInvoiceAccessWhere(
+        ctx.orgId,
+        ctx.locationId,
+        and(
+          input.status ? eq(recurringInvoiceTable.status, input.status) : undefined,
+          input.search
+            ? or(
+                ilike(recurringInvoiceTable.name, `%${input.search}%`),
+                ilike(recurringInvoiceTable.clientName, `%${input.search}%`),
+                ilike(recurringInvoiceTable.clientEmail, `%${input.search}%`)
+              )
+            : undefined,
+          cursorItem ? lt(recurringInvoiceTable.createdAt, cursorItem.createdAt) : undefined
+        )
+      );
 
-      if (input.search) {
-        where.OR = [
-          { name: { contains: input.search, mode: "insensitive" } },
-          { contactName: { contains: input.search, mode: "insensitive" } },
-          { contactEmail: { contains: input.search, mode: "insensitive" } },
-        ];
-      }
-
-      const recurringInvoices = await prisma.recurringInvoice.findMany({
+      const recurringInvoices = await db.query.recurringInvoice.findMany({
         where,
-        include: recurringInvoiceInclude,
-        take: RECURRING_INVOICE_PAGE_SIZE + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
-        orderBy: { createdAt: "desc" },
+        with: recurringInvoiceWithGenerations,
+        limit: RECURRING_INVOICE_PAGE_SIZE + 1,
+        orderBy: [desc(recurringInvoiceTable.createdAt)],
       });
 
       let nextCursor: string | undefined;
@@ -156,9 +152,9 @@ export const recurringInvoicesRouter = createTRPCRouter({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const recurringInvoice = await prisma.recurringInvoice.findUnique({
-        where: { id: input.id },
-        include: recurringInvoiceInclude,
+      const recurringInvoice = await db.query.recurringInvoice.findFirst({
+        where: eq(recurringInvoiceTable.id, input.id),
+        with: recurringInvoiceWithGenerations,
       });
 
       if (!recurringInvoice) {
@@ -185,10 +181,10 @@ export const recurringInvoicesRouter = createTRPCRouter({
       z.object({
         name: z.string(),
         description: z.string().optional(),
-        contactId: z.string().optional(),
-        contactName: z.string(),
-        contactEmail: z.string().email().optional(),
-        contactAddress: z
+        clientId: z.string().optional(),
+        clientName: z.string(),
+        clientEmail: z.string().email().optional(),
+        clientAddress: z
           .object({
             line1: z.string().optional(),
             line2: z.string().optional(),
@@ -242,17 +238,18 @@ export const recurringInvoicesRouter = createTRPCRouter({
         dayOfWeek: input.dayOfWeek,
       });
 
-      const recurringInvoice = await prisma.recurringInvoice.create({
-        data: {
-          id: crypto.randomUUID(),
+      const [created] = await db
+        .insert(recurringInvoiceTable)
+        .values({
+          id: createId(),
           organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId,
+          locationId: ctx.locationId,
           name: input.name,
           description: input.description,
-          contactId: input.contactId,
-          contactName: input.contactName,
-          contactEmail: input.contactEmail,
-          contactAddress: input.contactAddress,
+          clientId: input.clientId,
+          clientName: input.clientName,
+          clientEmail: input.clientEmail,
+          clientAddress: input.clientAddress,
           frequency: input.frequency,
           interval: input.interval,
           startDate: input.startDate,
@@ -261,11 +258,11 @@ export const recurringInvoicesRouter = createTRPCRouter({
           dayOfMonth: input.dayOfMonth,
           dayOfWeek: input.dayOfWeek,
           lineItems: input.lineItems,
-          subtotal,
-          taxRate: input.taxRate,
-          taxAmount,
-          discountAmount: input.discountAmount,
-          total,
+          subtotal: String(subtotal),
+          taxRate: input.taxRate === undefined ? null : String(input.taxRate),
+          taxAmount: String(taxAmount),
+          discountAmount: String(input.discountAmount),
+          total: String(total),
           currency: input.currency,
           dueDays: input.dueDays,
           notes: input.notes,
@@ -274,21 +271,25 @@ export const recurringInvoicesRouter = createTRPCRouter({
           sendReminders: input.sendReminders,
           templateId: input.templateId,
           billingModel: input.billingModel,
-          createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        include: recurringInvoiceInclude,
-      });
+        })
+        .returning();
+
+      if (!created) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create recurring invoice" });
+      }
+
+      const recurringInvoice = await getRecurringInvoiceWithGenerations(created.id);
 
       // Log activity
       await logAnalytics({
         userId: ctx.auth.user.id,
         action: ActivityAction.CREATED,
         entityType: "RECURRING_INVOICE",
-        entityId: recurringInvoice.id,
+        entityId: created.id,
         entityName: input.name,
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId,
+        locationId: ctx.locationId,
         metadata: {
           name: input.name,
           frequency: input.frequency,
@@ -297,7 +298,7 @@ export const recurringInvoicesRouter = createTRPCRouter({
         },
       });
 
-      return recurringInvoice;
+      return recurringInvoice ?? created;
     }),
 
   // Update recurring invoice
@@ -307,10 +308,10 @@ export const recurringInvoicesRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
-        contactId: z.string().optional(),
-        contactName: z.string().optional(),
-        contactEmail: z.string().email().optional(),
-        contactAddress: z
+        clientId: z.string().optional(),
+        clientName: z.string().optional(),
+        clientEmail: z.string().email().optional(),
+        clientAddress: z
           .object({
             line1: z.string().optional(),
             line2: z.string().optional(),
@@ -340,8 +341,8 @@ export const recurringInvoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await prisma.recurringInvoice.findUnique({
-        where: { id: input.id },
+      const existing = await db.query.recurringInvoice.findFirst({
+        where: eq(recurringInvoiceTable.id, input.id),
       });
 
       if (!existing) {
@@ -359,10 +360,10 @@ export const recurringInvoicesRouter = createTRPCRouter({
       }
 
       // Recalculate amounts if line items or pricing changed
-      let updateData: Prisma.RecurringInvoiceUpdateInput = {};
+      let updateData: Partial<typeof recurringInvoiceTable.$inferInsert> = {};
 
       if (input.lineItems || input.taxRate !== undefined || input.discountAmount !== undefined) {
-        const lineItems = input.lineItems || (existing.lineItems as unknown as typeof input.lineItems);
+        const lineItems = input.lineItems || parseLineItems(existing.lineItems);
         const subtotal = lineItems?.reduce((sum, item) => sum + item.amount, 0) || 0;
         const taxRate = input.taxRate ?? (existing.taxRate ? Number(existing.taxRate) : 0);
         const discountAmount = input.discountAmount ?? Number(existing.discountAmount);
@@ -370,11 +371,11 @@ export const recurringInvoicesRouter = createTRPCRouter({
         const total = subtotal + taxAmount - discountAmount;
 
         updateData = {
-          subtotal,
-          taxRate,
-          taxAmount,
-          discountAmount,
-          total,
+          subtotal: String(subtotal),
+          taxRate: taxRate === null ? null : String(taxRate),
+          taxAmount: String(taxAmount),
+          discountAmount: String(discountAmount),
+          total: String(total),
         };
       }
 
@@ -403,10 +404,10 @@ export const recurringInvoicesRouter = createTRPCRouter({
         ...updateData,
         name: input.name,
         description: input.description,
-        contactId: input.contactId,
-        contactName: input.contactName,
-        contactEmail: input.contactEmail,
-        contactAddress: input.contactAddress,
+        clientId: input.clientId,
+        clientName: input.clientName,
+        clientEmail: input.clientEmail,
+        clientAddress: input.clientAddress,
         frequency: input.frequency,
         interval: input.interval,
         startDate: input.startDate,
@@ -425,33 +426,37 @@ export const recurringInvoicesRouter = createTRPCRouter({
       };
 
       // Remove undefined values
-      Object.keys(updateData).forEach((key) => {
-        if (updateData[key as keyof typeof updateData] === undefined) {
-          delete updateData[key as keyof typeof updateData];
-        }
-      });
+      const sanitizedUpdateData = Object.fromEntries(
+        Object.entries({ ...updateData, updatedAt: new Date() }).filter(([, value]) => value !== undefined)
+      ) as Partial<typeof recurringInvoiceTable.$inferInsert>;
 
-      const recurringInvoice = await prisma.recurringInvoice.update({
-        where: { id: input.id },
-        data: updateData,
-        include: recurringInvoiceInclude,
-      });
+      const [updated] = await db
+        .update(recurringInvoiceTable)
+        .set(sanitizedUpdateData)
+        .where(eq(recurringInvoiceTable.id, input.id))
+        .returning();
+
+      if (!updated) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update recurring invoice" });
+      }
+
+      const recurringInvoice = await getRecurringInvoiceWithGenerations(updated.id);
 
       // Log activity
       await logAnalytics({
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "RECURRING_INVOICE",
-        entityId: recurringInvoice.id,
-        entityName: recurringInvoice.name,
+        entityId: updated.id,
+        entityName: updated.name,
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId,
+        locationId: ctx.locationId,
         metadata: {
           updatedFields: Object.keys(updateData),
         },
       });
 
-      return recurringInvoice;
+      return recurringInvoice ?? updated;
     }),
 
   // Pause/Resume recurring invoice
@@ -463,8 +468,8 @@ export const recurringInvoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const existing = await prisma.recurringInvoice.findUnique({
-        where: { id: input.id },
+      const existing = await db.query.recurringInvoice.findFirst({
+        where: eq(recurringInvoiceTable.id, input.id),
       });
 
       if (!existing) {
@@ -481,35 +486,41 @@ export const recurringInvoicesRouter = createTRPCRouter({
         });
       }
 
-      const recurringInvoice = await prisma.recurringInvoice.update({
-        where: { id: input.id },
-        data: { status: input.status },
-        include: recurringInvoiceInclude,
-      });
+      const [updated] = await db
+        .update(recurringInvoiceTable)
+        .set({ status: input.status, updatedAt: new Date() })
+        .where(eq(recurringInvoiceTable.id, input.id))
+        .returning();
+
+      if (!updated) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update recurring invoice status" });
+      }
+
+      const recurringInvoice = await getRecurringInvoiceWithGenerations(updated.id);
 
       // Log activity
       await logAnalytics({
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "RECURRING_INVOICE",
-        entityId: recurringInvoice.id,
-        entityName: recurringInvoice.name,
+        entityId: updated.id,
+        entityName: updated.name,
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId,
+        locationId: ctx.locationId,
         metadata: {
           status: input.status,
         },
       });
 
-      return recurringInvoice;
+      return recurringInvoice ?? updated;
     }),
 
   // Delete recurring invoice
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const existing = await prisma.recurringInvoice.findUnique({
-        where: { id: input.id },
+      const existing = await db.query.recurringInvoice.findFirst({
+        where: eq(recurringInvoiceTable.id, input.id),
       });
 
       if (!existing) {
@@ -526,9 +537,7 @@ export const recurringInvoicesRouter = createTRPCRouter({
         });
       }
 
-      await prisma.recurringInvoice.delete({
-        where: { id: input.id },
-      });
+      await db.delete(recurringInvoiceTable).where(eq(recurringInvoiceTable.id, input.id));
 
       // Log activity
       await logAnalytics({
@@ -538,7 +547,7 @@ export const recurringInvoicesRouter = createTRPCRouter({
         entityId: input.id,
         entityName: existing.name,
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId,
+        locationId: ctx.locationId,
         metadata: {
           name: existing.name,
         },
@@ -547,3 +556,30 @@ export const recurringInvoicesRouter = createTRPCRouter({
       return { success: true };
     }),
 });
+
+const recurringInvoiceWithGenerations = {
+  recurringInvoiceGenerations: {
+    orderBy: [desc(recurringInvoiceGeneration.generatedAt)],
+    limit: 10,
+  },
+};
+
+function recurringInvoiceAccessWhere(organizationId: string, locationId: string | null, extra?: ReturnType<typeof and>) {
+  return and(
+    eq(recurringInvoiceTable.organizationId, organizationId),
+    locationId ? eq(recurringInvoiceTable.locationId, locationId) : isNull(recurringInvoiceTable.locationId),
+    extra
+  );
+}
+
+function parseLineItems(value: unknown): LineItem[] {
+  const parsed = z.array(lineItemSchema).safeParse(value);
+  return parsed.success ? parsed.data : [];
+}
+
+async function getRecurringInvoiceWithGenerations(id: string) {
+  return db.query.recurringInvoice.findFirst({
+    where: eq(recurringInvoiceTable.id, id),
+    with: recurringInvoiceWithGenerations,
+  });
+}

@@ -1,5 +1,9 @@
-import { ActivityType, ActivityAction } from "@prisma/client";
 import { logActivity, getChangedFields } from "@/features/activity/lib/log-activity";
+import {
+  ActivityType,
+  type ActivityAction,
+  type ActivityType as ActivityTypeValue,
+} from "@/db/enums";
 import { getPostHogClient } from "@/lib/posthog/server";
 
 interface AnalyticsLoggerParams {
@@ -12,10 +16,10 @@ interface AnalyticsLoggerParams {
   action: ActivityAction;
 
   // Optional fields
-  subaccountId?: string | null;
-  type?: ActivityType;
-  changes?: Record<string, { old: any; new: any }>;
-  metadata?: Record<string, any>;
+  locationId?: string | null;
+  type?: ActivityTypeValue;
+  changes?: Record<string, { old: unknown; new: unknown }>;
+  metadata?: Record<string, unknown>;
   ipAddress?: string;
   userAgent?: string;
 
@@ -28,10 +32,12 @@ interface AnalyticsLoggerParams {
  * Unified logging function that logs both to Activity timeline and PostHog analytics
  * This replaces the need to call logActivity and PostHog tracking separately
  */
-export async function logAnalytics(params: AnalyticsLoggerParams) {
+export async function logAnalytics(
+  params: AnalyticsLoggerParams
+): Promise<void> {
   const {
     organizationId,
-    subaccountId,
+    locationId,
     userId,
     type,
     action,
@@ -53,7 +59,7 @@ export async function logAnalytics(params: AnalyticsLoggerParams) {
   try {
     await logActivity({
       organizationId,
-      subaccountId: subaccountId ?? null,
+      locationId: locationId ?? null,
       userId,
       type: activityType,
       action,
@@ -84,12 +90,12 @@ export async function logAnalytics(params: AnalyticsLoggerParams) {
         entity_name: entityName,
         action,
         organization_id: organizationId,
-        ...(subaccountId && { subaccount_id: subaccountId }),
+        ...(locationId && { location_id: locationId }),
         ...(changes && { changes: Object.keys(changes) }), // Track which fields changed
         ...(metadata && { metadata }),
         $groups: {
           organization: organizationId,
-          ...(subaccountId && { subaccount: subaccountId }),
+          ...(locationId && { location: locationId }),
         },
       };
 
@@ -110,14 +116,14 @@ export async function logAnalytics(params: AnalyticsLoggerParams) {
 /**
  * Helper function to determine ActivityType from entityType string
  */
-function determineActivityType(entityType: string): ActivityType {
-  const entityTypeMap: Record<string, ActivityType> = {
-    contact: ActivityType.CONTACT,
+function determineActivityType(entityType: string): ActivityTypeValue {
+  const entityTypeMap: Record<string, ActivityTypeValue> = {
+    client: ActivityType.CLIENT,
     deal: ActivityType.DEAL,
     workflow: ActivityType.WORKFLOW,
     execution: ActivityType.EXECUTION,
     pipeline: ActivityType.PIPELINE,
-    worker: ActivityType.WORKER,
+    instructor: ActivityType.INSTRUCTOR,
     time_log: ActivityType.TIME_LOG,
     task: ActivityType.TASK,
     email: ActivityType.EMAIL,
@@ -128,7 +134,10 @@ function determineActivityType(entityType: string): ActivityType {
     integration: ActivityType.INTEGRATION,
     credential: ActivityType.CREDENTIAL,
     webhook: ActivityType.WEBHOOK,
-    subaccount: ActivityType.SUBACCOUNT,
+    booking: ActivityType.BOOKING,
+    funnel: ActivityType.FUNNEL,
+    campaign: ActivityType.CAMPAIGN,
+    location: ActivityType.LOCATION,
     organization: ActivityType.ORGANIZATION,
   };
 

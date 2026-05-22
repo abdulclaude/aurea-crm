@@ -5,30 +5,27 @@
 
 import { TRPCError } from "@trpc/server";
 import z from "zod";
-import prisma from "@/lib/db";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { db } from "@/db";
+import { stripeConnection } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import {
   syncStripeConnectAccount,
   disconnectStripeConnectAccount,
 } from "@/lib/stripe";
-import type { Prisma } from "@prisma/client";
 
 export const stripeConnectRouter = createTRPCRouter({
-  // Get connection status for current subaccount/organization
+  // Get connection status for current location/organization
   getConnection: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.subaccountId && !ctx.orgId) {
+    if (!ctx.locationId && !ctx.orgId) {
       throw new TRPCError({
         code: "FORBIDDEN",
-        message: "Organization or subaccount context required",
+        message: "Organization or location context required",
       });
     }
 
-    const whereClause = (ctx.subaccountId
-      ? { subaccountId: ctx.subaccountId }
-      : { organizationId: ctx.orgId, subaccountId: null }) as Prisma.StripeConnectionWhereInput;
-
-    const connection = await prisma.stripeConnection.findFirst({
-      where: whereClause,
+    const connection = await db.query.stripeConnection.findFirst({
+      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
     });
 
     if (!connection) {
@@ -56,19 +53,15 @@ export const stripeConnectRouter = createTRPCRouter({
 
   // Sync account info from Stripe
   syncAccount: protectedProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.subaccountId && !ctx.orgId) {
+    if (!ctx.locationId && !ctx.orgId) {
       throw new TRPCError({
         code: "FORBIDDEN",
-        message: "Organization or subaccount context required",
+        message: "Organization or location context required",
       });
     }
 
-    const whereClause = (ctx.subaccountId
-      ? { subaccountId: ctx.subaccountId }
-      : { organizationId: ctx.orgId, subaccountId: null }) as Prisma.StripeConnectionWhereInput;
-
-    const connection = await prisma.stripeConnection.findFirst({
-      where: whereClause,
+    const connection = await db.query.stripeConnection.findFirst({
+      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
     });
 
     if (!connection) {
@@ -89,9 +82,9 @@ export const stripeConnectRouter = createTRPCRouter({
     }
 
     // Update database
-    const updated = await prisma.stripeConnection.update({
-      where: { id: connection.id },
-      data: {
+    const [updated] = await db
+      .update(stripeConnection)
+      .set({
         chargesEnabled: result.account.chargesEnabled,
         payoutsEnabled: result.account.payoutsEnabled,
         detailsSubmitted: result.account.detailsSubmitted,
@@ -100,8 +93,17 @@ export const stripeConnectRouter = createTRPCRouter({
         country: result.account.country,
         currency: result.account.currency,
         lastSyncedAt: new Date(),
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(stripeConnection.id, connection.id))
+      .returning();
+
+    if (!updated) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to update Stripe Connect account",
+      });
+    }
 
     return {
       success: true,
@@ -117,19 +119,15 @@ export const stripeConnectRouter = createTRPCRouter({
 
   // Disconnect Stripe account
   disconnect: protectedProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.subaccountId && !ctx.orgId) {
+    if (!ctx.locationId && !ctx.orgId) {
       throw new TRPCError({
         code: "FORBIDDEN",
-        message: "Organization or subaccount context required",
+        message: "Organization or location context required",
       });
     }
 
-    const whereClause = (ctx.subaccountId
-      ? { subaccountId: ctx.subaccountId }
-      : { organizationId: ctx.orgId, subaccountId: null }) as Prisma.StripeConnectionWhereInput;
-
-    const connection = await prisma.stripeConnection.findFirst({
-      where: whereClause,
+    const connection = await db.query.stripeConnection.findFirst({
+      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
     });
 
     if (!connection) {
@@ -148,12 +146,13 @@ export const stripeConnectRouter = createTRPCRouter({
     }
 
     // Mark as inactive in database (don't delete to preserve history)
-    await prisma.stripeConnection.update({
-      where: { id: connection.id },
-      data: {
+    await db
+      .update(stripeConnection)
+      .set({
         isActive: false,
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(stripeConnection.id, connection.id));
 
     return { success: true };
   }),
@@ -167,19 +166,15 @@ export const stripeConnectRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId && !ctx.orgId) {
+      if (!ctx.locationId && !ctx.orgId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Organization or subaccount context required",
+          message: "Organization or location context required",
         });
       }
 
-      const whereClause = (ctx.subaccountId
-        ? { subaccountId: ctx.subaccountId }
-        : { organizationId: ctx.orgId, subaccountId: null }) as Prisma.StripeConnectionWhereInput;
-
-      const connection = await prisma.stripeConnection.findFirst({
-        where: whereClause,
+      const connection = await db.query.stripeConnection.findFirst({
+        where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
       });
 
       if (!connection) {
@@ -190,13 +185,22 @@ export const stripeConnectRouter = createTRPCRouter({
       }
 
       // Update fee settings
-      const updated = await prisma.stripeConnection.update({
-        where: { id: connection.id },
-        data: {
-          applicationFeePercent: input.applicationFeePercent ?? null,
-          applicationFeeFixed: input.applicationFeeFixed ?? null,
-        },
-      });
+      const [updated] = await db
+        .update(stripeConnection)
+        .set({
+          applicationFeePercent: input.applicationFeePercent === undefined ? null : String(input.applicationFeePercent),
+          applicationFeeFixed: input.applicationFeeFixed === undefined ? null : String(input.applicationFeeFixed),
+          updatedAt: new Date(),
+        })
+        .where(eq(stripeConnection.id, connection.id))
+        .returning();
+
+      if (!updated) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update fee settings",
+        });
+      }
 
       return {
         success: true,
@@ -205,3 +209,9 @@ export const stripeConnectRouter = createTRPCRouter({
       };
     }),
 });
+
+function stripeConnectionScopeWhere(organizationId: string | null, locationId: string | null): SQL | undefined {
+  return locationId
+    ? eq(stripeConnection.locationId, locationId)
+    : and(eq(stripeConnection.organizationId, organizationId ?? ""), isNull(stripeConnection.locationId));
+}

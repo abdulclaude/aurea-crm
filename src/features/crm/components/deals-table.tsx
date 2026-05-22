@@ -138,36 +138,36 @@ const dealColumns: ColumnDef<DealRow>[] = [
     },
   },
   {
-    id: "contacts",
-    header: "Contacts",
-    meta: { label: "Contacts" },
+    id: "clients",
+    header: "Clients",
+    meta: { label: "Clients" },
     cell: ({ row }) => {
-      const contacts = row.original.contacts;
-      if (contacts.length === 0) {
-        return <span className="text-xs text-primary/75">No contacts</span>;
+      const clients = row.original.clients;
+      if (clients.length === 0) {
+        return <span className="text-xs text-primary/75">No clients</span>;
       }
       return (
         <div className="flex flex-col gap-2">
-          {contacts.slice(0, 2).map((contact: (typeof contacts)[number]) => (
-            <div key={contact.id} className="flex items-center gap-2">
+          {clients.slice(0, 2).map((client: (typeof clients)[number]) => (
+            <div key={client.id} className="flex items-center gap-2">
               <Avatar className="size-7 ">
-                <AvatarFallback className="bg-[#202e32] text-white brightness-120 text-[10px]">
-                  {(contact.name?.[0] ?? "C").toUpperCase()}
+                <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
+                  {(client.name?.[0] ?? "C").toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate text-xs text-primary">
-                  {contact.name ?? "Unknown"}
+                  {client.name ?? "Unknown"}
                 </p>
                 <p className="truncate text-[10px] text-primary/75">
-                  {contact.email ?? "No email"}
+                  {client.email ?? "No email"}
                 </p>
               </div>
             </div>
           ))}
-          {contacts.length > 2 && (
+          {clients.length > 2 && (
             <span className="text-[11px] text-primary/75">
-              +{contacts.length - 2} more contact(s)
+              +{clients.length - 2} more client(s)
             </span>
           )}
         </div>
@@ -175,9 +175,9 @@ const dealColumns: ColumnDef<DealRow>[] = [
     },
   },
   {
-    id: "members",
-    header: "Members assigned",
-    meta: { label: "Members assigned" },
+    id: "clients",
+    header: "Clients assigned",
+    meta: { label: "Clients assigned" },
     cell: ({ row }) => {
       const members = row.original.members;
 
@@ -191,7 +191,7 @@ const dealColumns: ColumnDef<DealRow>[] = [
           <div className="flex items-center gap-2">
             <Avatar className="size-7">
               <AvatarImage src={member.image || undefined} />
-              <AvatarFallback className="text-[10px] text-white bg-[#202e32] brightness-120">
+              <AvatarFallback className="text-[10px] bg-muted text-muted-foreground">
                 {member.name.substring(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -219,7 +219,7 @@ const dealColumns: ColumnDef<DealRow>[] = [
                   className="size-7 relative first:z-10 first:opacity-100 opacity-100"
                 >
                   <AvatarImage src={member.image || undefined} />
-                  <AvatarFallback className="text-[10px] bg-[#202e32] text-white brightness-120 rounded-full relative border">
+                  <AvatarFallback className="text-[10px] bg-muted text-muted-foreground rounded-full relative border">
                     {member.name.substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
@@ -228,7 +228,7 @@ const dealColumns: ColumnDef<DealRow>[] = [
 
             {members.length > 3 && (
               <Avatar className="size-7">
-                <AvatarFallback className="text-[8px] bg-[#202e32] text-white brightness-120 rounded-full relative first:z-10 border">
+                <AvatarFallback className="text-[8px] bg-muted text-muted-foreground rounded-full relative first:z-10 border">
                   +{members.length - 3}
                 </AvatarFallback>
               </Avatar>
@@ -295,6 +295,8 @@ const dealColumns: ColumnDef<DealRow>[] = [
     id: "actions",
     header: "",
     cell: ({ row }) => {
+      const router = useRouter();
+
       return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -326,16 +328,20 @@ const dealColumns: ColumnDef<DealRow>[] = [
               <Eye className="mr-0.5 size-3.5" />
               View details
             </DropdownMenuItem>
+
             <DropdownMenuItem
               className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
                 // Edit action - already handled by row click
+                //
+                router.push(`/deals/${row.original.id}`);
               }}
             >
               <Pencil className="mr-0.5 size-3.5" />
               Edit deal
             </DropdownMenuItem>
+
             <DropdownMenuItem
               className="text-xs text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 cursor-pointer"
               onClick={(e) => {
@@ -357,7 +363,7 @@ const dealColumns: ColumnDef<DealRow>[] = [
 
 const PRIMARY_COLUMN_ID = "select";
 const DEAL_COLUMN_IDS = dealColumns.map(
-  (column, index) => (column.id ?? `column-${index}`) as string
+  (column, index) => (column.id ?? `column-${index}`) as string,
 );
 const COLUMN_ORDER_STORAGE_KEY = "deals-table.column-order";
 
@@ -373,30 +379,33 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
 
   // Pagination state
   const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
-  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+  const [pageSize, setPageSize] = useQueryState(
+    "pageSize",
+    parseAsInteger.withDefault(20),
+  );
 
   // Client filter for "all-clients" scope (agency viewing all client data)
-  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
-    "subaccountId",
-    parseAsString.withDefault("")
+  const [selectedLocationId, setSelectedLocationId] = useQueryState(
+    "locationId",
+    parseAsString.withDefault(""),
   );
 
   // Date query state hooks (using parseAsString like profitableedge)
   const [deadlineStartStr, setDeadlineStartStr] = useQueryState(
     "deadlineStart",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [deadlineEndStr, setDeadlineEndStr] = useQueryState(
     "deadlineEnd",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [updatedAtStartStr, setUpdatedAtStartStr] = useQueryState(
     "updatedAtStart",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [updatedAtEndStr, setUpdatedAtEndStr] = useQueryState(
     "updatedAtEnd",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
 
   // Convert strings to Date objects for use in components
@@ -416,9 +425,9 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       search: params.search || undefined,
       pipelineStageIds:
         params.stages && params.stages.length > 0 ? params.stages : undefined,
-      contacts:
-        params.contacts && params.contacts.length > 0
-          ? params.contacts
+      clients:
+        params.clients && params.clients.length > 0
+          ? params.clients
           : undefined,
       members:
         params.members && params.members.length > 0
@@ -432,12 +441,12 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       deadlineEnd: deadlineEnd || undefined,
       updatedAtStart: updatedAtStart || undefined,
       updatedAtEnd: updatedAtEnd || undefined,
-      // For "all-clients" scope, pass the selected subaccount filter
+      // For "all-clients" scope, pass the selected location filter
       ...(scope === "all-clients" && {
-        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
-        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+        includeAllClients: !selectedLocationId, // If no specific client selected, show all
+        locationId: selectedLocationId || undefined, // If client selected, filter by it
       }),
-    })
+    }),
   );
 
   const { data: stats } = useSuspenseQuery(trpc.deals.stats.queryOptions());
@@ -446,18 +455,18 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
     (deal: DealRow) => {
       router.push(`/deals/${deal.id}`);
     },
-    [router]
+    [router],
   );
 
   const sortingState = React.useMemo(
     () => sortValueToState(params.sort),
-    [params.sort]
+    [params.sort],
   );
   const searchValue = params.search ?? "";
   const selectedStages = params.stages ?? [];
   const hiddenColumns = React.useMemo(
     () => normalizeHiddenColumns(params.hiddenColumns ?? []),
-    [params.hiddenColumns]
+    [params.hiddenColumns],
   );
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>(() => visibilityFromHidden(hiddenColumns));
@@ -472,7 +481,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
     const next = normalizeColumnOrder(
       order,
       DEAL_COLUMN_IDS,
-      PRIMARY_COLUMN_ID
+      PRIMARY_COLUMN_ID,
     );
     if (shallowEqualArrays(next, DEAL_COLUMN_IDS)) {
       window.localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
@@ -491,7 +500,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
         const next = normalizeColumnOrder(
           parsed,
           DEAL_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         setColumnOrder(next);
       }
@@ -516,19 +525,19 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       const nextValue = sortingStateToValue(state) ?? DEALS_DEFAULT_SORT;
       setParams((prev) => ({ ...prev, sort: nextValue }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleSortChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, sort: value }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handlePageChange = React.useCallback(
     (newPage: number) => void setPage(newPage),
-    [setPage]
+    [setPage],
   );
 
   const handlePageSizeChange = React.useCallback(
@@ -536,7 +545,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       void setPageSize(newPageSize);
       void setPage(1);
     },
-    [setPageSize, setPage]
+    [setPageSize, setPage],
   );
 
   const handleDeadlineChange = React.useCallback(
@@ -546,7 +555,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       void setDeadlineEndStr(end ? toYMD(end) : "");
       void setPage(1);
     },
-    [setDeadlineStartStr, setDeadlineEndStr, setPage]
+    [setDeadlineStartStr, setDeadlineEndStr, setPage],
   );
 
   const handleUpdatedAtChange = React.useCallback(
@@ -556,7 +565,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       void setUpdatedAtEndStr(end ? toYMD(end) : "");
       void setPage(1);
     },
-    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage]
+    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage],
   );
 
   const handleSearchChange = React.useCallback(
@@ -564,7 +573,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       setParams((prev) => ({ ...prev, search: value }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleToggleStage = React.useCallback(
@@ -575,14 +584,14 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleClearFilters = React.useCallback(() => {
     setParams((prev) => ({
       ...prev,
       stages: [],
-      contacts: [],
+      clients: [],
       members: [],
       valueMin: undefined,
       valueMax: undefined,
@@ -595,7 +604,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
   const handleApplyAllFilters = React.useCallback(
     (filters: {
       stages: string[];
-      contacts: string[];
+      clients: string[];
       members: string[];
       valueCurrency?: string;
       valueMin?: number;
@@ -606,7 +615,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       setParams((prev) => ({
         ...prev,
         stages: filters.stages,
-        contacts: filters.contacts,
+        clients: filters.clients,
         members: filters.members,
         valueCurrency: filters.valueCurrency,
         valueMin: filters.valueMin,
@@ -616,7 +625,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   // Get unique stages for filter with their IDs
@@ -644,7 +653,7 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
       pendingHiddenRef.current = normalizedHidden;
       setParams((prev) => ({ ...prev, hiddenColumns: normalizedHidden }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnOrderChange = React.useCallback(
@@ -654,17 +663,17 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
         const next = normalizeColumnOrder(
           resolved,
           DEAL_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         persistColumnOrder(next);
         return next;
       });
     },
-    [persistColumnOrder]
+    [persistColumnOrder],
   );
 
   return (
-    <div className="space-y-4 pt-6">
+    <div className="space-y-4">
       <DataTable
         data={data.items}
         columns={dealColumns}
@@ -728,8 +737,8 @@ export function DealsTable({ scope = "agency" }: DealsTableProps) {
               updatedAtEnd={updatedAtEnd}
               onUpdatedAtChange={handleUpdatedAtChange}
               scope={scope}
-              selectedSubaccountId={selectedSubaccountId}
-              onSubaccountChange={setSelectedSubaccountId}
+              selectedLocationId={selectedLocationId}
+              onLocationChange={setSelectedLocationId}
             />
           ),
         }}
@@ -753,7 +762,7 @@ function normalizeHiddenColumns(columns: string[]): string[] {
 function normalizeColumnOrder(
   order: string[],
   defaults: string[],
-  fixedFirst?: string
+  fixedFirst?: string,
 ) {
   const seen = new Set<string>();
   const next: string[] = [];

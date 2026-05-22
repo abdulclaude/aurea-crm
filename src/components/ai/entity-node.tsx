@@ -5,14 +5,14 @@ const EntityNodeView = ({ node }: { node: any }) => {
   const { type, name } = node.attrs;
 
   const typeColors: Record<string, string> = {
-    contact: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+    client: "bg-blue-500/20 text-blue-400 border-blue-500/30",
     deal: "bg-green-500/20 text-green-400 border-green-500/30",
     pipeline: "bg-purple-500/20 text-purple-400 border-purple-500/30",
     workflow: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   };
 
   const typeIcons: Record<string, string> = {
-    contact: "@",
+    client: "@",
     deal: "$",
     pipeline: "→",
     workflow: "⚡",

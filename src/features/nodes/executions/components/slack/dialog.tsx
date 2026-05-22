@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
-import { WebhookProvider } from "@prisma/client";
+import { WebhookProvider } from "@/db/enums";
 import { useWebhooksByProvider } from "@/features/webhooks/hooks/use-webhooks";
 
 const formSchema = z.object({

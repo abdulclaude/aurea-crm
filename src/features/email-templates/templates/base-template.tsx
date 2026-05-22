@@ -30,10 +30,10 @@ interface BaseTemplateProps {
 // Replace template variables in text
 function replaceVariables(text: string, variables: CampaignVariables): string {
   return text
-    .replace(/\{\{contact\.name\}\}/g, variables.name)
-    .replace(/\{\{contact\.firstName\}\}/g, variables.firstName)
-    .replace(/\{\{contact\.email\}\}/g, variables.email)
-    .replace(/\{\{contact\.companyName\}\}/g, variables.companyName || "")
+    .replace(/\{\{client\.name\}\}/g, variables.name)
+    .replace(/\{\{client\.firstName\}\}/g, variables.firstName)
+    .replace(/\{\{client\.email\}\}/g, variables.email)
+    .replace(/\{\{client\.companyName\}\}/g, variables.companyName || "")
     .replace(/\{\{unsubscribe_url\}\}/g, variables.unsubscribe_url)
     .replace(
       /\{\{view_in_browser_url\}\}/g,

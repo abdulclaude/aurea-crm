@@ -35,21 +35,33 @@ function groupItemsByType(items: SuggestionItem[]) {
 
 const typeLabels: Record<string, string> = {
   workflow: "Workflows",
-  contact: "Contacts",
+  client: "Clients",
   deal: "Deals",
   pipeline: "Pipelines",
+  member: "Team",
   action: "Actions",
   ai: "AI",
   query: "Query",
   // Category labels for slash commands
-  Contacts: "Contacts",
+  Clients: "Clients",
   Deals: "Deals",
   Workflows: "Workflows",
   AI: "AI",
   Query: "Query",
 };
 
-const typeOrder = ["workflow", "contact", "deal", "pipeline", "Contacts", "Deals", "Workflows", "AI", "Query"];
+const typeOrder = [
+  "member",
+  "workflow",
+  "client",
+  "deal",
+  "pipeline",
+  "Clients",
+  "Deals",
+  "Workflows",
+  "AI",
+  "Query",
+];
 
 export const ChatSuggestionList = forwardRef<
   { onKeyDown: (props: { event: KeyboardEvent }) => boolean },
@@ -62,22 +74,23 @@ export const ChatSuggestionList = forwardRef<
 
   // Determine if this should show a grouped menu
   // Either @ mention menu OR / command menu with categories
-  const isMentionMenu = props.items.some(item =>
-    ["workflow", "contact", "deal", "pipeline"].includes(item.type)
+  const isMentionMenu = props.items.some((item) =>
+    ["workflow", "client", "deal", "pipeline", "member"].includes(item.type),
   );
-  const isCommandMenu = props.items.some(item => item.category);
+  const isCommandMenu = props.items.some((item) => item.category);
   const shouldGroup = isMentionMenu || isCommandMenu;
 
   // Group items for mention menu or command menu
   const groupedItems = shouldGroup ? groupItemsByType(props.items) : null;
   const sortedGroups = groupedItems
-    ? typeOrder.filter(type => groupedItems[type]?.length > 0)
+    ? typeOrder.filter((type) => groupedItems[type]?.length > 0)
     : [];
 
   // Flatten items for keyboard navigation when a group is expanded
-  const flatItems = expandedType && groupedItems
-    ? groupedItems[expandedType] || []
-    : props.items;
+  const flatItems =
+    expandedType && groupedItems
+      ? groupedItems[expandedType] || []
+      : props.items;
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -97,9 +110,10 @@ export const ChatSuggestionList = forwardRef<
 
   const selectItem = useCallback(
     (index: number) => {
-      const items = expandedType && groupedItems
-        ? groupedItems[expandedType] || []
-        : props.items;
+      const items =
+        expandedType && groupedItems
+          ? groupedItems[expandedType] || []
+          : props.items;
       const item = items[index];
       if (!item) return;
 
@@ -109,22 +123,22 @@ export const ChatSuggestionList = forwardRef<
         type: item.type,
       });
     },
-    [props, expandedType, groupedItems]
+    [props, expandedType, groupedItems],
   );
 
   const upHandler = useCallback(() => {
-    const items = expandedType && groupedItems
-      ? groupedItems[expandedType] || []
-      : props.items;
-    setSelectedIndex(
-      (selectedIndex + items.length - 1) % items.length
-    );
+    const items =
+      expandedType && groupedItems
+        ? groupedItems[expandedType] || []
+        : props.items;
+    setSelectedIndex((selectedIndex + items.length - 1) % items.length);
   }, [selectedIndex, props.items.length, expandedType, groupedItems]);
 
   const downHandler = useCallback(() => {
-    const items = expandedType && groupedItems
-      ? groupedItems[expandedType] || []
-      : props.items;
+    const items =
+      expandedType && groupedItems
+        ? groupedItems[expandedType] || []
+        : props.items;
     setSelectedIndex((selectedIndex + 1) % items.length);
   }, [selectedIndex, props.items.length, expandedType, groupedItems]);
 
@@ -185,7 +199,14 @@ export const ChatSuggestionList = forwardRef<
         return false;
       },
     }),
-    [upHandler, downHandler, enterHandler, escapeHandler, shouldGroup, expandedType]
+    [
+      upHandler,
+      downHandler,
+      enterHandler,
+      escapeHandler,
+      shouldGroup,
+      expandedType,
+    ],
   );
 
   if (props.items.length === 0) {
@@ -200,13 +221,15 @@ export const ChatSuggestionList = forwardRef<
           {sortedGroups.map((type, index) => (
             <button
               key={type}
-              ref={(el) => { itemRefs.current[index] = el; }}
+              ref={(el) => {
+                itemRefs.current[index] = el;
+              }}
               type="button"
               className={cn(
                 "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm outline-none",
                 index === selectedIndex
                   ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50"
+                  : "hover:bg-accent/50",
               )}
               onClick={() => {
                 setExpandedType(type);
@@ -228,9 +251,10 @@ export const ChatSuggestionList = forwardRef<
   }
 
   // Render expanded submenu or flat list for / commands
-  const items = expandedType && groupedItems
-    ? groupedItems[expandedType] || []
-    : props.items;
+  const items =
+    expandedType && groupedItems
+      ? groupedItems[expandedType] || []
+      : props.items;
 
   return (
     <div className="z-50 min-w-[280px] overflow-hidden rounded-md border border-black/10 bg-popover text-popover-foreground shadow-md pointer-events-auto">
@@ -238,7 +262,7 @@ export const ChatSuggestionList = forwardRef<
         <div className="border-b border-black/5 px-2 py-1.5">
           <button
             type="button"
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-black"
             onClick={() => {
               setExpandedType(null);
               setSelectedIndex(sortedGroups.indexOf(expandedType) || 0);
@@ -252,13 +276,15 @@ export const ChatSuggestionList = forwardRef<
         {items.map((item, index) => (
           <button
             key={item.id}
-            ref={(el) => { itemRefs.current[index] = el; }}
+            ref={(el) => {
+              itemRefs.current[index] = el;
+            }}
             type="button"
             className={cn(
               "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none",
               index === selectedIndex
                 ? "bg-accent text-accent-foreground"
-                : "hover:bg-accent/50"
+                : "hover:bg-accent/50",
             )}
             onClick={() => selectItem(index)}
           >
@@ -284,7 +310,7 @@ ChatSuggestionList.displayName = "ChatSuggestionList";
 
 export const createChatSuggestion = (
   fetchItems: (query: string) => Promise<SuggestionItem[]>,
-  activeRef?: React.MutableRefObject<boolean>
+  activeRef?: React.MutableRefObject<boolean>,
 ) => ({
   items: async ({ query }: { query: string }) => {
     return await fetchItems(query);

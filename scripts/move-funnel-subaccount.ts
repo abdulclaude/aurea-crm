@@ -1,77 +1,83 @@
 import "dotenv/config";
-import prisma from "../src/lib/db";
+import { eq } from "drizzle-orm";
+import { db, dbPool } from "../src/db";
+import {
+  adSpend,
+  funnel,
+  funnelEvent,
+  funnelSession,
+  funnelWebVital,
+  location as locationTable,
+} from "../src/db/schema";
 
-const [funnelId, subaccountId] = process.argv.slice(2);
+const [funnelId, locationId] = process.argv.slice(2);
 
-if (!funnelId || !subaccountId) {
-  console.error("Usage: bunx tsx scripts/move-funnel-subaccount.ts <funnelId> <subaccountId>");
+if (!funnelId || !locationId) {
+  console.error("Usage: bunx tsx scripts/move-funnel-location.ts <funnelId> <locationId>");
   process.exit(1);
 }
 
 async function main() {
-  const funnel = await prisma.funnel.findUnique({
-    where: { id: funnelId },
-    select: { id: true, organizationId: true, subaccountId: true },
+  const selectedFunnel = await db.query.funnel.findFirst({
+    where: eq(funnel.id, funnelId),
+    columns: { id: true, organizationId: true, locationId: true },
   });
 
-  if (!funnel) {
+  if (!selectedFunnel) {
     throw new Error(`Funnel not found: ${funnelId}`);
   }
 
-  const subaccount = await prisma.subaccount.findUnique({
-    where: { id: subaccountId },
-    select: { id: true, organizationId: true },
+  const location = await db.query.location.findFirst({
+    where: eq(locationTable.id, locationId),
+    columns: { id: true, organizationId: true },
   });
 
-  if (!subaccount) {
-    throw new Error(`Subaccount not found: ${subaccountId}`);
+  if (!location) {
+    throw new Error(`Location not found: ${locationId}`);
   }
 
-  if (subaccount.organizationId !== funnel.organizationId) {
+  if (location.organizationId !== selectedFunnel.organizationId) {
     throw new Error(
-      `Subaccount ${subaccountId} does not belong to funnel organization ${funnel.organizationId}`
+      `Location ${locationId} does not belong to funnel organization ${selectedFunnel.organizationId}`
     );
   }
 
-  const [
-    updatedFunnel,
-    eventsResult,
-    sessionsResult,
-    webVitalsResult,
-    adSpendResult,
-  ] = await prisma.$transaction([
-    prisma.funnel.update({
-      where: { id: funnelId },
-      data: { subaccountId },
-    }),
-    prisma.funnelEvent.updateMany({
-      where: { funnelId },
-      data: { subaccountId },
-    }),
-    prisma.funnelSession.updateMany({
-      where: { funnelId },
-      data: { subaccountId },
-    }),
-    prisma.funnelWebVital.updateMany({
-      where: { funnelId },
-      data: { subaccountId },
-    }),
-    prisma.adSpend.updateMany({
-      where: { funnelId },
-      data: { subaccountId },
-    }),
-  ]);
+  const [updatedFunnel] = await db
+    .update(funnel)
+    .set({ locationId, updatedAt: new Date() })
+    .where(eq(funnel.id, funnelId))
+    .returning({ id: funnel.id });
+  const eventsResult = await db
+    .update(funnelEvent)
+    .set({ locationId })
+    .where(eq(funnelEvent.funnelId, funnelId))
+    .returning({ id: funnelEvent.id });
+  const sessionsResult = await db
+    .update(funnelSession)
+    .set({ locationId, updatedAt: new Date() })
+    .where(eq(funnelSession.funnelId, funnelId))
+    .returning({ id: funnelSession.id });
+  const webVitalsResult = await db
+    .update(funnelWebVital)
+    .set({ locationId })
+    .where(eq(funnelWebVital.funnelId, funnelId))
+    .returning({ id: funnelWebVital.id });
+  const adSpendResult = await db
+    .update(adSpend)
+    .set({ locationId, updatedAt: new Date() })
+    .where(eq(adSpend.funnelId, funnelId))
+    .returning({ id: adSpend.id });
 
   console.log("[Move Funnel] Completed");
   console.log({
     funnelId,
-    fromSubaccountId: funnel.subaccountId,
-    toSubaccountId: subaccountId,
+    fromLocationId: selectedFunnel.locationId,
+    toLocationId: locationId,
     updatedFunnelId: updatedFunnel.id,
-    eventsUpdated: eventsResult.count,
-    sessionsUpdated: sessionsResult.count,
-    webVitalsUpdated: webVitalsResult.count,
-    adSpendUpdated: adSpendResult.count,
+    eventsUpdated: eventsResult.length,
+    sessionsUpdated: sessionsResult.length,
+    webVitalsUpdated: webVitalsResult.length,
+    adSpendUpdated: adSpendResult.length,
   });
 }
 
@@ -81,5 +87,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await dbPool.end();
   });

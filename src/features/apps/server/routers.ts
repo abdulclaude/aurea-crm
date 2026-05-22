@@ -1,8 +1,13 @@
-import prisma from "@/lib/db";
+import { createId } from "@paralleldrive/cuid2";
+import { TRPCError } from "@trpc/server";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { apps } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { AppProvider } from "@prisma/client";
+import { AppProvider, type AppProvider as AppProviderType } from "@/db/enums";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { z } from "zod";
 import { removeGoogleCalendarSubscriptionsForUser } from "@/features/google-calendar/server/subscriptions";
 import {
   GMAIL_REQUIRED_SCOPES,
@@ -26,26 +31,20 @@ const hasAllScopes = (
 
 export const appsRouter = createTRPCRouter({
   getMany: protectedProcedure.query(({ ctx }) => {
-    return prisma.apps.findMany({
-      where: {
-        userId: ctx.auth.user.id,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
+    return db.query.apps.findMany({
+      where: eq(apps.userId, ctx.auth.user.id),
+      orderBy: [desc(apps.createdAt)],
     });
   }),
   getConnectedProviders: protectedProcedure.query(async ({ ctx }) => {
-    const apps = await prisma.apps.findMany({
-      where: {
-        userId: ctx.auth.user.id,
-      },
-      select: {
+    const userApps = await db.query.apps.findMany({
+      where: eq(apps.userId, ctx.auth.user.id),
+      columns: {
         provider: true,
       },
     });
 
-    return apps.map((app) => app.provider);
+    return userApps.map((app) => app.provider);
   }),
   syncGoogleCalendar: protectedProcedure.mutation(async ({ ctx }) => {
     const accountResponse = await auth.api.listUserAccounts({
@@ -58,58 +57,17 @@ export const appsRouter = createTRPCRouter({
 
     if (!googleAccount) {
       await removeGoogleCalendarSubscriptionsForUser(ctx.auth.user.id);
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE_CALENDAR,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GOOGLE_CALENDAR);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(googleAccount.scopes, GOOGLE_CALENDAR_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE_CALENDAR,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GOOGLE_CALENDAR);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.GOOGLE_CALENDAR,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: googleAccount.scopes ?? [],
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE_CALENDAR,
-          scopes: googleAccount.scopes ?? [],
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.GOOGLE_CALENDAR, googleAccount.scopes, googleAccount.accountId);
 
     return { connected: true };
   }),
@@ -123,58 +81,17 @@ export const appsRouter = createTRPCRouter({
     );
 
     if (!googleAccount) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GMAIL,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GMAIL);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(googleAccount.scopes, GMAIL_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GMAIL,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GMAIL);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.GMAIL,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: googleAccount.scopes ?? [],
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GMAIL,
-          scopes: googleAccount.scopes ?? [],
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.GMAIL, googleAccount.scopes, googleAccount.accountId);
 
     return { connected: true };
   }),
@@ -188,58 +105,17 @@ export const appsRouter = createTRPCRouter({
     );
 
     if (!googleAccount) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GOOGLE);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(googleAccount.scopes, GOOGLE_FULL_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.GOOGLE);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.GOOGLE,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: googleAccount.scopes ?? [],
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.GOOGLE,
-          scopes: googleAccount.scopes ?? [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          metadata: {
-            accountId: googleAccount.accountId,
-          },
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.GOOGLE, googleAccount.scopes, googleAccount.accountId);
 
     return { connected: true };
   }),
@@ -253,58 +129,17 @@ export const appsRouter = createTRPCRouter({
     );
 
     if (!microsoftAccount) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.MICROSOFT,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.MICROSOFT);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(microsoftAccount.scopes, MICROSOFT_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.MICROSOFT,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.MICROSOFT);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.MICROSOFT,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: microsoftAccount.scopes ?? [],
-          metadata: {
-            accountId: microsoftAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.MICROSOFT,
-          scopes: microsoftAccount.scopes ?? [],
-          metadata: {
-            accountId: microsoftAccount.accountId,
-          },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.MICROSOFT, microsoftAccount.scopes, microsoftAccount.accountId);
 
     return { connected: true };
   }),
@@ -384,58 +219,17 @@ export const appsRouter = createTRPCRouter({
     );
 
     if (!slackAccount) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.SLACK,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.SLACK);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(slackAccount.scopes, SLACK_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.SLACK,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.SLACK);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.SLACK,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: slackAccount.scopes ?? [],
-          metadata: {
-            accountId: slackAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.SLACK,
-          scopes: slackAccount.scopes ?? [],
-          metadata: {
-            accountId: slackAccount.accountId,
-          },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.SLACK, slackAccount.scopes, slackAccount.accountId);
 
     return { connected: true };
   }),
@@ -449,58 +243,17 @@ export const appsRouter = createTRPCRouter({
     );
 
     if (!discordAccount) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.DISCORD,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.DISCORD);
 
       return { connected: false };
     }
 
     if (!hasAllScopes(discordAccount.scopes, DISCORD_REQUIRED_SCOPES)) {
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.DISCORD,
-        },
-      });
+      await deleteUserApp(ctx.auth.user.id, AppProvider.DISCORD);
       return { connected: false, missingScopes: true };
     }
 
-    const existing = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: AppProvider.DISCORD,
-      },
-    });
-
-    if (existing) {
-      await prisma.apps.update({
-        where: { id: existing.id },
-        data: {
-          scopes: discordAccount.scopes ?? [],
-          metadata: {
-            accountId: discordAccount.accountId,
-          },
-        },
-      });
-    } else {
-      await prisma.apps.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          provider: AppProvider.DISCORD,
-          scopes: discordAccount.scopes ?? [],
-          metadata: {
-            accountId: discordAccount.accountId,
-          },
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    }
+    await upsertUserApp(ctx.auth.user.id, AppProvider.DISCORD, discordAccount.scopes, discordAccount.accountId);
 
     return { connected: true };
   }),
@@ -668,17 +421,7 @@ export const appsRouter = createTRPCRouter({
       }));
   }),
   listDiscordChannels: protectedProcedure
-    .input((input: unknown) => {
-      if (
-        typeof input === "object" &&
-        input !== null &&
-        "guildId" in input &&
-        typeof input.guildId === "string"
-      ) {
-        return { guildId: input.guildId };
-      }
-      throw new Error("Invalid input: guildId is required");
-    })
+    .input(z.object({ guildId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       const tokenResponse = await auth.api.getAccessToken({
         headers: await headers(),
@@ -714,7 +457,12 @@ export const appsRouter = createTRPCRouter({
       }
 
       const guilds = await guildsResponse.json().catch(() => []);
-      const hasAccess = Array.isArray(guilds) && guilds.some((g: any) => g.id === input.guildId);
+      const hasAccess =
+        Array.isArray(guilds) &&
+        guilds.some((guild: unknown) => {
+          const parsedGuild = guild as { id?: unknown };
+          return parsedGuild.id === input.guildId;
+        });
 
       if (!hasAccess) {
         console.warn("[Apps] User does not have access to guild:", input.guildId);
@@ -772,32 +520,14 @@ export const appsRouter = createTRPCRouter({
         : [];
     }),
   updateDiscordMetadata: protectedProcedure
-    .input((input: unknown) => {
-      if (
-        typeof input === "object" &&
-        input !== null &&
-        "guildId" in input &&
-        typeof input.guildId === "string" &&
-        "channelId" in input &&
-        typeof input.channelId === "string"
-      ) {
-        return {
-          guildId: input.guildId,
-          channelId: input.channelId,
-        };
-      }
-      throw new Error("Invalid input: guildId and channelId are required");
-    })
+    .input(z.object({ guildId: z.string().min(1), channelId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const app = await prisma.apps.findFirst({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.DISCORD,
-        },
+      const app = await db.query.apps.findFirst({
+        where: appOwnerWhere(ctx.auth.user.id, AppProvider.DISCORD),
       });
 
       if (!app) {
-        throw new Error("Discord app not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Discord app not found" });
       }
 
       const currentMetadata =
@@ -805,43 +535,29 @@ export const appsRouter = createTRPCRouter({
           ? app.metadata
           : {};
 
-      await prisma.apps.update({
-        where: { id: app.id },
-        data: {
+      await db
+        .update(apps)
+        .set({
           metadata: {
             ...(currentMetadata as Record<string, unknown>),
             guildId: input.guildId,
             channelId: input.channelId,
           },
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(apps.id, app.id));
 
       return { success: true };
     }),
   updateSlackMetadata: protectedProcedure
-    .input((input: unknown) => {
-      if (
-        typeof input === "object" &&
-        input !== null &&
-        "channelId" in input &&
-        typeof input.channelId === "string"
-      ) {
-        return {
-          channelId: input.channelId,
-        };
-      }
-      throw new Error("Invalid input: channelId is required");
-    })
+    .input(z.object({ channelId: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const app = await prisma.apps.findFirst({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: AppProvider.SLACK,
-        },
+      const app = await db.query.apps.findFirst({
+        where: appOwnerWhere(ctx.auth.user.id, AppProvider.SLACK),
       });
 
       if (!app) {
-        throw new Error("Slack app not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Slack app not found" });
       }
 
       const currentMetadata =
@@ -849,16 +565,51 @@ export const appsRouter = createTRPCRouter({
           ? app.metadata
           : {};
 
-      await prisma.apps.update({
-        where: { id: app.id },
-        data: {
+      await db
+        .update(apps)
+        .set({
           metadata: {
             ...(currentMetadata as Record<string, unknown>),
             channelId: input.channelId,
           },
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(apps.id, app.id));
 
       return { success: true };
     }),
 });
+
+function appOwnerWhere(userId: string, provider: AppProviderType) {
+  return and(eq(apps.userId, userId), eq(apps.provider, provider));
+}
+
+async function deleteUserApp(userId: string, provider: AppProviderType): Promise<void> {
+  await db.delete(apps).where(appOwnerWhere(userId, provider));
+}
+
+async function upsertUserApp(
+  userId: string,
+  provider: AppProviderType,
+  scopes: string[] | undefined,
+  accountId: string
+): Promise<void> {
+  await db
+    .insert(apps)
+    .values({
+      id: createId(),
+      userId,
+      provider,
+      scopes: scopes ?? [],
+      metadata: { accountId },
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [apps.userId, apps.provider],
+      set: {
+        scopes: scopes ?? [],
+        metadata: { accountId },
+        updatedAt: new Date(),
+      },
+    });
+}

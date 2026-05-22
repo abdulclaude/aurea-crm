@@ -1,5 +1,14 @@
-import db from "@/lib/db";
+import { db } from "@/db";
+import {
+  member,
+  notification,
+  notificationPreference,
+  locationMember,
+  user,
+  instructor,
+} from "@/db/schema";
 import { getPostHogClient } from "@/lib/posthog/server";
+import { and, eq, inArray, lt, type SQL } from "drizzle-orm";
 import { Resend } from "resend";
 
 const posthog = getPostHogClient();
@@ -10,27 +19,99 @@ export type NotificationType =
   | "WORKFLOW_CREATED"
   | "WORKFLOW_UPDATED"
   | "WORKFLOW_DELETED"
-  | "CONTACT_CREATED"
-  | "CONTACT_UPDATED"
-  | "CONTACT_DELETED"
+  | "WORKFLOW_ARCHIVED"
+  | "WORKFLOW_RESTORED"
+  | "WORKFLOW_FAILED"
+  | "FUNNEL_CREATED"
+  | "FUNNEL_UPDATED"
+  | "FUNNEL_PUBLISHED"
+  | "FUNNEL_DELETED"
+  | "CAMPAIGN_CREATED"
+  | "CAMPAIGN_UPDATED"
+  | "CAMPAIGN_SCHEDULED"
+  | "CAMPAIGN_SENT"
+  | "CAMPAIGN_CANCELLED"
+  | "CLIENT_CREATED"
+  | "CLIENT_UPDATED"
+  | "CLIENT_DELETED"
   | "DEAL_CREATED"
   | "DEAL_UPDATED"
   | "DEAL_DELETED"
+  | "DEAL_STAGE_CHANGED"
+  | "DEAL_CLOSED"
+  | "TASK_ASSIGNED"
+  | "TASK_COMPLETED"
+  | "TASK_DUE_SOON"
+  | "TASK_OVERDUE"
+  | "NOTE_MENTION"
+  | "INVOICE_PAID"
+  | "INVOICE_SENT"
+  | "INVOICE_REMINDER_SENT"
+  | "INVOICE_PAYMENT_RECORDED"
+  | "INVOICE_DELETED"
+  | "BOOKING_CREATED"
+  | "BOOKING_RESCHEDULED"
+  | "BOOKING_CANCELLED"
+  | "BOOKING_PAID"
   | "PIPELINE_CREATED"
   | "PIPELINE_UPDATED"
   | "PIPELINE_DELETED"
   | "INVITE_SENT"
   | "INVITE_ACCEPTED"
   | "INVITE_DECLINED"
+  | "MEMBER_ROLE_CHANGED"
+  | "MEMBER_REMOVED"
   | "MEMBER_ONLINE"
-  | "MEMBER_OFFLINE";
+  | "MEMBER_OFFLINE"
+  | "CLASS_BOOKING_NEW"
+  | "CLASS_BOOKING_CANCELLED"
+  | "CLASS_STARTING_SOON"
+  | "CLASS_STARTED"
+  | "CLASS_CANCELLED"
+  | "CLASS_SCHEDULE_CHANGED"
+  | "CLASS_WAITLIST_JOINED"
+  | "SUBSTITUTION_REQUESTED"
+  | "SUBSTITUTION_ACCEPTED"
+  | "SUBSTITUTION_DECLINED"
+  | "PAYOUT_SENT"
+  | "PAYOUT_COMPLETED"
+  | "NO_SHOW_SUMMARY"
+  | "IMPORT_STARTED"
+  | "IMPORT_COMPLETED"
+  | "IMPORT_FAILED"
+  | "IMPORT_NEEDS_REVIEW";
 
 export type EntityType =
   | "workflow"
-  | "contact"
+  | "client"
   | "deal"
   | "pipeline"
-  | "invitation";
+  | "invitation"
+  | "funnel"
+  | "campaign"
+  | "invoice"
+  | "booking"
+  | "organization"
+  | "location"
+  | "task"
+  | "import";
+
+export const INSTRUCTOR_NOTIFICATION_TYPES: ReadonlySet<NotificationType> =
+  new Set([
+    "CLASS_BOOKING_NEW",
+    "CLASS_BOOKING_CANCELLED",
+    "CLASS_STARTING_SOON",
+    "CLASS_STARTED",
+    "CLASS_CANCELLED",
+    "CLASS_SCHEDULE_CHANGED",
+    "CLASS_WAITLIST_JOINED",
+    "SUBSTITUTION_REQUESTED",
+    "SUBSTITUTION_ACCEPTED",
+    "SUBSTITUTION_DECLINED",
+    "PAYOUT_SENT",
+    "PAYOUT_COMPLETED",
+    "NO_SHOW_SUMMARY",
+  ]);
 
 interface CreateNotificationParams {
   type: NotificationType;
@@ -41,7 +122,7 @@ interface CreateNotificationParams {
   entityId?: string;
   data?: Record<string, unknown>;
   organizationId?: string | null;
-  subaccountId?: string | null;
+  locationId?: string | null;
 }
 
 interface NotificationRecipient {
@@ -56,89 +137,93 @@ interface NotificationRecipient {
  */
 export async function getNotificationRecipients(
   organizationId: string | null,
-  subaccountId: string | null,
+  locationId: string | null,
   entityType?: EntityType,
-  entityId?: string
+  entityId?: string,
 ): Promise<NotificationRecipient[]> {
   const recipients: NotificationRecipient[] = [];
 
-  if (subaccountId) {
-    // Get all subaccount members
-    const subaccountMembers = await db.subaccountMember.findMany({
-      where: { subaccountId },
-      include: {
-        user: {
-          include: {
-            notificationPreference: true,
-          },
-        },
-      },
-    });
+  if (locationId) {
+    const locationRows = await db
+      .select({
+        userId: locationMember.userId,
+        email: user.email,
+        name: user.name,
+        emailEnabled: notificationPreference.emailEnabled,
+      })
+      .from(locationMember)
+      .innerJoin(user, eq(locationMember.userId, user.id))
+      .leftJoin(
+        notificationPreference,
+        eq(notificationPreference.userId, user.id)
+      )
+      .where(eq(locationMember.locationId, locationId));
 
-    for (const member of subaccountMembers) {
+    for (const member of locationRows) {
       recipients.push({
         userId: member.userId,
-        email: member.user.email,
-        name: member.user.name,
-        shouldEmail:
-          member.user.notificationPreference?.emailEnabled ?? true,
+        email: member.email,
+        name: member.name,
+        shouldEmail: member.emailEnabled ?? true,
       });
     }
 
-    // Also get agency members assigned to this subaccount
     if (organizationId) {
-      const agencyMembers = await db.member.findMany({
-        where: {
-          organizationId,
-        },
-        include: {
-          user: {
-            include: {
-              notificationPreference: true,
-              subaccountMember: {
-                where: { subaccountId },
-              },
-            },
-          },
-        },
-      });
+      const agencyRows = await db
+        .select({
+          userId: member.userId,
+          email: user.email,
+          name: user.name,
+          emailEnabled: notificationPreference.emailEnabled,
+        })
+        .from(member)
+        .innerJoin(user, eq(member.userId, user.id))
+        .innerJoin(
+          locationMember,
+          and(
+            eq(locationMember.userId, member.userId),
+            eq(locationMember.locationId, locationId)
+          )
+        )
+        .leftJoin(
+          notificationPreference,
+          eq(notificationPreference.userId, user.id)
+        )
+        .where(eq(member.organizationId, organizationId));
 
-      for (const member of agencyMembers) {
-        // Only add if they have a subaccount membership (assigned to this client)
-        if (member.user && member.user.subaccountMember.length > 0) {
-          // Avoid duplicates
-          if (!recipients.find((r) => r.userId === member.userId)) {
-            recipients.push({
-              userId: member.userId,
-              email: member.user.email,
-              name: member.user.name,
-              shouldEmail:
-                member.user.notificationPreference?.emailEnabled ?? true,
-            });
-          }
+      for (const member of agencyRows) {
+        if (!recipients.find((recipient) => recipient.userId === member.userId)) {
+          recipients.push({
+            userId: member.userId,
+            email: member.email,
+            name: member.name,
+            shouldEmail: member.emailEnabled ?? true,
+          });
         }
       }
     }
   } else if (organizationId) {
-    // Organization-level notification - send to all org members
-    const orgMembers = await db.member.findMany({
-      where: { organizationId },
-      include: {
-        user: {
-          include: {
-            notificationPreference: true,
-          },
-        },
-      },
-    });
+    const orgRows = await db
+      .select({
+        userId: member.userId,
+        email: user.email,
+        name: user.name,
+        emailEnabled: notificationPreference.emailEnabled,
+      })
+      .from(member)
+      .innerJoin(user, eq(member.userId, user.id))
+      .leftJoin(
+        notificationPreference,
+        eq(notificationPreference.userId, user.id)
+      )
+      .where(eq(member.organizationId, organizationId));
 
-    for (const member of orgMembers) {
+    for (const member of orgRows) {
       recipients.push({
         userId: member.userId,
-        email: member.user.email,
-        name: member.user.name,
-        shouldEmail:
-          member.user.notificationPreference?.emailEnabled ?? true,
+        email: member.email,
+        name: member.name,
+        shouldEmail: member.emailEnabled ?? true,
       });
     }
   }
@@ -150,7 +235,7 @@ export async function getNotificationRecipients(
  * Create a notification and send to appropriate recipients
  */
 export async function createNotification(
-  params: CreateNotificationParams
+  params: CreateNotificationParams,
 ): Promise<void> {
   const {
     type,
@@ -161,41 +246,60 @@ export async function createNotification(
     entityId,
     data,
     organizationId,
-    subaccountId,
+    locationId,
   } = params;
 
   // Get recipients based on context
   const recipients = await getNotificationRecipients(
     organizationId ?? null,
-    subaccountId ?? null,
+    locationId ?? null,
     entityType,
-    entityId
+    entityId,
   );
 
   // Filter out the actor (don't notify yourself)
-  const filteredRecipients = recipients.filter((r) => r.userId !== actorId);
+  let filteredRecipients = recipients.filter((r) => r.userId !== actorId);
+
+  // For instructor-specific notifications, only send to users who are instructors
+  if (INSTRUCTOR_NOTIFICATION_TYPES.has(type)) {
+    const recipientUserIds = filteredRecipients.map((recipient) => recipient.userId);
+    const instructorInstructors =
+      recipientUserIds.length > 0
+        ? await db
+            .select({ userId: instructor.userId })
+            .from(instructor)
+            .where(
+              and(inArray(instructor.userId, recipientUserIds), eq(instructor.isActive, true))
+            )
+        : [];
+    const instructorUserIds = new Set(
+      instructorInstructors.map((instructor) => instructor.userId).filter(Boolean),
+    );
+    filteredRecipients = filteredRecipients.filter((r) =>
+      instructorUserIds.has(r.userId),
+    );
+  }
 
   if (filteredRecipients.length === 0) {
     return;
   }
 
-  // Create notifications in database
-  const notifications = await db.notification.createMany({
-    data: filteredRecipients.map((recipient) => ({
+  await db.insert(notification).values(
+    filteredRecipients.map((recipient) => ({
       id: crypto.randomUUID(),
       userId: recipient.userId,
-      organizationId: organizationId ?? undefined,
-      subaccountId: subaccountId ?? undefined,
+      organizationId: organizationId ?? null,
+      locationId: locationId ?? null,
       type,
       title,
       message,
-      data: data ? JSON.parse(JSON.stringify(data)) : undefined,
-      entityType,
-      entityId,
-      actorId,
+      data: data ? JSON.parse(JSON.stringify(data)) : null,
+      entityType: entityType ?? null,
+      entityId: entityId ?? null,
+      actorId: actorId ?? null,
       createdAt: new Date(),
-    })),
-  });
+    }))
+  );
 
   // Track in PostHog
   try {
@@ -208,7 +312,7 @@ export async function createNotification(
         entityId,
         recipientCount: filteredRecipients.length,
         organizationId,
-        subaccountId,
+        locationId,
       },
     });
   } catch (error) {
@@ -220,7 +324,12 @@ export async function createNotification(
     "INVITE_SENT",
     "INVITE_ACCEPTED",
     "DEAL_CREATED",
+    "DEAL_CLOSED",
     "PIPELINE_CREATED",
+    "INVOICE_PAID",
+    "INVOICE_SENT",
+    "BOOKING_CREATED",
+    "BOOKING_PAID",
   ];
 
   if (criticalTypes.includes(type)) {
@@ -242,7 +351,7 @@ async function sendEmailNotification(
   recipient: NotificationRecipient,
   title: string,
   message: string,
-  context: { entityType?: EntityType; entityId?: string }
+  context: { entityType?: EntityType; entityId?: string },
 ): Promise<void> {
   try {
     const baseUrl = process.env.APP_URL || "http://localhost:3000";
@@ -254,8 +363,8 @@ async function sendEmailNotification(
         case "workflow":
           actionUrl = `${baseUrl}/workflows/${context.entityId}`;
           break;
-        case "contact":
-          actionUrl = `${baseUrl}/contacts`;
+        case "client":
+          actionUrl = `${baseUrl}/clients`;
           break;
         case "deal":
           actionUrl = `${baseUrl}/deals`;
@@ -298,7 +407,7 @@ async function sendEmailNotification(
 
                 <div style="text-align: center; margin: 30px 0;">
                   <a href="${actionUrl}" style="display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: 600; font-size: 16px;">
-                    View Details
+                    View details
                   </a>
                 </div>
 
@@ -334,18 +443,15 @@ async function sendEmailNotification(
  */
 export async function markNotificationAsRead(
   notificationId: string,
-  userId: string
+  userId: string,
 ): Promise<void> {
-  await db.notification.updateMany({
-    where: {
-      id: notificationId,
-      userId,
-    },
-    data: {
+  await db
+    .update(notification)
+    .set({
       read: true,
       readAt: new Date(),
-    },
-  });
+    })
+    .where(and(eq(notification.id, notificationId), eq(notification.userId, userId)));
 
   posthog?.capture({
     distinctId: userId,
@@ -362,27 +468,35 @@ export async function markNotificationAsRead(
 export async function markAllNotificationsAsRead(
   userId: string,
   organizationId?: string,
-  subaccountId?: string
+  locationId?: string,
 ): Promise<void> {
-  await db.notification.updateMany({
-    where: {
-      userId,
-      read: false,
-      ...(organizationId && { organizationId }),
-      ...(subaccountId && { subaccountId }),
-    },
-    data: {
+  const filters: SQL[] = [
+    eq(notification.userId, userId),
+    eq(notification.read, false),
+  ];
+
+  if (organizationId) {
+    filters.push(eq(notification.organizationId, organizationId));
+  }
+
+  if (locationId) {
+    filters.push(eq(notification.locationId, locationId));
+  }
+
+  await db
+    .update(notification)
+    .set({
       read: true,
       readAt: new Date(),
-    },
-  });
+    })
+    .where(and(...filters));
 
   posthog?.capture({
     distinctId: userId,
     event: "notifications_marked_all_read",
     properties: {
       organizationId,
-      subaccountId,
+      locationId,
     },
   });
 }
@@ -391,18 +505,14 @@ export async function markAllNotificationsAsRead(
  * Delete old notifications (older than retention period)
  */
 export async function cleanupOldNotifications(
-  retentionDays: number = 14
+  retentionDays: number = 14,
 ): Promise<number> {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-  const result = await db.notification.deleteMany({
-    where: {
-      createdAt: {
-        lt: cutoffDate,
-      },
-    },
-  });
+  const result = await db
+    .delete(notification)
+    .where(lt(notification.createdAt, cutoffDate));
 
-  return result.count;
+  return result.rowCount ?? 0;
 }

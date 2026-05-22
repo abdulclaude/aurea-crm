@@ -123,7 +123,7 @@ export const StopWorkflowDialog: React.FC<Props> = ({
                   <FormLabel>Reason (Optional)</FormLabel>
                   <FormControl>
                     <VariableInput
-                      placeholder="Contact opted out"
+                      placeholder="Client opted out"
                       value={field.value || ""}
                       onChange={field.onChange}
                       variables={variables}

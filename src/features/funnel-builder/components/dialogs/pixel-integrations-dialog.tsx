@@ -31,7 +31,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { PixelProvider } from "@prisma/client";
+import { PixelProvider } from "@/db/enums";
 import { Trash2, Plus, ExternalLink } from "lucide-react";
 
 interface PixelIntegrationsDialogProps {

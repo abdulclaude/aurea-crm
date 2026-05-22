@@ -1,6 +1,6 @@
 "use client";
 
-import { CredentialType } from "@prisma/client";
+import { CredentialType } from "@/db/enums";
 import { useParams, useRouter } from "next/navigation";
 import React from "react";
 import {

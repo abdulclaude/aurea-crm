@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { DeviceType } from "@prisma/client";
+import { DeviceType } from "@/db/enums";
 
 /**
  * Funnel Editor State Management with Jotai

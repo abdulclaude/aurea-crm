@@ -1,11 +1,54 @@
 import { z } from "zod";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
-import prisma from "@/lib/db";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { apps, credential } from "@/db/schema";
 import { createMindbodyClient } from "../lib/mindbody-client";
 import { inngest } from "@/inngest/client";
 import { encrypt } from "@/lib/encryption";
-import { CredentialType } from "@prisma/client";
+import { AppProvider, CredentialType } from "@/db/enums";
+import type { JsonObject } from "@/db/json";
+
+const mindbodyMetadataSchema = z.object({
+  credentialId: z.string().optional(),
+  siteId: z.string().optional(),
+  organizationId: z.string().nullable().optional(),
+  locationId: z.string().nullable().optional(),
+  lastClientSync: z.string().optional(),
+  lastClassSync: z.string().optional(),
+});
+
+const readMindbodyMetadata = (metadata: unknown) =>
+  mindbodyMetadataSchema.catch({}).parse(metadata);
+
+const buildMindbodyMetadata = ({
+  credentialId,
+  organizationId,
+  locationId,
+  existing,
+}: {
+  credentialId: string;
+  organizationId: string | null;
+  locationId: string | null;
+  existing?: unknown;
+}): JsonObject => {
+  const parsed = readMindbodyMetadata(existing);
+  return {
+    ...parsed,
+    credentialId,
+    organizationId,
+    locationId,
+  };
+};
+
+const findMindbodyApp = async (userId: string) =>
+  await db.query.apps.findFirst({
+    where: and(
+      eq(apps.userId, userId),
+      eq(apps.provider, AppProvider.MINDBODY),
+    ),
+  });
 
 export const mindbodyRouter = createTRPCRouter({
   /**
@@ -29,11 +72,11 @@ export const mindbodyRouter = createTRPCRouter({
         });
       }
 
-      // Require either organization or subaccount context
-      if (!ctx.orgId && !ctx.subaccountId) {
+      // Require either organization or location context
+      if (!ctx.orgId && !ctx.locationId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "You must be in an organization or subaccount context to connect Mindbody",
+          message: "You must be in an organization or location context to connect Mindbody",
         });
       }
 
@@ -73,80 +116,86 @@ export const mindbodyRouter = createTRPCRouter({
       });
 
       // Upsert credential
-      const existingCredential = await prisma.credential.findFirst({
-        where: {
-          userId: ctx.auth.user.id,
-          type: CredentialType.MINDBODY,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      const existingCredential = await db.query.credential.findFirst({
+        where: and(
+          eq(credential.userId, ctx.auth.user.id),
+          eq(credential.type, CredentialType.MINDBODY),
+          ctx.locationId
+            ? eq(credential.locationId, ctx.locationId)
+            : isNull(credential.locationId),
+        ),
       });
 
-      let credential;
+      let selectedCredential;
       if (existingCredential) {
         // Update existing credential
-        credential = await prisma.credential.update({
-          where: { id: existingCredential.id },
-          data: {
+        const [updatedCredential] = await db
+          .update(credential)
+          .set({
             value: encrypt(credentialValue),
             metadata: {
               siteId: input.siteId,
             },
-          },
-        });
+            updatedAt: new Date(),
+          })
+          .where(eq(credential.id, existingCredential.id))
+          .returning();
+        selectedCredential = updatedCredential;
       } else {
         // Create new credential
-        credential = await prisma.credential.create({
-          data: {
+        const [createdCredential] = await db
+          .insert(credential)
+          .values({
             id: crypto.randomUUID(),
             name: "Mindbody",
-            type: "MINDBODY" as const,
+            type: CredentialType.MINDBODY,
             userId: ctx.auth.user.id,
-            subaccountId: ctx.subaccountId ?? null,
+            locationId: ctx.locationId ?? null,
             value: encrypt(credentialValue),
             metadata: {
               siteId: input.siteId,
             },
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
+        selectedCredential = createdCredential;
       }
 
       // Store OAuth token in Apps table
-      const app = await prisma.apps.upsert({
-        where: {
-          userId_provider: {
-            userId: ctx.auth.user.id,
-            provider: "MINDBODY",
-          },
-        },
-        create: {
+      const [app] = await db
+        .insert(apps)
+        .values({
           id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
-          provider: "MINDBODY",
+          provider: AppProvider.MINDBODY,
           accessToken: tokenResponse.AccessToken,
           refreshToken: tokenResponse.RefreshToken || null,
           expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour from now
           scopes: [],
           metadata: {
-            credentialId: credential.id, // Link to credential
+            credentialId: selectedCredential.id,
             organizationId: ctx.orgId,
-            subaccountId: ctx.subaccountId,
+            locationId: ctx.locationId,
           },
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        update: {
+        })
+        .onConflictDoUpdate({
+          target: [apps.userId, apps.provider],
+          set: {
           accessToken: tokenResponse.AccessToken,
           refreshToken: tokenResponse.RefreshToken || null,
           expiresAt: new Date(Date.now() + 3600 * 1000),
-          metadata: {
-            credentialId: credential.id, // Link to credential
+          metadata: buildMindbodyMetadata({
+            credentialId: selectedCredential.id,
             organizationId: ctx.orgId,
-            subaccountId: ctx.subaccountId,
+            locationId: ctx.locationId,
+          }),
+          updatedAt: new Date(),
           },
-        },
-      });
+        })
+        .returning();
 
       return { success: true, app };
     }),
@@ -163,33 +212,32 @@ export const mindbodyRouter = createTRPCRouter({
     }
 
     // Delete both the app and credential
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (app) {
-      const metadata = app.metadata as any;
+      const metadata = readMindbodyMetadata(app.metadata);
       const credentialId = metadata?.credentialId;
 
       // Delete the app
-      await prisma.apps.deleteMany({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: "MINDBODY",
-        },
-      });
+      await db
+        .delete(apps)
+        .where(
+          and(
+            eq(apps.userId, ctx.auth.user.id),
+            eq(apps.provider, AppProvider.MINDBODY),
+          ),
+        );
 
       // Delete the credential if it exists
       if (credentialId) {
-        await prisma.credential.deleteMany({
-          where: {
-            id: credentialId,
-            userId: ctx.auth.user.id,
-          },
-        });
+        await db
+          .delete(credential)
+          .where(
+            and(
+              eq(credential.id, credentialId),
+              eq(credential.userId, ctx.auth.user.id),
+            ),
+          );
       }
     }
 
@@ -204,18 +252,13 @@ export const mindbodyRouter = createTRPCRouter({
       return null;
     }
 
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (!app) {
       return null;
     }
 
-    const metadata = app.metadata as any;
+    const metadata = readMindbodyMetadata(app.metadata);
     return {
       connected: true,
       siteId: metadata?.siteId as string,
@@ -223,7 +266,7 @@ export const mindbodyRouter = createTRPCRouter({
       lastClientSync: metadata?.lastClientSync as string | undefined,
       lastClassSync: metadata?.lastClassSync as string | undefined,
       organizationId: metadata?.organizationId as string | undefined,
-      subaccountId: metadata?.subaccountId as string | undefined,
+      locationId: metadata?.locationId as string | undefined,
     };
   }),
 
@@ -238,12 +281,7 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (!app || !app.accessToken) {
       throw new TRPCError({
@@ -252,7 +290,7 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const metadata = app.metadata as any;
+    const metadata = readMindbodyMetadata(app.metadata);
     const client = createMindbodyClient({
       apiKey: app.accessToken,
       siteId: metadata?.siteId as string,
@@ -274,12 +312,7 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (!app) {
       throw new TRPCError({
@@ -288,14 +321,14 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const metadata = app.metadata as any;
+    const metadata = readMindbodyMetadata(app.metadata);
     // Trigger Inngest function
     await inngest.send({
       name: "mindbody/sync.full",
       data: {
         appId: app.id,
         organizationId: metadata?.organizationId || ctx.orgId,
-        subaccountId: metadata?.subaccountId || ctx.subaccountId,
+        locationId: metadata?.locationId || ctx.locationId,
       },
     });
 
@@ -313,12 +346,7 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (!app) {
       throw new TRPCError({
@@ -327,14 +355,14 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const metadata = app.metadata as any;
+    const metadata = readMindbodyMetadata(app.metadata);
     // Trigger Inngest function
     await inngest.send({
       name: "mindbody/sync.clients",
       data: {
         appId: app.id,
         organizationId: metadata?.organizationId || ctx.orgId,
-        subaccountId: metadata?.subaccountId || ctx.subaccountId,
+        locationId: metadata?.locationId || ctx.locationId,
       },
     });
 
@@ -360,12 +388,7 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const app = await prisma.apps.findFirst({
-      where: {
-        userId: ctx.auth.user.id,
-        provider: "MINDBODY",
-      },
-    });
+    const app = await findMindbodyApp(ctx.auth.user.id);
 
     if (!app) {
       throw new TRPCError({
@@ -374,16 +397,16 @@ export const mindbodyRouter = createTRPCRouter({
       });
     }
 
-    const metadata = app.metadata as any;
+    const metadata = readMindbodyMetadata(app.metadata);
     const organizationId = ctx.orgId;
-    const subaccountId = ctx.subaccountId; // Optional - can sync at org or subaccount level
+    const locationId = ctx.locationId; // Optional - can sync at org or location level
 
     console.log('[Mindbody Router] Triggering class sync with:', {
       appId: app.id,
       organizationId,
-      subaccountId,
+      locationId,
       metadataOrgId: metadata?.organizationId,
-      metadataSubaccountId: metadata?.subaccountId,
+      metadataLocationId: metadata?.locationId,
     });
 
     // Trigger Inngest function
@@ -392,7 +415,7 @@ export const mindbodyRouter = createTRPCRouter({
       data: {
         appId: app.id,
         organizationId,
-        subaccountId: subaccountId || undefined, // Pass undefined instead of null
+        locationId: locationId || undefined, // Pass undefined instead of null
       },
     });
 
@@ -400,12 +423,12 @@ export const mindbodyRouter = createTRPCRouter({
   }),
 
   /**
-   * Sync a specific contact's bookings and memberships
+   * Sync a specific client's bookings and memberships
    */
-  syncContact: protectedProcedure
+  syncClient: protectedProcedure
     .input(
       z.object({
-        contactId: z.string(),
+        clientId: z.string(),
         mindbodyClientId: z.string(),
       })
     )
@@ -417,12 +440,7 @@ export const mindbodyRouter = createTRPCRouter({
         });
       }
 
-      const app = await prisma.apps.findFirst({
-        where: {
-          userId: ctx.auth.user.id,
-          provider: "MINDBODY",
-        },
-      });
+      const app = await findMindbodyApp(ctx.auth.user.id);
 
       if (!app) {
         throw new TRPCError({
@@ -431,19 +449,19 @@ export const mindbodyRouter = createTRPCRouter({
         });
       }
 
-      const metadata = app.metadata as any;
+      const metadata = readMindbodyMetadata(app.metadata);
       // Trigger Inngest function
       await inngest.send({
-        name: "mindbody/sync.contact",
+        name: "mindbody/sync.client",
         data: {
           appId: app.id,
           organizationId: metadata?.organizationId || ctx.orgId,
-          subaccountId: metadata?.subaccountId || ctx.subaccountId,
-          contactId: input.contactId,
+          locationId: metadata?.locationId || ctx.locationId,
+          clientId: input.clientId,
           mindbodyClientId: input.mindbodyClientId,
         },
       });
 
-      return { success: true, message: "Contact sync job started" };
+      return { success: true, message: "Client sync job started" };
     }),
 });

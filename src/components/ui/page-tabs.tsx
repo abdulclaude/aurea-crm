@@ -23,10 +23,10 @@ export function PageTabs({ tabs, activeTab, onTabChange, className }: PageTabsPr
           type="button"
           onClick={() => onTabChange(tab.id)}
           className={cn(
-            "px-3 py-2 text-xs font-medium transition-colors",
+            "-mb-px px-3 py-2 text-xs font-medium transition-colors border-b-2",
             activeTab === tab.id
-              ? "border-b-2 border-primary text-primary"
-              : "text-muted-foreground hover:text-primary"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-primary"
           )}
         >
           {tab.label}

@@ -120,10 +120,14 @@ export function EventAttributionChart({ funnelId, timeRange }: EventAttributionC
             data={chartData}
             onMouseMove={(state) => {
               const x = state.activeCoordinate?.x;
-              const dataValue = state.activePayload?.[0]?.value;
+              const activePayload =
+                "activePayload" in state ? state.activePayload : undefined;
+              const dataValue = Array.isArray(activePayload)
+                ? activePayload[0]?.value
+                : undefined;
               if (x && dataValue !== undefined) {
                 springX.set(x);
-                springY.set(dataValue);
+                springY.set(Number(dataValue));
               }
             }}
             onMouseLeave={() => {

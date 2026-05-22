@@ -30,9 +30,9 @@ import { IconClockAlert as ClockIcon } from "central-icons/IconClockAlert";
 import { formatDistanceToNow } from "date-fns";
 
 interface InviteMembersSectionProps {
-  mode: "organization" | "subaccount";
+  mode: "organization" | "location";
   organizationName: string;
-  subaccountName?: string;
+  locationName?: string;
 }
 
 type TabValue = "pending" | "accepted" | "declined";
@@ -40,7 +40,7 @@ type TabValue = "pending" | "accepted" | "declined";
 export function InviteMembersSection({
   mode,
   organizationName,
-  subaccountName,
+  locationName,
 }: InviteMembersSectionProps) {
   const trpc = useTRPC();
   const [email, setEmail] = useState("");
@@ -58,8 +58,8 @@ export function InviteMembersSection({
     trpc.organizations.inviteToOrganization.mutationOptions()
   );
 
-  const inviteToSubaccount = useMutation(
-    trpc.organizations.inviteToSubaccount.mutationOptions()
+  const inviteToLocation = useMutation(
+    trpc.organizations.inviteToLocation.mutationOptions()
   );
 
   const revokeInvitation = useMutation(
@@ -68,7 +68,7 @@ export function InviteMembersSection({
 
   const isLoading =
     inviteToOrganization.isPending ||
-    inviteToSubaccount.isPending ||
+    inviteToLocation.isPending ||
     revokeInvitation.isPending;
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -86,7 +86,7 @@ export function InviteMembersSection({
           role: role as "owner" | "admin" | "manager" | "staff" | "viewer",
         });
       } else {
-        await inviteToSubaccount.mutateAsync({
+        await inviteToLocation.mutateAsync({
           email: email.trim(),
           role: role as
             | "AGENCY"
@@ -125,7 +125,7 @@ export function InviteMembersSection({
     return status === activeTab;
   });
 
-  const displayName = subaccountName || organizationName;
+  const displayName = locationName || organizationName;
 
   return (
     <div className="flex py-4">
@@ -170,7 +170,7 @@ export function InviteMembersSection({
                   ) : (
                     <>
                       <SelectItem value="AGENCY">Agency Team</SelectItem>
-                      <SelectItem value="ADMIN">Subaccount Admin</SelectItem>
+                      <SelectItem value="ADMIN">Location Admin</SelectItem>
                       <SelectItem value="MANAGER">Manager</SelectItem>
                       <SelectItem value="STANDARD">Standard User</SelectItem>
                       <SelectItem value="LIMITED">Limited User</SelectItem>

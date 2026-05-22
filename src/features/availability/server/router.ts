@@ -1,13 +1,16 @@
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { createId } from "@paralleldrive/cuid2";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, lt, or } from "drizzle-orm";
+import { db } from "@/db";
+import { instructor, instructorAvailability, timeOffRequest } from "@/db/schema";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
-import { ApprovalStatus, TimeOffType } from "@prisma/client";
+import { ApprovalStatus, TimeOffType } from "@/db/enums";
 import { differenceInDays } from "date-fns";
 
-// Worker Availability Schemas
+// Instructor Availability Schemas
 const createAvailabilitySchema = z.object({
-  workerId: z.string(),
+  instructorId: z.string(),
   dayOfWeek: z.number().min(0).max(6), // 0=Sunday, 6=Saturday
   startTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/), // HH:mm format
   endTime: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/),
@@ -28,7 +31,7 @@ const updateAvailabilitySchema = z.object({
 
 // Time Off Request Schemas
 const createTimeOffRequestSchema = z.object({
-  workerId: z.string(),
+  instructorId: z.string(),
   type: z.nativeEnum(TimeOffType),
   startDate: z.date(),
   endDate: z.date(),
@@ -45,20 +48,20 @@ const approveTimeOffSchema = z.object({
 });
 
 const listTimeOffSchema = z.object({
-  workerId: z.string().optional(),
+  instructorId: z.string().optional(),
   status: z.nativeEnum(ApprovalStatus).optional(),
   limit: z.number().min(1).max(100).default(20),
   cursor: z.string().optional(),
 });
 
 export const availabilityRouter = createTRPCRouter({
-  // ==================== Worker Availability ====================
+  // ==================== Instructor Availability ====================
 
   /**
-   * List worker availability
+   * List instructor availability
    */
   listAvailability: protectedProcedure
-    .input(z.object({ workerId: z.string() }))
+    .input(z.object({ instructorId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
         throw new TRPCError({
@@ -67,20 +70,20 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const availability = await prisma.workerAvailability.findMany({
-        where: {
-          workerId: input.workerId,
-          organizationId: ctx.orgId,
-          isActive: true,
-        },
-        orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+      const availability = await db.query.instructorAvailability.findMany({
+        where: and(
+          eq(instructorAvailability.instructorId, input.instructorId),
+          eq(instructorAvailability.organizationId, ctx.orgId),
+          eq(instructorAvailability.isActive, true)
+        ),
+        orderBy: [asc(instructorAvailability.dayOfWeek), asc(instructorAvailability.startTime)],
       });
 
       return availability;
     }),
 
   /**
-   * Create worker availability
+   * Create instructor availability
    */
   createAvailability: protectedProcedure
     .input(createAvailabilitySchema)
@@ -92,18 +95,15 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      // Verify worker exists
-      const worker = await prisma.worker.findFirst({
-        where: {
-          id: input.workerId,
-          organizationId: ctx.orgId,
-        },
+      // Verify instructor exists
+      const selectedInstructor = await db.query.instructor.findFirst({
+        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
       });
 
-      if (!worker) {
+      if (!selectedInstructor) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Worker not found",
+          message: "Instructor not found",
         });
       }
 
@@ -115,9 +115,11 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const availability = await prisma.workerAvailability.create({
-        data: {
-          workerId: input.workerId,
+      const [availability] = await db
+        .insert(instructorAvailability)
+        .values({
+          id: createId(),
+          instructorId: input.instructorId,
           organizationId: ctx.orgId,
           dayOfWeek: input.dayOfWeek,
           startTime: input.startTime,
@@ -125,14 +127,22 @@ export const availabilityRouter = createTRPCRouter({
           notes: input.notes,
           effectiveFrom: input.effectiveFrom || new Date(),
           effectiveTo: input.effectiveTo,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      if (!availability) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create availability",
+        });
+      }
 
       return availability;
     }),
 
   /**
-   * Update worker availability
+   * Update instructor availability
    */
   updateAvailability: protectedProcedure
     .input(updateAvailabilitySchema)
@@ -144,11 +154,8 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const existing = await prisma.workerAvailability.findFirst({
-        where: {
-          id: input.availabilityId,
-          organizationId: ctx.orgId,
-        },
+      const existing = await db.query.instructorAvailability.findFirst({
+        where: and(eq(instructorAvailability.id, input.availabilityId), eq(instructorAvailability.organizationId, ctx.orgId)),
       });
 
       if (!existing) {
@@ -160,16 +167,25 @@ export const availabilityRouter = createTRPCRouter({
 
       const { availabilityId, ...updateData } = input;
 
-      const availability = await prisma.workerAvailability.update({
-        where: { id: input.availabilityId },
-        data: updateData,
-      });
+      const availabilityUpdate = { ...updateData, updatedAt: new Date() };
+      const [availability] = await db
+        .update(instructorAvailability)
+        .set(availabilityUpdate)
+        .where(eq(instructorAvailability.id, input.availabilityId))
+        .returning();
+
+      if (!availability) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update availability",
+        });
+      }
 
       return availability;
     }),
 
   /**
-   * Delete worker availability
+   * Delete instructor availability
    */
   deleteAvailability: protectedProcedure
     .input(z.object({ availabilityId: z.string() }))
@@ -181,11 +197,8 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const existing = await prisma.workerAvailability.findFirst({
-        where: {
-          id: input.availabilityId,
-          organizationId: ctx.orgId,
-        },
+      const existing = await db.query.instructorAvailability.findFirst({
+        where: and(eq(instructorAvailability.id, input.availabilityId), eq(instructorAvailability.organizationId, ctx.orgId)),
       });
 
       if (!existing) {
@@ -195,20 +208,18 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      await prisma.workerAvailability.delete({
-        where: { id: input.availabilityId },
-      });
+      await db.delete(instructorAvailability).where(eq(instructorAvailability.id, input.availabilityId));
 
       return { success: true };
     }),
 
   /**
-   * Check if worker is available at a specific time
+   * Check if instructor is available at a specific time
    */
   checkAvailability: protectedProcedure
     .input(
       z.object({
-        workerId: z.string(),
+        instructorId: z.string(),
         date: z.date(),
         startTime: z.string(),
         endTime: z.string(),
@@ -225,28 +236,27 @@ export const availabilityRouter = createTRPCRouter({
       const dayOfWeek = input.date.getDay();
 
       // Check recurring availability
-      const availability = await prisma.workerAvailability.findFirst({
-        where: {
-          workerId: input.workerId,
-          organizationId: ctx.orgId,
-          dayOfWeek,
-          isActive: true,
-          startTime: { lte: input.startTime },
-          endTime: { gte: input.endTime },
-          effectiveFrom: { lte: input.date },
-          OR: [{ effectiveTo: null }, { effectiveTo: { gte: input.date } }],
-        },
+      const availability = await db.query.instructorAvailability.findFirst({
+        where: and(
+          eq(instructorAvailability.instructorId, input.instructorId),
+          eq(instructorAvailability.organizationId, ctx.orgId),
+          eq(instructorAvailability.dayOfWeek, dayOfWeek),
+          eq(instructorAvailability.isActive, true),
+          lte(instructorAvailability.startTime, input.startTime),
+          gte(instructorAvailability.endTime, input.endTime),
+          lte(instructorAvailability.effectiveFrom, input.date),
+          or(isNull(instructorAvailability.effectiveTo), gte(instructorAvailability.effectiveTo, input.date))
+        ),
       });
 
-      // Check time off requests
-      const timeOff = await prisma.timeOffRequest.findFirst({
-        where: {
-          workerId: input.workerId,
-          organizationId: ctx.orgId,
-          status: ApprovalStatus.APPROVED,
-          startDate: { lte: input.date },
-          endDate: { gte: input.date },
-        },
+      const timeOff = await db.query.timeOffRequest.findFirst({
+        where: and(
+          eq(timeOffRequest.instructorId, input.instructorId),
+          eq(timeOffRequest.organizationId, ctx.orgId),
+          eq(timeOffRequest.status, ApprovalStatus.APPROVED),
+          lte(timeOffRequest.startDate, input.date),
+          gte(timeOffRequest.endDate, input.date)
+        ),
       });
 
       const isAvailable = !!availability && !timeOff;
@@ -275,29 +285,31 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
-        organizationId: ctx.orgId,
-        ...(input.workerId && { workerId: input.workerId }),
-        ...(input.status && { status: input.status }),
-      };
+      const cursorItem = input.cursor
+        ? await db.query.timeOffRequest.findFirst({
+            where: eq(timeOffRequest.id, input.cursor),
+            columns: { requestedAt: true },
+          })
+        : null;
 
-      const items = await prisma.timeOffRequest.findMany({
-        where,
-        include: {
-          worker: {
-            select: {
+      const items = await db.query.timeOffRequest.findMany({
+        where: and(
+          eq(timeOffRequest.organizationId, ctx.orgId),
+          input.instructorId ? eq(timeOffRequest.instructorId, input.instructorId) : undefined,
+          input.status ? eq(timeOffRequest.status, input.status) : undefined,
+          cursorItem ? lt(timeOffRequest.requestedAt, cursorItem.requestedAt) : undefined
+        ),
+        with: {
+          instructor: {
+            columns: {
               id: true,
               name: true,
               email: true,
             },
           },
         },
-        orderBy: { requestedAt: "desc" },
-        take: input.limit + 1,
-        ...(input.cursor && {
-          cursor: { id: input.cursor },
-          skip: 1,
-        }),
+        orderBy: [desc(timeOffRequest.requestedAt)],
+        limit: input.limit + 1,
       });
 
       let nextCursor: string | undefined;
@@ -325,18 +337,15 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      // Verify worker exists
-      const worker = await prisma.worker.findFirst({
-        where: {
-          id: input.workerId,
-          organizationId: ctx.orgId,
-        },
+      // Verify instructor exists
+      const selectedInstructor = await db.query.instructor.findFirst({
+        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
       });
 
-      if (!worker) {
+      if (!selectedInstructor) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Worker not found",
+          message: "Instructor not found",
         });
       }
 
@@ -355,24 +364,38 @@ export const availabilityRouter = createTRPCRouter({
       if (input.startHalfDay) totalDays -= 0.5;
       if (input.endHalfDay) totalDays -= 0.5;
 
-      const timeOffRequest = await prisma.timeOffRequest.create({
-        data: {
-          workerId: input.workerId,
+      const [createdRequest] = await db
+        .insert(timeOffRequest)
+        .values({
+          id: createId(),
+          instructorId: input.instructorId,
           organizationId: ctx.orgId,
-          subaccountId: worker.subaccountId,
+          locationId: selectedInstructor.locationId,
           type: input.type,
           startDate: input.startDate,
           endDate: input.endDate,
           startHalfDay: input.startHalfDay,
           endHalfDay: input.endHalfDay,
-          totalDays,
+          totalDays: String(totalDays),
           reason: input.reason,
           notes: input.notes,
           status: ApprovalStatus.PENDING,
-        },
-        include: {
-          worker: {
-            select: {
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      if (!createdRequest) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create time off request",
+        });
+      }
+
+      const timeOffRequestWithInstructor = await db.query.timeOffRequest.findFirst({
+        where: eq(timeOffRequest.id, createdRequest.id),
+        with: {
+          instructor: {
+            columns: {
               id: true,
               name: true,
               email: true,
@@ -381,9 +404,7 @@ export const availabilityRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to admin/manager
-
-      return timeOffRequest;
+      return timeOffRequestWithInstructor ?? createdRequest;
     }),
 
   /**
@@ -399,24 +420,24 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const timeOffRequest = await prisma.timeOffRequest.findFirst({
-        where: {
-          id: input.requestId,
-          organizationId: ctx.orgId,
-          status: ApprovalStatus.PENDING,
-        },
+      const existingRequest = await db.query.timeOffRequest.findFirst({
+        where: and(
+          eq(timeOffRequest.id, input.requestId),
+          eq(timeOffRequest.organizationId, ctx.orgId),
+          eq(timeOffRequest.status, ApprovalStatus.PENDING)
+        ),
       });
 
-      if (!timeOffRequest) {
+      if (!existingRequest) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Time off request not found or already processed",
         });
       }
 
-      const updatedRequest = await prisma.timeOffRequest.update({
-        where: { id: input.requestId },
-        data: {
+      const [updated] = await db
+        .update(timeOffRequest)
+        .set({
           status: input.approve
             ? ApprovalStatus.APPROVED
             : ApprovalStatus.REJECTED,
@@ -430,10 +451,23 @@ export const availabilityRouter = createTRPCRouter({
                 rejectedBy: ctx.auth.user.id,
                 rejectionReason: input.rejectionReason,
               }),
-        },
-        include: {
-          worker: {
-            select: {
+          updatedAt: new Date(),
+        })
+        .where(eq(timeOffRequest.id, input.requestId))
+        .returning();
+
+      if (!updated) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update time off request",
+        });
+      }
+
+      const updatedRequest = await db.query.timeOffRequest.findFirst({
+        where: eq(timeOffRequest.id, updated.id),
+        with: {
+          instructor: {
+            columns: {
               id: true,
               name: true,
               email: true,
@@ -442,13 +476,11 @@ export const availabilityRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Send notification to worker
-
-      return updatedRequest;
+      return updatedRequest ?? updated;
     }),
 
   /**
-   * Cancel time off request (worker cancels)
+   * Cancel time off request (instructor cancels)
    */
   cancelTimeOff: protectedProcedure
     .input(
@@ -465,34 +497,45 @@ export const availabilityRouter = createTRPCRouter({
         });
       }
 
-      const timeOffRequest = await prisma.timeOffRequest.findFirst({
-        where: {
-          id: input.requestId,
-          organizationId: ctx.orgId,
-          status: {
-            in: [ApprovalStatus.PENDING, ApprovalStatus.APPROVED],
-          },
-        },
+      const existingRequest = await db.query.timeOffRequest.findFirst({
+        where: and(
+          eq(timeOffRequest.id, input.requestId),
+          eq(timeOffRequest.organizationId, ctx.orgId),
+          inArray(timeOffRequest.status, [ApprovalStatus.PENDING, ApprovalStatus.APPROVED])
+        ),
       });
 
-      if (!timeOffRequest) {
+      if (!existingRequest) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Time off request not found or cannot be cancelled",
         });
       }
 
-      const updatedRequest = await prisma.timeOffRequest.update({
-        where: { id: input.requestId },
-        data: {
+      const [updated] = await db
+        .update(timeOffRequest)
+        .set({
           status: ApprovalStatus.CANCELLED,
           cancelledAt: new Date(),
           cancelledBy: ctx.auth.user.id,
           cancellationReason: input.cancellationReason,
-        },
-        include: {
-          worker: {
-            select: {
+          updatedAt: new Date(),
+        })
+        .where(eq(timeOffRequest.id, input.requestId))
+        .returning();
+
+      if (!updated) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to cancel time off request",
+        });
+      }
+
+      const updatedRequest = await db.query.timeOffRequest.findFirst({
+        where: eq(timeOffRequest.id, updated.id),
+        with: {
+          instructor: {
+            columns: {
               id: true,
               name: true,
               email: true,
@@ -501,16 +544,16 @@ export const availabilityRouter = createTRPCRouter({
         },
       });
 
-      return updatedRequest;
+      return updatedRequest ?? updated;
     }),
 
   /**
-   * Get worker's time off summary
+   * Get instructor's time off summary
    */
   getTimeOffSummary: protectedProcedure
     .input(
       z.object({
-        workerId: z.string(),
+        instructorId: z.string(),
         year: z.number().optional(),
       })
     )
@@ -526,14 +569,14 @@ export const availabilityRouter = createTRPCRouter({
       const yearStart = new Date(year, 0, 1);
       const yearEnd = new Date(year, 11, 31, 23, 59, 59);
 
-      const timeOffRequests = await prisma.timeOffRequest.findMany({
-        where: {
-          workerId: input.workerId,
-          organizationId: ctx.orgId,
-          status: ApprovalStatus.APPROVED,
-          startDate: { gte: yearStart },
-          endDate: { lte: yearEnd },
-        },
+      const timeOffRequests = await db.query.timeOffRequest.findMany({
+        where: and(
+          eq(timeOffRequest.instructorId, input.instructorId),
+          eq(timeOffRequest.organizationId, ctx.orgId),
+          eq(timeOffRequest.status, ApprovalStatus.APPROVED),
+          gte(timeOffRequest.startDate, yearStart),
+          lte(timeOffRequest.endDate, yearEnd)
+        ),
       });
 
       // Calculate totals by type

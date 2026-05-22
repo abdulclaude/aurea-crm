@@ -1,24 +1,29 @@
-import prisma from "@/lib/db";
-import type { PayrollRunWorker, Worker, PayrollRun } from "@prisma/client";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { payrollRunInstructor as payrollRunInstructorTable } from "@/db/schema";
+
+type Instructor = typeof import("@/db/schema").instructor.$inferSelect;
+type PayrollRun = typeof import("@/db/schema").payrollRun.$inferSelect;
+type PayrollRunInstructor = typeof payrollRunInstructorTable.$inferSelect;
 
 interface PayslipData {
-  worker: Worker;
+  instructor: Instructor;
   payrollRun: PayrollRun;
-  payrollWorker: PayrollRunWorker & {
-    worker: Worker;
+  payrollInstructor: PayrollRunInstructor & {
+    instructor: Instructor;
   };
   organizationName: string;
   organizationAddress?: string;
 }
 
 /**
- * Generate payslip HTML for a worker
+ * Generate payslip HTML for a instructor
  */
 export function generatePayslipHTML(data: PayslipData): string {
   const {
-    worker,
+    instructor,
     payrollRun,
-    payrollWorker,
+    payrollInstructor,
     organizationName,
     organizationAddress,
   } = data;
@@ -27,11 +32,7 @@ export function generatePayslipHTML(data: PayslipData): string {
   const periodEnd = new Date(payrollRun.periodEnd).toLocaleDateString("en-GB");
   const paymentDate = new Date(payrollRun.paymentDate).toLocaleDateString("en-GB");
 
-  const formatCurrency = (amount: number | string | { toNumber?: () => number }) => {
-    // Handle Prisma Decimal type
-    if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
-      return `£${amount.toNumber().toFixed(2)}`;
-    }
+  const formatCurrency = (amount: number | string) => {
     return `£${Number(amount).toFixed(2)}`;
   };
 
@@ -40,7 +41,7 @@ export function generatePayslipHTML(data: PayslipData): string {
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Payslip - ${worker.name}</title>
+  <title>Payslip - ${instructor.name}</title>
   <style>
     * {
       margin: 0;
@@ -175,11 +176,11 @@ export function generatePayslipHTML(data: PayslipData): string {
     <div class="info-grid">
       <div class="info-item">
         <span class="info-label">Employee Name:</span>
-        <span class="info-value">${worker.name}</span>
+        <span class="info-value">${instructor.name}</span>
       </div>
       <div class="info-item">
         <span class="info-label">Employee ID:</span>
-        <span class="info-value">${worker.employeeId || "N/A"}</span>
+        <span class="info-value">${instructor.employeeId || "N/A"}</span>
       </div>
       <div class="info-item">
         <span class="info-label">Pay Period:</span>
@@ -191,11 +192,11 @@ export function generatePayslipHTML(data: PayslipData): string {
       </div>
       <div class="info-item">
         <span class="info-label">NI Number:</span>
-        <span class="info-value">${worker.nationalInsuranceNumber || "N/A"}</span>
+        <span class="info-value">${instructor.nationalInsuranceNumber || "N/A"}</span>
       </div>
       <div class="info-item">
         <span class="info-label">Tax Code:</span>
-        <span class="info-value">${worker.taxCode || "N/A"}</span>
+        <span class="info-value">${instructor.taxCode || "N/A"}</span>
       </div>
     </div>
 
@@ -212,78 +213,78 @@ export function generatePayslipHTML(data: PayslipData): string {
         </thead>
         <tbody>
           ${
-            Number(payrollWorker.regularHours) > 0
+            Number(payrollInstructor.regularHours) > 0
               ? `<tr>
             <td>Regular Pay</td>
-            <td class="amount">${Number(payrollWorker.regularHours).toFixed(1)}</td>
-            <td class="amount">${formatCurrency(Number(worker.hourlyRate) || 0)}</td>
-            <td class="amount">${formatCurrency(payrollWorker.regularPay)}</td>
+            <td class="amount">${Number(payrollInstructor.regularHours).toFixed(1)}</td>
+            <td class="amount">${formatCurrency(Number(instructor.hourlyRate) || 0)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.regularPay)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.overtimeHours) > 0
+            Number(payrollInstructor.overtimeHours) > 0
               ? `<tr>
             <td>Overtime Pay</td>
-            <td class="amount">${Number(payrollWorker.overtimeHours).toFixed(1)}</td>
-            <td class="amount">${formatCurrency((Number(worker.hourlyRate) || 0) * 1.5)}</td>
-            <td class="amount">${formatCurrency(payrollWorker.overtimePay)}</td>
+            <td class="amount">${Number(payrollInstructor.overtimeHours).toFixed(1)}</td>
+            <td class="amount">${formatCurrency((Number(instructor.hourlyRate) || 0) * 1.5)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.overtimePay)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.bonuses) > 0
+            Number(payrollInstructor.bonuses) > 0
               ? `<tr>
             <td>Bonus</td>
             <td class="amount">-</td>
             <td class="amount">-</td>
-            <td class="amount">${formatCurrency(payrollWorker.bonuses)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.bonuses)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.housingAllowance) > 0
+            Number(payrollInstructor.housingAllowance) > 0
               ? `<tr>
             <td>Housing Allowance</td>
             <td class="amount">-</td>
             <td class="amount">-</td>
-            <td class="amount">${formatCurrency(payrollWorker.housingAllowance)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.housingAllowance)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.transportAllowance) > 0
+            Number(payrollInstructor.transportAllowance) > 0
               ? `<tr>
             <td>Transport Allowance</td>
             <td class="amount">-</td>
             <td class="amount">-</td>
-            <td class="amount">${formatCurrency(payrollWorker.transportAllowance)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.transportAllowance)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.mealAllowance) > 0
+            Number(payrollInstructor.mealAllowance) > 0
               ? `<tr>
             <td>Meal Allowance</td>
             <td class="amount">-</td>
             <td class="amount">-</td>
-            <td class="amount">${formatCurrency(payrollWorker.mealAllowance)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.mealAllowance)}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.otherAllowances) > 0
+            Number(payrollInstructor.otherAllowances) > 0
               ? `<tr>
             <td>Other Allowances</td>
             <td class="amount">-</td>
             <td class="amount">-</td>
-            <td class="amount">${formatCurrency(payrollWorker.otherAllowances)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.otherAllowances)}</td>
           </tr>`
               : ""
           }
           <tr class="total-row">
             <td colspan="3">GROSS PAY</td>
-            <td class="amount">${formatCurrency(payrollWorker.grossPay)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.grossPay)}</td>
           </tr>
         </tbody>
       </table>
@@ -301,53 +302,53 @@ export function generatePayslipHTML(data: PayslipData): string {
         </thead>
         <tbody>
           ${
-            Number(payrollWorker.incomeTax) > 0
+            Number(payrollInstructor.incomeTax) > 0
               ? `<tr>
             <td>Income Tax (PAYE)</td>
-            <td class="amount">${formatCurrency(payrollWorker.incomeTax)}</td>
-            <td class="amount">${payrollWorker.ytdTax ? formatCurrency(payrollWorker.ytdTax) : "-"}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.incomeTax)}</td>
+            <td class="amount">${payrollInstructor.ytdTax ? formatCurrency(payrollInstructor.ytdTax) : "-"}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.nationalInsurance) > 0
+            Number(payrollInstructor.nationalInsurance) > 0
               ? `<tr>
             <td>National Insurance</td>
-            <td class="amount">${formatCurrency(payrollWorker.nationalInsurance)}</td>
-            <td class="amount">${payrollWorker.ytdNI ? formatCurrency(payrollWorker.ytdNI) : "-"}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.nationalInsurance)}</td>
+            <td class="amount">${payrollInstructor.ytdNi ? formatCurrency(payrollInstructor.ytdNi) : "-"}</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.pensionContribution) > 0
+            Number(payrollInstructor.pensionContribution) > 0
               ? `<tr>
             <td>Pension Contribution</td>
-            <td class="amount">${formatCurrency(payrollWorker.pensionContribution)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.pensionContribution)}</td>
             <td class="amount">-</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.studentLoan) > 0
+            Number(payrollInstructor.studentLoan) > 0
               ? `<tr>
             <td>Student Loan</td>
-            <td class="amount">${formatCurrency(payrollWorker.studentLoan)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.studentLoan)}</td>
             <td class="amount">-</td>
           </tr>`
               : ""
           }
           ${
-            Number(payrollWorker.otherDeductions) > 0
+            Number(payrollInstructor.otherDeductions) > 0
               ? `<tr>
             <td>Other Deductions</td>
-            <td class="amount">${formatCurrency(payrollWorker.otherDeductions)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.otherDeductions)}</td>
             <td class="amount">-</td>
           </tr>`
               : ""
           }
           <tr class="total-row">
             <td>TOTAL DEDUCTIONS</td>
-            <td class="amount">${formatCurrency(payrollWorker.deductions)}</td>
+            <td class="amount">${formatCurrency(payrollInstructor.deductions)}</td>
             <td class="amount">-</td>
           </tr>
         </tbody>
@@ -358,16 +359,16 @@ export function generatePayslipHTML(data: PayslipData): string {
       <table>
         <tr>
           <td><strong>Gross Pay:</strong></td>
-          <td class="amount"><strong>${formatCurrency(payrollWorker.grossPay)}</strong></td>
+          <td class="amount"><strong>${formatCurrency(payrollInstructor.grossPay)}</strong></td>
         </tr>
         <tr>
           <td><strong>Total Deductions:</strong></td>
-          <td class="amount"><strong>${formatCurrency(payrollWorker.deductions)}</strong></td>
+          <td class="amount"><strong>${formatCurrency(payrollInstructor.deductions)}</strong></td>
         </tr>
         <tr class="total-row">
           <td colspan="2" style="border-top: 2px solid #000; padding-top: 10px;">
             <div class="net-pay">
-              NET PAY: ${formatCurrency(payrollWorker.netPay)}
+              NET PAY: ${formatCurrency(payrollInstructor.netPay)}
             </div>
           </td>
         </tr>
@@ -375,26 +376,26 @@ export function generatePayslipHTML(data: PayslipData): string {
     </div>
 
     ${
-      payrollWorker.ytdGrossPay
+      payrollInstructor.ytdGrossPay
         ? `
     <div class="section">
       <div class="section-title">YEAR TO DATE SUMMARY</div>
       <div class="info-grid">
         <div class="info-item">
           <span class="info-label">YTD Gross Pay:</span>
-          <span class="info-value">${formatCurrency(payrollWorker.ytdGrossPay)}</span>
+          <span class="info-value">${formatCurrency(payrollInstructor.ytdGrossPay)}</span>
         </div>
         <div class="info-item">
           <span class="info-label">YTD Tax:</span>
-          <span class="info-value">${payrollWorker.ytdTax ? formatCurrency(payrollWorker.ytdTax) : "-"}</span>
+          <span class="info-value">${payrollInstructor.ytdTax ? formatCurrency(payrollInstructor.ytdTax) : "-"}</span>
         </div>
         <div class="info-item">
           <span class="info-label">YTD NI:</span>
-          <span class="info-value">${payrollWorker.ytdNI ? formatCurrency(payrollWorker.ytdNI) : "-"}</span>
+          <span class="info-value">${payrollInstructor.ytdNi ? formatCurrency(payrollInstructor.ytdNi) : "-"}</span>
         </div>
         <div class="info-item">
           <span class="info-label">YTD Net Pay:</span>
-          <span class="info-value">${payrollWorker.ytdNetPay ? formatCurrency(payrollWorker.ytdNetPay) : "-"}</span>
+          <span class="info-value">${payrollInstructor.ytdNetPay ? formatCurrency(payrollInstructor.ytdNetPay) : "-"}</span>
         </div>
       </div>
     </div>
@@ -403,11 +404,11 @@ export function generatePayslipHTML(data: PayslipData): string {
     }
 
     ${
-      payrollWorker.notes
+      payrollInstructor.notes
         ? `
     <div class="section">
       <div class="section-title">NOTES</div>
-      <p style="padding: 10px;">${payrollWorker.notes}</p>
+      <p style="padding: 10px;">${payrollInstructor.notes}</p>
     </div>
     `
         : ""
@@ -427,38 +428,36 @@ export function generatePayslipHTML(data: PayslipData): string {
 }
 
 /**
- * Fetch payslip data for a specific worker in a payroll run
+ * Fetch payslip data for a specific instructor in a payroll run
  */
 export async function getPayslipData(
   payrollRunId: string,
-  workerId: string
+  instructorId: string
 ): Promise<PayslipData | null> {
-  const payrollWorker = await prisma.payrollRunWorker.findUnique({
-    where: {
-      payrollRunId_workerId: {
-        payrollRunId,
-        workerId,
-      },
-    },
-    include: {
-      worker: true,
+  const payrollInstructor = await db.query.payrollRunInstructor.findFirst({
+    where: and(
+      eq(payrollRunInstructorTable.payrollRunId, payrollRunId),
+      eq(payrollRunInstructorTable.instructorId, instructorId)
+    ),
+    with: {
+      instructor: true,
       payrollRun: {
-        include: {
+        with: {
           organization: true,
         },
       },
     },
   });
 
-  if (!payrollWorker) {
+  if (!payrollInstructor) {
     return null;
   }
 
   return {
-    worker: payrollWorker.worker,
-    payrollRun: payrollWorker.payrollRun,
-    payrollWorker,
-    organizationName: payrollWorker.payrollRun.organization.name,
-    organizationAddress: undefined, // TODO: Add organization address field
+    instructor: payrollInstructor.instructor,
+    payrollRun: payrollInstructor.payrollRun,
+    payrollInstructor,
+    organizationName: payrollInstructor.payrollRun.organization.name,
+    organizationAddress: undefined,
   };
 }

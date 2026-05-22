@@ -39,7 +39,7 @@ import { nodeComponents } from "@/config/node-components";
 import { AddNodeButton } from "./add-node-button";
 import { useSetAtom } from "jotai";
 import { editorAtom } from "../store/atoms";
-import { NodeType } from "@prisma/client";
+import { NodeType } from "@/db/enums";
 import { ExecuteWorkflowButton } from "./execute-workflow-button";
 import { WorkflowContextProvider } from "../store/workflow-context";
 import { useTRPC } from "@/trpc/client";

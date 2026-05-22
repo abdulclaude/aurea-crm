@@ -12,8 +12,8 @@ import {
   TimelineTitle,
 } from "@/components/ui/timeline";
 import { CheckCircle2Icon, Loader2Icon, XCircleIcon } from "lucide-react";
-import type { Execution } from "@prisma/client";
-import { ExecutionStatus } from "@prisma/client";
+import type { Execution } from "@/db/types";
+import { ExecutionStatus } from "@/db/enums";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 

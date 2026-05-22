@@ -144,7 +144,7 @@ export function CampaignsTable() {
         </div>
         <h3 className="text-lg font-medium mb-2">No campaigns yet</h3>
         <p className="text-sm text-muted-foreground mb-4 max-w-sm">
-          Create your first email campaign to start engaging with your contacts.
+          Create your first email campaign to start engaging with your clients.
         </p>
         <Button asChild>
           <Link href="/campaigns/new">

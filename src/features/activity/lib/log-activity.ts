@@ -1,17 +1,20 @@
-import prisma from "@/lib/db";
-import { ActivityType, ActivityAction } from "@prisma/client";
+import { db } from "@/db";
+import { activity } from "@/db/schema";
+import type { ActivityAction, ActivityType } from "@/db/enums";
+
+type ChangedFields = Record<string, { old: unknown; new: unknown }>;
 
 interface LogActivityParams {
   organizationId: string;
-  subaccountId?: string | null;
+  locationId?: string | null;
   userId: string;
   type: ActivityType;
   action: ActivityAction;
   entityType: string;
   entityId: string;
   entityName: string;
-  changes?: Record<string, { old: any; new: any }>;
-  metadata?: Record<string, any>;
+  changes?: ChangedFields;
+  metadata?: Record<string, unknown>;
   ipAddress?: string;
   userAgent?: string;
 }
@@ -20,13 +23,12 @@ interface LogActivityParams {
  * Log an activity to the activity timeline
  * This is a helper function that can be called from anywhere to log user actions
  */
-export async function logActivity(params: LogActivityParams) {
+export async function logActivity(params: LogActivityParams): Promise<void> {
   try {
-    await prisma.activity.create({
-      data: {
+    await db.insert(activity).values({
         id: crypto.randomUUID(),
         organizationId: params.organizationId,
-        subaccountId: params.subaccountId ?? null,
+        locationId: params.locationId ?? null,
         userId: params.userId,
         type: params.type,
         action: params.action,
@@ -38,10 +40,8 @@ export async function logActivity(params: LogActivityParams) {
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
         createdAt: new Date(),
-      },
     });
   } catch (error) {
-    // Log error but don't fail the operation if activity logging fails
     console.error("Failed to log activity:", error);
   }
 }
@@ -49,11 +49,11 @@ export async function logActivity(params: LogActivityParams) {
 /**
  * Helper to extract changed fields from update operations
  */
-export function getChangedFields<T extends Record<string, any>>(
+export function getChangedFields<T extends Record<string, unknown>>(
   oldData: T,
   newData: Partial<T>,
-): Record<string, { old: any; new: any }> | undefined {
-  const changes: Record<string, { old: any; new: any }> = {};
+): ChangedFields | undefined {
+  const changes: ChangedFields = {};
   let hasChanges = false;
 
   for (const key in newData) {

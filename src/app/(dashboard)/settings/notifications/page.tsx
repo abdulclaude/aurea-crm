@@ -15,17 +15,111 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
 import { IconPayment as WorkflowIcon } from "central-icons/IconPayment";
-import { IconContacts as ContactIcon } from "central-icons/IconContacts";
+import { IconContacts as ClientIcon } from "central-icons/IconContacts";
 
 import { IconVerticalAlignmentCenter as PipelineIcon } from "central-icons/IconVerticalAlignmentCenter";
 import { IconGroup1 as TeamIcon } from "central-icons/IconGroup1";
+import { IconCalendar3 as ClassesIcon } from "central-icons/IconCalendar3";
+import { IconConstructionHelmet as InstructorIcon } from "central-icons/IconConstructionHelmet";
 
-import { Handshake as DealIcon } from "lucide-react";
+import { Handshake as DealIcon, Banknote as PayoutIcon, Database as ImportIcon } from "lucide-react";
 
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+import { useIsInstructor } from "@/features/instructors/hooks/use-is-instructor";
 
-const notificationGroups = [
+const instructorNotificationGroups = [
+  {
+    title: "Class Bookings",
+    description: "Get notified when members sign up for or cancel your classes",
+    icon: ClassesIcon,
+    types: [
+      {
+        type: "CLASS_BOOKING_NEW",
+        label: "New Booking",
+        description: "When a member signs up for one of your classes",
+      },
+      {
+        type: "CLASS_BOOKING_CANCELLED",
+        label: "Booking Cancelled",
+        description: "When a member cancels their booking for your class",
+      },
+      {
+        type: "CLASS_WAITLIST_JOINED",
+        label: "Waitlist Joined",
+        description: "When a member joins the waitlist for your full class",
+      },
+    ],
+  },
+  {
+    title: "Schedule",
+    description: "Stay updated on your class schedule and reminders",
+    icon: ClassesIcon,
+    types: [
+      {
+        type: "CLASS_STARTING_SOON",
+        label: "Class Starting Soon",
+        description: "Reminder before your class is about to start",
+      },
+      {
+        type: "CLASS_STARTED",
+        label: "Class Started",
+        description: "When your class has officially started",
+      },
+      {
+        type: "CLASS_CANCELLED",
+        label: "Class Cancelled",
+        description: "When one of your classes is cancelled by admin",
+      },
+      {
+        type: "CLASS_SCHEDULE_CHANGED",
+        label: "Schedule Changed",
+        description: "When your class time or room is changed",
+      },
+    ],
+  },
+  {
+    title: "Substitutions",
+    description: "Manage cover requests and substitution updates",
+    icon: InstructorIcon,
+    types: [
+      {
+        type: "SUBSTITUTION_REQUESTED",
+        label: "Cover Requested",
+        description: "When you receive a request to cover another class",
+      },
+      {
+        type: "SUBSTITUTION_ACCEPTED",
+        label: "Cover Accepted",
+        description: "When your substitution request is accepted",
+      },
+      {
+        type: "SUBSTITUTION_DECLINED",
+        label: "Cover Declined",
+        description: "When your substitution request is declined",
+      },
+    ],
+  },
+  {
+    title: "Earnings",
+    description: "Track your payouts and earnings",
+    icon: PayoutIcon,
+    types: [
+      {
+        type: "PAYOUT_SENT",
+        label: "Payout Sent",
+        description: "When a payout is initiated for your earnings",
+      },
+      {
+        type: "PAYOUT_COMPLETED",
+        label: "Payout Completed",
+        description: "When your payout has been successfully processed",
+      },
+    ],
+  },
+];
+
+const adminNotificationGroups = [
   {
     title: "Workflows",
     description: "Get notified about workflow changes and updates",
@@ -49,24 +143,24 @@ const notificationGroups = [
     ],
   },
   {
-    title: "Contacts",
-    description: "Stay updated on contact activity and changes",
-    icon: ContactIcon,
+    title: "Clients",
+    description: "Stay updated on client activity and changes",
+    icon: ClientIcon,
     types: [
       {
-        type: "CONTACT_CREATED",
-        label: "Contact Created",
-        description: "When a new contact is added",
+        type: "CLIENT_CREATED",
+        label: "Client Created",
+        description: "When a new client is added",
       },
       {
-        type: "CONTACT_UPDATED",
-        label: "Contact Updated",
-        description: "When a contact is modified",
+        type: "CLIENT_UPDATED",
+        label: "Client Updated",
+        description: "When a client is modified",
       },
       {
-        type: "CONTACT_DELETED",
-        label: "Contact Deleted",
-        description: "When a contact is removed",
+        type: "CLIENT_DELETED",
+        label: "Client Deleted",
+        description: "When a client is removed",
       },
     ],
   },
@@ -131,10 +225,42 @@ const notificationGroups = [
       },
     ],
   },
+  {
+    title: "Imports",
+    description: "Track Mindbody and CSV import status, failures, and mapping review items",
+    icon: ImportIcon,
+    types: [
+      {
+        type: "IMPORT_STARTED",
+        label: "Import Started",
+        description: "When a data import begins processing",
+      },
+      {
+        type: "IMPORT_COMPLETED",
+        label: "Import Completed",
+        description: "When imported records are available in your workspace",
+      },
+      {
+        type: "IMPORT_FAILED",
+        label: "Import Failed",
+        description: "When an import cannot be completed",
+      },
+      {
+        type: "IMPORT_NEEDS_REVIEW",
+        label: "Mapping Review",
+        description: "When extra CSV fields are preserved but need schema mapping review",
+      },
+    ],
+  },
 ];
 
 export default function NotificationSettingsPage() {
   const trpc = useTRPC();
+  const { isInstructor } = useIsInstructor();
+
+  const notificationGroups = isInstructor
+    ? instructorNotificationGroups
+    : adminNotificationGroups;
 
   const { data: preferences, isLoading } = useQuery(
     trpc.notifications.getPreferences.queryOptions()

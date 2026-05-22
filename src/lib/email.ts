@@ -158,7 +158,7 @@ export async function sendInvoiceReminder(params: {
 export async function sendInvoiceEmail(params: {
   to: string;
   invoiceNumber: string;
-  contactName: string;
+  clientName: string;
   total: string;
   currency: string;
   dueDate: Date;
@@ -166,7 +166,7 @@ export async function sendInvoiceEmail(params: {
   paymentLink: string;
   businessName?: string;
 }) {
-  const { to, invoiceNumber, contactName, total, currency, dueDate, pdfBuffer, paymentLink, businessName } =
+  const { to, invoiceNumber, clientName, total, currency, dueDate, pdfBuffer, paymentLink, businessName } =
     params;
 
   const subject = `Invoice ${invoiceNumber} from ${businessName || 'Your Business'}`;
@@ -186,7 +186,7 @@ export async function sendInvoiceEmail(params: {
   </div>
 
   <div style="margin-bottom: 24px;">
-    <p style="font-size: 16px;">Dear ${contactName},</p>
+    <p style="font-size: 16px;">Dear ${clientName},</p>
     <p>Thank you for your business! Please find attached invoice ${invoiceNumber}.</p>
 
     <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin: 24px 0;">
@@ -224,7 +224,7 @@ export async function sendInvoiceEmail(params: {
   </div>
 
   <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px;">
-    <p>Questions? Please reply to this email or contact us at your convenience.</p>
+    <p>Questions? Please reply to this email or client us at your convenience.</p>
     <p>Invoice ${invoiceNumber} • Sent via Aurea CRM</p>
   </div>
 </body>
@@ -255,13 +255,13 @@ export async function sendInvoiceEmail(params: {
 export async function sendPaymentConfirmationEmail(params: {
   to: string;
   invoiceNumber: string;
-  contactName: string;
+  clientName: string;
   amountPaid: string;
   currency: string;
   paidAt: Date;
   paymentMethod?: string;
 }) {
-  const { to, invoiceNumber, contactName, amountPaid, currency, paidAt, paymentMethod = "Stripe" } = params;
+  const { to, invoiceNumber, clientName, amountPaid, currency, paidAt, paymentMethod = "Stripe" } = params;
 
   const subject = `Payment Received - Invoice ${invoiceNumber}`;
 
@@ -281,7 +281,7 @@ export async function sendPaymentConfirmationEmail(params: {
   </div>
 
   <div style="margin-bottom: 24px;">
-    <p style="font-size: 16px;">Dear ${contactName},</p>
+    <p style="font-size: 16px;">Dear ${clientName},</p>
     <p>We have successfully received your payment for invoice ${invoiceNumber}. Thank you for your business!</p>
 
     <div style="background: #f0fdf4; border: 2px solid #10b981; border-radius: 8px; padding: 20px; margin: 24px 0;">
@@ -317,7 +317,7 @@ export async function sendPaymentConfirmationEmail(params: {
       </table>
     </div>
 
-    <p>A receipt has been sent to your email address. If you have any questions about this payment, please don't hesitate to contact us.</p>
+    <p>A receipt has been sent to your email address. If you have any questions about this payment, please don't hesitate to client us.</p>
   </div>
 
   <div style="margin-top: 32px; padding-top: 24px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; text-align: center;">
@@ -331,7 +331,7 @@ export async function sendPaymentConfirmationEmail(params: {
   const text = `
 Payment Received - Invoice ${invoiceNumber}
 
-Dear ${contactName},
+Dear ${clientName},
 
 We have successfully received your payment for invoice ${invoiceNumber}. Thank you for your business!
 
@@ -349,7 +349,7 @@ Payment Date: ${paidAt.toLocaleDateString("en-US", {
     minute: "2-digit",
   })}
 
-If you have any questions about this payment, please don't hesitate to contact us.
+If you have any questions about this payment, please don't hesitate to client us.
 
 This is an automated payment confirmation for invoice ${invoiceNumber}.
   `;

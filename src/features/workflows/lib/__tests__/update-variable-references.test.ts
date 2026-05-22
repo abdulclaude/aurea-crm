@@ -12,7 +12,7 @@ describe("updateVariableReferences", () => {
       },
       {
         id: "node2",
-        type: "createContact",
+        type: "createClient",
         position: { x: 100, y: 100 },
         data: {
           name: "{{form.responses.Name}}",
@@ -69,7 +69,7 @@ describe("updateVariableReferences", () => {
       },
       {
         id: "node2",
-        type: "createContact",
+        type: "createClient",
         position: { x: 100, y: 100 },
         data: { name: "{{form.responses.Name}}" },
       },
@@ -142,7 +142,7 @@ describe("updateVariableReferences", () => {
       },
       {
         id: "node2",
-        type: "createContact",
+        type: "createClient",
         position: { x: 100, y: 100 },
         data: {
           // Should update

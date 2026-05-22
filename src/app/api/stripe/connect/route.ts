@@ -5,7 +5,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import prisma from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { session as sessionTable } from "@/db/schema";
 
 export async function GET(req: NextRequest) {
   const session = await auth.api.getSession({
@@ -16,21 +18,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get active organization/subaccount from session
-  const sessionRecord = await prisma.session.findUnique({
-    where: { token: session.session.token },
-    select: {
+  // Get active organization/location from session
+  const sessionRecord = await db.query.session.findFirst({
+    where: eq(sessionTable.token, session.session.token),
+    columns: {
       activeOrganizationId: true,
-      activeSubaccountId: true,
+      activeLocationId: true,
     },
   });
 
   const organizationId = sessionRecord?.activeOrganizationId;
-  const subaccountId = sessionRecord?.activeSubaccountId;
+  const locationId = sessionRecord?.activeLocationId;
 
   if (!organizationId) {
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/payments?stripe_error=${encodeURIComponent("Please select an organization or subaccount first")}`
+      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/settings/payments?stripe_error=${encodeURIComponent("Please select an organization or location first")}`
     );
   }
 
@@ -48,7 +50,7 @@ export async function GET(req: NextRequest) {
   // Build state parameter to include context
   const state = Buffer.from(
     JSON.stringify({
-      subaccountId,
+      locationId,
       organizationId,
       userId: session.user.id,
     })

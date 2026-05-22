@@ -22,15 +22,7 @@ import { IconRunShortcut as SlashIcon } from "central-icons/IconRunShortcut";
 import { IconAt as AtIcon } from "central-icons/IconAt";
 import { IconPaperPlane as SendIcon } from "central-icons/IconPaperPlane";
 
-import {
-  X,
-  Users,
-  ChevronDown,
-  CheckCircle,
-  XCircle,
-  Clock,
-  ExternalLink,
-} from "lucide-react";
+import { Users, ChevronDown, CheckCircle, XCircle, Clock, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
@@ -120,13 +112,13 @@ function EntitySelector({ label, icon, items, onSelect }: EntitySelectorProps) {
 }
 
 interface AssistantContentProps {
-  subaccountId?: string;
+  locationId?: string;
   logsLimit?: number;
   showAllLogs?: boolean;
 }
 
 export function AssistantContent({
-  subaccountId: _subaccountId, // Prop is deprecated, we use active context instead
+  locationId: _locationId, // Prop is deprecated, we use active context instead
   logsLimit = 3,
   showAllLogs = false,
 }: AssistantContentProps) {
@@ -137,8 +129,8 @@ export function AssistantContent({
   // Get active organization info - must be fetched early to use in other hooks
   const activeOrgQuery = useQuery(trpc.organizations.getActive.queryOptions());
 
-  // Use the active subaccount from session context
-  const activeSubaccountId = activeOrgQuery.data?.activeSubaccountId ?? null;
+  // Use the active location from session context
+  const activeLocationId = activeOrgQuery.data?.activeLocationId ?? null;
 
   // Fetch logs from database
   const logsQuery = useQuery(
@@ -154,19 +146,18 @@ export function AssistantContent({
   );
 
   const { sendMessage, status } = useChat({
-    body: { subaccountId: activeSubaccountId },
     onFinish: () => {
       // Refetch logs when AI finishes
       queryClient.invalidateQueries({ queryKey: trpc.ai.getLogs.queryKey() });
     },
-  } as any);
+  });
 
   const isLoading = status === "streaming" || status === "submitted";
   const logs = logsQuery.data?.items || [];
 
   // Fetch suggestions for mentions and commands - refetch on window focus for fresh data
-  const contactsQuery = useQuery({
-    ...trpc.contacts.list.queryOptions({ limit: 100 }),
+  const clientsQuery = useQuery({
+    ...trpc.clients.list.queryOptions({ limit: 100 }),
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider stale after 30 seconds
   });
@@ -189,8 +180,8 @@ export function AssistantContent({
     staleTime: 30000,
   });
 
-  // Fetch clients (subaccounts) for the agency
-  const clientsQuery = useQuery({
+  // Fetch clients (locations) for the agency
+  const orgClientsQuery = useQuery({
     ...trpc.organizations.getClients.queryOptions(),
     refetchOnWindowFocus: true,
     staleTime: 30000,
@@ -203,11 +194,11 @@ export function AssistantContent({
     staleTime: 30000,
   });
 
-  // Mutation to switch active subaccount
-  const setActiveSubaccountMutation = useMutation(
-    trpc.organizations.setActiveSubaccount.mutationOptions({
+  // Mutation to switch active location
+  const setActiveLocationMutation = useMutation(
+    trpc.organizations.setActiveLocation.mutationOptions({
       onSuccess: () => {
-        // Invalidate queries that depend on subaccount context
+        // Invalidate queries that depend on location context
         queryClient.invalidateQueries();
       },
     })
@@ -219,33 +210,33 @@ export function AssistantContent({
   );
   const agencyName = currentOrg?.name || "Agency";
 
-  // Check if user is a member of the main organization (not just subaccount)
+  // Check if user is a member of the main organization (not just location)
   const isAgencyMember = currentOrg?.role !== undefined;
 
   // Build client items for selector
   const clientItems = [
     // Only show "Agency" option if user is an agency member
     ...(isAgencyMember ? [{ id: "agency", name: agencyName }] : []),
-    ...(clientsQuery.data || []).map((client) => ({
-      id: client.subaccountId,
+    ...(orgClientsQuery.data || []).map((client) => ({
+      id: client.locationId,
       name: client.name,
     })),
   ];
 
   // Get current selection label
-  const currentClientLabel = activeOrgQuery.data?.activeSubaccountId
-    ? activeOrgQuery.data?.activeSubaccount?.companyName ||
-      clientsQuery.data?.find(
-        (c) => c.subaccountId === activeOrgQuery.data?.activeSubaccountId
+  const currentClientLabel = activeOrgQuery.data?.activeLocationId
+    ? activeOrgQuery.data?.activeLocation?.companyName ||
+      orgClientsQuery.data?.find(
+        (c) => c.locationId === activeOrgQuery.data?.activeLocationId
       )?.name ||
       "Client"
     : agencyName;
 
   const handleClientSelect = (id: string) => {
     if (id === "agency") {
-      setActiveSubaccountMutation.mutate({ subaccountId: null });
+      setActiveLocationMutation.mutate({ locationId: null });
     } else {
-      setActiveSubaccountMutation.mutate({ subaccountId: id });
+      setActiveLocationMutation.mutate({ locationId: id });
     }
   };
 
@@ -259,13 +250,13 @@ export function AssistantContent({
 
       if (type === "command") {
         const commands: SuggestionItem[] = [
-          // Contacts
+          // Clients
           {
-            id: "create-contact",
-            name: "create-contact",
+            id: "create-client",
+            name: "create-client",
             type: "action",
-            category: "Contacts",
-            description: "Create a new contact",
+            category: "Clients",
+            description: "Create a new client",
           },
           // Deals
           {
@@ -334,14 +325,14 @@ export function AssistantContent({
           }
         }
 
-        const contacts = contactsQuery.data?.items || [];
-        for (const contact of contacts) {
-          if (!query || contact.name.toLowerCase().includes(lowerQuery)) {
+        const clients = clientsQuery.data?.items || [];
+        for (const client of clients) {
+          if (!query || client.name.toLowerCase().includes(lowerQuery)) {
             items.push({
-              id: contact.id,
-              name: contact.name,
-              type: "contact",
-              description: contact.email || contact.companyName || undefined,
+              id: client.id,
+              name: client.name,
+              type: "client",
+              description: client.email || client.companyName || undefined,
             });
           }
         }
@@ -386,7 +377,7 @@ export function AssistantContent({
       return items;
     },
     [
-      contactsQuery.data,
+      clientsQuery.data,
       dealsQuery.data,
       pipelinesQuery.data,
       workflowsQuery.data,
@@ -397,14 +388,11 @@ export function AssistantContent({
     async (content: string, html: string, entities: EntityReference[]) => {
       if (!content.trim() || isLoading) return;
 
-      await (sendMessage as any)(
-        {
-          role: "user",
-          content,
-        },
+      await sendMessage(
+        { text: content },
         {
           body: {
-            subaccountId: activeSubaccountId,
+            locationId: activeLocationId,
             entities,
             html,
           },
@@ -414,7 +402,7 @@ export function AssistantContent({
       editorRef.current?.clear();
       editorRef.current?.focus();
     },
-    [sendMessage, isLoading, activeSubaccountId]
+    [sendMessage, isLoading, activeLocationId]
   );
 
   const removeLog = (logId: string) => {
@@ -443,7 +431,7 @@ export function AssistantContent({
             <div className="flex items-center justify-between px-2">
               {/* Left side - Entity selectors */}
               <div className="flex items-center gap-2">
-                {/* Select client - for agency accounts or show static label for subaccount-only users */}
+                {/* Select client - for agency accounts or show static label for location-only users */}
                 {isAgencyMember ? (
                   <EntitySelector
                     label={currentClientLabel}
@@ -473,8 +461,8 @@ export function AssistantContent({
                     },
                     { label: "Deal", items: dealsQuery.data?.items || [] },
                     {
-                      label: "Contact",
-                      items: contactsQuery.data?.items || [],
+                      label: "Client",
+                      items: clientsQuery.data?.items || [],
                     },
                   ]}
                   onSelect={() => {}}

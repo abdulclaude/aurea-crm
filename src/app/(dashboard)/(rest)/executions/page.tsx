@@ -1,8 +1,3 @@
-import CredentialsList, {
-  CredentialsContainer,
-  CredentialsError,
-  CredentialsLoading,
-} from "@/features/credentials/components/credentials";
 import ExecutionsList, {
   ExecutionsContainer,
   ExecutionsError,

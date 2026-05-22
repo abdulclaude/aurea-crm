@@ -84,7 +84,7 @@ export function FormSubmissions({ formId }: FormSubmissionsProps) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Submitted</TableHead>
-                  <TableHead>Contact</TableHead>
+                  <TableHead>Client</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>IP Address</TableHead>
                 </TableRow>
@@ -98,18 +98,18 @@ export function FormSubmissions({ formId }: FormSubmissionsProps) {
                       })}
                     </TableCell>
                     <TableCell>
-                      {submission.contact ? (
+                      {submission.client ? (
                         <div>
                           <div className="font-medium">
-                            {submission.contact.name}
+                            {submission.client.name}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            {submission.contact.email}
+                            {submission.client.email}
                           </div>
                         </div>
                       ) : (
                         <span className="text-muted-foreground">
-                          No contact
+                          No client
                         </span>
                       )}
                     </TableCell>

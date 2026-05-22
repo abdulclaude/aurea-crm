@@ -1,16 +1,16 @@
 -- Fix existing workflows missing organizationId
 -- This will set organizationId based on either:
--- 1. The subaccount's organization (if workflow has a subaccount), OR
+-- 1. The location's organization (if workflow has a location), OR
 -- 2. The user's active organization membership
 
--- Update workflows that have a subaccount - get org from subaccount
+-- Update workflows that have a location - get org from location
 UPDATE "Workflows" w
 SET "organizationId" = s."organizationId"
-FROM "Subaccount" s
-WHERE w."subaccountId" = s.id
+FROM "Location" s
+WHERE w."locationId" = s.id
   AND w."organizationId" IS NULL;
 
--- Update workflows without subaccount - get org from user's first organization membership
+-- Update workflows without location - get org from user's first organization membership
 UPDATE "Workflows" w
 SET "organizationId" = (
   SELECT om."organizationId"
@@ -19,4 +19,4 @@ SET "organizationId" = (
   LIMIT 1
 )
 WHERE w."organizationId" IS NULL
-  AND w."subaccountId" IS NULL;
+  AND w."locationId" IS NULL;

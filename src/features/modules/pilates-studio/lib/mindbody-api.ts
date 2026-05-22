@@ -1,6 +1,9 @@
-import prisma from "@/lib/db";
-import type { Apps } from "@prisma/client";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { apps, credential as credentialTable } from "@/db/schema";
 import { decrypt } from "@/lib/encryption";
+
+export type MindbodyApp = typeof apps.$inferSelect & { scopes: string[] };
 
 export interface MindbodyConfig {
   siteId: string;
@@ -191,14 +194,15 @@ export class MindbodyAPI {
     this.config.expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour from now
 
     // Update database
-    await prisma.apps.update({
-      where: { id: this.appId },
-      data: {
+    await db
+      .update(apps)
+      .set({
         accessToken: data.AccessToken,
         refreshToken: data.RefreshToken || this.config.refreshToken,
         expiresAt: this.config.expiresAt,
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(apps.id, this.appId));
   }
 
   /**
@@ -314,7 +318,7 @@ export class MindbodyAPI {
  * Create a Mindbody API instance from an Apps record
  */
 export async function createMindbodyAPI(
-  app: Apps,
+  app: MindbodyApp,
 ): Promise<MindbodyAPI> {
   console.log('[Mindbody API] Creating API instance with app:', {
     appId: app.id,
@@ -327,16 +331,16 @@ export async function createMindbodyAPI(
     throw new MindbodyAPIError("Missing Mindbody access token");
   }
 
-  const metadata = app.metadata as any;
-  const credentialId = metadata?.credentialId;
+  const metadata = getMetadata(app.metadata);
+  const credentialId = typeof metadata.credentialId === "string" ? metadata.credentialId : undefined;
 
   if (!credentialId) {
     throw new MindbodyAPIError("Missing credential ID in app metadata. Please reconnect your Mindbody account.");
   }
 
   // Fetch the credential from the Credential table
-  const credential = await prisma.credential.findUnique({
-    where: { id: credentialId },
+  const credential = await db.query.credential.findFirst({
+    where: eq(credentialTable.id, credentialId),
   });
 
   if (!credential) {
@@ -371,4 +375,12 @@ export async function createMindbodyAPI(
   };
 
   return new MindbodyAPI(config, app.id);
+}
+
+function getMetadata(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(Object.entries(value));
 }

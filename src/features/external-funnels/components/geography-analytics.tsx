@@ -3,7 +3,7 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import * as React from "react";
-import MapLibreGL from "maplibre-gl";
+
 import {
   Card,
   CardContent,
@@ -31,10 +31,8 @@ import { motion, useInView } from "framer-motion";
 import {
   Map as MapView,
   MapControls,
-  MapMarker,
-  MarkerContent,
+  MapClusterLayer,
   MapPopup,
-  useMap,
 } from "@/components/ui/map";
 import { getCountryCoordinates } from "@/features/external-funnels/hooks/use-analytics-overview";
 import { Separator } from "@/components/ui/separator";
@@ -94,55 +92,13 @@ const getJitteredCoordinates = (
   };
 };
 
-const MARKER_COLORS = [
-  "bg-emerald-500",
-  "bg-sky-500",
-  "bg-indigo-500",
-  "bg-amber-500",
-  "bg-rose-500",
-  "bg-cyan-500",
-];
-
 const LOCATIONS_PER_PAGE = 6;
-
-const getMarkerColor = (seed: string) => {
-  const index = hashString(seed) % MARKER_COLORS.length;
-  return MARKER_COLORS[index];
-};
-
-const getCountryColor = (seed: string) => {
-  const hue = hashString(seed) % 360;
-  return `hsl(${hue} 90% 40%)`;
-};
-
-const getReadableTextColor = (color: string) => {
-  const match = color.match(/hsl\(\s*(\d+)\s+(\d+)%\s+(\d+)%\s*\)/);
-  if (!match) return "hsl(0 0% 85%)";
-  const h = Number(match[1]);
-  const s = Number(match[2]);
-  const l = Number(match[3]);
-  const clamp = (value: number, min: number, max: number) =>
-    Math.min(Math.max(value, min), max);
-  const targetLightness = l >= 50 ? l - 12 : l + 20;
-  const readableLightness = clamp(targetLightness, 30, 85);
-  const readableSaturation = clamp(s + 5, 50, 95);
-  return `hsl(${h} ${Math.round(readableSaturation)}% ${Math.round(
-    readableLightness
-  )}%)`;
-};
 
 export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
   const trpc = useTRPC();
   const [timeRange, setTimeRange] = React.useState<"7d" | "30d" | "90d">("30d");
   const [locationsPage, setLocationsPage] = React.useState(1);
-  const [activeSessionId, setActiveSessionId] = React.useState<string | null>(
-    null
-  );
-  const [mapZoom, setMapZoom] = React.useState(2);
-  const [selectedCountryCode, setSelectedCountryCode] = React.useState<
-    string | null
-  >(null);
-  const suppressCloseRef = React.useRef(false);
+
   const ref = React.useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-50px" });
 
@@ -186,322 +142,32 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
     }, data.countries[0]);
   }, [data.countries]);
 
-  const zoomInStart = 3;
-  const zoomInEnd = 5;
-  const zoomProgress = Math.min(
-    Math.max((mapZoom - zoomInStart) / (zoomInEnd - zoomInStart), 0),
-    1
-  );
-  const sessionOpacity = zoomProgress;
-  const countryOpacity = 1 - zoomProgress;
 
-  const MapSessionMarker = ({
-    session,
-    opacity,
-    isInteractive,
-  }: {
-    session: SessionLocation;
-    opacity: number;
-    isInteractive: boolean;
-  }) => {
-    const { map } = useMap();
-    const countryCode = session.countryCode || "Unknown";
-    const city = session.city || "Unknown";
-    const countryName = session.countryName || countryCode;
-    const hasCoords =
-      session.latitude != null &&
-      session.longitude != null &&
-      !(session.latitude === 0 && session.longitude === 0);
-    const sessionCoords = hasCoords
-      ? { lat: session.latitude, lng: session.longitude }
-      : null;
-    const cityCoords =
-      !sessionCoords && city !== "Unknown"
-        ? cityCoordsByKey.get(`${city}-${countryCode}`) || null
-        : null;
-    const coords =
-      sessionCoords || cityCoords || getCountryCoordinates(countryCode);
-    if (coords.lat == null || coords.lng == null) return null;
-    const jittered = sessionCoords
-      ? { lat: coords.lat, lng: coords.lng }
-      : getJitteredCoordinates(
-          coords.lat,
-          coords.lng,
-          session.sessionId,
-          cityCoords ? 0.08 : 0.6
-        );
-    const displayName = session.visitorDisplayName || "Anonymous Visitor";
-    const device = session.deviceType || "Unknown";
-    const browser = session.browserName || "Unknown";
-    const osName = session.osName || "Unknown";
-    const markerColor = getMarkerColor(session.sessionId);
-    const firstSeenValue = session.firstSeen || session.startedAt;
-    const firstSeen = format(new Date(firstSeenValue), "MMM d, yyyy");
-    const sessionsCount = session.totalSessions ?? 1;
-    const eventsCount =
-      typeof session.eventsCount === "number"
-        ? session.eventsCount
-        : (session.pageViews ?? 0);
-    const sourceLabel = session.firstSource
-      ? `${session.firstSource}${
-          session.firstMedium ? ` / ${session.firstMedium}` : ""
-        }${session.firstCampaign ? ` / ${session.firstCampaign}` : ""}`
-      : session.firstReferrer || "Direct";
 
-    const handleMarkerClick = () => {
-      if (!isInteractive) return;
-      map?.flyTo({
-        center: [jittered.lng, jittered.lat],
-        zoom: sessionCoords ? 14 : 6,
-        duration: 1200,
-        essential: true,
-      });
-
-      setActiveSessionId((current) => {
-        suppressCloseRef.current = true;
-        setTimeout(() => {
-          suppressCloseRef.current = false;
-        }, 0);
-        return current === session.sessionId ? null : session.sessionId;
-      });
-    };
-
-    const DeviceIcon = getDeviceIconForType(device);
-    const BrowserIcon = getBrowserIconForType(browser);
-    const OsIcon = getOsIconForType(osName);
-
-    return (
-      <MapMarker
-        key={session.sessionId}
-        longitude={jittered.lng}
-        latitude={jittered.lat}
-        scaleWithZoom={{
-          minZoom: 2,
-          maxZoom: 16,
-          minScale: 0.7,
-          maxScale: 1.8,
-        }}
-        onClick={isInteractive ? handleMarkerClick : undefined}
-      >
-        <MarkerContent
-          className={isInteractive ? undefined : "pointer-events-none"}
-        >
-          <div
-            className="relative flex h-4 w-4 items-center justify-center transition-opacity duration-300"
-            style={{ opacity }}
-          >
-            <span
-              className={cn(
-                "absolute inline-flex h-5 w-5 animate-ping rounded-full opacity-30",
-                markerColor
-              )}
-            />
-            <span
-              className={cn(
-                "relative inline-flex h-3.5 w-3.5 rounded-full border border-white/80 shadow-md",
-                markerColor
-              )}
-            />
-          </div>
-        </MarkerContent>
-
-        {activeSessionId === session.sessionId && (
-          <MapPopup
-            longitude={jittered.lng}
-            latitude={jittered.lat}
-            onClose={() => setActiveSessionId(null)}
-            className="w-104 px-0 py-4"
-            closeOnClick={false}
-          >
-            <div className="space-y-3 flex flex-col items-center">
-              <div className="space-y-1 text-center">
-                <div className="text-sm font-semibold">{displayName}</div>
-                <div className="text-xs text-muted-foreground">
-                  {getCountryFlag(countryCode)} {city}, {countryCode}
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="flex flex-col w-full gap-4 py-2">
-                <div className="grid grid-cols-3 gap-2 text-xs justify-between w-full text-center px-8">
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">First seen</div>
-                    <div className="font-medium">{firstSeen}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">Sessions</div>
-                    <div className="font-medium">
-                      {Number(sessionsCount).toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">Events</div>
-                    <div className="font-medium">
-                      {Number(eventsCount).toLocaleString()}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-xs items-between w-full text-center px-8">
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">Device</div>
-                    <div className="font-medium flex items-center justify-center gap-1.5">
-                      <DeviceIcon className="h-3.5 w-3.5" />
-                      <span>{device}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">OS</div>
-                    <div className="font-medium flex items-center justify-center gap-1.5">
-                      <OsIcon className="h-3.5 w-3.5" />
-                      <span>{osName}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-muted-foreground">Browser</div>
-                    <div className="font-medium flex items-center justify-center gap-1.5">
-                      <BrowserIcon className="h-3.5 w-3.5" />
-                      <span>{browser}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className="space-y-1 text-xs">
-                <div className="text-muted-foreground">Source</div>
-                <div className="font-medium">{sourceLabel}</div>
-              </div>
-            </div>
-          </MapPopup>
-        )}
-      </MapMarker>
-    );
-  };
-
-  const MapCountryMarker = ({
-    countryCode,
-    sessions,
-    sessionsForCountry,
-  }: {
+  // Session properties type for GeoJSON features
+  type SessionProperties = {
+    sessionId: string;
     countryCode: string;
-    sessions: number;
-    sessionsForCountry: typeof filteredSessions;
-  }) => {
-    const { map } = useMap();
-    const coords = getCountryCoordinates(countryCode);
-    if (!coords.lat && !coords.lng) return null;
-    const markerColor = getCountryColor(countryCode);
-
-    const handleClick = () => {
-      if (!map) return;
-      setSelectedCountryCode(countryCode);
-      const points = sessionsForCountry
-        .map((session) => {
-          const sessionCoords =
-            session.latitude != null && session.longitude != null
-              ? { lat: session.latitude, lng: session.longitude }
-              : getCountryCoordinates(countryCode);
-          if (!sessionCoords.lat && !sessionCoords.lng) return null;
-          return getJitteredCoordinates(
-            sessionCoords.lat,
-            sessionCoords.lng,
-            session.sessionId,
-            session.latitude && session.longitude ? 0.05 : 0.4
-          );
-        })
-        .filter((point): point is { lat: number; lng: number } =>
-          Boolean(point)
-        );
-
-      if (points.length === 0) {
-        map.flyTo({
-          center: [coords.lng, coords.lat],
-          zoom: zoomInEnd,
-          duration: 900,
-          essential: true,
-        });
-        return;
-      }
-
-      const bounds = new MapLibreGL.LngLatBounds();
-      for (const point of points) {
-        bounds.extend([point.lng, point.lat]);
-      }
-      const ne = bounds.getNorthEast();
-      const sw = bounds.getSouthWest();
-      if (ne.lng === sw.lng && ne.lat === sw.lat) {
-        map.flyTo({
-          center: [ne.lng, ne.lat],
-          zoom: zoomInEnd,
-          duration: 900,
-          essential: true,
-        });
-        return;
-      }
-
-      const prevZoom = map.getZoom();
-      map.fitBounds(bounds, {
-        padding: 120,
-        duration: 900,
-        maxZoom: 9,
-      });
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (Math.abs(map.getZoom() - prevZoom) < 0.1) {
-            const center = bounds.getCenter();
-            map.flyTo({
-              center: [center.lng, center.lat],
-              zoom: zoomInEnd,
-              duration: 900,
-              essential: true,
-            });
-          }
-        });
-      });
-    };
-
-    return (
-      <MapMarker
-        key={`country-${countryCode}`}
-        longitude={coords.lng}
-        latitude={coords.lat}
-        scaleWithZoom={{
-          minZoom: 1,
-          maxZoom: 8,
-          minScale: 0.8,
-          maxScale: 1.2,
-        }}
-        onClick={countryOpacity >= 0.2 ? handleClick : undefined}
-      >
-        <MarkerContent className="pointer-events-auto">
-          <div
-            className={cn(
-              "relative flex items-center justify-center rounded-full size-6 text-xs font-medium shadow-md transition-opacity duration-300 backdrop-blur-xl"
-            )}
-            style={{
-              opacity: countryOpacity,
-            }}
-          >
-            <span
-              className="absolute animate-ping rounded-full opacity-25 size-6 pointer-events-none"
-              style={{ backgroundColor: markerColor }}
-            />
-            <span
-              className="absolute inset-0 rounded-full opacity-80 pointer-events-none"
-              style={{ backgroundColor: markerColor }}
-            />
-            <span className="relative z-10">{sessions.toLocaleString()}</span>
-          </div>
-        </MarkerContent>
-      </MapMarker>
-    );
+    countryName: string;
+    city: string;
+    deviceType: string;
+    browserName: string;
+    osName: string;
+    visitorDisplayName: string;
+    firstSeen: string;
+    totalSessions: number;
+    eventsCount: number;
+    firstSource: string | null;
+    firstMedium: string | null;
+    firstCampaign: string | null;
+    firstReferrer: string | null;
   };
+
+  // State for selected session popup
+  const [selectedSession, setSelectedSession] = React.useState<{
+    properties: SessionProperties;
+    coordinates: [number, number];
+  } | null>(null);
 
   const { data: sessionsData } = useSuspenseQuery(
     trpc.externalFunnels.getGeographySessions.queryOptions({
@@ -570,33 +236,102 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
     return map;
   }, [filteredSessions]);
 
-  const sessionsByCountry = React.useMemo(() => {
-    const map = new Map<string, typeof filteredSessions>();
+
+
+  // Convert sessions to GeoJSON FeatureCollection for clustering
+  const sessionsGeoJSON = React.useMemo<
+    GeoJSON.FeatureCollection<GeoJSON.Point, SessionProperties>
+  >(() => {
+    const features: GeoJSON.Feature<GeoJSON.Point, SessionProperties>[] = [];
+
     for (const session of filteredSessions) {
       const countryCode = session.countryCode || "Unknown";
-      if (!map.has(countryCode)) {
-        map.set(countryCode, []);
-      }
-      map.get(countryCode)!.push(session);
-    }
-    return map;
-  }, [filteredSessions]);
+      const city = session.city || "Unknown";
 
-  const multiSessionCountries = React.useMemo(() => {
-    const set = new Set<string>();
-    for (const [countryCode, sessions] of sessionsByCountry.entries()) {
-      if (sessions.length > 1) {
-        set.add(countryCode);
-      }
-    }
-    return set;
-  }, [sessionsByCountry]);
+      const hasCoords =
+        session.latitude != null &&
+        session.longitude != null &&
+        !(session.latitude === 0 && session.longitude === 0);
 
-  React.useEffect(() => {
-    if (mapZoom < zoomInStart && selectedCountryCode) {
-      setSelectedCountryCode(null);
+      const sessionCoords = hasCoords
+        ? { lat: session.latitude!, lng: session.longitude! }
+        : null;
+
+      const cityCoords =
+        !sessionCoords && city !== "Unknown"
+          ? cityCoordsByKey.get(`${city}-${countryCode}`) || null
+          : null;
+
+      const baseCoords =
+        sessionCoords || cityCoords || getCountryCoordinates(countryCode);
+
+      if (baseCoords.lat == null || baseCoords.lng == null) continue;
+
+      // Always apply jitter to prevent overlapping points
+      // Use smaller jitter for exact coordinates, larger for city/country fallbacks
+      const jitterRadius = sessionCoords
+        ? 0.002 // ~200m for exact coordinates - enough to separate stacked points
+        : cityCoords
+          ? 0.08 // ~8km for city-level
+          : 0.6; // ~60km for country-level
+
+      const jittered = getJitteredCoordinates(
+        baseCoords.lat,
+        baseCoords.lng,
+        session.sessionId,
+        jitterRadius
+      );
+
+      const firstSeenValue = session.firstSeen || session.startedAt;
+
+      features.push({
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [jittered.lng, jittered.lat],
+        },
+        properties: {
+          sessionId: session.sessionId,
+          countryCode,
+          countryName: session.countryName || countryCode,
+          city,
+          deviceType: session.deviceType || "Unknown",
+          browserName: session.browserName || "Unknown",
+          osName: session.osName || "Unknown",
+          visitorDisplayName: session.visitorDisplayName || "Anonymous Visitor",
+          firstSeen: format(new Date(firstSeenValue), "MMM d, yyyy"),
+          totalSessions: session.totalSessions ?? 1,
+          eventsCount:
+            typeof session.eventsCount === "number"
+              ? session.eventsCount
+              : (session.pageViews ?? 0),
+          firstSource: session.firstSource,
+          firstMedium: session.firstMedium,
+          firstCampaign: session.firstCampaign,
+          firstReferrer: session.firstReferrer,
+        },
+      });
     }
-  }, [mapZoom, selectedCountryCode, zoomInStart]);
+
+    return {
+      type: "FeatureCollection",
+      features,
+    };
+  }, [filteredSessions, cityCoordsByKey]);
+
+  // Handle point click - show popup with session details
+  const handlePointClick = React.useCallback(
+    (
+      feature: GeoJSON.Feature<GeoJSON.Point, SessionProperties>,
+      coordinates: [number, number]
+    ) => {
+      setSelectedSession({
+        properties: feature.properties,
+        coordinates,
+      });
+    },
+    []
+  );
 
   return (
     <div className="">
@@ -720,49 +455,25 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
               attributionControl={false}
             >
               <MapControls showZoom className="text-primary" />
-              <MapZoomWatcher onZoomChange={setMapZoom} />
-              {filteredSessions.map((session) => {
-                const countryCode = session.countryCode || "Unknown";
-                const isMultiCountry = multiSessionCountries.has(countryCode);
-                const isUnlocked =
-                  selectedCountryCode === countryCode || mapZoom >= zoomInEnd;
-                const isInteractive = !isMultiCountry || isUnlocked;
-                const opacity = !isMultiCountry
-                  ? 1
-                  : isInteractive
-                    ? selectedCountryCode === countryCode
-                      ? 1
-                      : Math.max(sessionOpacity, 0.4)
-                    : 0;
-
-                return (
-                  <MapSessionMarker
-                    key={session.sessionId}
-                    session={session}
-                    opacity={opacity}
-                    isInteractive={isInteractive}
-                  />
-                );
-              })}
-              {data.countries
-                .filter((country) =>
-                  multiSessionCountries.has(country.countryCode || "Unknown")
-                )
-                .map((country) => (
-                  <MapCountryMarker
-                    key={`country-${country.countryCode}`}
-                    countryCode={country.countryCode}
-                    sessions={country.sessions}
-                    sessionsForCountry={
-                      sessionsByCountry.get(country.countryCode || "Unknown") ??
-                      []
-                    }
-                  />
-                ))}
-              <MapClickClose
-                onClose={() => setActiveSessionId(null)}
-                suppressRef={suppressCloseRef}
+              <MapClusterLayer<SessionProperties>
+                data={sessionsGeoJSON}
+                clusterMaxZoom={14}
+                clusterRadius={60}
+                clusterColors={["#10b981", "#0ea5e9", "#6366f1"]}
+                clusterThresholds={[50, 200]}
+                clusterSizes={[14, 18, 22]}
+                pointColor="#10b981"
+                pointRadius={5}
+                showPingAnimation
+                onPointClick={handlePointClick}
               />
+              {selectedSession && (
+                <SessionPopup
+                  session={selectedSession.properties}
+                  coordinates={selectedSession.coordinates}
+                  onClose={() => setSelectedSession(null)}
+                />
+              )}
             </MapView>
           </div>
 
@@ -940,49 +651,114 @@ export function GeographyAnalytics({ funnelId }: GeographyAnalyticsProps) {
   );
 }
 
-function MapClickClose({
+// Session popup component for displaying session details
+function SessionPopup({
+  session,
+  coordinates,
   onClose,
-  suppressRef,
 }: {
+  session: {
+    sessionId: string;
+    countryCode: string;
+    countryName: string;
+    city: string;
+    deviceType: string;
+    browserName: string;
+    osName: string;
+    visitorDisplayName: string;
+    firstSeen: string;
+    totalSessions: number;
+    eventsCount: number;
+    firstSource: string | null;
+    firstMedium: string | null;
+    firstCampaign: string | null;
+    firstReferrer: string | null;
+  };
+  coordinates: [number, number];
   onClose: () => void;
-  suppressRef: React.MutableRefObject<boolean>;
 }) {
-  const { map, isLoaded } = useMap();
+  const sourceLabel = session.firstSource
+    ? `${session.firstSource}${
+        session.firstMedium ? ` / ${session.firstMedium}` : ""
+      }${session.firstCampaign ? ` / ${session.firstCampaign}` : ""}`
+    : session.firstReferrer || "Direct";
 
-  React.useEffect(() => {
-    if (!map || !isLoaded) return;
+  const DeviceIcon = getDeviceIconForType(session.deviceType);
+  const BrowserIcon = getBrowserIconForType(session.browserName);
+  const OsIcon = getOsIconForType(session.osName);
 
-    const handleClick = () => {
-      if (suppressRef.current) return;
-      onClose();
-    };
+  return (
+    <MapPopup
+      longitude={coordinates[0]}
+      latitude={coordinates[1]}
+      onClose={onClose}
+      className="w-104 px-0 py-4"
+      closeOnClick={false}
+    >
+      <div className="space-y-3 flex flex-col items-center">
+        <div className="space-y-1 text-center">
+          <div className="text-sm font-semibold">{session.visitorDisplayName}</div>
+          <div className="text-xs text-muted-foreground">
+            {getCountryFlag(session.countryCode)} {session.city}, {session.countryCode}
+          </div>
+        </div>
 
-    map.on("click", handleClick);
-    return () => {
-      map.off("click", handleClick);
-    };
-  }, [map, isLoaded, onClose, suppressRef]);
+        <Separator />
 
-  return null;
-}
+        <div className="flex flex-col w-full gap-4 py-2">
+          <div className="grid grid-cols-3 gap-2 text-xs justify-between w-full text-center px-8">
+            <div className="space-y-1">
+              <div className="text-muted-foreground">First seen</div>
+              <div className="font-medium">{session.firstSeen}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-muted-foreground">Sessions</div>
+              <div className="font-medium">
+                {Number(session.totalSessions).toLocaleString()}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-muted-foreground">Events</div>
+              <div className="font-medium">
+                {Number(session.eventsCount).toLocaleString()}
+              </div>
+            </div>
+          </div>
 
-function MapZoomWatcher({
-  onZoomChange,
-}: {
-  onZoomChange: (zoom: number) => void;
-}) {
-  const { map, isLoaded } = useMap();
+          <div className="grid grid-cols-3 gap-2 text-xs items-between w-full text-center px-8">
+            <div className="space-y-1">
+              <div className="text-muted-foreground">Device</div>
+              <div className="font-medium flex items-center justify-center gap-1.5">
+                <DeviceIcon className="h-3.5 w-3.5" />
+                <span>{session.deviceType}</span>
+              </div>
+            </div>
 
-  React.useEffect(() => {
-    if (!map || !isLoaded) return;
+            <div className="space-y-1">
+              <div className="text-muted-foreground">OS</div>
+              <div className="font-medium flex items-center justify-center gap-1.5">
+                <OsIcon className="h-3.5 w-3.5" />
+                <span>{session.osName}</span>
+              </div>
+            </div>
 
-    const handleZoom = () => onZoomChange(map.getZoom());
-    handleZoom();
-    map.on("zoom", handleZoom);
-    return () => {
-      map.off("zoom", handleZoom);
-    };
-  }, [map, isLoaded, onZoomChange]);
+            <div className="space-y-1">
+              <div className="text-muted-foreground">Browser</div>
+              <div className="font-medium flex items-center justify-center gap-1.5">
+                <BrowserIcon className="h-3.5 w-3.5" />
+                <span>{session.browserName}</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-  return null;
+        <Separator />
+
+        <div className="space-y-1 text-xs">
+          <div className="text-muted-foreground">Source</div>
+          <div className="font-medium">{sourceLabel}</div>
+        </div>
+      </div>
+    </MapPopup>
+  );
 }

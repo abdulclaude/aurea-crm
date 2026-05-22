@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779198308634,
+      "tag": "0000_prisma_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779234775402,
+      "tag": "0001_studio-renames",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779239307429,
+      "tag": "0002_mindbody_import_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779239912523,
+      "tag": "0003_index_opclass_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779268493111,
+      "tag": "0004_user_delete_cascade_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779288736765,
+      "tag": "0005_mindbody_sale_details_staff",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779289551391,
+      "tag": "0006_mindbody_document_payment_credit_links",
+      "breakpoints": true
+    }
+  ]
+}

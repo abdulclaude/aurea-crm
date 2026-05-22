@@ -3,9 +3,11 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { aiLog, client as clientTable, deal as dealTable, pipeline as pipelineTable, pipelineStage, workflows as workflowTable } from "@/db/schema";
 import { routeIntent } from "@/lib/ai/intent-router";
 import { executeAction } from "@/lib/ai/action-handlers";
-import prisma from "@/lib/db";
 
 const google = createGoogleGenerativeAI({
   apiKey: process.env.GEMINI_API_KEY,
@@ -24,7 +26,7 @@ interface ChatRequest {
   }>;
   html?: string;
   entities?: EntityReference[];
-  subaccountId?: string;
+  locationId?: string;
 }
 
 function htmlToPlainText(html: string): string {
@@ -42,56 +44,56 @@ function htmlToPlainText(html: string): string {
 
 async function fetchEntityDetails(
   entities: EntityReference[],
-  subaccountId: string
+  locationId: string
 ) {
   const details: Record<string, unknown>[] = [];
 
   for (const entity of entities) {
     try {
       switch (entity.type) {
-        case "contact": {
-          const contact = await prisma.contact.findFirst({
-            where: { id: entity.id, subaccountId },
-            include: {
-              contactAssignee: {
-                include: {
-                  subaccountMember: {
-                    include: { user: true },
+        case "client": {
+          const client = await db.query.client.findFirst({
+            where: and(eq(clientTable.id, entity.id), eq(clientTable.locationId, locationId)),
+            with: {
+              clientAssignees: {
+                with: {
+                  locationMember: {
+                    with: { user: true },
                   },
                 },
               },
-              dealContact: {
-                include: { deal: true },
+              dealClients: {
+                with: { deal: true },
               },
             },
           });
-          if (contact) {
+          if (client) {
             details.push({
-              entityType: "contact",
-              ...contact,
-              assignees: contact.contactAssignee.map(
-                (a: any) => a.subaccountMember.user?.name
+              entityType: "client",
+              ...client,
+              assignees: client.clientAssignees.map(
+                (a) => a.locationMember.user?.name
               ),
-              deals: contact.dealContact.map((d: any) => d.deal.name),
+              deals: client.dealClients.map((d) => d.deal.name),
             });
           }
           break;
         }
         case "deal": {
-          const deal = await prisma.deal.findFirst({
-            where: { id: entity.id, subaccountId },
-            include: {
+          const deal = await db.query.deal.findFirst({
+            where: and(eq(dealTable.id, entity.id), eq(dealTable.locationId, locationId)),
+            with: {
               pipeline: true,
               pipelineStage: true,
-              dealMember: {
-                include: {
-                  subaccountMember: {
-                    include: { user: true },
+              dealAssignees: {
+                with: {
+                  locationMember: {
+                    with: { user: true },
                   },
                 },
               },
-              dealContact: {
-                include: { contact: true },
+              dealClients: {
+                with: { client: true },
               },
             },
           });
@@ -101,37 +103,37 @@ async function fetchEntityDetails(
               ...deal,
               pipelineName: deal.pipeline?.name,
               stageName: deal.pipelineStage?.name,
-              members: deal.dealMember.map((m: any) => m.subaccountMember.user?.name),
-              contacts: deal.dealContact.map((c: any) => c.contact.name),
+              members: deal.dealAssignees.map((m) => m.locationMember.user?.name),
+              clients: deal.dealClients.map((c) => c.client.name),
             });
           }
           break;
         }
         case "pipeline": {
-          const pipeline = await prisma.pipeline.findFirst({
-            where: { id: entity.id, subaccountId },
-            include: {
-              pipelineStage: {
-                orderBy: { position: "asc" },
+          const pipeline = await db.query.pipeline.findFirst({
+            where: and(eq(pipelineTable.id, entity.id), eq(pipelineTable.locationId, locationId)),
+            with: {
+              pipelineStages: {
+                orderBy: asc(pipelineStage.position),
               },
-              _count: { select: { deal: true } },
+              deals: { columns: { id: true } },
             },
           });
           if (pipeline) {
             details.push({
               type: "pipeline",
               ...pipeline,
-              dealCount: pipeline._count.deal,
+              dealCount: pipeline.deals.length,
             });
           }
           break;
         }
         case "workflow": {
-          const workflow = await prisma.workflows.findFirst({
-            where: { id: entity.id, subaccountId },
-            include: {
-              Node: true,
-              _count: { select: { Execution: true } },
+          const workflow = await db.query.workflows.findFirst({
+            where: and(eq(workflowTable.id, entity.id), eq(workflowTable.locationId, locationId)),
+            with: {
+              nodes: true,
+              executions: { columns: { id: true } },
             },
           });
           if (workflow) {
@@ -142,9 +144,9 @@ async function fetchEntityDetails(
               description: workflow.description,
               archived: workflow.archived,
               isTemplate: workflow.isTemplate,
-              nodeCount: workflow.Node.length,
-              executionCount: workflow._count.Execution,
-              nodeTypes: workflow.Node.map((n: any) => n.type),
+              nodeCount: workflow.nodes.length,
+              executionCount: workflow.executions.length,
+              nodeTypes: workflow.nodes.map((n) => n.type),
             });
           }
           break;
@@ -158,13 +160,13 @@ async function fetchEntityDetails(
   return details;
 }
 
-const SYSTEM_PROMPT = `You are an AI assistant for Aurea CRM, a workflow automation and customer relationship management platform. Your role is to help users manage their contacts, deals, pipelines, and workflows effectively.
+const SYSTEM_PROMPT = `You are an AI assistant for Aurea CRM, a workflow automation and customer relationship management platform. Your role is to help users manage their clients, deals, pipelines, and workflows effectively.
 
 ## Your Capabilities
-- Answer questions about CRM data (contacts, deals, pipelines, workflows)
+- Answer questions about CRM data (clients, deals, pipelines, workflows)
 - Provide insights and analysis based on the data
 - Help users understand their sales pipeline and customer relationships
-- Suggest actions and next steps for deals and contacts
+- Suggest actions and next steps for deals and clients
 - Explain workflow automations and their purposes
 
 ## Guidelines
@@ -176,10 +178,10 @@ const SYSTEM_PROMPT = `You are an AI assistant for Aurea CRM, a workflow automat
 6. **Format Responses**: Use markdown for better readability (lists, bold for emphasis, etc.)
 
 ## Entity Types
-- **Contacts**: People or companies in the CRM with details like name, email, company, lifecycle stage, score
-- **Deals**: Sales opportunities with value, pipeline stage, deadline, associated contacts
+- **Clients**: People or companies in the CRM with details like name, email, company, lifecycle stage, score
+- **Deals**: Sales opportunities with value, pipeline stage, deadline, associated clients
 - **Pipelines**: Sales processes with stages (e.g., Lead In → Qualified → Proposal → Won/Lost)
-- **Workflows**: Automated processes triggered by events (e.g., "When contact created, send email")
+- **Workflows**: Automated processes triggered by events (e.g., "When client created, send email")
 
 When referencing specific entities, use their names naturally in your response.`;
 
@@ -201,7 +203,7 @@ export async function POST(request: NextRequest) {
       messages: incomingMessages,
       html,
       entities = [],
-      subaccountId,
+      locationId,
     } = body;
 
     // Get the last user message
@@ -237,14 +239,15 @@ export async function POST(request: NextRequest) {
     console.log("[Chat API] Context:", {
       userId: session.user.id,
       orgId: activeOrgId,
-      subaccountId,
+      locationId,
     });
 
     // If we have a high-confidence intent, execute the action
     if (routeResult && routeResult.confidence > 0.4) {
       // Create a log entry for this action
-      const log = await prisma.aILog.create({
-        data: {
+      const [log] = await db
+        .insert(aiLog)
+        .values({
           id: crypto.randomUUID(),
           title: routeResult.intent.description || routeResult.intent.name,
           intent: routeResult.intent.name,
@@ -252,40 +255,40 @@ export async function POST(request: NextRequest) {
           status: "RUNNING",
           userId: session.user.id,
           organizationId: activeOrgId,
-          subaccountId: subaccountId || null,
+          locationId: locationId || null,
           createdAt: new Date(),
-        },
-      });
+        })
+        .returning({ id: aiLog.id });
 
       let actionResult: Awaited<ReturnType<typeof executeAction>>;
       try {
         actionResult = await executeAction(routeResult, {
           userId: session.user.id,
           organizationId: activeOrgId,
-          subaccountId: subaccountId || null,
+          locationId: locationId || null,
         });
 
         // Update log with result
-        await prisma.aILog.update({
-          where: { id: log.id },
-          data: {
+        await db
+          .update(aiLog)
+          .set({
             status: actionResult.success ? "COMPLETED" : "FAILED",
             error: actionResult.success ? null : actionResult.message,
             result: actionResult.data || null,
             completedAt: new Date(),
             description: actionResult.message,
-          },
-        });
+          })
+          .where(eq(aiLog.id, log.id));
       } catch (error) {
         // Update log with error
-        await prisma.aILog.update({
-          where: { id: log.id },
-          data: {
+        await db
+          .update(aiLog)
+          .set({
             status: "FAILED",
             error: error instanceof Error ? error.message : "Unknown error",
             completedAt: new Date(),
-          },
-        });
+          })
+          .where(eq(aiLog.id, log.id));
         throw error;
       }
 
@@ -343,10 +346,10 @@ export async function POST(request: NextRequest) {
       return result.toTextStreamResponse();
     }
 
-    // Fetch details for explicitly referenced entities (only if subaccount context)
+    // Fetch details for explicitly referenced entities (only if location context)
     const entityDetails =
-      entities.length > 0 && subaccountId
-        ? await fetchEntityDetails(entities, subaccountId)
+      entities.length > 0 && locationId
+        ? await fetchEntityDetails(entities, locationId)
         : [];
 
     // Build context message

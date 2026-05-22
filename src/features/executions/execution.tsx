@@ -13,7 +13,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { ExecutionStatus } from "@prisma/client";
+import { ExecutionStatus } from "@/db/enums";
 import { formatDistanceToNow } from "date-fns";
 import {
   CheckCircle2Icon,
@@ -175,7 +175,7 @@ export const ExecutionView = ({ executionId }: { executionId: string }) => {
           </div>
         )}
 
-        {execution.output && (
+        {execution.output !== null && execution.output !== undefined && (
           <div className="mt-6 p-4 bg-muted rounded-md">
             <p className="text-sm font-medium mb-2"> Output </p>
             <pre className="text-xs font-mono overflow-auto">

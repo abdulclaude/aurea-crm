@@ -29,7 +29,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import tunnel from "tunnel-rat";
-import { Card } from "@/components/ui/card";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
@@ -77,8 +76,8 @@ export const KanbanBoard = ({ id, children, className }: KanbanBoardProps) => {
   return (
     <div
       className={cn(
-        "flex size-full min-h-40 flex-col divide-y divide-white/5 overflow-hidden border-x first:border-l-0 first:border-r-0 last:border-l-0 nth-[2]:border-r-0 nth-[3]:border-r-0 border-t border-white/5 bg-[#202e32] text-xs shadow-sm ring-2 transition-all",
-        isOver ? "ring-white/25" : "ring-transparent",
+        "flex size-full min-h-40 flex-col divide-y divide-white/5 overflow-hidden border border-white/5 bg-[#202e32] text-xs shadow-sm transition-all",
+        isOver ? "ring-1 ring-white/25" : "",
         className
       )}
       ref={setNodeRef}
@@ -119,27 +118,27 @@ export const KanbanCard = <T extends KanbanItemProps = KanbanItemProps>({
   return (
     <>
       <div style={style} {...listeners} {...attributes} ref={setNodeRef}>
-        <Card
+        <div
           className={cn(
-            "cursor-grab gap-4 rounded-md p-3 shadow-sm",
+            "cursor-grab rounded-md p-3 shadow-sm",
             isDragging && "pointer-events-none cursor-grabbing opacity-30",
             className
           )}
         >
           {children ?? <p className="m-0 font-medium text-sm">{name}</p>}
-        </Card>
+        </div>
       </div>
       {activeCardId === id && (
         <t.In>
-          <Card
+          <div
             className={cn(
-              "cursor-grab gap-4 rounded-md p-3 shadow-sm ring-1 ring-white/50",
+              "cursor-grab rounded-md p-3 shadow-sm ring-1 ring-white/50",
               isDragging && "cursor-grabbing",
               className
             )}
           >
             {children ?? <p className="m-0 font-medium text-sm">{name}</p>}
-          </Card>
+          </div>
         </t.In>
       )}
     </>

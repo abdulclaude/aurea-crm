@@ -103,8 +103,8 @@ function RecurrenceBuilderWrapper({ form }: { form: any }) {
 }
 
 const formSchema = z.object({
-  workerId: z.string().min(1, "Staff member is required"),
-  contactId: z.string().optional(),
+  instructorId: z.string().min(1, "Staff member is required"),
+  clientId: z.string().optional(),
   companyName: z.string().optional(),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
@@ -132,7 +132,7 @@ interface RotaAssignmentDialogProps {
   } | null;
   selectedRotaId?: string | null;
   onSuccess?: () => void;
-  defaultWorkerId?: string; // Pre-select a worker
+  defaultInstructorId?: string; // Pre-select a instructor
 }
 
 export function RotaAssignmentDialog({
@@ -141,7 +141,7 @@ export function RotaAssignmentDialog({
   selectedSlot,
   selectedRotaId,
   onSuccess,
-  defaultWorkerId,
+  defaultInstructorId,
 }: RotaAssignmentDialogProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -150,8 +150,8 @@ export function RotaAssignmentDialog({
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      workerId: defaultWorkerId || "",
-      contactId: "",
+      instructorId: defaultInstructorId || "",
+      clientId: "",
       companyName: "",
       pipelineId: "",
       pipelineStageId: "",
@@ -168,28 +168,28 @@ export function RotaAssignmentDialog({
     },
   } as any);
 
-  // Fetch workers
-  const { data: workersData } = useSuspenseQuery(
-    trpc.workers.list.queryOptions({ pageSize: 100 })
+  // Fetch instructors
+  const { data: instructorsData } = useSuspenseQuery(
+    trpc.instructors.list.queryOptions({ pageSize: 100 })
   );
 
-  const workers = workersData?.items ?? [];
+  const instructors = instructorsData?.items ?? [];
 
-  // Check worker availability
-  const selectedWorkerId = form.watch("workerId");
+  // Check instructor availability
+  const selectedInstructorId = form.watch("instructorId");
   const selectedStartDate = form.watch("startDate");
   const selectedStartTime = form.watch("startTime");
   const selectedEndTime = form.watch("endTime");
 
   const { data: availabilityCheck } = useQuery(
     trpc.availability.checkAvailability.queryOptions({
-      workerId: selectedWorkerId || "",
+      instructorId: selectedInstructorId || "",
       date: selectedStartDate,
       startTime: selectedStartTime,
       endTime: selectedEndTime,
     }, {
       enabled: !!(
-        selectedWorkerId &&
+        selectedInstructorId &&
         selectedStartDate &&
         selectedStartTime &&
         selectedEndTime
@@ -197,12 +197,12 @@ export function RotaAssignmentDialog({
     })
   );
 
-  // Fetch contacts
-  const { data: contactsData } = useSuspenseQuery(
-    trpc.contacts.list.queryOptions({ limit: 100 })
+  // Fetch clients
+  const { data: clientsData } = useSuspenseQuery(
+    trpc.clients.list.queryOptions({ limit: 100 })
   );
 
-  const contacts = contactsData?.items ?? [];
+  const clients = clientsData?.items ?? [];
 
   // Fetch pipelines
   const { data: pipelinesData } = useSuspenseQuery(
@@ -219,18 +219,18 @@ export function RotaAssignmentDialog({
   // Deal search state
   const [dealSearchQuery, setDealSearchQuery] = useState("");
   const [dealPopoverOpen, setDealPopoverOpen] = useState(false);
-  const selectedContactId = form.watch("contactId");
+  const selectedClientId = form.watch("clientId");
   const dealName = form.watch("dealName");
 
-  // Search deals for selected contact and pipeline
+  // Search deals for selected client and pipeline
   const { data: searchedDeals = [] } = useQuery({
     ...trpc.deals.search.queryOptions({
       query: dealSearchQuery,
-      contactId: selectedContactId,
+      clientId: selectedClientId,
       pipelineId: selectedPipelineId,
       limit: 10,
     }),
-    enabled: !!dealSearchQuery && dealSearchQuery.length > 0 && !!selectedContactId && !!selectedPipelineId,
+    enabled: !!dealSearchQuery && dealSearchQuery.length > 0 && !!selectedClientId && !!selectedPipelineId,
   });
 
   // Fetch existing rota for edit mode
@@ -297,15 +297,15 @@ export function RotaAssignmentDialog({
 
   const isPending = isCreating || isUpdating || isDeleting;
 
-  // Watch contact selection to auto-fill company name
+  // Watch client selection to auto-fill company name
   useEffect(() => {
-    if (selectedContactId) {
-      const contact = contacts.find((c) => c.id === selectedContactId);
-      if (contact?.companyName && !form.getValues("companyName")) {
-        form.setValue("companyName", contact.companyName);
+    if (selectedClientId) {
+      const client = clients.find((c) => c.id === selectedClientId);
+      if (client?.companyName && !form.getValues("companyName")) {
+        form.setValue("companyName", client.companyName);
       }
     }
-  }, [selectedContactId, contacts, form]);
+  }, [selectedClientId, clients, form]);
 
   // Populate form when editing existing rota
   useEffect(() => {
@@ -314,8 +314,8 @@ export function RotaAssignmentDialog({
       const endDate = new Date(existingRota.endTime);
 
       form.reset({
-        workerId: existingRota.workerId,
-        contactId: existingRota.contactId || "",
+        instructorId: existingRota.instructorId,
+        clientId: existingRota.clientId || "",
         companyName: existingRota.companyName || "",
         pipelineId: existingRota.deal?.pipelineId || "",
         pipelineStageId: existingRota.deal?.pipelineStageId || "",
@@ -333,8 +333,8 @@ export function RotaAssignmentDialog({
     } else if (!isEditMode && selectedSlot && open) {
       // Populate with selected slot times for new rota
       form.reset({
-        workerId: "",
-        contactId: "",
+        instructorId: "",
+        clientId: "",
         companyName: "",
         pipelineId: "",
         pipelineStageId: "",
@@ -377,8 +377,8 @@ export function RotaAssignmentDialog({
 
     // Validate deal creation requirements
     if (values.dealName && !values.dealId) {
-      if (!values.contactId) {
-        toast.error("Please select a contact to create a new job/deal");
+      if (!values.clientId) {
+        toast.error("Please select a client to create a new job/deal");
         return;
       }
       if (!values.pipelineId) {
@@ -392,8 +392,8 @@ export function RotaAssignmentDialog({
     }
 
     const rotaData = {
-      workerId: values.workerId,
-      contactId: values.contactId || undefined,
+      instructorId: values.instructorId,
+      clientId: values.clientId || undefined,
       companyName: values.companyName || undefined,
       pipelineId: values.pipelineId || undefined,
       pipelineStageId: values.pipelineStageId || undefined,
@@ -436,7 +436,7 @@ export function RotaAssignmentDialog({
           <DialogDescription>
             {isEditMode
               ? "Update the shift details"
-              : "Assign a worker to a shift"}
+              : "Assign a instructor to a shift"}
           </DialogDescription>
         </DialogHeader>
 
@@ -554,10 +554,10 @@ export function RotaAssignmentDialog({
               />
             </div>
 
-            {/* Worker Selection */}
+            {/* Instructor Selection */}
             <FormField
               control={form.control}
-              name="workerId"
+              name="instructorId"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Staff Member *</FormLabel>
@@ -568,10 +568,10 @@ export function RotaAssignmentDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {workers.map((worker) => (
-                        <SelectItem key={worker.id} value={worker.id}>
-                          {worker.name}
-                          {worker.role && ` (${worker.role})`}
+                      {instructors.map((instructor) => (
+                        <SelectItem key={instructor.id} value={instructor.id}>
+                          {instructor.name}
+                          {instructor.role && ` (${instructor.role})`}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -590,27 +590,27 @@ export function RotaAssignmentDialog({
                   <AlertDescription>
                     {availabilityCheck.hasTimeOff ? (
                       <span>
-                        This worker has approved time off on this date.
+                        This instructor has approved time off on this date.
                       </span>
                     ) : !availabilityCheck.hasAvailability ? (
                       <span>
-                        This worker has not set their availability for this time slot.
+                        This instructor has not set their availability for this time slot.
                         They may not be available to work.
                       </span>
                     ) : (
-                      <span>Worker is not available at this time.</span>
+                      <span>Instructor is not available at this time.</span>
                     )}
                   </AlertDescription>
                 </Alert>
               )}
 
-            {/* Contact Selection */}
+            {/* Client Selection */}
             <FormField
               control={form.control}
-              name="contactId"
+              name="clientId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Contact</FormLabel>
+                  <FormLabel>Client</FormLabel>
                   <Select
                     onValueChange={(value) => {
                       field.onChange(value === "__none__" ? "" : value);
@@ -619,15 +619,15 @@ export function RotaAssignmentDialog({
                   >
                     <FormControl>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select contact (optional)" />
+                        <SelectValue placeholder="Select client (optional)" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="__none__">None</SelectItem>
-                      {contacts.map((contact) => (
-                        <SelectItem key={contact.id} value={contact.id}>
-                          {contact.name}
-                          {contact.companyName && ` - ${contact.companyName}`}
+                      {clients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                          {client.companyName && ` - ${client.companyName}`}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -728,7 +728,7 @@ export function RotaAssignmentDialog({
                         <Button
                           variant="outline"
                           role="combobox"
-                          disabled={!selectedContactId || !selectedPipelineId || !form.watch("pipelineStageId")}
+                          disabled={!selectedClientId || !selectedPipelineId || !form.watch("pipelineStageId")}
                           className={cn(
                             "justify-between",
                             !field.value && !dealName && "text-muted-foreground"
@@ -738,8 +738,8 @@ export function RotaAssignmentDialog({
                             ? searchedDeals.find((deal) => deal.id === field.value)?.name || "Deal selected"
                             : dealName
                             ? `Create: ${dealName}`
-                            : !selectedContactId
-                            ? "Select contact first"
+                            : !selectedClientId
+                            ? "Select client first"
                             : !selectedPipelineId
                             ? "Select pipeline first"
                             : !form.watch("pipelineStageId")
@@ -842,8 +842,8 @@ export function RotaAssignmentDialog({
                     </PopoverContent>
                   </Popover>
                   <FormDescription>
-                    {!selectedContactId
-                      ? "Select a contact first to search or create jobs"
+                    {!selectedClientId
+                      ? "Select a client first to search or create jobs"
                       : !selectedPipelineId
                       ? "Select a pipeline and stage first to enable deal/job assignment"
                       : !form.watch("pipelineStageId")
@@ -946,9 +946,9 @@ export function RotaAssignmentDialog({
                     />
                   </FormControl>
                   <div className="space-y-1 leading-none">
-                    <FormLabel>Send worker magic link now</FormLabel>
+                    <FormLabel>Send instructor magic link now</FormLabel>
                     <FormDescription>
-                      Worker will receive an email immediately. Magic links are
+                      Instructor will receive an email immediately. Magic links are
                       also sent automatically 5 minutes before the shift starts.
                     </FormDescription>
                   </div>

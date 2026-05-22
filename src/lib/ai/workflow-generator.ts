@@ -1,5 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import prisma from "@/lib/db";
+import { and, asc, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { pipeline as pipelineTable, pipelineStage } from "@/db/schema";
+import type { JsonObject } from "@/db/json";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
@@ -37,34 +40,34 @@ const nodeDefinitions = {
       description: "Triggered by Stripe payment events",
     },
     {
-      type: "CONTACT_CREATED_TRIGGER",
-      name: "Contact Created Trigger",
-      description: "Triggered when a new contact is created",
+      type: "CLIENT_CREATED_TRIGGER",
+      name: "Client Created Trigger",
+      description: "Triggered when a new client is created",
     },
     {
-      type: "CONTACT_UPDATED_TRIGGER",
-      name: "Contact Updated Trigger",
-      description: "Triggered when a contact is updated",
+      type: "CLIENT_UPDATED_TRIGGER",
+      name: "Client Updated Trigger",
+      description: "Triggered when a client is updated",
     },
     {
-      type: "CONTACT_DELETED_TRIGGER",
-      name: "Contact Deleted Trigger",
-      description: "Triggered when a contact is deleted",
+      type: "CLIENT_DELETED_TRIGGER",
+      name: "Client Deleted Trigger",
+      description: "Triggered when a client is deleted",
     },
     {
-      type: "CONTACT_FIELD_CHANGED_TRIGGER",
-      name: "Contact Field Changed Trigger",
-      description: "Triggered when a specific contact field changes",
+      type: "CLIENT_FIELD_CHANGED_TRIGGER",
+      name: "Client Field Changed Trigger",
+      description: "Triggered when a specific client field changes",
     },
     {
-      type: "CONTACT_TYPE_CHANGED_TRIGGER",
-      name: "Contact Type Changed Trigger",
-      description: "Triggered when contact type changes (Lead, Customer, etc.)",
+      type: "CLIENT_TYPE_CHANGED_TRIGGER",
+      name: "Client Type Changed Trigger",
+      description: "Triggered when client type changes (Lead, Customer, etc.)",
     },
     {
-      type: "CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER",
-      name: "Contact Lifecycle Stage Changed Trigger",
-      description: "Triggered when contact lifecycle stage changes",
+      type: "CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER",
+      name: "Client Lifecycle Stage Changed Trigger",
+      description: "Triggered when client lifecycle stage changes",
     },
   ],
   executions: [
@@ -105,23 +108,23 @@ const nodeDefinitions = {
       description: "Wait for a specified duration before continuing",
     },
     {
-      type: "CREATE_CONTACT",
-      name: "Create Contact",
-      description: "Create a new contact in CRM",
+      type: "CREATE_CLIENT",
+      name: "Create Client",
+      description: "Create a new client in CRM",
     },
     {
-      type: "UPDATE_CONTACT",
-      name: "Update Contact",
-      description: "Update an existing contact",
+      type: "UPDATE_CLIENT",
+      name: "Update Client",
+      description: "Update an existing client",
     },
     {
-      type: "DELETE_CONTACT",
-      name: "Delete Contact",
-      description: "Delete a contact",
+      type: "DELETE_CLIENT",
+      name: "Delete Client",
+      description: "Delete a client",
     },
     {
       type: "CREATE_DEAL",
-      name: "Create Deal",
+      name: "Create deal",
       description: "Create a new deal in pipeline",
     },
     {
@@ -172,7 +175,7 @@ export interface GeneratedWorkflow {
     name: string;
     type: string;
     position: { x: number; y: number };
-    data: Record<string, any>;
+    data: JsonObject;
   }>;
   connections: Array<{
     sourceId: string;
@@ -184,27 +187,20 @@ export async function generateWorkflow(
   description: string,
   context: {
     organizationId: string;
-    subaccountId: string | null;
-  }
+    locationId: string | null;
+  },
 ): Promise<GeneratedWorkflow | null> {
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   // Fetch existing pipelines for context
-  const pipelines = await prisma.pipeline.findMany({
-    where: {
-      organizationId: context.organizationId,
-      subaccountId: context.subaccountId,
-    },
-    include: { pipelineStage: { orderBy: { position: "asc" } } },
-    take: 5,
-  });
+  const pipelines = await getPipelinePromptContext(context);
 
   const pipelineContext =
     pipelines.length > 0
       ? `\nExisting pipelines:\n${pipelines
           .map(
-            (p) =>
-              `- ${p.name} (stages: ${p.pipelineStage.map((s: any) => s.name).join(" → ")})`
+            (pipeline) =>
+              `- ${pipeline.name} (stages: ${pipeline.pipelineStages.map((stage) => stage.name).join(" -> ")})`,
           )
           .join("\n")}`
       : "";
@@ -261,7 +257,7 @@ Return JSON in this exact format:
 
 Position nodes horizontally (increment x by 150 for each node, keep y at 0).
 Only use node types from the lists above.
-For application intake, consider using GOOGLE_FORM_TRIGGER or CONTACT_CREATED_TRIGGER.
+For application intake, consider using GOOGLE_FORM_TRIGGER or CLIENT_CREATED_TRIGGER.
 
 JSON:`;
 
@@ -280,7 +276,7 @@ JSON:`;
 
       // Ensure at least one trigger node
       const hasTrigger = workflow.nodes.some((n) =>
-        nodeDefinitions.triggers.some((t) => t.type === n.type)
+        nodeDefinitions.triggers.some((t) => t.type === n.type),
       );
 
       if (!hasTrigger) {
@@ -300,27 +296,19 @@ export async function generateBundleWorkflow(
   description: string,
   context: {
     organizationId: string;
-    subaccountId: string | null;
-  }
+    locationId: string | null;
+  },
 ): Promise<GeneratedWorkflow | null> {
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-  // Fetch existing pipelines for context
-  const pipelines = await prisma.pipeline.findMany({
-    where: {
-      organizationId: context.organizationId,
-      subaccountId: context.subaccountId,
-    },
-    include: { pipelineStage: { orderBy: { position: "asc" } } },
-    take: 5,
-  });
+  const pipelines = await getPipelinePromptContext(context);
 
   const pipelineContext =
     pipelines.length > 0
       ? `\nExisting pipelines:\n${pipelines
           .map(
-            (p) =>
-              `- ${p.name} (stages: ${p.pipelineStage.map((s: any) => s.name).join(" → ")})`
+            (pipeline) =>
+              `- ${pipeline.name} (stages: ${pipeline.pipelineStages.map((stage) => stage.name).join(" -> ")})`,
           )
           .join("\n")}`
       : "";
@@ -391,7 +379,7 @@ JSON:`;
 
       // Ensure NO trigger nodes (bundles shouldn't have triggers)
       const hasTrigger = workflow.nodes.some((n) =>
-        nodeDefinitions.triggers.some((t) => t.type === n.type)
+        nodeDefinitions.triggers.some((t) => t.type === n.type),
       );
 
       if (hasTrigger) {
@@ -411,4 +399,22 @@ JSON:`;
   }
 
   return null;
+}
+
+function getPipelinePromptContext(context: {
+  organizationId: string;
+  locationId: string | null;
+}) {
+  return db.query.pipeline.findMany({
+    where: and(
+      eq(pipelineTable.organizationId, context.organizationId),
+      context.locationId ? eq(pipelineTable.locationId, context.locationId) : isNull(pipelineTable.locationId)
+    ),
+    with: {
+      pipelineStages: {
+        orderBy: [asc(pipelineStage.position)],
+      },
+    },
+    limit: 5,
+  });
 }

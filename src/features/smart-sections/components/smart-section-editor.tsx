@@ -33,7 +33,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { toast } from "sonner";
-import { DeviceType } from "@prisma/client";
+import { DeviceType } from "@/db/enums";
 import {
   deviceModeAtom,
   activePageIdAtom,

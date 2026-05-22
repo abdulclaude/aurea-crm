@@ -27,7 +27,7 @@ export default function DunningSettingsPage() {
   const [newDay, setNewDay] = useState("");
 
   const isOrganization = workspace?.type === "organization";
-  const isSubaccount = workspace?.type === "subaccount";
+  const isLocation = workspace?.type === "location";
 
   // Update local state when workspace data is loaded
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function DunningSettingsPage() {
         if (org?.dunningDays) {
           setDunningDays(org.dunningDays as number[]);
         }
-      } else if (workspace.type === "subaccount") {
+      } else if (workspace.type === "location") {
         const sub = workspace.data;
         setDunningEnabled(sub?.dunningEnabled ?? true);
         if (sub?.dunningDays) {
@@ -49,11 +49,11 @@ export default function DunningSettingsPage() {
   }, [workspace]);
 
   const updateOrganization = useMutation(
-    trpc.organizations.updateOrganization.mutationOptions()
+    trpc.organizations.updateOrganization.mutationOptions(),
   );
 
-  const updateSubaccount = useMutation(
-    trpc.organizations.updateSubaccount.mutationOptions()
+  const updateLocation = useMutation(
+    trpc.organizations.updateLocation.mutationOptions(),
   );
 
   const handleSave = async () => {
@@ -66,9 +66,9 @@ export default function DunningSettingsPage() {
         });
         toast.success("Dunning settings updated successfully");
         refetch();
-      } else if (workspace?.type === "subaccount") {
-        await updateSubaccount.mutateAsync({
-          subaccountId: workspace.data?.id || "",
+      } else if (workspace?.type === "location") {
+        await updateLocation.mutateAsync({
+          locationId: workspace.data?.id || "",
           dunningEnabled,
           dunningDays,
         });
@@ -79,7 +79,7 @@ export default function DunningSettingsPage() {
       toast.error(
         error instanceof Error
           ? error.message
-          : "Failed to update dunning settings"
+          : "Failed to update dunning settings",
       );
     }
   };
@@ -112,7 +112,7 @@ export default function DunningSettingsPage() {
     );
   }
 
-  const isPending = updateOrganization.isPending || updateSubaccount.isPending;
+  const isPending = updateOrganization.isPending || updateLocation.isPending;
 
   return (
     <div className="">
@@ -122,7 +122,7 @@ export default function DunningSettingsPage() {
             variant={isOrganization ? "gradient" : "secondary"}
             className="w-max rounded-full p-1 px-2.5"
           >
-            {isOrganization ? "Agency" : "Client"}
+            {isOrganization ? "Studio" : "Location"}
           </Badge>
 
           <h1 className="text-lg font-bold">Dunning Settings</h1>
@@ -178,7 +178,7 @@ export default function DunningSettingsPage() {
                       type="button"
                       onClick={() => removeDay(day)}
                       disabled={isPending}
-                      className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      className="text-muted-foreground hover:text-black disabled:opacity-50"
                     >
                       <X className="size-3" />
                     </button>
@@ -237,7 +237,10 @@ export default function DunningSettingsPage() {
             {/* Gentle */}
             <div className="rounded-lg border p-4 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
               <div className="flex items-center gap-2 mb-2">
-                <Badge variant="outline" className="bg-blue-100 dark:bg-blue-900/50">
+                <Badge
+                  variant="outline"
+                  className="bg-blue-100 dark:bg-blue-900/50"
+                >
                   7 days overdue
                 </Badge>
                 <span className="text-xs text-blue-700 dark:text-blue-300 font-medium">
@@ -254,7 +257,10 @@ export default function DunningSettingsPage() {
             {/* Firm */}
             <div className="rounded-lg border p-4 bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800">
               <div className="flex items-center gap-2 mb-2">
-                <Badge variant="outline" className="bg-yellow-100 dark:bg-yellow-900/50">
+                <Badge
+                  variant="outline"
+                  className="bg-yellow-100 dark:bg-yellow-900/50"
+                >
                   14 days overdue
                 </Badge>
                 <span className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">
@@ -270,7 +276,10 @@ export default function DunningSettingsPage() {
             {/* Urgent */}
             <div className="rounded-lg border p-4 bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800">
               <div className="flex items-center gap-2 mb-2">
-                <Badge variant="outline" className="bg-red-100 dark:bg-red-900/50">
+                <Badge
+                  variant="outline"
+                  className="bg-red-100 dark:bg-red-900/50"
+                >
                   30 days overdue
                 </Badge>
                 <span className="text-xs text-red-700 dark:text-red-300 font-medium">
@@ -297,7 +306,8 @@ export default function DunningSettingsPage() {
                 1
               </span>
               <p>
-                The system checks for overdue invoices <strong>daily at 9 AM</strong>
+                The system checks for overdue invoices{" "}
+                <strong>daily at 9 AM</strong>
               </p>
             </div>
             <div className="flex gap-3">
@@ -328,12 +338,12 @@ export default function DunningSettingsPage() {
             </div>
           </div>
 
-          {isSubaccount && (
+          {isLocation && (
             <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
               <p className="text-xs text-blue-700 dark:text-blue-300">
-                <strong>Note:</strong> As a client workspace, your dunning
+                <strong>Note:</strong> As a location workspace, your dunning
                 settings will be used for your invoices. If dunning is disabled
-                here, the system will fall back to your agency's organization
+                here, the system will fall back to your studio's organization
                 settings.
               </p>
             </div>

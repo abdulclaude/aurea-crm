@@ -1,5 +1,7 @@
 import "dotenv/config";
-import prisma from "../src/lib/db";
+import { eq, inArray, isNull, or } from "drizzle-orm";
+import { db, dbPool } from "../src/db";
+import { funnelEvent, funnelSession } from "../src/db/schema";
 
 const chunk = <T>(items: T[], size: number) => {
   const chunks: T[][] = [];
@@ -10,18 +12,16 @@ const chunk = <T>(items: T[], size: number) => {
 };
 
 async function main() {
-  const events = await prisma.funnelEvent.findMany({
-    where: {
-      OR: [
-        { city: null },
-        { city: "Unknown" },
-        { countryCode: null },
-        { countryCode: "Unknown" },
-        { countryName: null },
-        { countryName: "Unknown" },
-      ],
-    },
-    select: {
+  const events = await db.query.funnelEvent.findMany({
+    where: or(
+      isNull(funnelEvent.city),
+      eq(funnelEvent.city, "Unknown"),
+      isNull(funnelEvent.countryCode),
+      eq(funnelEvent.countryCode, "Unknown"),
+      isNull(funnelEvent.countryName),
+      eq(funnelEvent.countryName, "Unknown"),
+    ),
+    columns: {
       id: true,
       sessionId: true,
       city: true,
@@ -40,9 +40,9 @@ async function main() {
   >();
 
   for (const batch of chunk(sessionIds, 500)) {
-    const sessions = await prisma.funnelSession.findMany({
-      where: { sessionId: { in: batch } },
-      select: {
+    const sessions = await db.query.funnelSession.findMany({
+      where: inArray(funnelSession.sessionId, batch),
+      columns: {
         sessionId: true,
         city: true,
         countryCode: true,
@@ -78,14 +78,14 @@ async function main() {
 
     if (!nextCity && !nextCountryCode && !nextCountryName) continue;
 
-    await prisma.funnelEvent.update({
-      where: { id: event.id },
-      data: {
+    await db
+      .update(funnelEvent)
+      .set({
         ...(nextCity && { city: nextCity }),
         ...(nextCountryCode && { countryCode: nextCountryCode }),
         ...(nextCountryName && { countryName: nextCountryName }),
-      },
-    });
+      })
+      .where(eq(funnelEvent.id, event.id));
     updatedCount += 1;
   }
 
@@ -98,5 +98,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await dbPool.end();
   });

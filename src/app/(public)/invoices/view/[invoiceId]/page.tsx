@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
-import prisma from "@/lib/db";
-import { InvoiceStatus } from "@prisma/client";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { invoice as invoiceTable, invoiceLineItem } from "@/db/schema";
+import { InvoiceStatus } from "@/db/enums";
 import { renderInvoiceHTML } from "@/features/invoicing/lib/template-renderer";
-import { PRESET_TEMPLATES } from "@/features/invoicing/lib/template-presets";
+import { PRESET_TEMPLATES, type InvoiceTemplatePreset } from "@/features/invoicing/lib/template-presets";
 
 interface InvoiceViewPageProps {
   params: Promise<{
@@ -15,11 +17,11 @@ export default async function InvoiceViewPage({
 }: InvoiceViewPageProps) {
   const { invoiceId } = await params;
 
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: {
-      invoiceLineItem: {
-        orderBy: { order: "asc" },
+  const invoice = await db.query.invoice.findFirst({
+    where: eq(invoiceTable.id, invoiceId),
+    with: {
+      invoiceLineItems: {
+        orderBy: [asc(invoiceLineItem.order)],
       },
       invoiceTemplate: true,
     },
@@ -31,31 +33,29 @@ export default async function InvoiceViewPage({
 
   // Mark invoice as viewed if not already
   if (invoice.status === InvoiceStatus.SENT) {
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { status: InvoiceStatus.VIEWED },
-    });
+    await db
+      .update(invoiceTable)
+      .set({ status: InvoiceStatus.VIEWED, updatedAt: new Date() })
+      .where(eq(invoiceTable.id, invoiceId));
   }
 
-  // Get template (use invoice's template or default to minimal)
   const template = invoice.invoiceTemplate
     ? {
         name: invoice.invoiceTemplate.name,
         description: invoice.invoiceTemplate.description || "",
-        layout: invoice.invoiceTemplate.layout as any,
-        styles: invoice.invoiceTemplate.styles as any,
+        layout: invoice.invoiceTemplate.layout as InvoiceTemplatePreset["layout"],
+        styles: invoice.invoiceTemplate.styles as InvoiceTemplatePreset["styles"],
       }
     : PRESET_TEMPLATES.minimal;
 
-  // Prepare invoice data for renderer
   const invoiceData = {
     invoiceNumber: invoice.invoiceNumber,
     issueDate: invoice.issueDate,
     dueDate: invoice.dueDate,
-    contactName: invoice.contactName,
-    contactEmail: invoice.contactEmail,
-    contactAddress: invoice.contactAddress as Record<string, unknown> | null,
-    lineItems: invoice.invoiceLineItem.map((item: any) => ({
+    clientName: invoice.clientName,
+    clientEmail: invoice.clientEmail,
+    clientAddress: invoice.clientAddress as Record<string, unknown> | null,
+    lineItems: invoice.invoiceLineItems.map((item) => ({
       description: item.description,
       quantity: item.quantity.toString(),
       unitPrice: item.unitPrice.toString(),
@@ -69,15 +69,12 @@ export default async function InvoiceViewPage({
     currency: invoice.currency,
     notes: invoice.notes,
     termsConditions: invoice.termsConditions,
-    // TODO: Get these from organization
     businessName: "Your Business Name",
-    businessEmail: "contact@yourbusiness.com",
+    businessEmail: "client@yourbusiness.com",
   };
 
-  // Render invoice HTML
   const html = renderInvoiceHTML(invoiceData, template);
 
-  // Return raw HTML
   return (
     <div dangerouslySetInnerHTML={{ __html: html }} />
   );

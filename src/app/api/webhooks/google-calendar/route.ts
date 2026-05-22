@@ -1,7 +1,9 @@
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { googleCalendarSubscription } from "@/db/schema";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { enqueueGoogleCalendarNotification } from "@/features/google-calendar/server/subscriptions";
+import { and, eq } from "drizzle-orm";
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,12 +20,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const subscription = await prisma.googleCalendarSubscription.findFirst({
-      where: {
-        channelId,
-        resourceId,
-      },
-    });
+    const [subscription] = await db
+      .select()
+      .from(googleCalendarSubscription)
+      .where(
+        and(
+          eq(googleCalendarSubscription.channelId, channelId),
+          eq(googleCalendarSubscription.resourceId, resourceId)
+        )
+      )
+      .limit(1);
 
     if (!subscription) {
       return NextResponse.json(
@@ -43,10 +49,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (resourceState === "sync") {
-      await prisma.googleCalendarSubscription.update({
-        where: { id: subscription.id },
-        data: { lastSyncedAt: new Date() },
-      });
+      await db
+        .update(googleCalendarSubscription)
+        .set({ lastSyncedAt: new Date() })
+        .where(eq(googleCalendarSubscription.id, subscription.id));
       return NextResponse.json({ success: true });
     }
 

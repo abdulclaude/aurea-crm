@@ -6,7 +6,7 @@ export type TimeLogsParams = {
   page: number;
   pageSize: number;
   search?: string;
-  workers?: string[];
+  instructors?: string[];
   deals?: string[];
   statuses?: string[];
   startDate?: string;
@@ -25,7 +25,7 @@ export function useTimeLogsParams() {
       page: parseAsInteger.withDefault(1),
       pageSize: parseAsInteger.withDefault(20),
       search: parseAsString.withDefault(""),
-      workers: parseAsArrayOf(parseAsString).withDefault([]),
+      instructors: parseAsArrayOf(parseAsString).withDefault([]),
       deals: parseAsArrayOf(parseAsString).withDefault([]),
       statuses: parseAsArrayOf(parseAsString).withDefault([]),
       startDate: parseAsString.withDefault(""),

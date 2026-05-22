@@ -25,7 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { TimeLogStatus } from "@prisma/client";
+import { TimeLogStatus } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { useTRPC } from "@/trpc/client";
@@ -76,7 +76,7 @@ function formatDuration(minutes: number | null | undefined): string {
 
 function formatCurrency(
   amount: number | null | undefined,
-  currency?: string | null
+  currency?: string | null,
 ): string {
   if (!amount) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -133,9 +133,9 @@ export function TimesheetTable() {
   const { data, isFetching, refetch } = useSuspenseQuery(
     trpc.timeTracking.list.queryOptions({
       search: params.search || undefined,
-      workers:
-        params.workers && params.workers.length > 0
-          ? params.workers
+      instructors:
+        params.instructors && params.instructors.length > 0
+          ? params.instructors
           : undefined,
       deals: params.deals && params.deals.length > 0 ? params.deals : undefined,
       statuses:
@@ -148,7 +148,7 @@ export function TimesheetTable() {
       durationMax: params.durationMax ?? undefined,
       amountMin: params.amountMin ?? undefined,
       amountMax: params.amountMax ?? undefined,
-    })
+    }),
   );
 
   const handleApprove = React.useCallback(
@@ -163,10 +163,10 @@ export function TimesheetTable() {
           onError: (error: any) => {
             toast.error(error.message);
           },
-        }
+        },
       );
     },
-    [approveTimeLog, refetch]
+    [approveTimeLog, refetch],
   );
 
   const handleReject = React.useCallback(
@@ -181,10 +181,10 @@ export function TimesheetTable() {
           onError: (error: any) => {
             toast.error(error.message);
           },
-        }
+        },
       );
     },
-    [approveTimeLog, refetch]
+    [approveTimeLog, refetch],
   );
 
   const handleDelete = React.useCallback(
@@ -200,11 +200,11 @@ export function TimesheetTable() {
             onError: (error: any) => {
               toast.error(error.message);
             },
-          }
+          },
         );
       }
     },
-    [deleteTimeLog, refetch]
+    [deleteTimeLog, refetch],
   );
 
   const timeLogColumns: ColumnDef<TimeLogRow>[] = [
@@ -232,15 +232,15 @@ export function TimesheetTable() {
       enableHiding: false,
     },
     {
-      id: "worker",
-      accessorFn: (row) => row.worker?.name || row.contact?.name || "—",
-      header: "Worker",
-      meta: { label: "Worker" },
+      id: "instructor",
+      accessorFn: (row) => row.instructor?.name || row.client?.name || "—",
+      header: "Instructor",
+      meta: { label: "Instructor" },
       enableHiding: false,
       cell: ({ row }) => {
-        const worker = row.original.worker;
-        const contact = row.original.contact;
-        const person = worker || contact;
+        const instructor = row.original.instructor;
+        const client = row.original.client;
+        const person = instructor || client;
 
         if (!person) {
           return <span className="text-xs text-primary/40">—</span>;
@@ -257,14 +257,14 @@ export function TimesheetTable() {
               <p className="text-xs font-medium text-primary truncate">
                 {person.name}
               </p>
-              {worker?.role && (
+              {instructor?.role && (
                 <p className="text-[11px] text-primary/60 truncate">
-                  {worker.role}
+                  {instructor.role}
                 </p>
               )}
-              {!worker && contact?.email && (
+              {!instructor && client?.email && (
                 <p className="text-[11px] text-primary/60 truncate">
-                  {contact.email}
+                  {client.email}
                 </p>
               )}
             </div>
@@ -366,7 +366,7 @@ export function TimesheetTable() {
         <span className="text-xs font-medium text-primary">
           {formatCurrency(
             row.original.totalAmount ? Number(row.original.totalAmount) : null,
-            row.original.currency
+            row.original.currency,
           )}
         </span>
       ),
@@ -442,7 +442,7 @@ export function TimesheetTable() {
   ];
 
   const TIMESHEET_COLUMN_IDS = timeLogColumns.map(
-    (column, index) => (column.id ?? `column-${index}`) as string
+    (column, index) => (column.id ?? `column-${index}`) as string,
   );
   const COLUMN_ORDER_STORAGE_KEY = "timesheet-table.column-order";
 
@@ -450,7 +450,7 @@ export function TimesheetTable() {
     React.useState<ColumnOrderState>(TIMESHEET_COLUMN_IDS);
   const hiddenColumns = React.useMemo(
     () => normalizeHiddenColumns(params.hiddenColumns ?? []),
-    [params.hiddenColumns]
+    [params.hiddenColumns],
   );
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>(() => visibilityFromHidden(hiddenColumns));
@@ -463,7 +463,7 @@ export function TimesheetTable() {
     const next = normalizeColumnOrder(
       order,
       TIMESHEET_COLUMN_IDS,
-      PRIMARY_COLUMN_ID
+      PRIMARY_COLUMN_ID,
     );
     if (shallowEqualArrays(next, TIMESHEET_COLUMN_IDS)) {
       window.localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
@@ -482,7 +482,7 @@ export function TimesheetTable() {
         const next = normalizeColumnOrder(
           parsed,
           TIMESHEET_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         setColumnOrder(next);
       }
@@ -504,7 +504,7 @@ export function TimesheetTable() {
 
   const sortingState = React.useMemo(
     () => sortValueToState(params.sort),
-    [params.sort]
+    [params.sort],
   );
 
   const handleSortingChange = React.useCallback(
@@ -512,26 +512,26 @@ export function TimesheetTable() {
       const nextValue = sortingStateToValue(state) ?? TIMESHEET_DEFAULT_SORT;
       setParams((prev) => ({ ...prev, sort: nextValue }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleSortChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, sort: value }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleApplyAllFilters = React.useCallback(
     (filters: {
-      workers: string[];
+      instructors: string[];
       deals: string[];
       statuses: string[];
       durationMin?: number;
@@ -541,7 +541,7 @@ export function TimesheetTable() {
     }) => {
       setParams((prev) => ({
         ...prev,
-        workers: filters.workers,
+        instructors: filters.instructors,
         deals: filters.deals,
         statuses: filters.statuses,
         durationMin: filters.durationMin,
@@ -550,13 +550,13 @@ export function TimesheetTable() {
         amountMax: filters.amountMax,
       }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleClearFilters = React.useCallback(() => {
     setParams((prev) => ({
       ...prev,
-      workers: [],
+      instructors: [],
       deals: [],
       statuses: [],
       durationMin: undefined,
@@ -575,7 +575,7 @@ export function TimesheetTable() {
         endDate: end ? toYMD(end) : "",
       }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -589,7 +589,7 @@ export function TimesheetTable() {
       pendingHiddenRef.current = normalizedHidden;
       setParams((prev) => ({ ...prev, hiddenColumns: normalizedHidden }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnOrderChange = React.useCallback(
@@ -599,13 +599,13 @@ export function TimesheetTable() {
         const next = normalizeColumnOrder(
           resolved,
           TIMESHEET_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         persistColumnOrder(next);
         return next;
       });
     },
-    [persistColumnOrder]
+    [persistColumnOrder],
   );
 
   const searchValue = params.search ?? "";
@@ -621,19 +621,19 @@ export function TimesheetTable() {
       // Calculate totals
       const totalMinutes = data.items.reduce(
         (sum, log) => sum + (log.duration ?? 0),
-        0
+        0,
       );
       const totalHours = totalMinutes / 60;
       const totalAmount = data.items.reduce(
         (sum, log) => sum + Number(log.totalAmount ?? 0),
-        0
+        0,
       );
 
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Time Logs Export</title>
+            <title>Time logs export</title>
             <style>
               body {
                 font-family: system-ui, -apple-system, sans-serif;
@@ -671,7 +671,7 @@ export function TimesheetTable() {
                 font-size: 13px;
                 color: #333;
               }
-              .worker-cell {
+              .instructor-cell {
                 font-weight: 500;
               }
               .role-text {
@@ -739,7 +739,7 @@ export function TimesheetTable() {
             </style>
           </head>
           <body>
-            <h1>Time Logs Export</h1>
+            <h1>Time logs export</h1>
             <p class="subtitle">
               Exported on ${format(new Date(), "MMM d, yyyy 'at' h:mm a")}
             </p>
@@ -747,7 +747,7 @@ export function TimesheetTable() {
             <table>
               <thead>
                 <tr>
-                  <th>Worker</th>
+                  <th>Instructor</th>
                   <th>Title</th>
                   <th>Job/Deal</th>
                   <th>Date</th>
@@ -764,14 +764,14 @@ export function TimesheetTable() {
                         .map(
                           (log) => `
                   <tr>
-                    <td class="worker-cell">
-                      ${log.worker?.name || log.contact?.name || "—"}
+                    <td class="instructor-cell">
+                      ${log.instructor?.name || log.client?.name || "—"}
                       ${
-                        log.worker?.role
-                          ? `<span class="role-text">${log.worker.role}</span>`
-                          : log.contact?.email
-                          ? `<span class="role-text">${log.contact.email}</span>`
-                          : ""
+                        log.instructor?.role
+                          ? `<span class="role-text">${log.instructor.role}</span>`
+                          : log.client?.email
+                            ? `<span class="role-text">${log.client.email}</span>`
+                            : ""
                       }
                     </td>
                     <td>${log.title || "—"}</td>
@@ -798,10 +798,10 @@ export function TimesheetTable() {
                     </td>
                     <td>${formatCurrency(
                       log.totalAmount ? Number(log.totalAmount) : null,
-                      log.currency
+                      log.currency,
                     )}</td>
                   </tr>
-                `
+                `,
                         )
                         .join("")
                     : '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #999;">No time logs found</td></tr>'
@@ -811,14 +811,14 @@ export function TimesheetTable() {
 
             <div class="totals-section">
               <div class="total-item">
-                <div class="total-label">Total Hours</div>
+                <div class="total-label">Total hours</div>
                 <div class="total-value">${totalHours.toFixed(2)}h</div>
               </div>
               <div class="total-item">
-                <div class="total-label">Total Amount</div>
+                <div class="total-label">Total amount</div>
                 <div class="total-value">${formatCurrency(
                   totalAmount,
-                  null
+                  null,
                 )}</div>
               </div>
             </div>
@@ -860,7 +860,7 @@ export function TimesheetTable() {
         onRowSelectionChange={setRowSelection}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
-            No time logs found. <br /> Time logs will appear here once workers
+            No time logs found. <br /> Time logs will appear here once instructors
             clock in.
           </div>
         }
@@ -876,7 +876,7 @@ export function TimesheetTable() {
               columnOrder={columnOrder}
               onColumnOrderChange={handleColumnOrderChange}
               initialColumnOrder={TIMESHEET_COLUMN_IDS}
-              selectedWorkers={params.workers ?? []}
+              selectedInstructors={params.instructors ?? []}
               selectedDeals={params.deals ?? []}
               selectedStatuses={params.statuses ?? []}
               startDate={
@@ -914,7 +914,7 @@ function normalizeHiddenColumns(columns: string[]): string[] {
 function normalizeColumnOrder(
   order: string[],
   defaults: string[],
-  fixedFirst?: string
+  fixedFirst?: string,
 ) {
   const seen = new Set<string>();
   const next: string[] = [];

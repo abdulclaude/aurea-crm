@@ -56,6 +56,7 @@ export interface EventCalendarProps {
   className?: string;
   initialView?: CalendarView;
   timeBounds?: { startHour: number; endHour: number };
+  enableCellEventCreate?: boolean;
 }
 
 export function EventCalendar({
@@ -68,6 +69,7 @@ export function EventCalendar({
   className,
   initialView = "month",
   timeBounds = { startHour: 7, endHour: 24 },
+  enableCellEventCreate = true,
 }: EventCalendarProps) {
   // Use the shared calendar context instead of local state
   const { currentDate, setCurrentDate } = useCalendarContext();
@@ -80,7 +82,7 @@ export function EventCalendar({
   };
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
-    null
+    null,
   );
   const { open } = useSidebar();
 
@@ -162,7 +164,7 @@ export function EventCalendar({
     }
   };
 
-  const handleEventCreate = (startTime: Date) => {
+  const handleEventCreate = (startTime: Date, endTime?: Date) => {
     console.log("Creating new event at:", startTime); // Debug log
 
     // Snap to 15-minute intervals
@@ -184,7 +186,8 @@ export function EventCalendar({
       id: "",
       title: "",
       start: startTime,
-      end: addHoursToDate(startTime, 1),
+      end:
+        endTime && endTime > startTime ? endTime : addHoursToDate(startTime, 1),
       allDay: false,
     };
 
@@ -301,7 +304,7 @@ export function EventCalendar({
         <div
           className={cn(
             "flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-5 sm:px-8",
-            className
+            className,
           )}
         >
           <div className="flex sm:flex-col max-sm:items-center justify-between gap-1.5">
@@ -345,11 +348,22 @@ export function EventCalendar({
                 variant="outline"
                 className="max-sm:h-8 max-sm:px-2.5!"
                 onClick={() => {
-                  setSelectedEvent(null); // Ensure we're creating a new event
-                  setIsEventDialogOpen(true);
+                  if (onEventAdd) {
+                    const now = new Date();
+                    onEventAdd({
+                      id: "",
+                      title: "",
+                      start: now,
+                      end: addHoursToDate(now, 1),
+                      allDay: false,
+                    });
+                  } else {
+                    setSelectedEvent(null);
+                    setIsEventDialogOpen(true);
+                  }
                 }}
               >
-                New Event
+                Schedule a class
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -390,7 +404,9 @@ export function EventCalendar({
               currentDate={currentDate}
               events={events}
               onEventSelect={handleEventSelect}
-              onEventCreate={handleEventCreate}
+              onEventCreate={
+                enableCellEventCreate ? handleEventCreate : undefined
+              }
             />
           )}
           {view === "week" && (
@@ -398,7 +414,9 @@ export function EventCalendar({
               currentDate={currentDate}
               events={events}
               onEventSelect={handleEventSelect}
-              onEventCreate={handleEventCreate}
+              onEventCreate={
+                enableCellEventCreate ? handleEventCreate : undefined
+              }
               timeBounds={timeBounds}
             />
           )}
@@ -407,7 +425,9 @@ export function EventCalendar({
               currentDate={currentDate}
               events={events}
               onEventSelect={handleEventSelect}
-              onEventCreate={handleEventCreate}
+              onEventCreate={
+                enableCellEventCreate ? handleEventCreate : undefined
+              }
               timeBounds={timeBounds}
             />
           )}
@@ -420,16 +440,18 @@ export function EventCalendar({
           )}
         </div>
 
-        <EventDialog
-          event={selectedEvent}
-          isOpen={isEventDialogOpen}
-          onClose={() => {
-            setIsEventDialogOpen(false);
-            setSelectedEvent(null);
-          }}
-          onSave={handleEventSave}
-          onDelete={handleEventDelete}
-        />
+        {!onEventSelect && (
+          <EventDialog
+            event={selectedEvent}
+            isOpen={isEventDialogOpen}
+            onClose={() => {
+              setIsEventDialogOpen(false);
+              setSelectedEvent(null);
+            }}
+            onSave={handleEventSave}
+            onDelete={handleEventDelete}
+          />
+        )}
       </CalendarDndProvider>
     </div>
   );

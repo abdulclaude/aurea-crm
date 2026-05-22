@@ -57,7 +57,7 @@ const formSchema = z.object({
   description: z.string().optional(),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
-  contactIds: z.string().optional(),
+  clientIds: z.string().optional(),
 });
 
 export type CreateDealFormValues = z.infer<typeof formSchema>;
@@ -89,11 +89,11 @@ export const CreateDealDialog: React.FC<Props> = ({
       description: defaultValues.description || "",
       pipelineId: defaultValues.pipelineId || "",
       pipelineStageId: defaultValues.pipelineStageId || "",
-      contactIds: defaultValues.contactIds || "",
+      clientIds: defaultValues.clientIds || "",
     },
   });
 
-  const [useVariableInputForContact, setUseVariableInputForContact] =
+  const [useVariableInputForClient, setUseVariableInputForClient] =
     useState(false);
 
   const trpc = useTRPC();
@@ -102,11 +102,11 @@ export const CreateDealDialog: React.FC<Props> = ({
     enabled: open,
   });
 
-  const contactsQuery = useQuery(
-    trpc.contacts.list.queryOptions({
+  const clientsQuery = useQuery(
+    trpc.clients.list.queryOptions({
       cursor: undefined,
       limit: 100,
-    })
+    }),
   );
 
   const pipelines = pipelinesQuery.data?.items || [];
@@ -130,10 +130,23 @@ export const CreateDealDialog: React.FC<Props> = ({
         description: defaultValues.description || "",
         pipelineId: defaultValues.pipelineId || "",
         pipelineStageId: defaultValues.pipelineStageId || "",
-        contactIds: defaultValues.contactIds || "",
+        clientIds: defaultValues.clientIds || "",
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.name, defaultValues.value, defaultValues.currency, defaultValues.deadline, defaultValues.source, defaultValues.description, defaultValues.pipelineId, defaultValues.pipelineStageId, defaultValues.contactIds, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.name,
+    defaultValues.value,
+    defaultValues.currency,
+    defaultValues.deadline,
+    defaultValues.source,
+    defaultValues.description,
+    defaultValues.pipelineId,
+    defaultValues.pipelineStageId,
+    defaultValues.clientIds,
+    form,
+  ]);
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);
@@ -144,7 +157,7 @@ export const CreateDealDialog: React.FC<Props> = ({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-black/10">
         <SheetHeader className="px-6 p-6 pb-2 gap-1">
-          <SheetTitle>Create Deal Configuration</SheetTitle>
+          <SheetTitle>Create deal Configuration</SheetTitle>
           <SheetDescription>
             Configure the deal details to create in your CRM pipeline.
           </SheetDescription>
@@ -297,7 +310,7 @@ export const CreateDealDialog: React.FC<Props> = ({
                     <VariableInput
                       value={field.value || ""}
                       onChange={field.onChange}
-                      placeholder="Deal details and notes or @variables"
+                      placeholder="Deal details or @variables"
                       variables={variables}
                     />
                   </FormControl>
@@ -383,27 +396,27 @@ export const CreateDealDialog: React.FC<Props> = ({
 
             <FormField
               control={form.control}
-              name="contactIds"
+              name="clientIds"
               render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between mb-2">
-                    <FormLabel>Contact ID (optional)</FormLabel>
+                    <FormLabel>Client ID (optional)</FormLabel>
                     <div className="flex items-center space-x-2">
                       <Label
-                        htmlFor="use-variable-contact-create"
+                        htmlFor="use-variable-client-create"
                         className="text-xs text-primary/75 cursor-pointer"
                       >
                         Use variables
                       </Label>
                       <Switch
-                        id="use-variable-contact-create"
-                        checked={useVariableInputForContact}
-                        onCheckedChange={setUseVariableInputForContact}
+                        id="use-variable-client-create"
+                        checked={useVariableInputForClient}
+                        onCheckedChange={setUseVariableInputForClient}
                       />
                     </div>
                   </div>
                   <FormControl>
-                    {useVariableInputForContact ? (
+                    {useVariableInputForClient ? (
                       <VariableInput
                         value={field.value || ""}
                         onChange={field.onChange}
@@ -415,34 +428,34 @@ export const CreateDealDialog: React.FC<Props> = ({
                       <Select
                         value={field.value || ""}
                         onValueChange={field.onChange}
-                        disabled={contactsQuery.isLoading}
+                        disabled={clientsQuery.isLoading}
                       >
                         <SelectTrigger className="w-full">
                           <SelectValue
                             placeholder={
-                              contactsQuery.isLoading
-                                ? "Loading contacts..."
-                                : "Select a contact"
+                              clientsQuery.isLoading
+                                ? "Loading clients..."
+                                : "Select a client"
                             }
                           />
                         </SelectTrigger>
                         <SelectContent>
-                          {contactsQuery.data?.items?.map((contact) => (
-                            <SelectItem key={contact.id} value={contact.id}>
+                          {clientsQuery.data?.items?.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
                               <div className="flex flex-col">
                                 <span className="font-medium">
-                                  {contact.name}
+                                  {client.name}
                                 </span>
-                                {contact.email && (
+                                {client.email && (
                                   <span className="text-xs text-primary/75">
-                                    {contact.email}
+                                    {client.email}
                                   </span>
                                 )}
                               </div>
                             </SelectItem>
                           )) ?? (
                             <div className="px-2 py-4 text-sm text-primary/75">
-                              No contacts found
+                              No clients found
                             </div>
                           )}
                         </SelectContent>
@@ -450,7 +463,7 @@ export const CreateDealDialog: React.FC<Props> = ({
                     )}
                   </FormControl>
                   <FormDescription>
-                    {useVariableInputForContact ? (
+                    {useVariableInputForClient ? (
                       <>
                         Type{" "}
                         <span className="text-primary font-medium">
@@ -460,7 +473,7 @@ export const CreateDealDialog: React.FC<Props> = ({
                         to insert context variables
                       </>
                     ) : (
-                      "Link this deal to an existing contact"
+                      "Link this deal to an existing client"
                     )}
                   </FormDescription>
                   <FormMessage />

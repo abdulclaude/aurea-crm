@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Settings, Save, Upload, Archive, Trash2, BarChart3, Globe } from "lucide-react";
-import { FunnelStatus } from "@prisma/client";
-import type { Funnel } from "@prisma/client";
+import { FunnelStatus } from "@/db/enums";
+import type { Funnel } from "@/db/types";
 import { toast } from "sonner";
 import { PixelIntegrationsDialog } from "../dialogs/pixel-integrations-dialog";
 import { DomainSettingsDialog } from "../dialogs/domain-settings-dialog";

@@ -144,17 +144,16 @@ export function TimeLogEditSheet({
     }
   }, [timeLog, form, existingSections]);
 
-  const updateMutation = useMutation({
-    ...trpc.timeTracking.update.mutationOptions({}),
+  const updateMutation = useMutation(trpc.timeTracking.update.mutationOptions({
     onSuccess: () => {
       toast.success("Time log updated successfully");
       onSuccess?.();
       onOpenChange(false);
     },
-    onError: (error: any) => {
-      toast.error(error.message || "Failed to update time log");
+    onError: (error: unknown) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update time log");
     },
-  });
+  }));
 
   const onSubmit = (data: FormValues) => {
     if (!timeLog) return;
@@ -216,17 +215,17 @@ export function TimeLogEditSheet({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6 pt-6">
-            {/* Worker & Client Info (Read-only display) */}
+            {/* Instructor & Client Info (Read-only display) */}
             <div className="space-y-2">
-              <Label className="text-xs text-primary/60">Worker</Label>
+              <Label className="text-xs text-primary/60">Instructor</Label>
               <div className="text-sm text-primary font-medium">
-                {timeLog.worker?.name || timeLog.contact?.name || "—"}
+                {timeLog.instructor?.name || timeLog.client?.name || "—"}
               </div>
-              {timeLog.contact && (
+              {timeLog.client && (
                 <>
                   <Label className="text-xs text-primary/60 mt-4">Client</Label>
                   <div className="text-sm text-primary font-medium">
-                    {timeLog.contact.name}
+                    {timeLog.client.name}
                   </div>
                 </>
               )}

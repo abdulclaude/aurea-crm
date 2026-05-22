@@ -1,10 +1,12 @@
 import { generateEmbeddings, entityToText } from "./openai";
-import { storeVectors, deleteVectorsBySubaccount } from "@/lib/vector/store";
+import { storeVectors, deleteVectorsByLocation } from "@/lib/vector/store";
 import type { VectorDocument, EntityType } from "@/lib/vector/types";
-import prisma from "../db";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { client as clientTable, deal as dealTable, location as locationTable, pipeline as pipelineTable, pipelineStage, workflows as workflowTable } from "@/db/schema";
 
 interface SyncResult {
-  contacts: number;
+  clients: number;
   deals: number;
   pipelines: number;
   workflows: number;
@@ -12,18 +14,18 @@ interface SyncResult {
 }
 
 /**
- * Sync all CRM entities for a subaccount to the vector store
+ * Sync all CRM entities for a location to the vector store
  */
-export async function syncSubaccountEmbeddings(
-  subaccountId: string,
+export async function syncLocationEmbeddings(
+  locationId: string,
   options?: { onProgress?: (message: string) => void }
 ): Promise<SyncResult> {
   const log = options?.onProgress ?? console.log;
 
-  log(`Starting embedding sync for subaccount: ${subaccountId}`);
+  log(`Starting embedding sync for location: ${locationId}`);
 
-  // Clear existing vectors for this subaccount
-  const deleted = await deleteVectorsBySubaccount(subaccountId);
+  // Clear existing vectors for this location
+  const deleted = await deleteVectorsByLocation(locationId);
   log(`Deleted ${deleted} existing vectors`);
 
   const documents: {
@@ -32,73 +34,83 @@ export async function syncSubaccountEmbeddings(
     metadata: VectorDocument["metadata"];
   }[] = [];
 
-  // Fetch contacts
-  const contacts = await prisma.contact.findMany({
-    where: { subaccountId },
-    include: {
-      contactAssignee: {
-        include: {
-          subaccountMember: {
-            include: { user: true },
+  // Fetch clients
+  const clients = await db.query.client.findMany({
+    where: eq(clientTable.locationId, locationId),
+    with: {
+      clientAssignees: {
+        with: {
+          locationMember: {
+            with: { user: true },
           },
+        },
+      },
+      notes: {
+        columns: {
+          content: true,
         },
       },
     },
   });
 
-  log(`Found ${contacts.length} contacts`);
+  log(`Found ${clients.length} clients`);
 
-  for (const contact of contacts) {
+  for (const client of clients) {
     const fields = {
-      name: contact.name,
-      email: contact.email,
-      companyName: contact.companyName,
-      phone: contact.phone,
-      position: contact.position,
-      type: contact.type,
-      lifecycleStage: contact.lifecycleStage,
-      source: contact.source,
-      website: contact.website,
-      linkedin: contact.linkedin,
-      tags: contact.tags,
-      score: contact.score,
-      country: contact.country,
-      city: contact.city,
-      notes: contact.notes,
-      assignees: contact.contactAssignee
-        .map((a) => a.subaccountMember.user?.name)
+      name: client.name,
+      email: client.email,
+      companyName: client.companyName,
+      phone: client.phone,
+      position: client.position,
+      type: client.type,
+      lifecycleStage: client.lifecycleStage,
+      source: client.source,
+      website: client.website,
+      linkedin: client.linkedin,
+      tags: client.tags,
+      score: client.score,
+      country: client.country,
+      city: client.city,
+      notes: client.notes.map((note) => note.content),
+      assignees: client.clientAssignees
+        .map((a) => a.locationMember.user?.name)
         .filter(Boolean),
     };
 
     documents.push({
-      id: `contact:${contact.id}`,
-      text: entityToText("contact", fields),
+      id: `client:${client.id}`,
+      text: entityToText("client", fields),
       metadata: {
-        entityType: "contact" as EntityType,
-        entityId: contact.id,
-        name: contact.name,
-        subaccountId,
+        entityType: "client" as EntityType,
+        entityId: client.id,
+        name: client.name,
+        locationId,
         fields,
-        updatedAt: contact.updatedAt.toISOString(),
+        updatedAt: client.updatedAt.toISOString(),
       },
     });
   }
 
   // Fetch deals
-  const deals = await prisma.deal.findMany({
-    where: { subaccountId },
-    include: {
+  const deals = await db.query.deal.findMany({
+    where: eq(dealTable.locationId, locationId),
+    with: {
       pipeline: true,
       pipelineStage: true,
-      dealMember: {
-        include: {
-          subaccountMember: {
-            include: { user: true },
+      dealAssignees: {
+        with: {
+          locationMember: {
+            with: { user: true },
           },
         },
       },
-      dealContact: {
-        include: { contact: true },
+      dealClients: {
+        with: { client: true },
+      },
+      notes: {
+        columns: {
+          content: true,
+        },
       },
     },
   });
@@ -115,11 +127,12 @@ export async function syncSubaccountEmbeddings(
       source: deal.source,
       tags: deal.tags,
       description: deal.description,
+      notes: deal.notes.map((note) => note.content),
       deadline: deal.deadline?.toISOString(),
-      members: deal.dealMember
-        .map((m) => m.subaccountMember.user?.name)
+      members: deal.dealAssignees
+        .map((m) => m.locationMember.user?.name)
         .filter(Boolean),
-      contacts: deal.dealContact.map((c) => c.contact.name),
+      clients: deal.dealClients.map((c) => c.client.name),
     };
 
     documents.push({
@@ -129,7 +142,7 @@ export async function syncSubaccountEmbeddings(
         entityType: "deal" as EntityType,
         entityId: deal.id,
         name: deal.name,
-        subaccountId,
+        locationId,
         fields,
         updatedAt: deal.updatedAt.toISOString(),
       },
@@ -137,11 +150,11 @@ export async function syncSubaccountEmbeddings(
   }
 
   // Fetch pipelines
-  const pipelines = await prisma.pipeline.findMany({
-    where: { subaccountId },
-    include: {
-      pipelineStage: {
-        orderBy: { position: "asc" },
+  const pipelines = await db.query.pipeline.findMany({
+    where: eq(pipelineTable.locationId, locationId),
+    with: {
+      pipelineStages: {
+        orderBy: asc(pipelineStage.position),
       },
     },
   });
@@ -154,7 +167,7 @@ export async function syncSubaccountEmbeddings(
       description: pipeline.description,
       isActive: pipeline.isActive,
       isDefault: pipeline.isDefault,
-      stages: pipeline.pipelineStage.map((s) => ({
+      stages: pipeline.pipelineStages.map((s) => ({
         name: s.name,
         probability: s.probability,
         rottingDays: s.rottingDays,
@@ -168,7 +181,7 @@ export async function syncSubaccountEmbeddings(
         entityType: "pipeline" as EntityType,
         entityId: pipeline.id,
         name: pipeline.name,
-        subaccountId,
+        locationId,
         fields,
         updatedAt: pipeline.updatedAt.toISOString(),
       },
@@ -176,20 +189,20 @@ export async function syncSubaccountEmbeddings(
   }
 
   // Fetch workflows
-  const workflows = await prisma.workflows.findMany({
-    where: { subaccountId },
-    include: {
-      Node: true,
+  const workflows = await db.query.workflows.findMany({
+    where: eq(workflowTable.locationId, locationId),
+    with: {
+      nodes: true,
     },
   });
 
   log(`Found ${workflows.length} workflows`);
 
   for (const workflow of workflows) {
-    const triggerNodes = workflow.Node.filter((n) =>
+    const triggerNodes = workflow.nodes.filter((n) =>
       n.type.includes("TRIGGER")
     );
-    const executionNodes = workflow.Node.filter(
+    const executionNodes = workflow.nodes.filter(
       (n) => !n.type.includes("TRIGGER")
     );
 
@@ -200,7 +213,7 @@ export async function syncSubaccountEmbeddings(
       isTemplate: workflow.isTemplate,
       triggerTypes: triggerNodes.map((n) => n.type),
       executionTypes: executionNodes.map((n) => n.type),
-      nodeCount: workflow.Node.length,
+      nodeCount: workflow.nodes.length,
     };
 
     documents.push({
@@ -210,7 +223,7 @@ export async function syncSubaccountEmbeddings(
         entityType: "workflow" as EntityType,
         entityId: workflow.id,
         name: workflow.name,
-        subaccountId,
+        locationId,
         fields,
         updatedAt: workflow.updatedAt.toISOString(),
       },
@@ -220,7 +233,7 @@ export async function syncSubaccountEmbeddings(
   if (documents.length === 0) {
     log("No documents to embed");
     return {
-      contacts: contacts.length,
+      clients: clients.length,
       deals: deals.length,
       pipelines: pipelines.length,
       workflows: workflows.length,
@@ -260,7 +273,7 @@ export async function syncSubaccountEmbeddings(
   log("Embedding sync complete");
 
   return {
-    contacts: contacts.length,
+    clients: clients.length,
     deals: deals.length,
     pipelines: pipelines.length,
     workflows: workflows.length,
@@ -269,25 +282,25 @@ export async function syncSubaccountEmbeddings(
 }
 
 /**
- * Sync embeddings for all subaccounts
+ * Sync embeddings for all locations
  */
 export async function syncAllEmbeddings(options?: {
   onProgress?: (message: string) => void;
 }): Promise<Map<string, SyncResult>> {
   const log = options?.onProgress ?? console.log;
 
-  const subaccounts = await prisma.subaccount.findMany({
-    select: { id: true, companyName: true },
+  const locations = await db.query.location.findMany({
+    columns: { id: true, companyName: true },
   });
 
-  log(`Found ${subaccounts.length} subaccounts to sync`);
+  log(`Found ${locations.length} locations to sync`);
 
   const results = new Map<string, SyncResult>();
 
-  for (const subaccount of subaccounts) {
-    log(`\nSyncing subaccount: ${subaccount.companyName} (${subaccount.id})`);
-    const result = await syncSubaccountEmbeddings(subaccount.id, options);
-    results.set(subaccount.id, result);
+  for (const location of locations) {
+    log(`\nSyncing location: ${location.companyName} (${location.id})`);
+    const result = await syncLocationEmbeddings(location.id, options);
+    results.set(location.id, result);
   }
 
   return results;

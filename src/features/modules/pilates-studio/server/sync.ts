@@ -1,13 +1,23 @@
-import prisma from "@/lib/db";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  apps as appsTable,
+  client,
+  location,
+  studioBooking,
+  studioClass,
+  studioMembership,
+} from "@/db/schema";
 import {
   createMindbodyAPI,
+  type MindbodyApp,
   type MindbodyClient,
   type MindbodyClass,
   type MindbodyAppointment,
   type MindbodyClientContract,
 } from "../lib/mindbody-api";
-import type { Apps } from "@prisma/client";
-import { StudioBookingStatus, StudioMembershipStatus } from "@prisma/client";
+import { StudioBookingStatus, StudioMembershipStatus } from "@/db/enums";
+import type { JsonObject } from "@/db/json";
 
 export interface SyncResult {
   success: boolean;
@@ -18,12 +28,12 @@ export interface SyncResult {
 }
 
 /**
- * Sync clients from Mindbody to CRM Contacts
+ * Sync clients from Mindbody to CRM Clients
  */
 export async function syncMindbodyClients(
-  app: Apps,
+  app: MindbodyApp,
   options?: {
-    subaccountId?: string;
+    locationId?: string;
     organizationId?: string;
     updatedAfter?: Date;
   },
@@ -52,7 +62,7 @@ export async function syncMindbodyClients(
       for (const mindbodyClient of response.Clients) {
         try {
           await syncClient(mindbodyClient, {
-            subaccountId: options?.subaccountId,
+            locationId: options?.locationId,
             organizationId: options?.organizationId,
           });
           result.synced++;
@@ -69,15 +79,16 @@ export async function syncMindbodyClients(
     }
 
     // Update last sync time
-    await prisma.apps.update({
-      where: { id: app.id },
-      data: {
+    await db
+      .update(appsTable)
+      .set({
         metadata: {
-          ...(app.metadata as object),
+          ...(isJsonObject(app.metadata) ? app.metadata : {}),
           lastClientSync: new Date().toISOString(),
         },
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(appsTable.id, app.id));
   } catch (error) {
     result.success = false;
     result.errors.push(
@@ -89,46 +100,46 @@ export async function syncMindbodyClients(
 }
 
 /**
- * Sync a single Mindbody client to a CRM contact
+ * Sync a single Mindbody client to a CRM client
  */
 async function syncClient(
   mindbodyClient: MindbodyClient,
   context: {
-    subaccountId?: string;
+    locationId?: string;
     organizationId?: string;
   },
 ): Promise<void> {
   let organizationId = context.organizationId;
-  const subaccountId = context.subaccountId;
+  const locationId = context.locationId;
 
-  // If we have subaccountId, get the organizationId from it
-  if (subaccountId && !organizationId) {
-    const subaccount = await prisma.subaccount.findUnique({
-      where: { id: subaccountId },
-      select: { organizationId: true },
+  // If we have locationId, get the organizationId from it
+  if (locationId && !organizationId) {
+    const selectedLocation = await db.query.location.findFirst({
+      where: eq(location.id, locationId),
+      columns: { organizationId: true },
     });
 
-    if (!subaccount) {
-      throw new Error(`Subaccount ${subaccountId} not found`);
+    if (!selectedLocation) {
+      throw new Error(`Location ${locationId} not found`);
     }
 
-    organizationId = subaccount.organizationId;
+    organizationId = selectedLocation.organizationId;
   }
 
   if (!organizationId) {
-    throw new Error("Either organizationId or subaccountId is required");
+    throw new Error("Either organizationId or locationId is required");
   }
 
-  // Try to find existing contact by email
-  const existingContact = await prisma.contact.findFirst({
-    where: {
-      organizationId,
-      subaccountId: subaccountId || null,
-      email: mindbodyClient.Email,
-    },
+  // Try to find existing client by email
+  const existingClient = await db.query.client.findFirst({
+    where: and(
+      eq(client.organizationId, organizationId),
+      locationId ? eq(client.locationId, locationId) : isNull(client.locationId),
+      eq(client.email, mindbodyClient.Email),
+    ),
   });
 
-  const contactData = {
+  const clientData = {
     name: `${mindbodyClient.FirstName} ${mindbodyClient.LastName}`,
     email: mindbodyClient.Email,
     phone: mindbodyClient.MobilePhone,
@@ -140,24 +151,22 @@ async function syncClient(
         creationDate: mindbodyClient.CreationDate,
         lastModified: mindbodyClient.LastModifiedDateTime,
       },
-    },
+    } satisfies JsonObject,
   };
 
-  if (existingContact) {
-    await prisma.contact.update({
-      where: { id: existingContact.id },
-      data: contactData,
-    });
+  if (existingClient) {
+    await db
+      .update(client)
+      .set({ ...clientData, updatedAt: new Date() })
+      .where(eq(client.id, existingClient.id));
   } else {
-    await prisma.contact.create({
-      data: {
+    await db.insert(client).values({
         id: crypto.randomUUID(),
-        ...contactData,
-        subaccountId: subaccountId || null,
+        ...clientData,
+        locationId: locationId || null,
         organizationId,
         createdAt: new Date(),
         updatedAt: new Date(),
-      },
     });
   }
 }
@@ -166,9 +175,9 @@ async function syncClient(
  * Sync classes from Mindbody
  */
 export async function syncMindbodyClasses(
-  app: Apps,
+  app: MindbodyApp,
   options?: {
-    subaccountId?: string;
+    locationId?: string;
     organizationId?: string;
     startDate?: Date;
     endDate?: Date;
@@ -184,7 +193,7 @@ export async function syncMindbodyClasses(
 
   try {
     console.log('[Mindbody Classes Sync] Starting sync with options:', {
-      subaccountId: options?.subaccountId,
+      locationId: options?.locationId,
       organizationId: options?.organizationId,
       startDate: options?.startDate,
       endDate: options?.endDate,
@@ -242,14 +251,14 @@ export async function syncMindbodyClasses(
           });
 
           const organizationId = options.organizationId; // Required
-          const subaccountId = options.subaccountId; // Optional
+          const locationId = options.locationId; // Optional
 
-          const existing = await prisma.studioClass.findFirst({
-            where: {
-              organizationId,
-              ...(subaccountId ? { subaccountId } : {}),
-              externalId: String(mindbodyClass.Id),
-            },
+          const existing = await db.query.studioClass.findFirst({
+            where: and(
+              eq(studioClass.organizationId, organizationId),
+              locationId ? eq(studioClass.locationId, locationId) : undefined,
+              eq(studioClass.externalId, String(mindbodyClass.Id)),
+            ),
           });
 
           console.log(`[Mindbody Classes Sync] Existing class found:`, !!existing);
@@ -269,36 +278,29 @@ export async function syncMindbodyClasses(
               staffId: mindbodyClass.Staff?.Id,
               locationId: mindbodyClass.Location?.Id,
               active: mindbodyClass.Active,
-            },
+            } satisfies JsonObject,
           };
 
           if (existing) {
             console.log(`[Mindbody Classes Sync] Updating existing class ${existing.id}`);
-            await prisma.studioClass.update({
-              where: { id: existing.id },
-              data: classData,
-            });
+            await db
+              .update(studioClass)
+              .set({ ...classData, updatedAt: new Date() })
+              .where(eq(studioClass.id, existing.id));
             result.updated++;
           } else {
             console.log(`[Mindbody Classes Sync] Creating new class`);
-            const created = await prisma.studioClass.create({
-              data: {
+            const [created] = await db
+              .insert(studioClass)
+              .values({
                 id: crypto.randomUUID(),
                 ...classData,
                 createdAt: new Date(),
                 updatedAt: new Date(),
-                organization: {
-                  connect: { id: organizationId },
-                },
-                ...(subaccountId
-                  ? {
-                      subaccount: {
-                        connect: { id: subaccountId },
-                      },
-                    }
-                  : {}),
-              },
-            });
+                organizationId,
+                locationId,
+              })
+              .returning();
             console.log(`[Mindbody Classes Sync] Created class with ID: ${created.id}`);
             result.created++;
           }
@@ -318,15 +320,16 @@ export async function syncMindbodyClasses(
     }
 
     // Update last sync time
-    await prisma.apps.update({
-      where: { id: app.id },
-      data: {
+    await db
+      .update(appsTable)
+      .set({
         metadata: {
-          ...(app.metadata as object),
+          ...(isJsonObject(app.metadata) ? app.metadata : {}),
           lastClassSync: new Date().toISOString(),
         },
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(appsTable.id, app.id));
 
     console.log('[Mindbody Classes Sync] Sync completed successfully:', {
       synced: result.synced,
@@ -347,14 +350,14 @@ export async function syncMindbodyClasses(
 }
 
 /**
- * Sync bookings and memberships for a specific contact
+ * Sync bookings and memberships for a specific client
  */
 export async function syncClientBookingsAndMemberships(
-  app: Apps,
-  contactId: string,
+  app: MindbodyApp,
+  clientId: string,
   mindbodyClientId: string,
   options?: {
-    subaccountId?: string;
+    locationId?: string;
   },
 ): Promise<SyncResult> {
   const result: SyncResult = {
@@ -377,7 +380,7 @@ export async function syncClientBookingsAndMemberships(
 
     for (const visit of visitsResponse.Visits) {
       try {
-        await syncBooking(visit, contactId, options?.subaccountId);
+        await syncBooking(visit, clientId, options?.locationId);
         result.synced++;
       } catch (error) {
         result.errors.push(
@@ -391,7 +394,7 @@ export async function syncClientBookingsAndMemberships(
 
     for (const contract of contractsResponse.Contracts) {
       try {
-        await syncMembership(contract, contactId);
+        await syncMembership(contract, clientId);
         result.synced++;
       } catch (error) {
         result.errors.push(
@@ -414,18 +417,18 @@ export async function syncClientBookingsAndMemberships(
  */
 async function syncBooking(
   visit: MindbodyAppointment,
-  contactId: string,
-  subaccountId?: string,
+  clientId: string,
+  locationId?: string,
 ): Promise<void> {
   // Find the corresponding class
-  const studioClass = await prisma.studioClass.findFirst({
-    where: {
-      ...(subaccountId ? { subaccountId } : {}),
-      externalId: String(visit.ClassId),
-    },
+  const selectedClass = await db.query.studioClass.findFirst({
+    where: and(
+      locationId ? eq(studioClass.locationId, locationId) : undefined,
+      eq(studioClass.externalId, String(visit.ClassId)),
+    ),
   });
 
-  if (!studioClass) {
+  if (!selectedClass) {
     throw new Error(`Class ${visit.ClassId} not found in database`);
   }
 
@@ -440,10 +443,8 @@ async function syncBooking(
 
   const status = statusMap[visit.Status] ?? StudioBookingStatus.BOOKED;
 
-  const existingBooking = await prisma.studioBooking.findFirst({
-    where: {
-      externalId: String(visit.Id),
-    },
+  const existingBooking = await db.query.studioBooking.findFirst({
+    where: eq(studioBooking.externalId, String(visit.Id)),
   });
 
   const bookingData = {
@@ -453,24 +454,22 @@ async function syncBooking(
     externalId: String(visit.Id),
     metadata: {
       startDateTime: visit.StartDateTime,
-    },
+    } satisfies JsonObject,
   };
 
   if (existingBooking) {
-    await prisma.studioBooking.update({
-      where: { id: existingBooking.id },
-      data: bookingData,
-    });
+    await db
+      .update(studioBooking)
+      .set({ ...bookingData, updatedAt: new Date() })
+      .where(eq(studioBooking.id, existingBooking.id));
   } else {
-    await prisma.studioBooking.create({
-      data: {
+    await db.insert(studioBooking).values({
         id: crypto.randomUUID(),
         ...bookingData,
-        classId: studioClass.id,
-        contactId,
+        classId: selectedClass.id,
+        clientId,
         createdAt: new Date(),
         updatedAt: new Date(),
-      },
     });
   }
 }
@@ -480,17 +479,15 @@ async function syncBooking(
  */
 async function syncMembership(
   contract: MindbodyClientContract,
-  contactId: string,
+  clientId: string,
 ): Promise<void> {
   // Determine status based on dates
   const now = new Date();
   const endDate = new Date(contract.EndDate);
   const status: StudioMembershipStatus = endDate < now ? StudioMembershipStatus.EXPIRED : StudioMembershipStatus.ACTIVE;
 
-  const existingMembership = await prisma.studioMembership.findFirst({
-    where: {
-      externalId: String(contract.Id),
-    },
+  const existingMembership = await db.query.studioMembership.findFirst({
+    where: eq(studioMembership.externalId, String(contract.Id)),
   });
 
   const membershipData = {
@@ -505,23 +502,21 @@ async function syncMembership(
     metadata: {
       originationLocationId: contract.OriginationLocationId,
       agreementDate: contract.AgreementDate,
-    },
+    } satisfies JsonObject,
   };
 
   if (existingMembership) {
-    await prisma.studioMembership.update({
-      where: { id: existingMembership.id },
-      data: membershipData,
-    });
+    await db
+      .update(studioMembership)
+      .set({ ...membershipData, updatedAt: new Date() })
+      .where(eq(studioMembership.id, existingMembership.id));
   } else {
-    await prisma.studioMembership.create({
-      data: {
+    await db.insert(studioMembership).values({
         id: crypto.randomUUID(),
         ...membershipData,
-        contactId,
+        clientId,
         createdAt: new Date(),
         updatedAt: new Date(),
-      },
     });
   }
 }
@@ -530,10 +525,10 @@ async function syncMembership(
  * Full sync - syncs clients, classes, and then bookings/memberships
  */
 export async function fullMindbodySync(
-  app: Apps,
+  app: MindbodyApp,
   options?: {
     organizationId?: string;
-    subaccountId?: string;
+    locationId?: string;
   },
 ): Promise<{
   clients: SyncResult;
@@ -546,7 +541,7 @@ export async function fullMindbodySync(
   // Step 2: Sync classes
   const classesResult = await syncMindbodyClasses(app, options);
 
-  // Step 3: Sync bookings and memberships for all contacts with Mindbody IDs
+  // Step 3: Sync bookings and memberships for all clients with Mindbody IDs
   const bookingsAndMembershipsResult: SyncResult = {
     success: true,
     synced: 0,
@@ -555,28 +550,27 @@ export async function fullMindbodySync(
     errors: [],
   };
 
-  const allContacts = await prisma.contact.findMany({
-    where: {
-      organizationId: options?.organizationId,
-      subaccountId: options?.subaccountId || null,
-      source: "mindbody",
-    },
-    select: {
-      id: true,
-      metadata: true,
-    },
+  const allClients = await db.query.client.findMany({
+    where: and(
+      options?.organizationId
+        ? eq(client.organizationId, options.organizationId)
+        : undefined,
+      options?.locationId ? eq(client.locationId, options.locationId) : isNull(client.locationId),
+      eq(client.source, "mindbody"),
+    ),
+    columns: { id: true, metadata: true },
   });
 
-  for (const contact of allContacts) {
-    const mindbodyId = (contact.metadata as any)?.mindbody?.id;
+  for (const selectedClient of allClients) {
+    const mindbodyId = getMindbodyClientId(selectedClient.metadata);
     if (!mindbodyId) continue;
 
     try {
       const result = await syncClientBookingsAndMemberships(
         app,
-        contact.id,
+        selectedClient.id,
         mindbodyId,
-        { subaccountId: options?.subaccountId },
+        { locationId: options?.locationId },
       );
 
       bookingsAndMembershipsResult.synced += result.synced;
@@ -589,7 +583,7 @@ export async function fullMindbodySync(
       }
     } catch (error) {
       bookingsAndMembershipsResult.errors.push(
-        `Failed to sync bookings/memberships for contact ${contact.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to sync bookings/memberships for client ${selectedClient.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
       bookingsAndMembershipsResult.success = false;
     }
@@ -600,4 +594,20 @@ export async function fullMindbodySync(
     classes: classesResult,
     bookingsAndMemberships: bookingsAndMembershipsResult,
   };
+}
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getMindbodyClientId(metadata: unknown): string | null {
+  if (!isJsonObject(metadata)) {
+    return null;
+  }
+  const mindbody = metadata.mindbody;
+  if (!isJsonObject(mindbody)) {
+    return null;
+  }
+  const id = mindbody.id;
+  return typeof id === "string" ? id : null;
 }

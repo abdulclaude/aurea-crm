@@ -3,34 +3,39 @@ import z from "zod";
 
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
 import { convertToUSD } from "@/features/crm/lib/currency";
-import type { Prisma } from "@prisma/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import {
+  deal as dealTable,
+  dealAssignee,
+  dealClient,
+  locationMember,
+  pipeline as pipelineTable,
+  pipelineStage,
+} from "@/db/schema";
 import { getUsersActivityStatus } from "@/lib/activity-tracker";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
-import { ActivityAction } from "@prisma/client";
+import { ActivityAction } from "@/db/enums";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  max,
+  min,
+  or,
+  type SQL,
+} from "drizzle-orm";
 
-const dealInclude = {
-  pipeline: true,
-  pipelineStage: true,
-  dealMember: {
-    include: {
-      subaccountMember: {
-        include: {
-          user: true,
-        },
-      },
-    },
-  },
-  dealContact: {
-    include: {
-      contact: true,
-    },
-  },
-} satisfies Prisma.DealInclude;
-
-type DealResult = Prisma.DealGetPayload<{ include: typeof dealInclude }>;
+type DealResult = NonNullable<Awaited<ReturnType<typeof getDealWithRelations>>>;
 
 const mapDeal = (
   deal: DealResult,
@@ -80,18 +85,18 @@ const mapDeal = (
     lastActivityAt: deal.lastActivityAt,
     createdAt: deal.createdAt,
     updatedAt: deal.updatedAt,
-    members: deal.dealMember.map((member) => {
-      const userId = member.subaccountMember.user?.id;
+    members: deal.dealAssignees.map((member) => {
+      const userId = member.locationMember.user?.id;
       const activity =
         userId && activityStatus ? activityStatus.get(userId) : undefined;
 
       return {
-        id: member.subaccountMember.user?.id ?? member.subaccountMemberId,
+        id: member.locationMember.user?.id ?? member.locationMemberId,
         userId: userId ?? null,
-        name: member.subaccountMember.user?.name ?? "Unknown",
-        email: member.subaccountMember.user?.email ?? null,
-        image: member.subaccountMember.user?.image ?? null,
-        role: member.subaccountMember.role,
+        name: member.locationMember.user?.name ?? "Unknown",
+        email: member.locationMember.user?.email ?? null,
+        image: member.locationMember.user?.image ?? null,
+        role: member.locationMember.role,
         isOnline: activity?.isOnline ?? false,
         lastActivityAt: activity?.lastActivityAt ?? null,
         lastLoginAt: activity?.lastLoginAt ?? null,
@@ -99,20 +104,64 @@ const mapDeal = (
         statusMessage: activity?.statusMessage ?? null,
       };
     }),
-    contacts: deal.dealContact.map((link) => ({
-      id: link.contact.id,
-      name: link.contact.name,
-      companyName: link.contact.companyName,
-      email: link.contact.email,
-      type: link.contact.type,
+    clients: deal.dealClients.map((link) => ({
+      id: link.client.id,
+      name: link.client.name,
+      companyName: link.client.companyName,
+      email: link.client.email,
+      type: link.client.type,
     })),
   };
 };
 
+async function getDealWithRelations(id: string) {
+  return db.query.deal.findFirst({
+    where: eq(dealTable.id, id),
+    with: {
+      pipeline: true,
+      pipelineStage: true,
+      dealAssignees: {
+        with: {
+          locationMember: {
+            with: {
+              user: true,
+            },
+          },
+        },
+      },
+      dealClients: {
+        with: {
+          client: true,
+        },
+      },
+    },
+  });
+}
+
+function scopedDealConditions(
+  orgId: string,
+  locationId: string | null,
+  includeAllClients?: boolean
+) {
+  const conditions: SQL[] = [eq(dealTable.organizationId, orgId)];
+
+  if (!includeAllClients) {
+    conditions.push(locationId ? eq(dealTable.locationId, locationId) : isNull(dealTable.locationId));
+  }
+
+  return conditions;
+}
+
+function endOfDay(date: Date) {
+  const value = new Date(date);
+  value.setHours(23, 59, 59, 999);
+  return value;
+}
+
 export const dealsRouter = createTRPCRouter({
   stats: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return {
@@ -125,12 +174,12 @@ export const dealsRouter = createTRPCRouter({
     }
 
     // Fetch all deals with their values and currencies
-    const deals = await prisma.deal.findMany({
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-      select: {
+    const deals = await db.query.deal.findMany({
+      where: and(
+        eq(dealTable.organizationId, orgId),
+        locationId ? eq(dealTable.locationId, locationId) : undefined
+      ),
+      columns: {
         value: true,
         currency: true,
       },
@@ -170,7 +219,7 @@ export const dealsRouter = createTRPCRouter({
 
   dateRange: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return {
@@ -179,26 +228,26 @@ export const dealsRouter = createTRPCRouter({
       };
     }
 
-    const result = await prisma.deal.aggregate({
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-      _min: {
-        deadline: true,
-        updatedAt: true,
-      },
-      _max: {
-        deadline: true,
-        updatedAt: true,
-      },
-    });
+    const [result] = await db
+      .select({
+        minDeadline: min(dealTable.deadline),
+        minUpdatedAt: min(dealTable.updatedAt),
+        maxDeadline: max(dealTable.deadline),
+        maxUpdatedAt: max(dealTable.updatedAt),
+      })
+      .from(dealTable)
+      .where(
+        and(
+          eq(dealTable.organizationId, orgId),
+          locationId ? eq(dealTable.locationId, locationId) : undefined
+        )
+      );
 
     const allDates = [
-      result._min.deadline,
-      result._min.updatedAt,
-      result._max.deadline,
-      result._max.updatedAt,
+      result?.minDeadline,
+      result?.minUpdatedAt,
+      result?.maxDeadline,
+      result?.maxUpdatedAt,
     ].filter((d): d is Date => d !== null);
 
     if (allDates.length === 0) {
@@ -225,7 +274,7 @@ export const dealsRouter = createTRPCRouter({
           search: z.string().optional(),
           cursor: z.number().optional(),
           limit: z.number().optional(),
-          contacts: z.array(z.string()).optional(),
+          clients: z.array(z.string()).optional(),
           members: z.array(z.string()).optional(),
           valueCurrency: z.string().optional(),
           valueMin: z.number().optional(),
@@ -236,18 +285,18 @@ export const dealsRouter = createTRPCRouter({
           deadlineEnd: z.date().optional(),
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
-          subaccountId: z.string().optional(), // Override for "all-clients" view
+          locationId: z.string().optional(), // Override for "all-clients" view
           includeAllClients: z.boolean().optional(), // Flag to include all clients
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      // Use input subaccountId if provided, otherwise use context subaccountId
-      const subaccountId =
-        input?.subaccountId !== undefined
-          ? input.subaccountId || null
-          : ctx.subaccountId;
+      // Use input locationId if provided, otherwise use context locationId
+      const locationId =
+        input?.locationId !== undefined
+          ? input.locationId || null
+          : ctx.locationId;
 
       if (!orgId) {
         return {
@@ -268,51 +317,63 @@ export const dealsRouter = createTRPCRouter({
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
       const skip = input?.cursor ?? (page - 1) * pageSize;
 
-      const where: Prisma.DealWhereInput = {
-        organizationId: orgId,
-        // Only filter by subaccount if not viewing all clients
-        ...(input?.includeAllClients
-          ? {}
-          : subaccountId
-          ? { subaccountId }
-          : { subaccountId: null }),
-      };
+      const conditions = scopedDealConditions(
+        orgId,
+        locationId,
+        input?.includeAllClients
+      );
 
       if (input?.pipelineId) {
-        where.pipelineId = input.pipelineId;
+        conditions.push(eq(dealTable.pipelineId, input.pipelineId));
       }
 
       // Support both single stage (backward compatibility) and multiple stages
       if (input?.pipelineStageIds && input.pipelineStageIds.length > 0) {
-        where.pipelineStageId = { in: input.pipelineStageIds };
+        conditions.push(inArray(dealTable.pipelineStageId, input.pipelineStageIds));
       } else if (input?.pipelineStageId) {
-        where.pipelineStageId = input.pipelineStageId;
+        conditions.push(eq(dealTable.pipelineStageId, input.pipelineStageId));
       }
 
       if (input?.search?.trim()) {
         const search = input.search.trim();
-        where.OR = [
-          { name: { contains: search, mode: "insensitive" } },
-          { source: { contains: search, mode: "insensitive" } },
-        ];
+        const pattern = `%${search}%`;
+        conditions.push(
+          or(ilike(dealTable.name, pattern), ilike(dealTable.source, pattern))!
+        );
       }
 
-      // Filter by contacts
-      if (input?.contacts && input.contacts.length > 0) {
-        where.dealContact = {
-          some: {
-            contactId: { in: input.contacts },
-          },
-        };
+      // Filter by clients
+      if (input?.clients && input.clients.length > 0) {
+        conditions.push(
+          exists(
+            db
+              .select({ id: dealClient.id })
+              .from(dealClient)
+              .where(
+                and(
+                  eq(dealClient.dealId, dealTable.id),
+                  inArray(dealClient.clientId, input.clients)
+                )
+              )
+          )
+        );
       }
 
       // Filter by members
       if (input?.members && input.members.length > 0) {
-        where.dealMember = {
-          some: {
-            subaccountMemberId: { in: input.members },
-          },
-        };
+        conditions.push(
+          exists(
+            db
+              .select({ id: dealAssignee.id })
+              .from(dealAssignee)
+              .where(
+                and(
+                  eq(dealAssignee.dealId, dealTable.id),
+                  inArray(dealAssignee.locationMemberId, input.members)
+                )
+              )
+          )
+        );
       }
 
       // Filter by probability
@@ -320,76 +381,96 @@ export const dealsRouter = createTRPCRouter({
         input?.probabilityMin !== undefined ||
         input?.probabilityMax !== undefined
       ) {
-        where.pipelineStage = {
-          probability: {
-            ...(input.probabilityMin !== undefined && {
-              gte: input.probabilityMin,
-            }),
-            ...(input.probabilityMax !== undefined && {
-              lte: input.probabilityMax,
-            }),
-          },
-        };
+        conditions.push(
+          exists(
+            db
+              .select({ id: pipelineStage.id })
+              .from(pipelineStage)
+              .where(
+                and(
+                  eq(pipelineStage.id, dealTable.pipelineStageId),
+                  input.probabilityMin !== undefined
+                    ? gte(pipelineStage.probability, input.probabilityMin)
+                    : undefined,
+                  input.probabilityMax !== undefined
+                    ? lte(pipelineStage.probability, input.probabilityMax)
+                    : undefined
+                )
+              )
+          )
+        );
       }
 
       // Filter by deadline
       if (input?.deadlineStart || input?.deadlineEnd) {
-        where.deadline = {};
         if (input.deadlineStart) {
-          where.deadline.gte = input.deadlineStart;
+          conditions.push(gte(dealTable.deadline, input.deadlineStart));
         }
         if (input.deadlineEnd) {
-          const endOfDay = new Date(input.deadlineEnd);
-          endOfDay.setHours(23, 59, 59, 999);
-          where.deadline.lte = endOfDay;
+          conditions.push(lte(dealTable.deadline, endOfDay(input.deadlineEnd)));
         }
       }
 
       // Filter by updated date
       if (input?.updatedAtStart || input?.updatedAtEnd) {
-        where.updatedAt = {};
         if (input.updatedAtStart) {
-          where.updatedAt.gte = input.updatedAtStart;
+          conditions.push(gte(dealTable.updatedAt, input.updatedAtStart));
         }
         if (input.updatedAtEnd) {
-          const endOfDay = new Date(input.updatedAtEnd);
-          endOfDay.setHours(23, 59, 59, 999);
-          where.updatedAt.lte = endOfDay;
+          conditions.push(lte(dealTable.updatedAt, endOfDay(input.updatedAtEnd)));
         }
       }
 
       // Filter by currency
       if (input?.valueCurrency) {
-        where.currency = input.valueCurrency;
+        conditions.push(eq(dealTable.currency, input.valueCurrency));
       }
 
       // Filter by value range
       if (input?.valueMin !== undefined || input?.valueMax !== undefined) {
-        where.value = {};
         if (input.valueMin !== undefined) {
-          where.value.gte = input.valueMin;
+          conditions.push(gte(dealTable.value, input.valueMin.toString()));
         }
         if (input.valueMax !== undefined) {
-          where.value.lte = input.valueMax;
+          conditions.push(lte(dealTable.value, input.valueMax.toString()));
         }
       }
 
-      const [items, totalItems] = await Promise.all([
-        prisma.deal.findMany({
+      const where = and(...conditions);
+      const [items, totalResult] = await Promise.all([
+        db.query.deal.findMany({
           where,
-          include: dealInclude,
-          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-          skip,
-          take: pageSize,
+          with: {
+            pipeline: true,
+            pipelineStage: true,
+            dealAssignees: {
+              with: {
+                locationMember: {
+                  with: {
+                    user: true,
+                  },
+                },
+              },
+            },
+            dealClients: {
+              with: {
+                client: true,
+              },
+            },
+          },
+          orderBy: [desc(dealTable.updatedAt), desc(dealTable.createdAt)],
+          offset: skip,
+          limit: pageSize,
         }),
-        prisma.deal.count({ where }),
+        db.select({ total: count() }).from(dealTable).where(where),
       ]);
+      const totalItems = totalResult[0]?.total ?? 0;
 
       // Collect all unique user IDs from members
       const userIds = new Set<string>();
       for (const deal of items) {
-        for (const member of deal.dealMember) {
-          const userId = member.subaccountMember.user?.id;
+        for (const member of deal.dealAssignees) {
+          const userId = member.locationMember.user?.id;
           if (userId) {
             userIds.add(userId);
           }
@@ -433,15 +514,15 @@ export const dealsRouter = createTRPCRouter({
         source: z.string().optional(),
         tags: z.array(z.string()).optional(),
         description: z.string().optional(),
-        contactIds: z
+        clientIds: z
           .array(z.string())
-          .min(1, "At least one contact is required"),
+          .min(1, "At least one client is required"),
         memberIds: z.array(z.string()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -455,57 +536,77 @@ export const dealsRouter = createTRPCRouter({
       let pipelineStageId = input.pipelineStageId;
 
       if (!pipelineId) {
-        const defaultPipeline = await prisma.pipeline.findFirst({
-          where: {
-            organizationId: orgId,
-            ...(subaccountId && { subaccountId }),
-            isDefault: true,
+        const defaultPipeline = await db.query.pipeline.findFirst({
+          where: and(
+            eq(pipelineTable.organizationId, orgId),
+            locationId ? eq(pipelineTable.locationId, locationId) : undefined,
+            eq(pipelineTable.isDefault, true)
+          ),
+          with: {
+            pipelineStages: {
+              orderBy: asc(pipelineStage.position),
+              limit: 1,
+            },
           },
-          include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
         });
 
         if (defaultPipeline) {
           pipelineId = defaultPipeline.id;
-          if (!pipelineStageId && defaultPipeline.pipelineStage[0]) {
-            pipelineStageId = defaultPipeline.pipelineStage[0].id;
+          if (!pipelineStageId && defaultPipeline.pipelineStages[0]) {
+            pipelineStageId = defaultPipeline.pipelineStages[0].id;
           }
         }
       }
 
-      const deal = await prisma.deal.create({
-        data: {
-          id: crypto.randomUUID(),
+      const dealId = crypto.randomUUID();
+      const now = new Date();
+
+      await db.transaction(async (tx) => {
+        await tx.insert(dealTable).values({
+          id: dealId,
           organizationId: orgId,
-          subaccountId: subaccountId ?? null,
+          locationId: locationId ?? null,
           name: input.name,
           pipelineId,
           pipelineStageId,
-          value: input.value,
+          value: input.value?.toString(),
           currency: input.currency ?? "USD",
           deadline: input.deadline,
           source: input.source,
           tags: input.tags ?? [],
           description: input.description,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          dealContact: {
-            create: input.contactIds.map((contactId) => ({
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        await tx.insert(dealClient).values(
+          input.clientIds.map((clientId) => ({
+            id: crypto.randomUUID(),
+            dealId,
+            clientId,
+          }))
+        );
+
+        if (input.memberIds && input.memberIds.length > 0) {
+          await tx.insert(dealAssignee).values(
+            input.memberIds.map((memberId) => ({
               id: crypto.randomUUID(),
-              contactId,
-            })),
-          },
-          dealMember: input.memberIds
-            ? {
-                create: input.memberIds.map((memberId) => ({
-                  id: crypto.randomUUID(),
-                  subaccountMemberId: memberId,
-                  createdAt: new Date(),
-                })),
-              }
-            : undefined,
-        },
-        include: dealInclude,
+              dealId,
+              locationMemberId: memberId,
+              assignedAt: now,
+            }))
+          );
+        }
       });
+
+      const deal = await getDealWithRelations(dealId);
+
+      if (!deal) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Deal was created but could not be loaded.",
+        });
+      }
 
       // Send notification
       await createNotification({
@@ -516,13 +617,13 @@ export const dealsRouter = createTRPCRouter({
         entityType: "deal",
         entityId: deal.id,
         organizationId: orgId,
-        subaccountId: subaccountId ?? undefined,
+        locationId: locationId ?? undefined,
       });
 
       // Log activity and PostHog analytics
       await logAnalytics({
         organizationId: orgId,
-        subaccountId: subaccountId ?? null,
+        locationId: locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.CREATED,
         entityType: "deal",
@@ -543,14 +644,14 @@ export const dealsRouter = createTRPCRouter({
         },
       });
 
-      return mapDeal(deal as DealResult);
+      return mapDeal(deal);
     }),
 
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -559,13 +660,30 @@ export const dealsRouter = createTRPCRouter({
         });
       }
 
-      const deal = await prisma.deal.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
+      const deal = await db.query.deal.findFirst({
+        where: and(
+          eq(dealTable.id, input.id),
+          eq(dealTable.organizationId, orgId),
+          locationId ? eq(dealTable.locationId, locationId) : undefined
+        ),
+        with: {
+          pipeline: true,
+          pipelineStage: true,
+          dealAssignees: {
+            with: {
+              locationMember: {
+                with: {
+                  user: true,
+                },
+              },
+            },
+          },
+          dealClients: {
+            with: {
+              client: true,
+            },
+          },
         },
-        include: dealInclude,
       });
 
       if (!deal) {
@@ -591,13 +709,13 @@ export const dealsRouter = createTRPCRouter({
         source: z.string().optional(),
         tags: z.array(z.string()).optional(),
         description: z.string().optional(),
-        contactIds: z.array(z.string()).optional(),
+        clientIds: z.array(z.string()).optional(),
         memberIds: z.array(z.string()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -606,16 +724,16 @@ export const dealsRouter = createTRPCRouter({
         });
       }
 
-      const { id, contactIds, memberIds, ...data } = input;
+      const { id, clientIds, memberIds, ...data } = input;
 
       // First verify the deal exists and belongs to the org
-      const existing = await prisma.deal.findFirst({
-        where: {
-          id,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        select: {
+      const existing = await db.query.deal.findFirst({
+        where: and(
+          eq(dealTable.id, id),
+          eq(dealTable.organizationId, orgId),
+          locationId ? eq(dealTable.locationId, locationId) : undefined
+        ),
+        columns: {
           name: true,
           value: true,
           currency: true,
@@ -634,41 +752,78 @@ export const dealsRouter = createTRPCRouter({
         });
       }
 
-      const deal = await prisma.deal.update({
-        where: { id },
-        data: {
-          ...(data.name && { name: data.name }),
-          ...(data.pipelineId !== undefined && { pipelineId: data.pipelineId }),
-          ...(data.pipelineStageId !== undefined && {
-            pipelineStageId: data.pipelineStageId,
-          }),
-          ...(data.value !== undefined && { value: data.value }),
-          ...(data.currency !== undefined && { currency: data.currency }),
-          ...(data.deadline !== undefined && { deadline: data.deadline }),
-          ...(data.source !== undefined && { source: data.source || null }),
-          ...(data.tags !== undefined && { tags: data.tags }),
-          ...(data.description !== undefined && {
-            description: data.description || null,
-          }),
-          ...(contactIds && {
-            contacts: {
-              deleteMany: {},
-              create: contactIds.map((contactId) => ({
-                contactId,
-              })),
-            },
-          }),
-          ...(memberIds && {
-            members: {
-              deleteMany: {},
-              create: memberIds.map((memberId) => ({
-                subaccountMemberId: memberId,
-              })),
-            },
-          }),
-        },
-        include: dealInclude,
+      const updateData: Partial<typeof dealTable.$inferInsert> = {
+        updatedAt: new Date(),
+        ...(data.name && { name: data.name }),
+        ...(data.pipelineId !== undefined && { pipelineId: data.pipelineId }),
+        ...(data.pipelineStageId !== undefined && {
+          pipelineStageId: data.pipelineStageId,
+        }),
+        ...(data.value !== undefined && { value: data.value.toString() }),
+        ...(data.currency !== undefined && { currency: data.currency }),
+        ...(data.deadline !== undefined && { deadline: data.deadline }),
+        ...(data.source !== undefined && { source: data.source || null }),
+        ...(data.tags !== undefined && { tags: data.tags }),
+        ...(data.description !== undefined && {
+          description: data.description || null,
+        }),
+      };
+
+      await db.transaction(async (tx) => {
+        const [updatedDeal] = await tx
+          .update(dealTable)
+          .set(updateData)
+          .where(
+            and(
+              eq(dealTable.id, id),
+              eq(dealTable.organizationId, orgId),
+              locationId ? eq(dealTable.locationId, locationId) : undefined
+            )
+          )
+          .returning({ id: dealTable.id });
+
+        if (!updatedDeal) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Deal not found",
+          });
+        }
+
+        if (clientIds) {
+          await tx.delete(dealClient).where(eq(dealClient.dealId, id));
+          if (clientIds.length > 0) {
+            await tx.insert(dealClient).values(
+              clientIds.map((clientId) => ({
+                id: crypto.randomUUID(),
+                dealId: id,
+                clientId,
+              }))
+            );
+          }
+        }
+
+        if (memberIds) {
+          await tx.delete(dealAssignee).where(eq(dealAssignee.dealId, id));
+          if (memberIds.length > 0) {
+            await tx.insert(dealAssignee).values(
+              memberIds.map((memberId) => ({
+                id: crypto.randomUUID(),
+                dealId: id,
+                locationMemberId: memberId,
+              }))
+            );
+          }
+        }
       });
+
+      const deal = await getDealWithRelations(id);
+
+      if (!deal) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Deal not found",
+        });
+      }
 
       // Log activity with changes (convert Decimal to number for comparison)
       const existingForComparison = {
@@ -684,7 +839,7 @@ export const dealsRouter = createTRPCRouter({
 
       await logAnalytics({
         organizationId: orgId,
-        subaccountId: subaccountId ?? null,
+        locationId: locationId ?? null,
         userId: ctx.auth.user.id,
         action: isStageChange
           ? ActivityAction.STAGE_CHANGED
@@ -712,65 +867,138 @@ export const dealsRouter = createTRPCRouter({
         },
       });
 
+      if (changes && !isStageChange) {
+        await createNotification({
+          type: "DEAL_UPDATED",
+          title: "Deal updated",
+          message: `${ctx.auth.user.name} updated deal ${deal.name}`,
+          actorId: ctx.auth.user.id,
+          entityType: "deal",
+          entityId: deal.id,
+          organizationId: orgId,
+          locationId: locationId ?? undefined,
+          data: {
+            fieldsChanged: Object.keys(changes),
+          },
+        });
+      }
+
+      if (isStageChange) {
+        let previousStageName: string | null = null;
+        let previousStageProbability: number | null = null;
+
+        if (existing.pipelineStageId) {
+          const previousStage = await db.query.pipelineStage.findFirst({
+            where: eq(pipelineStage.id, existing.pipelineStageId),
+            columns: { name: true, probability: true },
+          });
+          previousStageName = previousStage?.name ?? null;
+          previousStageProbability = previousStage?.probability ?? null;
+        }
+
+        const nextStageName = deal.pipelineStage?.name ?? null;
+        const nextStageProbability = deal.pipelineStage?.probability ?? null;
+
+        await createNotification({
+          type: "DEAL_STAGE_CHANGED",
+          title: "Deal stage updated",
+          message: `${ctx.auth.user.name} moved ${deal.name}${
+            nextStageName ? ` to ${nextStageName}` : ""
+          }`,
+          actorId: ctx.auth.user.id,
+          entityType: "deal",
+          entityId: deal.id,
+          organizationId: orgId,
+          locationId: locationId ?? undefined,
+          data: {
+            previousStage: previousStageName,
+            nextStage: nextStageName,
+          },
+        });
+
+        if (
+          nextStageProbability === 100 &&
+          previousStageProbability !== 100
+        ) {
+          await createNotification({
+            type: "DEAL_CLOSED",
+            title: "Deal closed",
+            message: `${ctx.auth.user.name} closed ${deal.name}`,
+            actorId: ctx.auth.user.id,
+            entityType: "deal",
+            entityId: deal.id,
+            organizationId: orgId,
+            locationId: locationId ?? undefined,
+            data: {
+              previousStage: previousStageName,
+              nextStage: nextStageName,
+            },
+          });
+        }
+      }
+
       return mapDeal(deal);
     }),
 
   /**
-   * Search deals by name for a specific contact and pipeline
+   * Search deals by name for a specific client and pipeline
    */
   search: protectedProcedure
     .input(
       z.object({
         query: z.string().min(1),
-        contactId: z.string().optional(),
+        clientId: z.string().optional(),
         pipelineId: z.string().optional(),
         limit: z.number().default(10),
       })
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
-      if (!orgId || !subaccountId) {
+      if (!orgId || !locationId) {
         return [];
       }
 
-      const where: Prisma.DealWhereInput = {
-        organizationId: orgId,
-        subaccountId,
-        name: {
-          contains: input.query,
-          mode: "insensitive" as Prisma.QueryMode,
-        },
-      };
+      const conditions: SQL[] = [
+        eq(dealTable.organizationId, orgId),
+        eq(dealTable.locationId, locationId),
+        ilike(dealTable.name, `%${input.query}%`),
+      ];
 
-      // Filter by contact if provided
-      if (input.contactId) {
-        where.dealContact = {
-          some: {
-            contactId: input.contactId,
-          },
-        };
+      if (input.clientId) {
+        conditions.push(
+          exists(
+            db
+              .select({ id: dealClient.id })
+              .from(dealClient)
+              .where(
+                and(
+                  eq(dealClient.dealId, dealTable.id),
+                  eq(dealClient.clientId, input.clientId)
+                )
+              )
+          )
+        );
       }
 
-      // Filter by pipeline if provided
       if (input.pipelineId) {
-        where.pipelineId = input.pipelineId;
+        conditions.push(eq(dealTable.pipelineId, input.pipelineId));
       }
 
-      const deals = await prisma.deal.findMany({
-        where,
-        include: {
+      const deals = await db.query.deal.findMany({
+        where: and(...conditions),
+        with: {
           pipeline: true,
           pipelineStage: true,
-          dealContact: {
-            include: {
-              contact: true,
+          dealClients: {
+            with: {
+              client: true,
             },
           },
         },
-        orderBy: [{ updatedAt: "desc" }],
-        take: input.limit,
+        orderBy: desc(dealTable.updatedAt),
+        limit: input.limit,
       });
 
       return deals.map((deal) => ({
@@ -780,9 +1008,9 @@ export const dealsRouter = createTRPCRouter({
         currency: deal.currency,
         pipeline: deal.pipeline?.name ?? "",
         stage: deal.pipelineStage?.name ?? "",
-        contacts: deal.dealContact.map((dc: any) => ({
-          id: dc.contact.id,
-          name: dc.contact.name,
+        clients: deal.dealClients.map((dc) => ({
+          id: dc.client.id,
+          name: dc.client.name,
         })),
       }));
     }),

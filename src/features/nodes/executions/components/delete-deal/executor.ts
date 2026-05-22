@@ -2,8 +2,11 @@ import Handlebars from "handlebars";
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 import { deleteDealChannel } from "@/inngest/channels/delete-deal";
-import prisma from "@/lib/db";
 import { decode } from "html-entities";
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { deal as dealTable, node as nodeTable } from "@/db/schema";
 
 type DeleteDealData = {
   variableName?: string;
@@ -37,38 +40,52 @@ export const deleteDealExecutor: NodeExecutor<
     }
 
     const workflow = await step.run("get-workflow-context", async () => {
-      const node = await prisma.node.findUnique({
-        where: { id: nodeId },
-        include: {
-          Workflows: {
-            select: {
-              subaccountId: true,
+      const node = await db.query.node.findFirst({
+        where: eq(nodeTable.id, nodeId),
+        with: {
+          workflow: {
+            columns: {
+              locationId: true,
               organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.Workflows?.organizationId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
           "Delete Deal Node error: This workflow must be in an organization context."
         );
       }
 
-      return node.Workflows;
+      return {
+        organizationId: node.workflow.organizationId,
+        locationId: node.workflow.locationId,
+      };
     });
 
     const dealId = decode(Handlebars.compile(data.dealId)(context));
 
     const deletedDeal = await step.run("delete-deal", async () => {
-      return await prisma.deal.delete({
-        where: {
-          id: dealId,
-          ...(workflow.subaccountId
-            ? { subaccountId: workflow.subaccountId }
-            : { organizationId: workflow.organizationId! }),
-        },
-      });
+      const [deleted] = await db
+        .delete(dealTable)
+        .where(
+          and(
+            eq(dealTable.id, dealId),
+            workflow.locationId
+              ? eq(dealTable.locationId, workflow.locationId)
+              : eq(dealTable.organizationId, workflow.organizationId)
+          )
+        )
+        .returning();
+
+      if (!deleted) {
+        throw new NonRetriableError(
+          `Delete Deal Node error: Deal with ID ${dealId} not found.`
+        );
+      }
+
+      return deleted;
     });
 
     await publish(

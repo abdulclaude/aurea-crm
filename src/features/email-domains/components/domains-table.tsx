@@ -196,7 +196,7 @@ export function DomainsTable() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {domain.dnsRecords && (
+                        {Boolean(domain.dnsRecords) && (
                           <DropdownMenuItem
                             onClick={() =>
                               setDnsDialogDomain({

@@ -42,7 +42,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
-import { PaymentMethod } from "@prisma/client";
+import { PaymentMethod } from "@/db/enums";
 import { Separator } from "@/components/ui/separator";
 
 const formSchema = z.object({

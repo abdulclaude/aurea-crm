@@ -35,7 +35,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
-import { WebhookProvider } from "@prisma/client";
+import { WebhookProvider } from "@/db/enums";
 import {
   useCreateWebhook,
   useSuspenseWebhook,

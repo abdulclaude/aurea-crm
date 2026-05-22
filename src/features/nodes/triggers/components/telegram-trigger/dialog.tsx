@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
-import { CredentialType } from "@prisma/client";
+import { CredentialType } from "@/db/enums";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 

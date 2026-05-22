@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
-import prisma from "@/lib/db";
+import { asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { invoice as invoiceTable, invoiceLineItem } from "@/db/schema";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { InvoiceStatus } from "@prisma/client";
+import { InvoiceStatus } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { InvoicePaymentActions } from "@/features/invoicing/components/invoice-payment-actions";
 
@@ -68,11 +70,11 @@ export default async function InvoicePaymentPage({
 }: InvoicePaymentPageProps) {
   const { invoiceId } = await params;
 
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: {
-      invoiceLineItem: {
-        orderBy: { order: "asc" },
+  const invoice = await db.query.invoice.findFirst({
+    where: eq(invoiceTable.id, invoiceId),
+    with: {
+      invoiceLineItems: {
+        orderBy: [asc(invoiceLineItem.order)],
       },
     },
   });
@@ -83,10 +85,10 @@ export default async function InvoicePaymentPage({
 
   // Mark invoice as viewed if not already
   if (invoice.status === InvoiceStatus.SENT) {
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { status: InvoiceStatus.VIEWED },
-    });
+    await db
+      .update(invoiceTable)
+      .set({ status: InvoiceStatus.VIEWED, updatedAt: new Date() })
+      .where(eq(invoiceTable.id, invoiceId));
   }
 
   const isOverdue =
@@ -127,11 +129,11 @@ export default async function InvoicePaymentPage({
 
                 <div className="font-medium">
                   <p className="text-xs text-primary/75">
-                    {invoice.contactName}
+                    {invoice.clientName}
                   </p>
-                  {invoice.contactEmail && (
+                  {invoice.clientEmail && (
                     <p className="text-xs text-primary/75">
-                      {invoice.contactEmail}
+                      {invoice.clientEmail}
                     </p>
                   )}
                 </div>
@@ -187,12 +189,12 @@ export default async function InvoicePaymentPage({
                   </thead>
 
                   <tbody>
-                    {invoice.invoiceLineItem.map((item: any, index: number) => (
+                    {invoice.invoiceLineItems.map((item, index) => (
                       <tr
                         key={item.id}
                         className={cn(
                           "text-xs text-primary ",
-                          index !== invoice.invoiceLineItem.length - 1 && "border-b"
+                          index !== invoice.invoiceLineItems.length - 1 && "border-b"
                         )}
                       >
                         <td className="p-4 px-8">{item.description}</td>
@@ -346,8 +348,8 @@ export default async function InvoicePaymentPage({
           {/* Footer */}
           <div className="bg-gray-50 dark:bg-gray-900 px-8 py-6 text-center text-xs text-muted-foreground">
             <p>
-              Questions about this invoice? Please contact us at{" "}
-              {invoice.contactEmail || "support@example.com"}
+              Questions about this invoice? Please client us at{" "}
+              {invoice.clientEmail || "support@example.com"}
             </p>
           </div>
         </div>

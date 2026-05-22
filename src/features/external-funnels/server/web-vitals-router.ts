@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { and, desc, eq, gte, ilike, lte } from "drizzle-orm";
+import { db } from "@/db";
+import { funnelWebVital } from "@/db/schema";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import db from "@/lib/db";
 
 export const webVitalsRouter = createTRPCRouter({
 	/**
@@ -33,23 +35,26 @@ export const webVitalsRouter = createTRPCRouter({
 				limit,
 			} = input;
 
-			const webVitals = await db.funnelWebVital.findMany({
-				where: {
-					funnelId,
-					metric,
-					rating,
-					pageUrl: pageUrl ? { contains: pageUrl } : undefined,
-					deviceType,
-					timestamp: {
-						gte: timestampStart,
-						lte: timestampEnd,
-					},
-				},
-				orderBy: {
-					timestamp: "desc",
-				},
-				take: limit + 1,
-				cursor: cursor ? { id: cursor } : undefined,
+			const cursorVital = cursor
+				? await db.query.funnelWebVital.findFirst({
+						where: eq(funnelWebVital.id, cursor),
+						columns: { id: true, timestamp: true },
+					})
+				: null;
+
+			const webVitals = await db.query.funnelWebVital.findMany({
+				where: and(
+					eq(funnelWebVital.funnelId, funnelId),
+					metric ? eq(funnelWebVital.metric, metric) : undefined,
+					rating ? eq(funnelWebVital.rating, rating) : undefined,
+					pageUrl ? ilike(funnelWebVital.pageUrl, `%${pageUrl}%`) : undefined,
+					deviceType ? eq(funnelWebVital.deviceType, deviceType) : undefined,
+					timestampStart ? gte(funnelWebVital.timestamp, timestampStart) : undefined,
+					timestampEnd ? lte(funnelWebVital.timestamp, timestampEnd) : undefined,
+					cursorVital ? lte(funnelWebVital.timestamp, cursorVital.timestamp) : undefined
+				),
+				orderBy: [desc(funnelWebVital.timestamp)],
+				limit: limit + 1,
 			});
 
 			let nextCursor: string | undefined = undefined;
@@ -79,15 +84,13 @@ export const webVitalsRouter = createTRPCRouter({
 			const { funnelId, timestampStart, timestampEnd } = input;
 
 			// Get all web vitals for the period
-			const webVitals = await db.funnelWebVital.findMany({
-				where: {
-					funnelId,
-					timestamp: {
-						gte: timestampStart,
-						lte: timestampEnd,
-					},
-				},
-				select: {
+			const webVitals = await db.query.funnelWebVital.findMany({
+				where: and(
+					eq(funnelWebVital.funnelId, funnelId),
+					timestampStart ? gte(funnelWebVital.timestamp, timestampStart) : undefined,
+					timestampEnd ? lte(funnelWebVital.timestamp, timestampEnd) : undefined
+				),
+				columns: {
 					metric: true,
 					value: true,
 					rating: true,
@@ -176,16 +179,15 @@ export const webVitalsRouter = createTRPCRouter({
 		.query(async ({ input }) => {
 			const { funnelId } = input;
 
-			const webVitals = await db.funnelWebVital.findMany({
-				where: { funnelId },
-				select: {
+			const webVitals = await db.query.funnelWebVital.findMany({
+				where: eq(funnelWebVital.funnelId, funnelId),
+				columns: {
 					pageUrl: true,
 					pagePath: true,
 					deviceType: true,
 					browserName: true,
 					countryName: true,
 				},
-				distinct: ["pageUrl", "deviceType", "browserName", "countryName"],
 			});
 
 			const pages = [

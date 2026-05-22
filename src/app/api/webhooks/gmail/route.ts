@@ -3,7 +3,9 @@ import { Buffer } from "node:buffer";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import prisma from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { gmailSubscription } from "@/db/schema";
 import { enqueueGmailNotification } from "@/features/gmail/server/subscriptions";
 
 const VERIFY_TOKEN = process.env.GMAIL_PUBSUB_VERIFICATION_TOKEN;
@@ -41,8 +43,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const subscription = await prisma.gmailSubscription.findFirst({
-      where: { emailAddress },
+    const subscription = await db.query.gmailSubscription.findFirst({
+      where: eq(gmailSubscription.emailAddress, emailAddress),
+      columns: { id: true },
     });
 
     if (!subscription) {
@@ -72,4 +75,3 @@ function decodeMessageData(data: string) {
     return null;
   }
 }
-

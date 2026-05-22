@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { inngest } from "@/inngest/client";
-import { syncSubaccountEmbeddings } from "@/lib/embeddings/sync";
+import { syncLocationEmbeddings } from "@/lib/embeddings/sync";
 
 export async function POST(request: NextRequest) {
   const session = await auth.api.getSession({
@@ -14,11 +14,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { subaccountId, async: runAsync = true } = body;
+  const { locationId, async: runAsync = true } = body;
 
-  if (!subaccountId) {
+  if (!locationId) {
     return NextResponse.json(
-      { error: "subaccountId is required" },
+      { error: "locationId is required" },
       { status: 400 }
     );
   }
@@ -27,19 +27,19 @@ export async function POST(request: NextRequest) {
     if (runAsync) {
       // Queue the reindex job via Inngest
       await inngest.send({
-        name: "embeddings/reindex.subaccount",
-        data: { subaccountId },
+        name: "embeddings/reindex.location",
+        data: { locationId },
       });
 
       return NextResponse.json({
         success: true,
         message: "Reindex job queued",
-        subaccountId,
+        locationId,
       });
     } else {
       // Run synchronously (for smaller datasets or testing)
       const logs: string[] = [];
-      const result = await syncSubaccountEmbeddings(subaccountId, {
+      const result = await syncLocationEmbeddings(locationId, {
         onProgress: (msg) => logs.push(msg),
       });
 

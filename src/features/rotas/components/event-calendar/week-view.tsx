@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addHours,
+  addMinutes,
   areIntervalsOverlapping,
   differenceInMinutes,
   eachDayOfInterval,
@@ -23,6 +24,7 @@ import {
   DroppableCell,
   EventItem,
   isMultiDayEvent,
+  useCalendarDnd,
   useCurrentTimeIndicator,
   WeekCellsHeight,
   type CalendarEvent,
@@ -37,7 +39,7 @@ interface WeekViewProps {
   currentDate: Date;
   events: CalendarEvent[];
   onEventSelect: (event: CalendarEvent) => void;
-  onEventCreate: (startTime: Date) => void;
+  onEventCreate?: (startTime: Date, endTime?: Date) => void;
   timeBounds?: { startHour: number; endHour: number };
 }
 
@@ -57,6 +59,9 @@ export function WeekView({
   onEventCreate,
   timeBounds = { startHour: StartHour, endHour: EndHour },
 }: WeekViewProps) {
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<Date | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const days = useMemo(() => {
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday
     const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
@@ -246,12 +251,39 @@ export function WeekView({
     "week"
   );
 
+  useEffect(() => {
+    if (!isSelecting) {
+      return;
+    }
+
+    const handleMouseUp = () => {
+      if (!selectionStart || !selectionEnd) {
+        setIsSelecting(false);
+        return;
+      }
+
+      const [start, end] =
+        selectionStart <= selectionEnd
+          ? [selectionStart, selectionEnd]
+          : [selectionEnd, selectionStart];
+      const isSingleSlot = selectionStart.getTime() === selectionEnd.getTime();
+      const endWithBuffer = addMinutes(end, isSingleSlot ? 60 : 15);
+
+      onEventCreate?.(start, endWithBuffer);
+      setIsSelecting(false);
+      setSelectionStart(null);
+      setSelectionEnd(null);
+    };
+
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, [isSelecting, selectionStart, selectionEnd, onEventCreate]);
+
+
   return (
     <div data-slot="week-view" className="flex h-full flex-col">
-      <div className="bg-background border-border/70 sticky top-0 z-30 grid grid-cols-8 border-y backdrop-blur-md uppercase">
-        <div className="text-primary/70 py-2 text-center text-xs">
-          <span className="max-[479px]:sr-only">{format(new Date(), "O")}</span>
-        </div>
+      <div className="bg-background border-border/70 sticky top-0 z-30 grid grid-cols-8 border-y uppercase">
+        <div className="py-2" />
         {days.map((day) => (
           <div
             key={day.toString()}
@@ -348,90 +380,223 @@ export function WeekView({
         </div>
 
         {days.map((day, dayIndex) => (
-          <div
+          <DayColumn
             key={day.toString()}
-            className="border-border/70 relative border-r last:border-r-0 grid auto-cols-fr"
-            data-today={isToday(day) || undefined}
-          >
-            {/* Positioned events */}
-            {(processedDayEvents[dayIndex] ?? []).map((positionedEvent) => (
-              <div
-                key={positionedEvent.event.id}
-                className="absolute z-10 px-0.5"
-                style={{
-                  top: `${positionedEvent.top}px`,
-                  height: `${positionedEvent.height}px`,
-                  left: `${positionedEvent.left * 100}%`,
-                  width: `${positionedEvent.width * 100}%`,
-                  zIndex: positionedEvent.zIndex,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="h-full w-full">
-                  <DraggableEvent
-                    event={positionedEvent.event}
-                    view="week"
-                    onClick={(e) => handleEventClick(positionedEvent.event, e)}
-                    showTime
-                    height={positionedEvent.height}
-                  />
-                </div>
-              </div>
-            ))}
-
-            {/* Current time indicator - only show for today's column */}
-            {currentTimeVisible && isToday(day) && (
-              <div
-                className="pointer-events-none absolute right-0 left-0 z-20"
-                style={{ top: `${currentTimePosition}%` }}
-              >
-                <div className="relative flex items-center">
-                  <div className="bg-red-500 absolute -left-1 h-2 w-2 rounded-full"></div>
-                  <div className="bg-red-500 h-[2px] w-full"></div>
-                </div>
-              </div>
-            )}
-            {hours.map((hour) => {
-              const hourValue = getHours(hour);
-              return (
-                <div
-                  key={hour.toString()}
-                  className="border-border/70 relative min-h-[var(--week-cells-height)] border-b last:border-b-0"
-                >
-                  {/* Quarter-hour intervals */}
-                  {[0, 1, 2, 3].map((quarter) => {
-                    const quarterHourTime = hourValue + quarter * 0.25;
-                    return (
-                      <DroppableCell
-                        key={`${hour.toString()}-${quarter}`}
-                        id={`week-cell-${day.toISOString()}-${quarterHourTime}`}
-                        date={day}
-                        time={quarterHourTime}
-                        className={cn(
-                          "absolute h-[calc(var(--week-cells-height)/4)] w-full",
-                          quarter === 0 && "top-0",
-                          quarter === 1 &&
-                            "top-[calc(var(--week-cells-height)/4)]",
-                          quarter === 2 &&
-                            "top-[calc(var(--week-cells-height)/4*2)]",
-                          quarter === 3 &&
-                            "top-[calc(var(--week-cells-height)/4*3)]"
-                        )}
-                        onClick={() => {
-                          const startTime = new Date(day);
-                          startTime.setHours(hourValue);
-                          startTime.setMinutes(quarter * 15);
-                          onEventCreate(startTime);
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
+            day={day}
+            dayIndex={dayIndex}
+            hours={hours}
+            timeBounds={timeBounds}
+            processedEvents={processedDayEvents[dayIndex] ?? []}
+            currentTimeVisible={currentTimeVisible}
+            currentTimePosition={currentTimePosition}
+            isSelecting={isSelecting}
+            selectionStart={selectionStart}
+            selectionEnd={selectionEnd}
+            onSelectionStart={(cellStart) => {
+              if (!onEventCreate) return;
+              setIsSelecting(true);
+              setSelectionStart(cellStart);
+              setSelectionEnd(cellStart);
+            }}
+            onSelectionMove={(cellStart) => {
+              if (isSelecting) setSelectionEnd(cellStart);
+            }}
+            onEventClick={handleEventClick}
+          />
         ))}
       </div>
     </div>
   );
 }
+
+interface DayColumnProps {
+  day: Date;
+  dayIndex: number;
+  hours: Date[];
+  timeBounds: { startHour: number; endHour: number };
+  processedEvents: PositionedEvent[];
+  currentTimeVisible: boolean;
+  currentTimePosition: number;
+  isSelecting: boolean;
+  selectionStart: Date | null;
+  selectionEnd: Date | null;
+  onSelectionStart: (cellStart: Date) => void;
+  onSelectionMove: (cellStart: Date) => void;
+  onEventClick: (event: CalendarEvent, e: React.MouseEvent) => void;
+}
+
+const DayColumn = React.memo(function DayColumn({
+  day,
+  dayIndex,
+  hours,
+  timeBounds,
+  processedEvents,
+  currentTimeVisible,
+  currentTimePosition,
+  isSelecting,
+  selectionStart,
+  selectionEnd,
+  onSelectionStart,
+  onSelectionMove,
+  onEventClick,
+}: DayColumnProps) {
+  const columnRef = useRef<HTMLDivElement>(null);
+  const { activeEvent } = useCalendarDnd();
+  const isDragging = activeEvent !== null;
+
+  const getTimeFromMouseY = useCallback(
+    (clientY: number) => {
+      if (!columnRef.current) return null;
+      const rect = columnRef.current.getBoundingClientRect();
+      const y = clientY - rect.top;
+      const totalHeight = rect.height;
+      const totalHours = timeBounds.endHour - timeBounds.startHour;
+      const hourFraction = (y / totalHeight) * totalHours;
+      const quarter = Math.floor(hourFraction * 4) / 4;
+      return Math.max(0, Math.min(totalHours - 0.25, quarter)) + timeBounds.startHour;
+    },
+    [timeBounds],
+  );
+
+  const getCellDate = useCallback(
+    (time: number) => {
+      const startTime = new Date(day);
+      startTime.setHours(Math.floor(time));
+      startTime.setMinutes(Math.round((time % 1) * 60));
+      startTime.setSeconds(0);
+      startTime.setMilliseconds(0);
+      return startTime;
+    },
+    [day],
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      const time = getTimeFromMouseY(e.clientY);
+      if (time === null) return;
+      onSelectionStart(getCellDate(time));
+    },
+    [getTimeFromMouseY, getCellDate, onSelectionStart],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isSelecting) return;
+      const time = getTimeFromMouseY(e.clientY);
+      if (time === null) return;
+      onSelectionMove(getCellDate(time));
+    },
+    [isSelecting, getTimeFromMouseY, getCellDate, onSelectionMove],
+  );
+
+  const selectionStyle = useMemo(() => {
+    if (!isSelecting || !selectionStart || !selectionEnd) return null;
+    if (!isSameDay(day, selectionStart) && !isSameDay(day, selectionEnd)) return null;
+
+    const [start, end] =
+      selectionStart <= selectionEnd
+        ? [selectionStart, selectionEnd]
+        : [selectionEnd, selectionStart];
+
+    if (!isSameDay(day, start) && !isSameDay(day, end)) return null;
+
+    const startHour = getHours(start) + getMinutes(start) / 60;
+    const endHour = getHours(end) + getMinutes(end) / 60 + 0.25;
+    const totalHours = timeBounds.endHour - timeBounds.startHour;
+
+    const top = ((startHour - timeBounds.startHour) / totalHours) * 100;
+    const height = ((endHour - startHour) / totalHours) * 100;
+
+    return { top: `${top}%`, height: `${height}%` };
+  }, [isSelecting, selectionStart, selectionEnd, day, timeBounds]);
+
+  return (
+    <div
+      ref={columnRef}
+      className="border-border/70 relative border-r last:border-r-0"
+      data-today={isToday(day) || undefined}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+    >
+      {/* Selection highlight */}
+      {selectionStyle && (
+        <div
+          className="absolute inset-x-0 z-5 bg-primary/10 pointer-events-none"
+          style={selectionStyle}
+        />
+      )}
+
+      {/* Positioned events */}
+      {processedEvents.map((positionedEvent) => (
+        <div
+          key={positionedEvent.event.id}
+          className="absolute z-10 px-0.5"
+          style={{
+            top: `${positionedEvent.top}px`,
+            height: `${positionedEvent.height}px`,
+            left: `${positionedEvent.left * 100}%`,
+            width: `${positionedEvent.width * 100}%`,
+            zIndex: positionedEvent.zIndex,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-full w-full">
+            <DraggableEvent
+              event={positionedEvent.event}
+              view="week"
+              onClick={(e) => onEventClick(positionedEvent.event, e)}
+              showTime
+              height={positionedEvent.height}
+            />
+          </div>
+        </div>
+      ))}
+
+      {/* Current time indicator */}
+      {currentTimeVisible && isToday(day) && (
+        <div
+          className="pointer-events-none absolute right-0 left-0 z-20"
+          style={{ top: `${currentTimePosition}%` }}
+        >
+          <div className="relative flex items-center">
+            <div className="bg-red-500 absolute -left-1 h-2 w-2 rounded-full"></div>
+            <div className="bg-red-500 h-[2px] w-full"></div>
+          </div>
+        </div>
+      )}
+
+      {/* Hour grid lines */}
+      {hours.map((hour) => (
+        <div
+          key={hour.toString()}
+          className="border-border/70 min-h-[var(--week-cells-height)] border-b last:border-b-0"
+        />
+      ))}
+
+      {/* Droppable cells - only mount during drag for DnD targets */}
+      {isDragging &&
+        hours.map((hour) => {
+          const hourValue = getHours(hour);
+          return [0, 1, 2, 3].map((quarter) => {
+            const quarterHourTime = hourValue + quarter * 0.25;
+            return (
+              <DroppableCell
+                key={`${hour.toString()}-${quarter}`}
+                id={`week-cell-${day.toISOString()}-${quarterHourTime}`}
+                date={day}
+                time={quarterHourTime}
+                className={cn(
+                  "absolute w-full pointer-events-auto",
+                  "h-[calc(var(--week-cells-height)/4)]",
+                )}
+                style={{
+                  top: `${((hourValue - timeBounds.startHour) * 4 + quarter) * (100 / ((timeBounds.endHour - timeBounds.startHour) * 4))}%`,
+                }}
+              />
+            );
+          });
+        })}
+    </div>
+  );
+});

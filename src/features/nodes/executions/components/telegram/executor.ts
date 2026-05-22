@@ -2,10 +2,13 @@ import { Buffer } from "node:buffer";
 import Handlebars from "handlebars";
 
 import type { NodeExecutor } from "@/features/executions/types";
-import prisma from "@/lib/db";
 import { NonRetriableError } from "inngest";
 import { decrypt } from "@/lib/encryption";
 import { telegramChannel } from "@/inngest/channels/telegram";
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { credential as credentialTable } from "@/db/schema";
 
 type TelegramExecutionData = {
   variableName?: string;
@@ -51,11 +54,8 @@ export const telegramExecutionExecutor: NodeExecutor<
     }
 
     const credential = await step.run("get-telegram-credential", () =>
-      prisma.credential.findUnique({
-        where: {
-          id: data.credentialId,
-          userId,
-        },
+      db.query.credential.findFirst({
+        where: and(eq(credentialTable.id, data.credentialId!), eq(credentialTable.userId, userId)),
       })
     );
 

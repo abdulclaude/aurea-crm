@@ -1,5 +1,5 @@
 export interface EntityReference {
-  type: "contact" | "deal" | "pipeline" | "workflow";
+  type: "client" | "deal" | "pipeline" | "workflow";
   id: string;
   name: string;
 }
@@ -15,7 +15,15 @@ export interface ChatMessage {
 export interface SuggestionItem {
   id: string;
   name: string;
-  type: "contact" | "deal" | "pipeline" | "workflow" | "action" | "ai" | "query";
+  type:
+    | "client"
+    | "deal"
+    | "pipeline"
+    | "workflow"
+    | "action"
+    | "ai"
+    | "query"
+    | "member";
   description?: string;
   category?: string;
 }

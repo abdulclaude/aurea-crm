@@ -14,7 +14,7 @@ export type PipelinesParamsState = {
   isActive: boolean | null;
   hiddenColumns: string[];
   stages?: string[];
-  contacts?: string[];
+  clients?: string[];
   dealsCountMin?: number;
   dealsCountMax?: number;
   dealsValueCurrency?: string;
@@ -36,7 +36,7 @@ export const pipelinesParams = {
   stages: parseAsArrayOf(parseAsString)
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
-  contacts: parseAsArrayOf(parseAsString)
+  clients: parseAsArrayOf(parseAsString)
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   dealsCountMin: parseAsInteger.withOptions({ clearOnDefault: true }),

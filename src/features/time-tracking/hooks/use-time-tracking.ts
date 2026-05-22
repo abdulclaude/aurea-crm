@@ -42,7 +42,7 @@ export const useQRCodes = () => {
   return useSuspenseQuery(trpc.timeTracking.listQRCodes.queryOptions());
 };
 
-export const useTimesheet = (input: { contactId?: string; startDate: Date; endDate: Date }) => {
+export const useTimesheet = (input: { clientId?: string; startDate: Date; endDate: Date }) => {
   const trpc = useTRPC();
   return useSuspenseQuery(trpc.timeTracking.getTimesheet.queryOptions(input));
 };

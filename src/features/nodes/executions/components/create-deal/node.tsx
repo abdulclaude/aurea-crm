@@ -76,7 +76,7 @@ export const CreateDealNode: React.FC<NodeProps<CreateDealNodeType>> = memo(
           }
 
           return node;
-        })
+        }),
       );
     };
 
@@ -94,7 +94,7 @@ export const CreateDealNode: React.FC<NodeProps<CreateDealNodeType>> = memo(
           {...props}
           id={props.id}
           icon={CreateDealIcon}
-          name="Create Deal"
+          name="Create deal"
           description={description}
           status={nodeStatus}
           onSettings={handleOpenSettings}
@@ -102,7 +102,7 @@ export const CreateDealNode: React.FC<NodeProps<CreateDealNodeType>> = memo(
         />
       </>
     );
-  }
+  },
 );
 
 CreateDealNode.displayName = "CreateDealNode";

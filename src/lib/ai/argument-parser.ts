@@ -1,9 +1,9 @@
 // Parse inline arguments from command messages
 // Supports formats like:
-// /create-contact John Doe, john@email.com, Acme Corp
+// /create-client John Doe, john@email.com, Acme Corp
 // /create-deal Enterprise Deal, 50000, @Sales Pipeline
 
-export interface ParsedContactArgs {
+export interface ParsedClientArgs {
   name?: string;
   email?: string;
   phone?: string;
@@ -18,7 +18,7 @@ export interface ParsedDealArgs {
   currency?: string;
   pipelineName?: string;
   stageName?: string;
-  contactName?: string;
+  clientName?: string;
   assigneeName?: string;
   deadline?: string;
 }
@@ -35,12 +35,12 @@ const PHONE_REGEX = /^[\d\s\-\+\(\)]{7,}$/;
 // Currency amount regex (e.g., $50000, 50000, 50,000)
 const AMOUNT_REGEX = /^[\$£€]?\s*[\d,]+(\.\d{2})?$/;
 
-export function parseContactArgs(message: string): ParsedContactArgs {
+export function parseClientArgs(message: string): ParsedClientArgs {
   // Remove the command prefix
   const text = message.replace(/^\/\S+\s*/, "").trim();
   if (!text) return {};
 
-  const result: ParsedContactArgs = {};
+  const result: ParsedClientArgs = {};
 
   // Split by comma or common separators
   const parts = text.split(/[,;]\s*/).map(p => p.trim()).filter(Boolean);

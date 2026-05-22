@@ -63,7 +63,7 @@ const sortingStateToValue = (state: SortingState): string | null => {
 };
 
 const getPipelineColumns = (
-  selectedCurrency?: string | null
+  selectedCurrency?: string | null,
 ): ColumnDef<PipelineRow>[] => [
   {
     id: "select",
@@ -144,7 +144,7 @@ const getPipelineColumns = (
           </div>
 
           {pipeline.stages.length > 2 && (
-            <Badge className="text-[10px] text-white bg-primary dark:bg-primary/10 brightness-120">
+            <Badge className="text-[10px] bg-primary/10 text-primary">
               +{pipeline.stages.length - 2} more
             </Badge>
           )}
@@ -153,38 +153,38 @@ const getPipelineColumns = (
     },
   },
   {
-    id: "contacts",
-    header: "Contacts",
-    meta: { label: "Contacts" },
+    id: "clients",
+    header: "Clients",
+    meta: { label: "Clients" },
     cell: ({ row }) => {
       const pipeline = row.original;
-      const contacts = pipeline.contacts || [];
+      const clients = pipeline.clients || [];
 
-      if (contacts.length === 0) {
+      if (clients.length === 0) {
         return (
           <span className="text-xs text-primary/80 hover:text-black dark:text-white/40 group truncate">
-            No contacts
+            No clients
           </span>
         );
       }
 
-      if (contacts.length === 1) {
-        const contact = contacts[0];
+      if (clients.length === 1) {
+        const client = clients[0];
         return (
           <div className="flex items-center gap-2">
             <Avatar className="size-7">
-              <AvatarImage src={contact.logo || undefined} />
-              <AvatarFallback className="text-[10px] text-white bg-[#202e32] brightness-120">
-                {contact.name.substring(0, 2).toUpperCase()}
+              <AvatarImage src={client.logo || undefined} />
+              <AvatarFallback className="text-[10px] bg-muted text-muted-foreground">
+                {client.name.substring(0, 2).toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="flex flex-col">
               <span className="text-xs text-primary hover:text-black dark:text-white font-medium group">
-                {contact.name}
+                {client.name}
               </span>
-              {contact.email && (
+              {client.email && (
                 <span className="text-[10px] text-primary/75 hover:text-black dark:text-white/50 group">
-                  {contact.email}
+                  {client.email}
                 </span>
               )}
             </div>
@@ -196,23 +196,23 @@ const getPipelineColumns = (
         <div className="flex items-center gap-2">
           <div className="flex -space-x-1.5">
             <div className="flex -space-x-1.5">
-              {contacts.slice(0, 3).map((contact) => (
+              {clients.slice(0, 3).map((client) => (
                 <Avatar
-                  key={contact.id}
+                  key={client.id}
                   className="size-7 relative first:z-10 first:opacity-100 opacity-100"
                 >
-                  <AvatarImage src={contact.logo || undefined} />
-                  <AvatarFallback className="text-[10px] bg-[#202e32] text-white brightness-120 rounded-full relative border">
-                    {contact.name.substring(0, 2).toUpperCase()}
+                  <AvatarImage src={client.logo || undefined} />
+                  <AvatarFallback className="text-[10px] bg-muted text-muted-foreground rounded-full relative border">
+                    {client.name.substring(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
               ))}
             </div>
 
-            {contacts.length > 3 && (
+            {clients.length > 3 && (
               <Avatar className="size-7">
-                <AvatarFallback className="text-[8px] bg-[#202e32] text-white brightness-120 rounded-full relative first:z-10 border">
-                  +{contacts.length - 3}
+                <AvatarFallback className="text-[8px] bg-muted text-muted-foreground rounded-full relative first:z-10 border">
+                  +{clients.length - 3}
                 </AvatarFallback>
               </Avatar>
             )}
@@ -223,8 +223,8 @@ const getPipelineColumns = (
   },
   {
     id: "dealsCount",
-    header: "# of Deals",
-    meta: { label: "# of Deals" },
+    header: "# of deals",
+    meta: { label: "# of deals" },
     cell: ({ row }) => (
       <span className="text-xs text-primary  dark:text-white/80 group max-w-[50px] truncate">
         {row.original.dealsCount || 0}
@@ -233,8 +233,8 @@ const getPipelineColumns = (
   },
   {
     id: "dealsValue",
-    header: "Deals Value",
-    meta: { label: "Deals Value" },
+    header: "Deals value",
+    meta: { label: "Deals value" },
     cell: ({ row }) => {
       const value = row.original.dealsValue || 0;
       const currencySymbol = getCurrencySymbol(selectedCurrency || "USD");
@@ -250,8 +250,8 @@ const getPipelineColumns = (
   },
   {
     id: "winRate",
-    header: "Win Rate %",
-    meta: { label: "Win Rate %" },
+    header: "Win rate",
+    meta: { label: "Win rate" },
     cell: ({ row }) => {
       const winRate = row.original.winRate || 0;
       return (
@@ -272,7 +272,7 @@ const getPipelineColumns = (
           "text-[10px] uppercase",
           row.original.isActive
             ? "bg-emerald-400 text-white"
-            : "bg-gray-500/20 text-gray-400"
+            : "bg-gray-500/20 text-gray-400",
         )}
       >
         {row.original.isActive ? "Active" : "Inactive"}
@@ -363,7 +363,7 @@ const COLUMN_ORDER_STORAGE_KEY = "pipelines-table.column-order";
 
 // Get default column IDs using null currency (will show USD by default)
 const PIPELINE_COLUMN_IDS = getPipelineColumns(null).map(
-  (column, index) => (column.id ?? `column-${index}`) as string
+  (column, index) => (column.id ?? `column-${index}`) as string,
 );
 
 type PipelinesTableProps = {
@@ -378,30 +378,33 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
 
   // Pagination state
   const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
-  const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
+  const [pageSize, setPageSize] = useQueryState(
+    "pageSize",
+    parseAsInteger.withDefault(20),
+  );
 
   // Client filter for "all-clients" scope (agency viewing all client data)
-  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
-    "subaccountId",
-    parseAsString.withDefault("")
+  const [selectedLocationId, setSelectedLocationId] = useQueryState(
+    "locationId",
+    parseAsString.withDefault(""),
   );
 
   // Date query state hooks (using parseAsString like profitableedge)
   const [createdAtStartStr, setCreatedAtStartStr] = useQueryState(
     "createdAtStart",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [createdAtEndStr, setCreatedAtEndStr] = useQueryState(
     "createdAtEnd",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [updatedAtStartStr, setUpdatedAtStartStr] = useQueryState(
     "updatedAtStart",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [updatedAtEndStr, setUpdatedAtEndStr] = useQueryState(
     "updatedAtEnd",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
 
   // Convert strings to Date objects for use in components
@@ -417,7 +420,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
   // Generate columns with the selected currency
   const pipelineColumns = React.useMemo(
     () => getPipelineColumns(params.dealsValueCurrency ?? null),
-    [params.dealsValueCurrency]
+    [params.dealsValueCurrency],
   );
 
   const { data, isFetching } = useSuspenseQuery(
@@ -428,9 +431,9 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       isActive: params.isActive ?? undefined,
       stages:
         params.stages && params.stages.length > 0 ? params.stages : undefined,
-      contacts:
-        params.contacts && params.contacts.length > 0
-          ? params.contacts
+      clients:
+        params.clients && params.clients.length > 0
+          ? params.clients
           : undefined,
       dealsCountMin: params.dealsCountMin ?? undefined,
       dealsCountMax: params.dealsCountMax ?? undefined,
@@ -443,12 +446,12 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       createdAtEnd: createdAtEnd || undefined,
       updatedAtStart: updatedAtStart || undefined,
       updatedAtEnd: updatedAtEnd || undefined,
-      // For "all-clients" scope, pass the selected subaccount filter
+      // For "all-clients" scope, pass the selected location filter
       ...(scope === "all-clients" && {
-        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
-        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+        includeAllClients: !selectedLocationId, // If no specific client selected, show all
+        locationId: selectedLocationId || undefined, // If client selected, filter by it
       }),
-    })
+    }),
   );
 
   const { data: stats } = useSuspenseQuery(trpc.pipelines.stats.queryOptions());
@@ -465,12 +468,12 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
 
   const sortingState = React.useMemo(
     () => sortValueToState(params.sort),
-    [params.sort]
+    [params.sort],
   );
   const searchValue = params.search ?? "";
   const hiddenColumns = React.useMemo(
     () => normalizeHiddenColumns(params.hiddenColumns ?? []),
-    [params.hiddenColumns]
+    [params.hiddenColumns],
   );
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>(() => visibilityFromHidden(hiddenColumns));
@@ -485,7 +488,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
     const next = normalizeColumnOrder(
       order,
       PIPELINE_COLUMN_IDS,
-      PRIMARY_COLUMN_ID
+      PRIMARY_COLUMN_ID,
     );
     if (shallowEqualArrays(next, PIPELINE_COLUMN_IDS)) {
       window.localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
@@ -504,7 +507,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
         const next = normalizeColumnOrder(
           parsed,
           PIPELINE_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         setColumnOrder(next);
       }
@@ -529,12 +532,12 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       const nextValue = sortingStateToValue(state) ?? PIPELINES_DEFAULT_SORT;
       setParams((prev) => ({ ...prev, sort: nextValue }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handlePageChange = React.useCallback(
     (newPage: number) => void setPage(newPage),
-    [setPage]
+    [setPage],
   );
 
   const handlePageSizeChange = React.useCallback(
@@ -542,7 +545,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       void setPageSize(newPageSize);
       void setPage(1);
     },
-    [setPageSize, setPage]
+    [setPageSize, setPage],
   );
 
   const handleSearchChange = React.useCallback(
@@ -550,7 +553,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       setParams((prev) => ({ ...prev, search: value }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleActiveFilterChange = React.useCallback(
@@ -558,7 +561,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       setParams((prev) => ({ ...prev, isActive }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleSortChange = React.useCallback(
@@ -566,7 +569,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       setParams((prev) => ({ ...prev, sort: value }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleCreatedAtChange = React.useCallback(
@@ -576,7 +579,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       void setCreatedAtEndStr(end ? toYMD(end) : "");
       void setPage(1);
     },
-    [setCreatedAtStartStr, setCreatedAtEndStr, setPage]
+    [setCreatedAtStartStr, setCreatedAtEndStr, setPage],
   );
 
   const handleUpdatedAtChange = React.useCallback(
@@ -586,7 +589,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       void setUpdatedAtEndStr(end ? toYMD(end) : "");
       void setPage(1);
     },
-    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage]
+    [setUpdatedAtStartStr, setUpdatedAtEndStr, setPage],
   );
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -600,7 +603,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       pendingHiddenRef.current = normalizedHidden;
       setParams((prev) => ({ ...prev, hiddenColumns: normalizedHidden }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnOrderChange = React.useCallback(
@@ -610,20 +613,20 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
         const next = normalizeColumnOrder(
           resolved,
           PIPELINE_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         persistColumnOrder(next);
         return next;
       });
     },
-    [persistColumnOrder]
+    [persistColumnOrder],
   );
 
   const handleRowClick = React.useCallback(
     (pipeline: PipelineRow) => {
       router.push(`/pipelines/${pipeline.id}`);
     },
-    [router]
+    [router],
   );
 
   const handleCurrencyChange = React.useCallback(
@@ -634,13 +637,13 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
   const handleApplyAllFilters = React.useCallback(
     (filters: {
       stages: string[];
-      contacts: string[];
+      clients: string[];
       dealsCountMin?: number;
       dealsCountMax?: number;
       dealsValueMin?: number;
@@ -651,7 +654,7 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       setParams((prev) => ({
         ...prev,
         stages: filters.stages,
-        contacts: filters.contacts,
+        clients: filters.clients,
         dealsCountMin: filters.dealsCountMin,
         dealsCountMax: filters.dealsCountMax,
         dealsValueMin: filters.dealsValueMin,
@@ -661,10 +664,10 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
       }));
       void setPage(1);
     },
-    [setParams, setPage]
+    [setParams, setPage],
   );
 
-  // Extract unique stages and contacts from all pipelines
+  // Extract unique stages and clients from all pipelines
   const uniqueStages = React.useMemo(() => {
     const stageNames = new Set<string>();
     data.items.forEach((pipeline) => {
@@ -675,21 +678,21 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
     return Array.from(stageNames).sort();
   }, [data.items]);
 
-  // Extract unique contacts with their IDs and names
-  const uniqueContactsWithIds = React.useMemo(() => {
+  // Extract unique clients with their IDs and names
+  const uniqueClientsWithIds = React.useMemo(() => {
     const seen = new Set<string>();
-    const contacts: Array<{ id: string; name: string }> = [];
+    const clients: Array<{ id: string; name: string }> = [];
 
     data.items.forEach((pipeline) => {
-      pipeline.contacts.forEach((contact: any) => {
-        if (contact && !seen.has(contact.id)) {
-          seen.add(contact.id);
-          contacts.push({ id: contact.id, name: contact.name || "Unknown" });
+      pipeline.clients.forEach((client: any) => {
+        if (client && !seen.has(client.id)) {
+          seen.add(client.id);
+          clients.push({ id: client.id, name: client.name || "Unknown" });
         }
       });
     });
 
-    return contacts.sort((a, b) => a.name.localeCompare(b.name));
+    return clients.sort((a, b) => a.name.localeCompare(b.name));
   }, [data.items]);
 
   return (
@@ -742,8 +745,8 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
               initialColumnOrder={PIPELINE_COLUMN_IDS}
               stages={uniqueStages}
               selectedStages={params.stages ?? []}
-              contacts={uniqueContactsWithIds}
-              selectedContacts={params.contacts ?? []}
+              clients={uniqueClientsWithIds}
+              selectedClients={params.clients ?? []}
               dealsCountMin={stats.minDealsCount}
               dealsCountMax={stats.maxDealsCount}
               dealsValueMin={stats.minDealsValue}
@@ -767,8 +770,8 @@ export function PipelinesTable({ scope = "agency" }: PipelinesTableProps) {
               updatedAtEnd={updatedAtEnd}
               onUpdatedAtChange={handleUpdatedAtChange}
               scope={scope}
-              selectedSubaccountId={selectedSubaccountId}
-              onSubaccountChange={setSelectedSubaccountId}
+              selectedLocationId={selectedLocationId}
+              onLocationChange={setSelectedLocationId}
             />
           ),
         }}
@@ -792,7 +795,7 @@ function normalizeHiddenColumns(columns: string[]): string[] {
 function normalizeColumnOrder(
   order: string[],
   defaults: string[],
-  fixedFirst?: string
+  fixedFirst?: string,
 ) {
   const seen = new Set<string>();
   const next: string[] = [];

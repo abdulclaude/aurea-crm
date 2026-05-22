@@ -10,13 +10,13 @@ import {
 } from "@/inngest/functions";
 import {
   syncEmbeddingsDaily,
-  reindexSubaccount,
+  reindexLocation,
 } from "@/inngest/channels/embedding-sync";
 import {
   mindbodyFullSync,
   mindbodyClientsSync,
   mindbodyClassesSync,
-  mindbodyContactSync,
+  mindbodyClientSync,
   mindbodyScheduledSync,
 } from "@/inngest/functions/mindbody-sync";
 import { sendRotaMagicLinks } from "@/inngest/functions/send-rota-magic-links";
@@ -24,6 +24,17 @@ import { processTrackingEvents } from "@/inngest/functions/process-tracking-even
 import { cleanupOldEvents } from "@/inngest/functions/cleanup-old-events";
 import { dataRetentionCleanup } from "@/inngest/functions/data-retention";
 import { sendCampaign, checkScheduledCampaigns } from "@/inngest/functions/send-campaign";
+import { sendMembershipWelcomeEmail, checkMembershipExpiry } from "@/inngest/functions/studio-automations";
+import { processStudioImport } from "@/inngest/functions/studio-import";
+import { sendClassReminders } from "@/inngest/functions/send-class-reminders";
+import { autoPromoteWaitlist, expireWaitlistNotifications } from "@/inngest/functions/auto-promote-waitlist";
+import { detectNoShows, dailyNoShowSummary } from "@/inngest/functions/detect-no-shows";
+import { calculateChurnScores } from "@/inngest/functions/calculate-churn-scores";
+import {
+  runBirthdayWorkflowTriggers,
+  runRetentionAutomations,
+} from "@/inngest/functions/run-retention-automations";
+import { processSmsQueue } from "@/inngest/functions/process-sms-queue";
 
 // Create an API that serves zero functions
 export const { GET, POST, PUT } = serve({
@@ -36,11 +47,11 @@ export const { GET, POST, PUT } = serve({
     renewGmailSubscriptionWatches,
     handleTelegramUpdate,
     syncEmbeddingsDaily,
-    reindexSubaccount,
+    reindexLocation,
     mindbodyFullSync,
     mindbodyClientsSync,
     mindbodyClassesSync,
-    mindbodyContactSync,
+    mindbodyClientSync,
     mindbodyScheduledSync,
     sendRotaMagicLinks,
     processTrackingEvents,
@@ -48,5 +59,17 @@ export const { GET, POST, PUT } = serve({
     dataRetentionCleanup,
     sendCampaign,
     checkScheduledCampaigns,
+    sendMembershipWelcomeEmail,
+    checkMembershipExpiry,
+    processStudioImport,
+    sendClassReminders,
+    autoPromoteWaitlist,
+    expireWaitlistNotifications,
+    detectNoShows,
+    dailyNoShowSummary,
+    calculateChurnScores,
+    runRetentionAutomations,
+    runBirthdayWorkflowTriggers,
+    processSmsQueue,
   ],
 });

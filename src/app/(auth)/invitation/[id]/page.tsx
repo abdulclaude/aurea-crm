@@ -105,8 +105,8 @@ function InvitationPageContent() {
           </h1>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
             You've successfully joined{" "}
-            {invitation?.subaccount
-              ? invitation.subaccount.companyName
+            {invitation?.location
+              ? invitation.location.companyName
               : invitation?.organization.name}
             .
           </p>
@@ -167,17 +167,17 @@ function InvitationPageContent() {
     );
   }
 
-  const entityName = invitation.subaccount
-    ? `${invitation.subaccount.companyName} (${invitation.organization.name})`
+  const entityName = invitation.location
+    ? `${invitation.location.companyName} (${invitation.organization.name})`
     : invitation.organization.name;
 
   const entityLogo =
-    invitation.subaccount?.logo || invitation.organization.logo;
+    invitation.location?.logo || invitation.organization.logo;
 
   return (
     <div className="flex h-svh items-center justify-center bg-background">
       <div className="w-full min-w-xl rounded-lg border border-black/10 bg-white shadow-xl">
-        {/* Organization/Subaccount Logo */}
+        {/* Organization/Location Logo */}
         {/* {entityLogo && (
           <div className="mx-auto mb-6 flex size-20 items-center justify-center">
             <Avatar className="h-16 w-16">
@@ -191,7 +191,7 @@ function InvitationPageContent() {
 
         {/* Invitation Details */}
         <div className="flex flex-col items-center gap-2 p-8 py-6 pb-5">
-          {invitation.subaccount && (
+          {invitation.location && (
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
               Client Workspace
             </p>

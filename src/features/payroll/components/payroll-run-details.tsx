@@ -50,7 +50,7 @@ const getStatusColor = (status: string) => {
 
 export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsProps) {
   const trpc = useTRPC();
-  const [selectedWorker, setSelectedWorker] = React.useState<{
+  const [selectedInstructor, setSelectedInstructor] = React.useState<{
     id: string;
     name: string;
   } | null>(null);
@@ -67,15 +67,15 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
     );
   }
 
-  const columns: ColumnDef<typeof payrollRun.payrollRunWorkers[number]>[] = [
+  const columns: ColumnDef<typeof payrollRun.payrollRunInstructors[number]>[] = [
     {
-      id: "worker",
-      accessorKey: "worker.name",
-      header: "Worker",
+      id: "instructor",
+      accessorKey: "instructor.name",
+      header: "Instructor",
       cell: ({ row }) => (
         <div>
-          <p className="font-medium text-xs">{row.original.worker.name}</p>
-          <p className="text-xs text-primary/60">{row.original.worker.email || "No email"}</p>
+          <p className="font-medium text-xs">{row.original.instructor.name}</p>
+          <p className="text-xs text-primary/60">{row.original.instructor.email || "No email"}</p>
         </div>
       ),
     },
@@ -127,9 +127,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
           size="sm"
           className="h-7"
           onClick={() =>
-            setSelectedWorker({
-              id: row.original.workerId,
-              name: row.original.worker.name,
+            setSelectedInstructor({
+              id: row.original.instructorId,
+              name: row.original.instructor.name,
             })
           }
         >
@@ -170,10 +170,10 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-primary/60">Total Workers</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary/60">Total Instructors</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{payrollRun._count.payrollRunWorkers}</div>
+              <div className="text-2xl font-bold">{payrollRun._count.payrollRunInstructors}</div>
             </CardContent>
           </Card>
 
@@ -211,18 +211,18 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
           </Card>
         </div>
 
-        {/* Workers Table */}
+        {/* Instructors Table */}
         <div>
-          <h3 className="text-sm font-medium mb-3">Workers</h3>
+          <h3 className="text-sm font-medium mb-3">Instructors</h3>
           <DataTable
             columns={columns}
-            data={payrollRun.payrollRunWorkers}
+            data={payrollRun.payrollRunInstructors}
             emptyState={
               <div className="text-center py-12">
                 <FileText className="size-12 mx-auto text-primary/20 mb-4" />
-                <h3 className="text-sm font-medium text-primary mb-1">No workers</h3>
+                <h3 className="text-sm font-medium text-primary mb-1">No instructors</h3>
                 <p className="text-xs text-primary/60">
-                  No workers found in this payroll run
+                  No instructors found in this payroll run
                 </p>
               </div>
             }
@@ -231,13 +231,13 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       </div>
 
       {/* Payslip Dialog */}
-      {selectedWorker && (
+      {selectedInstructor && (
         <PayslipDialog
-          open={!!selectedWorker}
-          onOpenChange={(open) => !open && setSelectedWorker(null)}
+          open={!!selectedInstructor}
+          onOpenChange={(open) => !open && setSelectedInstructor(null)}
           payrollRunId={payrollRunId}
-          workerId={selectedWorker.id}
-          workerName={selectedWorker.name}
+          instructorId={selectedInstructor.id}
+          instructorName={selectedInstructor.name}
         />
       )}
     </>

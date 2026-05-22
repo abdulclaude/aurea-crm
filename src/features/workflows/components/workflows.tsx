@@ -55,6 +55,7 @@ import {
   useUpdateWorkflowArchived,
   useCreateTemplateFromWorkflow,
   useCreateWorkflowFromTemplate,
+  useInstallStudioStarterTemplates,
   useUpdateTemplateMeta,
 } from "../hooks/use-workflows";
 
@@ -62,19 +63,19 @@ import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useWorkflowsParams } from "../hooks/use-workflows-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
-import type { Workflows } from "@prisma/client";
-import { NodeType } from "@prisma/client";
+import type { Workflows } from "@/db/types";
+import { NodeType } from "@/db/enums";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
-import type { Prisma } from "@prisma/client";
+import type { JsonValue } from "@/db/json";
 
 type WorkflowNodePreview = {
   id?: string;
   type?: NodeType;
   createdAt?: string | Date | null;
-  position?: Prisma.JsonValue;
+  position?: JsonValue;
 };
 
 type WorkflowEntity = Omit<Workflows, "nodes"> & {
@@ -331,20 +332,36 @@ export const ArchivedWorkflowsPagination = () => {
 
 export const TemplatesList = () => {
   const templates = useSuspenseTemplates();
+  const installStarterTemplates = useInstallStudioStarterTemplates();
+
   return (
-    <EntityList
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-      items={templates.data.items as WorkflowEntity[]}
-      getKey={(t) => t.id}
-      renderItem={(t) => <TemplateCard data={t} />}
-      emptyView={
-        <EmptyView
-          title="No templates"
-          label="template"
-          message="No templates have been found. Get started by templating an existing workflow."
-        />
-      }
-    />
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={installStarterTemplates.isPending}
+          onClick={() => installStarterTemplates.mutate()}
+        >
+          {installStarterTemplates.isPending
+            ? "Installing..."
+            : "Install studio starters"}
+        </Button>
+      </div>
+      <EntityList
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        items={templates.data.items as WorkflowEntity[]}
+        getKey={(t) => t.id}
+        renderItem={(t) => <TemplateCard data={t} />}
+        emptyView={
+          <EmptyView
+            title="No templates"
+            label="template"
+            message="No templates have been found. Install studio starters or template an existing workflow."
+          />
+        }
+      />
+    </div>
   );
 };
 
@@ -391,7 +408,7 @@ export const TemplateItem = ({ data }: { data: WorkflowEntity }) => {
                   onSuccess: (d) => {
                     router.push(`/workflows/${d.id}`);
                   },
-                }
+                },
               );
             }}
           >
@@ -429,7 +446,7 @@ const getTriggerIcon = (nodes?: WorkflowNodePreview[]) => {
       ?.map((node) => node.type)
       .find(
         (nodeType): nodeType is NodeType =>
-          !!nodeType && triggerPriority.includes(nodeType)
+          !!nodeType && triggerPriority.includes(nodeType),
       ) ?? NodeType.MANUAL_TRIGGER;
   switch (type) {
     case NodeType.STRIPE_TRIGGER:
@@ -507,34 +524,34 @@ const nodeIconDescriptors: Partial<Record<NodeType, NodeIconDescriptor>> = {
   [NodeType.DISCORD]: { image: "/logos/discord.svg", alt: "Discord" },
   [NodeType.SLACK]: { image: "/logos/slack.svg", alt: "Slack" },
   [NodeType.WAIT]: { icon: IconPayment, alt: "Wait" },
-  [NodeType.CREATE_CONTACT]: { icon: IconPayment, alt: "Create Contact" },
-  [NodeType.UPDATE_CONTACT]: { icon: IconPayment, alt: "Update Contact" },
-  [NodeType.DELETE_CONTACT]: { icon: IconPayment, alt: "Delete Contact" },
-  [NodeType.CREATE_DEAL]: { icon: IconPayment, alt: "Create Deal" },
-  [NodeType.UPDATE_DEAL]: { icon: IconPayment, alt: "Update Deal" },
-  [NodeType.DELETE_DEAL]: { icon: IconPayment, alt: "Delete Deal" },
+  [NodeType.CREATE_CLIENT]: { icon: IconPayment, alt: "Create Client" },
+  [NodeType.UPDATE_CLIENT]: { icon: IconPayment, alt: "Update Client" },
+  [NodeType.DELETE_CLIENT]: { icon: IconPayment, alt: "Delete Client" },
+  [NodeType.CREATE_DEAL]: { icon: IconPayment, alt: "Create deal" },
+  [NodeType.UPDATE_DEAL]: { icon: IconPayment, alt: "Update deal" },
+  [NodeType.DELETE_DEAL]: { icon: IconPayment, alt: "Delete deal" },
   [NodeType.UPDATE_PIPELINE]: { icon: IconPayment, alt: "Update Pipeline" },
-  [NodeType.CONTACT_CREATED_TRIGGER]: {
+  [NodeType.CLIENT_CREATED_TRIGGER]: {
     icon: IconPayment,
-    alt: "Contact Created",
+    alt: "Client Created",
   },
-  [NodeType.CONTACT_UPDATED_TRIGGER]: {
+  [NodeType.CLIENT_UPDATED_TRIGGER]: {
     icon: IconPayment,
-    alt: "Contact Updated",
+    alt: "Client Updated",
   },
-  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: {
+  [NodeType.CLIENT_FIELD_CHANGED_TRIGGER]: {
     icon: IconPayment,
     alt: "Field Changed",
   },
-  [NodeType.CONTACT_DELETED_TRIGGER]: {
+  [NodeType.CLIENT_DELETED_TRIGGER]: {
     icon: IconPayment,
-    alt: "Contact Deleted",
+    alt: "Client Deleted",
   },
-  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: {
+  [NodeType.CLIENT_TYPE_CHANGED_TRIGGER]: {
     icon: IconPayment,
     alt: "Type Changed",
   },
-  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]: {
+  [NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER]: {
     icon: IconPayment,
     alt: "Lifecycle Changed",
   },
@@ -672,7 +689,7 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState(data.name);
   const [description, setDescription] = React.useState<string>(
-    data.description || ""
+    data.description || "",
   );
 
   return (
@@ -712,7 +729,7 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                       onSuccess: (d) => {
                         router.push(`/workflows/${d.id}`);
                       },
-                    }
+                    },
                   )
                 }
               >
@@ -800,7 +817,7 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                   { id: data.id, name, description },
                   {
                     onSuccess: () => setOpen(false),
-                  }
+                  },
                 )
               }
               disabled={updateTemplateMeta.isPending}

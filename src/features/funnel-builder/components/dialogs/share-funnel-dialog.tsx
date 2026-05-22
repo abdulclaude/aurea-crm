@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Copy, ExternalLink, QrCode, Globe, AlertCircle } from "lucide-react";
 import { getPublicFunnelPageUrl } from "../../lib/funnel-urls";
-import type { FunnelPage, Funnel } from "@prisma/client";
+import type { FunnelPage, Funnel } from "@/db/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface ShareFunnelDialogProps {

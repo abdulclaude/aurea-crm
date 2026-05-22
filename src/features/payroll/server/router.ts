@@ -1,10 +1,97 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
+import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  instructorPayment,
+  payrollRun,
+  payrollRunInstructor,
+  timeLog,
+} from "@/db/schema";
 import { TRPCError } from "@trpc/server";
 import { generatePayslipHTML, getPayslipData } from "../lib/payslip-generator";
 import { calculateUKTax } from "../lib/uk-tax-calculator";
 import { startOfYear } from "date-fns";
+import type { JsonObject } from "@/db/json";
+
+type PayrollCalculation = {
+  instructorId: string;
+  instructor: NonNullable<Awaited<ReturnType<typeof fetchPayrollTimeLogs>>[number]["instructor"]>;
+  regularHours: number;
+  overtimeHours: number;
+  regularPay: number;
+  overtimePay: number;
+  bonuses: number;
+  grossPay: number;
+  housingAllowance?: number;
+  transportAllowance?: number;
+  mealAllowance?: number;
+  otherAllowances?: number;
+  incomeTax?: number;
+  nationalInsurance?: number;
+  pensionContribution?: number;
+  studentLoan?: number;
+  otherDeductions?: number;
+  deductions?: number;
+  netPay?: number;
+  ytdGrossPay?: number;
+  ytdTax?: number;
+  ytdNI?: number;
+  ytdNetPay?: number;
+};
+
+const scopedPayrollWhere = (organizationId: string, locationId: string | null | undefined) =>
+  and(
+    eq(payrollRun.organizationId, organizationId),
+    locationId ? eq(payrollRun.locationId, locationId) : isNull(payrollRun.locationId),
+  );
+
+async function fetchPayrollTimeLogs({
+  organizationId,
+  locationId,
+  periodStart,
+  periodEnd,
+  instructorIds,
+}: {
+  organizationId: string;
+  locationId: string | null | undefined;
+  periodStart: Date;
+  periodEnd: Date;
+  instructorIds?: string[];
+}) {
+  return await db.query.timeLog.findMany({
+    where: and(
+      eq(timeLog.organizationId, organizationId),
+      locationId ? eq(timeLog.locationId, locationId) : isNull(timeLog.locationId),
+      gte(timeLog.startTime, periodStart),
+      lte(timeLog.startTime, periodEnd),
+      eq(timeLog.status, "APPROVED"),
+      instructorIds && instructorIds.length > 0
+        ? inArray(timeLog.instructorId, instructorIds)
+        : undefined,
+    ),
+    with: {
+      instructor: true,
+    },
+  });
+}
+
+const money = (value: number | string | null | undefined): string =>
+  String(Number(value ?? 0));
+
+const parseStudentLoanPlan = (
+  value: string | null,
+): "plan1" | "plan2" | "plan4" | "postgraduate" | null => {
+  if (
+    value === "plan1" ||
+    value === "plan2" ||
+    value === "plan4" ||
+    value === "postgraduate"
+  ) {
+    return value;
+  }
+  return null;
+};
 
 export const payrollRouter = createTRPCRouter({
   // List payroll runs
@@ -26,17 +113,17 @@ export const payrollRouter = createTRPCRouter({
 
       const { status, limit, cursor } = input;
 
-      const payrollRuns = await prisma.payrollRun.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-          ...(status && { status }),
-        },
-        include: {
-          payrollRunWorkers: {
-            include: {
-              worker: {
-                select: {
+      const payrollRuns = await db.query.payrollRun.findMany({
+        where: and(
+          scopedPayrollWhere(ctx.orgId, ctx.locationId),
+          status ? eq(payrollRun.status, status) : undefined,
+          cursor ? lt(payrollRun.id, cursor) : undefined,
+        ),
+        with: {
+          payrollRunInstructors: {
+            with: {
+              instructor: {
+                columns: {
                   id: true,
                   name: true,
                   email: true,
@@ -44,30 +131,16 @@ export const payrollRouter = createTRPCRouter({
               },
             },
           },
-          workerPayments: {
-            select: {
+          instructorPayments: {
+            columns: {
               id: true,
               paymentStatus: true,
               netAmount: true,
             },
           },
-          _count: {
-            select: {
-              payrollRunWorkers: true,
-              workerPayments: true,
-            },
-          },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: limit + 1,
-        ...(cursor && {
-          cursor: {
-            id: cursor,
-          },
-          skip: 1,
-        }),
+        orderBy: [desc(payrollRun.createdAt)],
+        limit: limit + 1,
       });
 
       let nextCursor: string | undefined = undefined;
@@ -77,7 +150,13 @@ export const payrollRouter = createTRPCRouter({
       }
 
       return {
-        payrollRuns,
+        payrollRuns: payrollRuns.map((run) => ({
+          ...run,
+          _count: {
+            payrollRunInstructors: run.payrollRunInstructors.length,
+            instructorPayments: run.instructorPayments.length,
+          },
+        })),
         nextCursor,
       };
     }),
@@ -93,16 +172,13 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const payrollRun = await prisma.payrollRun.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-        },
-        include: {
-          payrollRunWorkers: {
-            include: {
-              worker: {
-                select: {
+      const selectedPayrollRun = await db.query.payrollRun.findFirst({
+        where: and(eq(payrollRun.id, input.id), eq(payrollRun.organizationId, ctx.orgId)),
+        with: {
+          payrollRunInstructors: {
+            with: {
+              instructor: {
+                columns: {
                   id: true,
                   name: true,
                   email: true,
@@ -113,33 +189,33 @@ export const payrollRouter = createTRPCRouter({
               },
             },
           },
-          workerPayments: {
-            include: {
-              worker: {
-                select: {
+          instructorPayments: {
+            with: {
+              instructor: {
+                columns: {
                   id: true,
                   name: true,
                 },
               },
             },
           },
-          _count: {
-            select: {
-              payrollRunWorkers: true,
-              workerPayments: true,
-            },
-          },
         },
       });
 
-      if (!payrollRun) {
+      if (!selectedPayrollRun) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Payroll run not found",
         });
       }
 
-      return payrollRun;
+      return {
+        ...selectedPayrollRun,
+        _count: {
+          payrollRunInstructors: selectedPayrollRun.payrollRunInstructors.length,
+          instructorPayments: selectedPayrollRun.instructorPayments.length,
+        },
+      };
     }),
 
   // Calculate payroll for a period (preview before creating)
@@ -148,7 +224,7 @@ export const payrollRouter = createTRPCRouter({
       z.object({
         periodStart: z.date(),
         periodEnd: z.date(),
-        workerIds: z.array(z.string()).optional(), // If not provided, calculate for all workers
+        instructorIds: z.array(z.string()).optional(), // If not provided, calculate for all instructors
       })
     )
     .query(async ({ ctx, input }) => {
@@ -159,47 +235,24 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const { periodStart, periodEnd, workerIds } = input;
+      const { periodStart, periodEnd, instructorIds } = input;
 
       // Fetch approved time logs for the period
-      const timeLogs = await prisma.timeLog.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-          startTime: {
-            gte: periodStart,
-            lte: periodEnd,
-          },
-          status: "APPROVED",
-          ...(workerIds && {
-            workerId: {
-              in: workerIds,
-            },
-          }),
-        },
-        include: {
-          worker: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              hourlyRate: true,
-              currency: true,
-              bankAccountName: true,
-              bankAccountNumber: true,
-              bankSortCode: true,
-            },
-          },
-        },
+      const timeLogs = await fetchPayrollTimeLogs({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        periodStart,
+        periodEnd,
+        instructorIds,
       });
 
-      // Group by worker and calculate totals
-      const workerCalculations = new Map<
+      // Group by instructor and calculate totals
+      const instructorCalculations = new Map<
         string,
         {
-          workerId: string;
-          workerName: string;
-          workerEmail: string | null;
+          instructorId: string;
+          instructorName: string;
+          instructorEmail: string | null;
           regularHours: number;
           overtimeHours: number;
           regularPay: number;
@@ -214,22 +267,22 @@ export const payrollRouter = createTRPCRouter({
       >();
 
       for (const log of timeLogs) {
-        if (!log.workerId) continue;
+        if (!log.instructorId) continue;
 
-        const workerId = log.workerId;
-        const existing = workerCalculations.get(workerId) || {
-          workerId,
-          workerName: log.worker?.name || "Unknown",
-          workerEmail: log.worker?.email || null,
+        const instructorId = log.instructorId;
+        const existing = instructorCalculations.get(instructorId) || {
+          instructorId,
+          instructorName: log.instructor?.name || "Unknown",
+          instructorEmail: log.instructor?.email || null,
           regularHours: 0,
           overtimeHours: 0,
           regularPay: 0,
           overtimePay: 0,
           grossPay: 0,
           netPay: 0,
-          bankAccountName: log.worker?.bankAccountName || null,
-          bankAccountNumber: log.worker?.bankAccountNumber || null,
-          bankSortCode: log.worker?.bankSortCode || null,
+          bankAccountName: log.instructor?.bankAccountName || null,
+          bankAccountNumber: log.instructor?.bankAccountNumber || null,
+          bankSortCode: log.instructor?.bankSortCode || null,
           timeLogCount: 0,
         };
 
@@ -248,13 +301,13 @@ export const payrollRouter = createTRPCRouter({
         existing.netPay += amount; // No deductions for now
         existing.timeLogCount += 1;
 
-        workerCalculations.set(workerId, existing);
+        instructorCalculations.set(instructorId, existing);
       }
 
-      const calculations = Array.from(workerCalculations.values());
+      const calculations = Array.from(instructorCalculations.values());
 
       const summary = {
-        totalWorkers: calculations.length,
+        totalInstructors: calculations.length,
         totalRegularHours: calculations.reduce((sum, w) => sum + w.regularHours, 0),
         totalOvertimeHours: calculations.reduce((sum, w) => sum + w.overtimeHours, 0),
         totalGrossPay: calculations.reduce((sum, w) => sum + w.grossPay, 0),
@@ -264,7 +317,7 @@ export const payrollRouter = createTRPCRouter({
       return {
         periodStart,
         periodEnd,
-        workers: calculations,
+        instructors: calculations,
         summary,
       };
     }),
@@ -277,7 +330,7 @@ export const payrollRouter = createTRPCRouter({
         periodEnd: z.date(),
         paymentDate: z.date(),
         notes: z.string().optional(),
-        workerIds: z.array(z.string()).optional(),
+        instructorIds: z.array(z.string()).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -295,38 +348,27 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const { periodStart, periodEnd, paymentDate, notes, workerIds } = input;
+      const { periodStart, periodEnd, paymentDate, notes, instructorIds } = input;
+      const organizationId = ctx.orgId;
 
       // Calculate payroll first
-      const timeLogs = await prisma.timeLog.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-          startTime: {
-            gte: periodStart,
-            lte: periodEnd,
-          },
-          status: "APPROVED",
-          ...(workerIds && {
-            workerId: {
-              in: workerIds,
-            },
-          }),
-        },
-        include: {
-          worker: true,
-        },
+      const timeLogs = await fetchPayrollTimeLogs({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        periodStart,
+        periodEnd,
+        instructorIds,
       });
 
-      // Group by worker and calculate gross pay
-      const workerCalculations = new Map<string, any>();
+      // Group by instructor and calculate gross pay
+      const instructorCalculations = new Map<string, PayrollCalculation>();
       for (const log of timeLogs) {
-        if (!log.workerId) continue;
+        if (!log.instructorId || !log.instructor) continue;
 
-        const workerId = log.workerId;
-        const existing = workerCalculations.get(workerId) || {
-          workerId,
-          worker: log.worker,
+        const instructorId = log.instructorId;
+        const existing = instructorCalculations.get(instructorId) || {
+          instructorId,
+          instructor: log.instructor,
           regularHours: 0,
           overtimeHours: 0,
           regularPay: 0,
@@ -348,57 +390,58 @@ export const payrollRouter = createTRPCRouter({
 
         existing.grossPay += amount;
 
-        workerCalculations.set(workerId, existing);
+        instructorCalculations.set(instructorId, existing);
       }
 
-      // Calculate tax, NI, and deductions for each worker
+      // Calculate tax, NI, and deductions for each instructor
       const yearStart = startOfYear(periodStart);
 
       const calculations = await Promise.all(
-        Array.from(workerCalculations.values()).map(async (calc) => {
+        Array.from(instructorCalculations.values()).map(async (calc) => {
           // Get YTD totals from previous payroll runs this year
-          const ytdData = await prisma.payrollRunWorker.aggregate({
-            where: {
-              workerId: calc.workerId,
-              payrollRun: {
-                periodStart: { gte: yearStart },
-                periodEnd: { lt: periodStart },
-                status: { in: ["COMPLETED", "PROCESSING", "APPROVED"] },
-              },
-            },
-            _sum: {
-              grossPay: true,
-              incomeTax: true,
-              nationalInsurance: true,
-            },
-          });
+          const [ytdData] = await db
+            .select({
+              grossPay: sql<string | null>`sum(${payrollRunInstructor.grossPay})`,
+              incomeTax: sql<string | null>`sum(${payrollRunInstructor.incomeTax})`,
+              nationalInsurance: sql<string | null>`sum(${payrollRunInstructor.nationalInsurance})`,
+            })
+            .from(payrollRunInstructor)
+            .innerJoin(payrollRun, eq(payrollRunInstructor.payrollRunId, payrollRun.id))
+            .where(
+              and(
+                eq(payrollRunInstructor.instructorId, calc.instructorId),
+                gte(payrollRun.periodStart, yearStart),
+                lt(payrollRun.periodEnd, periodStart),
+                inArray(payrollRun.status, ["COMPLETED", "PROCESSING", "APPROVED"]),
+              ),
+            );
 
-          const ytdGrossPay = Number(ytdData._sum.grossPay || 0);
-          const ytdTax = Number(ytdData._sum.incomeTax || 0);
-          const ytdNI = Number(ytdData._sum.nationalInsurance || 0);
+          const ytdGrossPay = Number(ytdData?.grossPay || 0);
+          const ytdTax = Number(ytdData?.incomeTax || 0);
+          const ytdNI = Number(ytdData?.nationalInsurance || 0);
 
-          // Add worker's allowances to gross pay
-          const workerAllowances =
-            Number(calc.worker.housingAllowance || 0) +
-            Number(calc.worker.transportAllowance || 0) +
-            Number(calc.worker.mealAllowance || 0) +
-            Number(calc.worker.otherAllowances || 0);
+          // Add instructor's allowances to gross pay
+          const instructorAllowances =
+            Number(calc.instructor.housingAllowance || 0) +
+            Number(calc.instructor.transportAllowance || 0) +
+            Number(calc.instructor.mealAllowance || 0) +
+            Number(calc.instructor.otherAllowances || 0);
 
-          calc.housingAllowance = Number(calc.worker.housingAllowance || 0);
-          calc.transportAllowance = Number(calc.worker.transportAllowance || 0);
-          calc.mealAllowance = Number(calc.worker.mealAllowance || 0);
-          calc.otherAllowances = Number(calc.worker.otherAllowances || 0);
+          calc.housingAllowance = Number(calc.instructor.housingAllowance || 0);
+          calc.transportAllowance = Number(calc.instructor.transportAllowance || 0);
+          calc.mealAllowance = Number(calc.instructor.mealAllowance || 0);
+          calc.otherAllowances = Number(calc.instructor.otherAllowances || 0);
 
-          calc.grossPay += workerAllowances;
+          calc.grossPay += instructorAllowances;
 
           // Calculate UK tax and deductions
           const taxCalc = calculateUKTax({
             grossPay: calc.grossPay,
-            taxCode: calc.worker.taxCode || "1257L",
-            pensionContributionRate: calc.worker.pensionSchemeEnrolled
-              ? Number(calc.worker.pensionContributionRate || 5)
+            taxCode: calc.instructor.taxCode || "1257L",
+            pensionContributionRate: calc.instructor.pensionSchemeEnrolled
+              ? Number(calc.instructor.pensionContributionRate || 5)
               : 0,
-            studentLoanPlan: calc.worker.studentLoanPlan || null,
+            studentLoanPlan: parseStudentLoanPlan(calc.instructor.studentLoanPlan),
             ytdGrossPay,
             ytdTax,
             ytdNI,
@@ -429,60 +472,73 @@ export const payrollRouter = createTRPCRouter({
       }
 
       const totalGrossPay = calculations.reduce((sum, w) => sum + w.grossPay, 0);
-      const totalDeductions = calculations.reduce((sum, w) => sum + w.deductions, 0);
-      const totalNetPay = calculations.reduce((sum, w) => sum + w.netPay, 0);
+      const totalDeductions = calculations.reduce((sum, w) => sum + (w.deductions ?? 0), 0);
+      const totalNetPay = calculations.reduce((sum, w) => sum + (w.netPay ?? 0), 0);
 
-      // Create payroll run with workers in a transaction
-      const payrollRun = await prisma.payrollRun.create({
-        data: {
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
+      // Create payroll run with instructors in a transaction
+      const createdPayrollRun = await db.transaction(async (tx) => {
+        const [run] = await tx
+          .insert(payrollRun)
+          .values({
+          id: crypto.randomUUID(),
+          organizationId,
+          locationId: ctx.locationId ?? null,
           periodStart,
           periodEnd,
           paymentDate,
-          totalGrossPay,
-          totalDeductions,
-          totalNetPay,
+          totalGrossPay: money(totalGrossPay),
+          totalDeductions: money(totalDeductions),
+          totalNetPay: money(totalNetPay),
           currency: "GBP",
           notes,
           createdBy: ctx.auth.user.id,
-          payrollRunWorkers: {
-            create: calculations.map((calc) => ({
-              workerId: calc.workerId,
-              regularHours: calc.regularHours,
-              overtimeHours: calc.overtimeHours,
-              regularPay: calc.regularPay,
-              overtimePay: calc.overtimePay,
-              bonuses: calc.bonuses,
-              housingAllowance: calc.housingAllowance,
-              transportAllowance: calc.transportAllowance,
-              mealAllowance: calc.mealAllowance,
-              otherAllowances: calc.otherAllowances,
-              incomeTax: calc.incomeTax,
-              nationalInsurance: calc.nationalInsurance,
-              pensionContribution: calc.pensionContribution,
-              studentLoan: calc.studentLoan,
-              otherDeductions: calc.otherDeductions,
-              deductions: calc.deductions,
-              grossPay: calc.grossPay,
-              netPay: calc.netPay,
-              ytdGrossPay: calc.ytdGrossPay,
-              ytdTax: calc.ytdTax,
-              ytdNI: calc.ytdNI,
-              ytdNetPay: calc.ytdNetPay,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          })
+          .returning();
+
+        await tx.insert(payrollRunInstructor).values(
+          calculations.map((calc) => ({
+              id: crypto.randomUUID(),
+              payrollRunId: run.id,
+              instructorId: calc.instructorId,
+              regularHours: money(calc.regularHours),
+              overtimeHours: money(calc.overtimeHours),
+              regularPay: money(calc.regularPay),
+              overtimePay: money(calc.overtimePay),
+              bonuses: money(calc.bonuses),
+              housingAllowance: money(calc.housingAllowance),
+              transportAllowance: money(calc.transportAllowance),
+              mealAllowance: money(calc.mealAllowance),
+              otherAllowances: money(calc.otherAllowances),
+              incomeTax: money(calc.incomeTax),
+              nationalInsurance: money(calc.nationalInsurance),
+              pensionContribution: money(calc.pensionContribution),
+              studentLoan: money(calc.studentLoan),
+              otherDeductions: money(calc.otherDeductions),
+              deductions: money(calc.deductions),
+              grossPay: money(calc.grossPay),
+              netPay: money(calc.netPay),
+              ytdGrossPay: money(calc.ytdGrossPay),
+              ytdTax: money(calc.ytdTax),
+              ytdNi: money(calc.ytdNI),
+              ytdNetPay: money(calc.ytdNetPay),
+              createdAt: new Date(),
+              updatedAt: new Date(),
             })),
-          },
-        },
-        include: {
-          payrollRunWorkers: {
-            include: {
-              worker: true,
-            },
+        );
+
+        return run;
+      });
+
+      return await db.query.payrollRun.findFirst({
+        where: eq(payrollRun.id, createdPayrollRun.id),
+        with: {
+          payrollRunInstructors: {
+            with: { instructor: true },
           },
         },
       });
-
-      return payrollRun;
     }),
 
   // Approve payroll run
@@ -503,19 +559,18 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const payrollRun = await prisma.payrollRun.update({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-        },
-        data: {
+      const [updatedRun] = await db
+        .update(payrollRun)
+        .set({
           status: "APPROVED",
           approvedBy: ctx.auth.user.id,
           approvedAt: new Date(),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(and(eq(payrollRun.id, input.id), eq(payrollRun.organizationId, ctx.orgId)))
+        .returning();
 
-      return payrollRun;
+      return updatedRun;
     }),
 
   // Process payments (mark as processing)
@@ -536,81 +591,79 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      // Get payroll run with workers
-      const payrollRun = await prisma.payrollRun.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-        },
-        include: {
-          payrollRunWorkers: {
-            include: {
-              worker: true,
+      // Get payroll run with instructors
+      const selectedPayrollRun = await db.query.payrollRun.findFirst({
+        where: and(eq(payrollRun.id, input.id), eq(payrollRun.organizationId, ctx.orgId)),
+        with: {
+          payrollRunInstructors: {
+            with: {
+              instructor: true,
             },
           },
         },
       });
 
-      if (!payrollRun) {
+      if (!selectedPayrollRun) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Payroll run not found",
         });
       }
 
-      if (payrollRun.status !== "APPROVED") {
+      if (selectedPayrollRun.status !== "APPROVED") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Payroll run must be approved before processing",
         });
       }
 
-      // Create worker payment records
-      await prisma.$transaction([
-        // Update payroll run status
-        prisma.payrollRun.update({
-          where: { id: input.id },
-          data: {
+      // Create instructor payment records
+      await db.transaction(async (tx) => {
+        await tx
+          .update(payrollRun)
+          .set({
             status: "PROCESSING",
             processedBy: ctx.auth.user.id,
             processedAt: new Date(),
-          },
-        }),
-        // Create payment records
-        ...payrollRun.payrollRunWorkers.map((prw) =>
-          prisma.workerPayment.create({
-            data: {
-              workerId: prw.workerId,
-              payrollRunId: payrollRun.id,
+            updatedAt: new Date(),
+          })
+          .where(eq(payrollRun.id, input.id));
+
+        await tx.insert(instructorPayment).values(
+          selectedPayrollRun.payrollRunInstructors.map((prw) => ({
+              id: crypto.randomUUID(),
+              instructorId: prw.instructorId,
+              payrollRunId: selectedPayrollRun.id,
               organizationId: ctx.orgId!,
-              subaccountId: ctx.subaccountId ?? null,
-              periodStart: payrollRun.periodStart,
-              periodEnd: payrollRun.periodEnd,
-              paymentDate: payrollRun.paymentDate,
+              locationId: ctx.locationId ?? null,
+              periodStart: selectedPayrollRun.periodStart,
+              periodEnd: selectedPayrollRun.periodEnd,
+              paymentDate: selectedPayrollRun.paymentDate,
               grossAmount: prw.grossPay,
               deductions: prw.deductions,
               netAmount: prw.netPay,
-              currency: payrollRun.currency,
-              paymentMethod: "BANK_TRANSFER",
-              paymentStatus: "PENDING",
-              bankAccountName: prw.worker.bankAccountName,
-              bankAccountNumber: prw.worker.bankAccountNumber,
-              bankSortCode: prw.worker.bankSortCode,
+              currency: selectedPayrollRun.currency,
+              paymentMethod: "BANK_TRANSFER" as const,
+              paymentStatus: "PENDING" as const,
+              bankAccountName: prw.instructor.bankAccountName,
+              bankAccountNumber: prw.instructor.bankAccountNumber,
+              bankSortCode: prw.instructor.bankSortCode,
               metadata: {
                 regularHours: Number(prw.regularHours),
                 overtimeHours: Number(prw.overtimeHours),
                 regularPay: Number(prw.regularPay),
                 overtimePay: Number(prw.overtimePay),
                 bonuses: Number(prw.bonuses),
-              },
-            },
-          })
-        ),
-      ]);
+              } satisfies JsonObject,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })),
+        );
+      });
 
       return {
         success: true,
-        paymentsCreated: payrollRun.payrollRunWorkers.length,
+        paymentsCreated: selectedPayrollRun.payrollRunInstructors.length,
       };
     }),
 
@@ -638,26 +691,28 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const payment = await prisma.workerPayment.update({
-        where: {
-          id: input.paymentId,
-          organizationId: ctx.orgId,
-        },
-        data: {
+      const [payment] = await db
+        .update(instructorPayment)
+        .set({
           paymentStatus: "COMPLETED",
           paymentReference: input.paymentReference,
           notes: input.notes,
           paidBy: ctx.auth.user.id,
           paidAt: new Date(),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(instructorPayment.id, input.paymentId),
+            eq(instructorPayment.organizationId, ctx.orgId),
+          ),
+        )
+        .returning();
 
       // Check if all payments in the run are completed
       if (payment.payrollRunId) {
-        const allPayments = await prisma.workerPayment.findMany({
-          where: {
-            payrollRunId: payment.payrollRunId,
-          },
+        const allPayments = await db.query.instructorPayment.findMany({
+          where: eq(instructorPayment.payrollRunId, payment.payrollRunId),
         });
 
         const allCompleted = allPayments.every(
@@ -665,13 +720,14 @@ export const payrollRouter = createTRPCRouter({
         );
 
         if (allCompleted) {
-          await prisma.payrollRun.update({
-            where: { id: payment.payrollRunId },
-            data: {
+          await db
+            .update(payrollRun)
+            .set({
               status: "COMPLETED",
               completedAt: new Date(),
-            },
-          });
+              updatedAt: new Date(),
+            })
+            .where(eq(payrollRun.id, payment.payrollRunId));
         }
       }
 
@@ -700,42 +756,48 @@ export const payrollRouter = createTRPCRouter({
           message: "User not authenticated",
         });
       }
+      const organizationId = ctx.orgId;
 
-      await prisma.$transaction([
-        // Update all payments
-        prisma.workerPayment.updateMany({
-          where: {
-            payrollRunId: input.payrollRunId,
-            organizationId: ctx.orgId,
-          },
-          data: {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(instructorPayment)
+          .set({
             paymentStatus: "COMPLETED",
             paymentReference: input.paymentReference,
             paidBy: ctx.auth.user.id,
             paidAt: new Date(),
-          },
-        }),
-        // Update payroll run
-        prisma.payrollRun.update({
-          where: {
-            id: input.payrollRunId,
-            organizationId: ctx.orgId!,
-          },
-          data: {
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(instructorPayment.payrollRunId, input.payrollRunId),
+              eq(instructorPayment.organizationId, organizationId),
+            ),
+          );
+
+        await tx
+          .update(payrollRun)
+          .set({
             status: "COMPLETED",
             completedAt: new Date(),
-          },
-        }),
-      ]);
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(payrollRun.id, input.payrollRunId),
+              eq(payrollRun.organizationId, organizationId),
+            ),
+          );
+      });
 
       return { success: true };
     }),
 
-  // Get worker payment history
-  getWorkerPayments: protectedProcedure
+  // Get instructor payment history
+  getInstructorPayments: protectedProcedure
     .input(
       z.object({
-        workerId: z.string(),
+        instructorId: z.string(),
         limit: z.number().min(1).max(100).default(20),
         cursor: z.string().optional(),
       })
@@ -748,14 +810,15 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const payments = await prisma.workerPayment.findMany({
-        where: {
-          workerId: input.workerId,
-          organizationId: ctx.orgId,
-        },
-        include: {
+      const payments = await db.query.instructorPayment.findMany({
+        where: and(
+          eq(instructorPayment.instructorId, input.instructorId),
+          eq(instructorPayment.organizationId, ctx.orgId),
+          input.cursor ? lt(instructorPayment.id, input.cursor) : undefined,
+        ),
+        with: {
           payrollRun: {
-            select: {
+            columns: {
               id: true,
               status: true,
               periodStart: true,
@@ -763,16 +826,8 @@ export const payrollRouter = createTRPCRouter({
             },
           },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: input.limit + 1,
-        ...(input.cursor && {
-          cursor: {
-            id: input.cursor,
-          },
-          skip: 1,
-        }),
+        orderBy: [desc(instructorPayment.createdAt)],
+        limit: input.limit + 1,
       });
 
       let nextCursor: string | undefined = undefined;
@@ -798,46 +853,41 @@ export const payrollRouter = createTRPCRouter({
         });
       }
 
-      const payrollRun = await prisma.payrollRun.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-        },
+      const selectedPayrollRun = await db.query.payrollRun.findFirst({
+        where: and(eq(payrollRun.id, input.id), eq(payrollRun.organizationId, ctx.orgId)),
       });
 
-      if (!payrollRun) {
+      if (!selectedPayrollRun) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Payroll run not found",
         });
       }
 
-      if (payrollRun.status !== "DRAFT") {
+      if (selectedPayrollRun.status !== "DRAFT") {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Can only delete draft payroll runs",
         });
       }
 
-      await prisma.payrollRun.delete({
-        where: { id: input.id },
-      });
+      await db.delete(payrollRun).where(eq(payrollRun.id, input.id));
 
       return { success: true };
     }),
 
-  // Generate payslip HTML for a worker in a payroll run
+  // Generate payslip HTML for a instructor in a payroll run
   generatePayslip: protectedProcedure
     .input(
       z.object({
         payrollRunId: z.string(),
-        workerId: z.string(),
+        instructorId: z.string(),
       })
     )
     .query(async ({ input }) => {
       const payslipData = await getPayslipData(
         input.payrollRunId,
-        input.workerId
+        input.instructorId
       );
 
       if (!payslipData) {
@@ -851,7 +901,7 @@ export const payrollRouter = createTRPCRouter({
 
       return {
         html,
-        workerName: payslipData.worker.name,
+        instructorName: payslipData.instructor.name,
       };
     }),
 
@@ -860,13 +910,13 @@ export const payrollRouter = createTRPCRouter({
     .input(
       z.object({
         payrollRunId: z.string(),
-        workerId: z.string(),
+        instructorId: z.string(),
       })
     )
     .query(async ({ input }) => {
       const payslipData = await getPayslipData(
         input.payrollRunId,
-        input.workerId
+        input.instructorId
       );
 
       if (!payslipData) {
@@ -877,10 +927,10 @@ export const payrollRouter = createTRPCRouter({
       }
 
       return {
-        worker: {
-          id: payslipData.worker.id,
-          name: payslipData.worker.name,
-          email: payslipData.worker.email,
+        instructor: {
+          id: payslipData.instructor.id,
+          name: payslipData.instructor.name,
+          email: payslipData.instructor.email,
         },
         payrollRun: {
           id: payslipData.payrollRun.id,
@@ -888,8 +938,8 @@ export const payrollRouter = createTRPCRouter({
           periodEnd: payslipData.payrollRun.periodEnd,
           paymentDate: payslipData.payrollRun.paymentDate,
         },
-        payslipUrl: payslipData.payrollWorker.payslipUrl,
-        payslipSentAt: payslipData.payrollWorker.payslipSentAt,
+        payslipUrl: payslipData.payrollInstructor.payslipUrl,
+        payslipSentAt: payslipData.payrollInstructor.payslipSentAt,
       };
     }),
 });

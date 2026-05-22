@@ -5,7 +5,7 @@
  * These scripts are injected into the <head> of published funnel pages.
  */
 
-import type { PixelProvider } from "@prisma/client";
+import type { PixelProvider } from "@/db/enums";
 
 export interface TrackingScript {
   provider: PixelProvider;

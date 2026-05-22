@@ -17,38 +17,39 @@ import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 
 export default function DealsPage() {
-  const [activeTab, setActiveTab] = useState("agency-data");
   const trpc = useTRPC();
 
-  // Check if user is at agency level (no active subaccount)
+  // Check if user is at studio level (no active location)
   const { data: active } = useSuspenseQuery(
     trpc.organizations.getActive.queryOptions()
   );
 
-  const isAgencyLevel = !active?.activeSubaccountId;
+  const isStudioLevel = !active?.activeLocationId;
 
-  const { data: contactCount = 0 } = useQuery({
-    ...trpc.contacts.count.queryOptions(),
+  const { data: clientCount = 0 } = useQuery({
+    ...trpc.clients.count.queryOptions(),
   });
 
   const { data: pipelineCount = 0 } = useQuery({
     ...trpc.pipelines.count.queryOptions(),
   });
 
-  const hasContacts = contactCount > 0;
+  const hasClients = clientCount > 0;
   const hasPipelines = pipelineCount > 0;
 
   // Define tabs based on context
-  const tabs = isAgencyLevel
+  const tabs = isStudioLevel
     ? [
-        { id: "agency-data", label: "Agency data" },
-        { id: "clients-data", label: "All clients data" },
+        { id: "studio-data", label: "Studio data" },
+        { id: "locations-data", label: "All locations data" },
         { id: "activity", label: "Activity timeline" },
       ]
     : [
         { id: "data", label: "Data table" },
         { id: "activity", label: "Activity timeline" },
       ];
+
+  const [activeTab, setActiveTab] = useState(tabs[0].id);
 
   return (
     <div className="space-y-0">
@@ -62,7 +63,7 @@ export default function DealsPage() {
           </p>
         </div>
 
-        {hasContacts ? (
+        {hasClients ? (
           <Button variant="outline" size="sm" asChild>
             <Link href="/deals/new">
               <AddDealIcon className="size-3.5 " />
@@ -71,7 +72,7 @@ export default function DealsPage() {
           </Button>
         ) : (
           <Badge className="text-xs rounded-full px-3 py-1.5 bg-rose-600 text-white ring ring-black/10 shadow-sm">
-            Cannot make any deals until a contact has been added
+            Cannot make any deals until a member has been added
           </Badge>
         )}
 
@@ -91,7 +92,7 @@ export default function DealsPage() {
         className="px-6"
       />
 
-      {activeTab === "data" || activeTab === "agency-data" ? (
+      {activeTab === "data" || activeTab === "studio-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
@@ -102,7 +103,7 @@ export default function DealsPage() {
         >
           <DealsTable scope="agency" />
         </Suspense>
-      ) : activeTab === "clients-data" ? (
+      ) : activeTab === "locations-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">

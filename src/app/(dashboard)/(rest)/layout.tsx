@@ -5,13 +5,13 @@ import { PresenceTracker } from "@/features/notifications/components/presence-tr
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   return (
-    <>
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <PresenceTracker />
       <AppHeader />
-      <main className="flex-1 bg-background text-primary overflow-x-hidden">
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background text-primary">
         {children}
       </main>
-    </>
+    </div>
   );
 };
 

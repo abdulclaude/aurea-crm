@@ -1,12 +1,77 @@
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import {
+  notification,
+  notificationPreference,
+  user as userTable,
+  userPresence,
+} from "@/db/schema";
 import { z } from "zod";
 import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
 } from "@/lib/notifications";
+import { TRPCError } from "@trpc/server";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  lt,
+  or,
+  type SQL,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 const NOTIFICATIONS_PAGE_SIZE = 20;
+
+const notificationActor = alias(userTable, "notificationActor");
+
+const contextConditions = ({
+  organizationId,
+  locationId,
+}: {
+  organizationId?: string;
+  locationId?: string;
+}): SQL[] => {
+  const conditions: SQL[] = [];
+  if (organizationId) {
+    conditions.push(eq(notification.organizationId, organizationId));
+  }
+  if (locationId) {
+    conditions.push(eq(notification.locationId, locationId));
+  }
+  return conditions;
+};
+
+const scopedNotificationConditions = ({
+  userId,
+  organizationId,
+  locationId,
+}: {
+  userId: string;
+  organizationId?: string;
+  locationId?: string;
+}): SQL[] => [
+  eq(notification.userId, userId),
+  ...contextConditions({ organizationId, locationId }),
+];
+
+const preferenceRecord = (value: unknown): Record<string, boolean> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const preferences: Record<string, boolean> = {};
+  const record = value as Record<string, unknown>;
+  for (const [key, enabled] of Object.entries(record)) {
+    if (typeof enabled === "boolean") {
+      preferences[key] = enabled;
+    }
+  }
+  return preferences;
+};
 
 export const notificationsRouter = createTRPCRouter({
   /**
@@ -19,49 +84,79 @@ export const notificationsRouter = createTRPCRouter({
         limit: z.number().min(1).max(100).default(NOTIFICATIONS_PAGE_SIZE),
         filter: z.enum(["all", "unread", "read"]).default("all"),
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const { cursor, limit, filter, organizationId, subaccountId } = input;
+      const { cursor, limit, filter, organizationId, locationId } = input;
 
-      const where: any = {
+      const conditions = scopedNotificationConditions({
         userId: ctx.auth.user.id,
-      };
-
-      // Filter by read status
-      if (filter === "unread") {
-        where.read = false;
-      } else if (filter === "read") {
-        where.read = true;
-      }
-
-      // Filter by context
-      if (organizationId) {
-        where.organizationId = organizationId;
-      }
-      if (subaccountId) {
-        where.subaccountId = subaccountId;
-      }
-
-      const notifications = await prisma.notification.findMany({
-        where,
-        take: limit + 1,
-        cursor: cursor ? { id: cursor } : undefined,
-        orderBy: {
-          createdAt: "desc",
-        },
-        include: {
-          userNotificationActorIdTouser: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
-          },
-        },
+        organizationId,
+        locationId,
       });
+
+      if (filter === "unread") {
+        conditions.push(eq(notification.read, false));
+      } else if (filter === "read") {
+        conditions.push(eq(notification.read, true));
+      }
+
+      if (cursor) {
+        const [cursorNotification] = await db
+          .select({
+            id: notification.id,
+            createdAt: notification.createdAt,
+          })
+          .from(notification)
+          .where(
+            and(
+              eq(notification.id, cursor),
+              eq(notification.userId, ctx.auth.user.id)
+            )
+          )
+          .limit(1);
+
+        if (cursorNotification) {
+          const cursorCondition = or(
+            lt(notification.createdAt, cursorNotification.createdAt),
+            and(
+              eq(notification.createdAt, cursorNotification.createdAt),
+              lt(notification.id, cursorNotification.id)
+            )
+          );
+
+          if (cursorCondition) {
+            conditions.push(cursorCondition);
+          }
+        }
+      }
+
+      const notifications = await db
+        .select({
+          notification,
+          userNotificationActorIdTouser: {
+            id: notificationActor.id,
+            name: notificationActor.name,
+            email: notificationActor.email,
+            image: notificationActor.image,
+          },
+        })
+        .from(notification)
+        .leftJoin(
+          notificationActor,
+          eq(notification.actorId, notificationActor.id)
+        )
+        .where(and(...conditions))
+        .orderBy(desc(notification.createdAt), desc(notification.id))
+        .limit(limit + 1)
+        .then((rows) =>
+          rows.map(({ notification, userNotificationActorIdTouser }) => ({
+            ...notification,
+            userNotificationActorIdTouser,
+            actor: userNotificationActorIdTouser,
+          }))
+        );
 
       let nextCursor: string | undefined = undefined;
       if (notifications.length > limit) {
@@ -82,29 +177,25 @@ export const notificationsRouter = createTRPCRouter({
     .input(
       z.object({
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const { organizationId, subaccountId } = input;
+      const { organizationId, locationId } = input;
 
-      const where: any = {
+      const conditions = scopedNotificationConditions({
         userId: ctx.auth.user.id,
-        read: false,
-      };
-
-      if (organizationId) {
-        where.organizationId = organizationId;
-      }
-      if (subaccountId) {
-        where.subaccountId = subaccountId;
-      }
-
-      const count = await prisma.notification.count({
-        where,
+        organizationId,
+        locationId,
       });
+      conditions.push(eq(notification.read, false));
 
-      return { count };
+      const [{ count: unreadCount }] = await db
+        .select({ count: count() })
+        .from(notification)
+        .where(and(...conditions));
+
+      return { count: unreadCount };
     }),
 
   /**
@@ -113,24 +204,41 @@ export const notificationsRouter = createTRPCRouter({
   getNotification: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const notification = await prisma.notification.findFirstOrThrow({
-        where: {
-          id: input.id,
-          userId: ctx.auth.user.id,
-        },
-        include: {
+      const [row] = await db
+        .select({
+          notification,
           userNotificationActorIdTouser: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
+            id: notificationActor.id,
+            name: notificationActor.name,
+            email: notificationActor.email,
+            image: notificationActor.image,
           },
-        },
-      });
+        })
+        .from(notification)
+        .leftJoin(
+          notificationActor,
+          eq(notification.actorId, notificationActor.id)
+        )
+        .where(
+          and(
+            eq(notification.id, input.id),
+            eq(notification.userId, ctx.auth.user.id)
+          )
+        )
+        .limit(1);
 
-      return notification;
+      if (!row) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Notification not found",
+        });
+      }
+
+      return {
+        ...row.notification,
+        userNotificationActorIdTouser: row.userNotificationActorIdTouser,
+        actor: row.userNotificationActorIdTouser,
+      };
     }),
 
   /**
@@ -151,14 +259,14 @@ export const notificationsRouter = createTRPCRouter({
     .input(
       z.object({
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       await markAllNotificationsAsRead(
         ctx.auth.user.id,
         input.organizationId,
-        input.subaccountId
+        input.locationId
       );
 
       return { success: true };
@@ -170,12 +278,14 @@ export const notificationsRouter = createTRPCRouter({
   deleteNotification: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      await prisma.notification.deleteMany({
-        where: {
-          id: input.id,
-          userId: ctx.auth.user.id,
-        },
-      });
+      await db
+        .delete(notification)
+        .where(
+          and(
+            eq(notification.id, input.id),
+            eq(notification.userId, ctx.auth.user.id)
+          )
+        );
 
       return { success: true };
     }),
@@ -184,28 +294,36 @@ export const notificationsRouter = createTRPCRouter({
    * Get notification preferences for the current user
    */
   getPreferences: protectedProcedure.query(async ({ ctx }) => {
-    let prefs = await prisma.notificationPreference.findUnique({
-      where: {
-        userId: ctx.auth.user.id,
-      },
-    });
+    const [existingPrefs] = await db
+      .select()
+      .from(notificationPreference)
+      .where(eq(notificationPreference.userId, ctx.auth.user.id))
+      .limit(1);
 
-    // Create default preferences if they don't exist
-    if (!prefs) {
-      prefs = await prisma.notificationPreference.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: ctx.auth.user.id,
-          preferences: {},
-          emailEnabled: true,
-          emailDigest: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+    if (existingPrefs) {
+      return {
+        ...existingPrefs,
+        preferences: preferenceRecord(existingPrefs.preferences),
+      };
     }
 
-    return prefs;
+    const [prefs] = await db
+      .insert(notificationPreference)
+      .values({
+        id: crypto.randomUUID(),
+        userId: ctx.auth.user.id,
+        preferences: {},
+        emailEnabled: true,
+        emailDigest: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    return {
+      ...prefs,
+      preferences: preferenceRecord(prefs.preferences),
+    };
   }),
 
   /**
@@ -220,11 +338,9 @@ export const notificationsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const prefs = await prisma.notificationPreference.upsert({
-        where: {
-          userId: ctx.auth.user.id,
-        },
-        create: {
+      const [prefs] = await db
+        .insert(notificationPreference)
+        .values({
           id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           preferences: input.preferences ?? {},
@@ -232,21 +348,28 @@ export const notificationsRouter = createTRPCRouter({
           emailDigest: input.emailDigest ?? false,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        update: {
-          ...(input.preferences !== undefined && {
-            preferences: input.preferences,
-          }),
-          ...(input.emailEnabled !== undefined && {
-            emailEnabled: input.emailEnabled,
-          }),
-          ...(input.emailDigest !== undefined && {
-            emailDigest: input.emailDigest,
-          }),
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: notificationPreference.userId,
+          set: {
+            ...(input.preferences !== undefined && {
+              preferences: input.preferences,
+            }),
+            ...(input.emailEnabled !== undefined && {
+              emailEnabled: input.emailEnabled,
+            }),
+            ...(input.emailDigest !== undefined && {
+              emailDigest: input.emailDigest,
+            }),
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
 
-      return prefs;
+      return {
+        ...prefs,
+        preferences: preferenceRecord(prefs.preferences),
+      };
     }),
 
   /**
@@ -257,38 +380,37 @@ export const notificationsRouter = createTRPCRouter({
       z.object({
         userIds: z.array(z.string()),
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const where: any = {
-        userId: {
-          in: input.userIds,
-        },
-      };
+      if (input.userIds.length === 0) {
+        return [];
+      }
 
+      const conditions: SQL[] = [inArray(userPresence.userId, input.userIds)];
       if (input.organizationId) {
-        where.organizationId = input.organizationId;
+        conditions.push(eq(userPresence.organizationId, input.organizationId));
       }
-      if (input.subaccountId) {
-        where.subaccountId = input.subaccountId;
+      if (input.locationId) {
+        conditions.push(eq(userPresence.locationId, input.locationId));
       }
 
-      const presence = await prisma.userPresence.findMany({
-        where,
-        include: {
+      const presence = await db
+        .select({
+          presence: userPresence,
           user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
+            id: userTable.id,
+            name: userTable.name,
+            email: userTable.email,
+            image: userTable.image,
           },
-        },
-      });
+        })
+        .from(userPresence)
+        .innerJoin(userTable, eq(userPresence.userId, userTable.id))
+        .where(and(...conditions));
 
-      return presence;
+      return presence.map(({ presence, user }) => ({ ...presence, user }));
     }),
 
   /**
@@ -299,32 +421,35 @@ export const notificationsRouter = createTRPCRouter({
       z.object({
         status: z.enum(["online", "offline", "away"]),
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const presence = await prisma.userPresence.upsert({
-        where: {
-          userId: ctx.auth.user.id,
-        },
-        create: {
+      const now = new Date();
+      const [presence] = await db
+        .insert(userPresence)
+        .values({
           id: crypto.randomUUID(),
           userId: ctx.auth.user.id,
           status: input.status,
           organizationId: input.organizationId ?? null,
-          subaccountId: input.subaccountId ?? null,
-          lastSeenAt: new Date(),
-          lastActivityAt: new Date(),
-          updatedAt: new Date(),
-        },
-        update: {
-          status: input.status,
-          organizationId: input.organizationId ?? null,
-          subaccountId: input.subaccountId ?? null,
-          lastSeenAt: new Date(),
-          lastActivityAt: new Date(),
-        },
-      });
+          locationId: input.locationId ?? null,
+          lastSeenAt: now,
+          lastActivityAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: userPresence.userId,
+          set: {
+            status: input.status,
+            organizationId: input.organizationId ?? null,
+            locationId: input.locationId ?? null,
+            lastSeenAt: now,
+            lastActivityAt: now,
+            updatedAt: now,
+          },
+        })
+        .returning();
 
       return presence;
     }),

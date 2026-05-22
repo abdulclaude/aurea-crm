@@ -27,6 +27,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
+import { useIsInstructor } from "@/features/instructors/hooks/use-is-instructor";
 
 type AccountSwitcherProps = {
   className?: string;
@@ -36,16 +37,16 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
   const trpc = useTRPC();
 
   const { data: orgs } = useSuspenseQuery(
-    trpc.organizations.getMyOrganizations.queryOptions()
+    trpc.organizations.getMyOrganizations.queryOptions(),
   );
   const { data: active } = useSuspenseQuery(
-    trpc.organizations.getActive.queryOptions()
+    trpc.organizations.getActive.queryOptions(),
   );
   const { data: clients } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+    trpc.organizations.getClients.queryOptions(),
   );
-  const setActiveSubaccount = useMutation(
-    trpc.organizations.setActiveSubaccount.mutationOptions()
+  const setActiveLocation = useMutation(
+    trpc.organizations.setActiveLocation.mutationOptions(),
   );
   const [isSwitching, setIsSwitching] = React.useState<
     string | "agency" | null
@@ -54,21 +55,24 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
   const activeOrg =
     orgs?.find((o) => o.id === active?.activeOrganizationId) ?? orgs?.[0];
 
-  const activeClient = active?.activeSubaccount ?? null;
-  const activeSubaccountId = active?.activeSubaccountId ?? null;
+  const activeClient = active?.activeLocation ?? null;
+  const activeLocationId = active?.activeLocationId ?? null;
 
   const currentAccountName =
     activeClient?.companyName ?? activeOrg?.name ?? "Select account";
   const currentAccountLogo = activeClient?.logo ?? activeOrg?.logo ?? "";
 
+  const { isInstructor } = useIsInstructor();
+
   // All agency members can see and switch between clients
   // Agency Staff will only see their assigned clients (filtered server-side)
-  const canSwitchClients = !!activeOrg?.role;
+  // Instructors cannot switch locations
+  const canSwitchClients = !!activeOrg?.role && !isInstructor;
 
-  const handleSwitch = async (subaccountId: string | null) => {
+  const handleSwitch = async (locationId: string | null) => {
     try {
-      setIsSwitching(subaccountId ?? "agency");
-      await setActiveSubaccount.mutateAsync({ subaccountId });
+      setIsSwitching(locationId ?? "agency");
+      await setActiveLocation.mutateAsync({ locationId });
       // Hard reload to re-fetch session-bound data
       window.location.href = "/dashboard";
     } finally {
@@ -85,7 +89,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
           variant="ghost"
           className={cn(
             "rounded-sm text-left font-medium text-xs flex items-center justify-between h-max! hover:bg-foreground hover:text-black border-none transition duration-150 px-1! py-1! pr-2.5!",
-            className
+            className,
           )}
         >
           <div className="flex items-center gap-1">
@@ -95,7 +99,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                 className="object-scale-down size-5 pl-1"
               />
 
-              <AvatarFallback className="bg-[#202E32] brightness-120 text-white text-[10px]">
+              <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
                 {(currentAccountName?.[0] ?? "O").toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -139,26 +143,50 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                   <ClientsIcon className="size-3.5 text-primary/75 group-hover:text-black" />
 
                   <span className="text-xs text-primary/75 group-hover:text-black tracking-tight">
-                    Switch to client
+                    Switch location
                   </span>
                 </DropdownMenuSubTrigger>
 
                 <DropdownMenuSubContent className="w-64 ml-2.5 text-primary border-black/5 flex flex-col gap-y-0 p-0">
+                  {/* All locations aggregate view */}
+                  <DropdownMenuItem
+                    className={cn(
+                      "flex items-center gap-2 bg-background hover:bg-foreground hover:text-black hover:opacity-100! p-2 px-3 m-1 group",
+                      !activeLocationId &&
+                        "bg-foreground hover:bg-primary-foreground opacity-100!",
+                    )}
+                    onClick={() => handleSwitch(null)}
+                  >
+                    <div className="bg-foreground text-primary text-xs grid size-6 shrink-0 place-items-center rounded">
+                      <Layers2Icon className="size-3" />
+                    </div>
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-xs font-medium text-primary/75 group-hover:text-primary">
+                        All locations
+                      </span>
+                    </div>
+                    {isSwitching === "agency" && (
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        Switching...
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0" />
                   {clients && clients.length > 0 ? (
                     clients.map((client) => {
                       const selected =
                         client.isActive ??
-                        client.subaccountId === activeSubaccountId;
+                        client.locationId === activeLocationId;
                       return (
                         <DropdownMenuItem
-                          key={client.subaccountId ?? client.id}
+                          key={client.locationId ?? client.id}
                           className={cn(
                             "flex items-center gap-2 bg-background hover:bg-foreground hover:text-black hover:opacity-100! p-2 px-3 m-1 group",
                             selected &&
-                              "bg-foreground hover:bg-primary-foreground opacity-100!"
+                              "bg-foreground hover:bg-primary-foreground opacity-100!",
                           )}
                           onClick={() =>
-                            handleSwitch(client.subaccountId ?? null)
+                            handleSwitch(client.locationId ?? null)
                           }
                         >
                           {client.logo ? (
@@ -180,7 +208,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                               {client.name}
                             </span>
                           </div>
-                          {isSwitching === client.subaccountId && (
+                          {isSwitching === client.locationId && (
                             <span className="ml-auto text-xs text-muted-foreground">
                               Switching...
                             </span>
@@ -193,7 +221,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                       disabled
                       className="text-primary/75 text-xs px-3"
                     >
-                      No clients found
+                      No locations found
                     </DropdownMenuItem>
                   )}
 
@@ -202,82 +230,76 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
                   <DropdownMenuItem
                     className="bg-background hover:bg-foreground hover:text-black group p-2 px-3 m-1"
                     onClick={() => {
-                      router.push("/clients/new");
+                      router.push("/location/new");
                     }}
                   >
                     <PlusIcon className=" size-3 text-primary/75 group-hover:text-black transition duration-150" />
                     <span className="text-xs font-medium text-primary/75 group-hover:text-black transition duration-150">
-                      Create new client
+                      Add new location
                     </span>
                   </DropdownMenuItem>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-
-              {activeSubaccountId && (
-                <DropdownMenuItem
-                  className={cn(
-                    "flex items-center gap-3 hover:bg-foreground hover:text-black group",
-                    !activeSubaccountId &&
-                      "hover:bg-foreground hover:text-black"
-                  )}
-                  onClick={() => handleSwitch(null)}
-                >
-                  <Layers2Icon className="size-3 text-primary/75 group-hover:text-black" />
-                  <div className="flex min-w-0 flex-col">
-                    <span className="text-[11px] font-medium truncate">
-                      Back to {activeOrg?.name ?? "Agency"}'s workspace
-                    </span>
-                  </div>
-
-                  {isSwitching === "agency" && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      Switching...
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              )}
             </DropdownMenuGroup>
             <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
           </>
         )}
 
-        <DropdownMenuItem
-          className="group"
-          onClick={() => {
-            router.push("/settings/members");
-          }}
-        >
-          <UsersIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
-            Manage members
-          </span>
-        </DropdownMenuItem>
+        {!isInstructor && (
+          <>
+            <DropdownMenuItem
+              className="group"
+              onClick={() => {
+                router.push("/settings/team");
+              }}
+            >
+              <UsersIcon className="text-primary/75 group-hover:text-black size-3.5" />
+              <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+                Manage team
+              </span>
+            </DropdownMenuItem>
 
-        <DropdownMenuItem
-          className="group"
-          onClick={() => {
-            router.push("/invites");
-          }}
-        >
-          <InviteIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
-            Invites
-          </span>
-        </DropdownMenuItem>
+            <DropdownMenuItem
+              className="group"
+              onClick={() => {
+                router.push("/invites");
+              }}
+            >
+              <InviteIcon className="text-primary/75 group-hover:text-black size-3.5" />
+              <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+                Invites
+              </span>
+            </DropdownMenuItem>
 
-        <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
+            <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
 
-        <DropdownMenuItem
-          className="group"
-          onClick={() => {
-            router.push("/settings/workspace");
-          }}
-        >
-          <WorkspaceSettingsIcon className="text-primary/75 group-hover:text-black size-3.5" />
-          <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
-            Workspace settings
-          </span>
-        </DropdownMenuItem>
+            <DropdownMenuItem
+              className="group"
+              onClick={() => {
+                router.push("/settings/workspace");
+              }}
+            >
+              <WorkspaceSettingsIcon className="text-primary/75 group-hover:text-black size-3.5" />
+              <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+                Workspace settings
+              </span>
+            </DropdownMenuItem>
+          </>
+        )}
+
+        {isInstructor && (
+          <DropdownMenuItem
+            className="group"
+            onClick={() => {
+              router.push("/settings/profile");
+            }}
+          >
+            <WorkspaceSettingsIcon className="text-primary/75 group-hover:text-black size-3.5" />
+            <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
+              Settings
+            </span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

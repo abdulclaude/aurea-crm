@@ -28,10 +28,10 @@ export async function renderCampaignEmail({
 
 function replaceVariables(text: string, variables: CampaignVariables): string {
   return text
-    .replace(/\{\{contact\.name\}\}/g, variables.name)
-    .replace(/\{\{contact\.firstName\}\}/g, variables.firstName)
-    .replace(/\{\{contact\.email\}\}/g, variables.email)
-    .replace(/\{\{contact\.companyName\}\}/g, variables.companyName || "")
+    .replace(/\{\{client\.name\}\}/g, variables.name)
+    .replace(/\{\{client\.firstName\}\}/g, variables.firstName)
+    .replace(/\{\{client\.email\}\}/g, variables.email)
+    .replace(/\{\{client\.companyName\}\}/g, variables.companyName || "")
     .replace(/\{\{unsubscribe_url\}\}/g, variables.unsubscribe_url)
     .replace(
       /\{\{view_in_browser_url\}\}/g,
@@ -143,7 +143,7 @@ export function createDefaultEmailContent(): EmailContent {
         type: "text",
         id: "text-1",
         content:
-          "Hi {{contact.firstName}},\n\nWe're excited to share the latest updates with you. Here's what's new...",
+          "Hi {{client.firstName}},\n\nWe're excited to share the latest updates with you. Here's what's new...",
       },
       {
         type: "button",

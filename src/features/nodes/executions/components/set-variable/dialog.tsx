@@ -124,7 +124,7 @@ export const SetVariableDialog: React.FC<Props> = ({
                   <FormLabel>Value</FormLabel>
                   <FormControl>
                     <VariableInput
-                      placeholder="{{contact.firstName}} {{contact.lastName}}"
+                      placeholder="{{client.firstName}} {{client.lastName}}"
                       value={field.value || ""}
                       onChange={field.onChange}
                       variables={variables}

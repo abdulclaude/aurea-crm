@@ -33,7 +33,7 @@ type RouterOutput = inferRouterOutputs<AppRouter>;
 type ClassRow = RouterOutput["studioClasses"]["list"]["classes"][number];
 
 const SORTABLE_COLUMNS = new Set(["name", "startTime", "instructorName"]);
-const CLASSES_DEFAULT_SORT = "startTime.asc";
+const CLASSES_DEFAULT_SORT = "startTime.desc";
 
 const sortValueToState = (value?: string): SortingState => {
   const sort = value || CLASSES_DEFAULT_SORT;
@@ -140,24 +140,35 @@ const classColumns: ColumnDef<ClassRow>[] = [
     ),
   },
   {
-    id: "location",
-    header: "Location",
-    meta: { label: "Location" },
-    cell: ({ row }) => (
-      <div className="flex items-center gap-1.5">
-        {row.original.location && <MapPin className="h-3.5 w-3.5" />}
-        <span className="text-xs text-primary">
-          {row.original.location || "—"}
-        </span>
-      </div>
-    ),
+    id: "room",
+    header: "Room",
+    meta: { label: "Room" },
+    cell: ({ row }) => {
+      const roomName = row.original.room?.name ?? row.original.roomName;
+
+      return (
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            {roomName && <MapPin className="h-3.5 w-3.5 shrink-0" />}
+            <span className="truncate text-xs text-primary">
+              {roomName ?? "Unassigned"}
+            </span>
+          </div>
+          {row.original.location && (
+            <span className="block truncate text-[11px] text-primary/50">
+              {row.original.location}
+            </span>
+          )}
+        </div>
+      );
+    },
   },
   {
     id: "capacity",
     header: "Capacity",
     meta: { label: "Capacity" },
     cell: ({ row }) => {
-      const booked = (row.original._count as any)?.studioBooking ?? 0;
+      const booked = row.original._count?.studioBooking ?? 0;
       const max = row.original.maxCapacity;
       const percentage = max ? Math.round((booked / max) * 100) : 0;
 
@@ -244,6 +255,7 @@ export function ClassesTable() {
   const [startDateStr, setStartDateStr] = useQueryState("startDate", parseAsString.withDefault(""));
   const [endDateStr, setEndDateStr] = useQueryState("endDate", parseAsString.withDefault(""));
   const [instructorFilter, setInstructorFilter] = useQueryState("instructor", parseAsString.withDefault(""));
+  const [roomFilter, setRoomFilter] = useQueryState("room", parseAsString.withDefault(""));
 
   // Convert strings to Date objects
   const startDate = startDateStr ? new Date(startDateStr) : undefined;
@@ -263,10 +275,22 @@ export function ClassesTable() {
       startDate: startDateStr || undefined,
       endDate: endDateStr || undefined,
       instructorName: instructorFilter || undefined,
+      roomId: roomFilter || undefined,
     })
   );
 
   const { data: stats } = useSuspenseQuery(trpc.studioClasses.stats.queryOptions());
+
+  const { data: instructorsData } = useSuspenseQuery(trpc.instructors.list.queryOptions({ pageSize: 100 }));
+  const instructors = React.useMemo(
+    () => (instructorsData?.items ?? []).map((w) => ({ id: w.id, name: w.name })),
+    [instructorsData],
+  );
+  const { data: roomRows } = useSuspenseQuery(trpc.rooms.list.queryOptions());
+  const rooms = React.useMemo(
+    () => roomRows.map((room) => ({ id: room.id, name: room.name })),
+    [roomRows],
+  );
 
   const sortingState = React.useMemo(
     () => sortValueToState(sortParam),
@@ -364,13 +388,22 @@ export function ClassesTable() {
     [setInstructorFilter, setPage]
   );
 
+  const handleRoomChange = React.useCallback(
+    (value: string) => {
+      void setRoomFilter(value);
+      void setPage(1);
+    },
+    [setRoomFilter, setPage]
+  );
+
   const handleClearFilters = React.useCallback(() => {
     void setSearch("");
     void setStartDateStr("");
     void setEndDateStr("");
     void setInstructorFilter("");
+    void setRoomFilter("");
     void setPage(1);
-  }, [setSearch, setStartDateStr, setEndDateStr, setInstructorFilter, setPage]);
+  }, [setSearch, setStartDateStr, setEndDateStr, setInstructorFilter, setRoomFilter, setPage]);
 
   const handleColumnVisibilityChange = React.useCallback(
     (state: VisibilityState) => {
@@ -424,7 +457,7 @@ export function ClassesTable() {
   );
 
   return (
-    <div className="space-y-4 pt-6">
+    <div>
       <DataTable
         data={data.classes}
         columns={classColumns}
@@ -437,7 +470,7 @@ export function ClassesTable() {
         columnOrder={columnOrder}
         onColumnOrderChange={handleColumnOrderChange}
         initialColumnOrder={CLASS_COLUMN_IDS}
-        initialSorting={[{ id: "startTime", desc: false }]}
+        initialSorting={[{ id: "startTime", desc: true }]}
         onRowClick={handleRowClick}
         enableRowSelection
         rowSelection={rowSelection}
@@ -464,6 +497,10 @@ export function ClassesTable() {
               onDateRangeChange={handleDateRangeChange}
               instructor={instructorFilter}
               onInstructorChange={handleInstructorChange}
+              instructors={instructors}
+              roomId={roomFilter}
+              onRoomChange={handleRoomChange}
+              rooms={rooms}
               onClearFilters={handleClearFilters}
               stats={stats}
             />

@@ -43,7 +43,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { CreateFunnelDialog } from "./create-funnel-dialog";
 import { RegisterExternalFunnelDialog } from "@/features/external-funnels/components/register-external-funnel-dialog";
-import { FunnelStatus, FunnelType } from "@prisma/client";
+import { FunnelStatus, FunnelType } from "@/db/enums";
 
 export function FunnelsList() {
   const router = useRouter();

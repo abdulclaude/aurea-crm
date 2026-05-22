@@ -1,6 +1,8 @@
 import { redirect, notFound } from "next/navigation";
 import { headers } from "next/headers";
-import prisma from "@/lib/db";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { funnel as funnelTable } from "@/db/schema";
 
 /**
  * Root Public Page Handler
@@ -16,16 +18,16 @@ export default async function PublicRootPage() {
   const hostWithoutPort = host.split(":")[0];
 
   // Check if it's a custom domain
-  let funnel = await prisma.funnel.findFirst({
-    where: {
-      customDomain: hostWithoutPort,
-      status: "PUBLISHED",
-      domainType: "CUSTOM",
-    },
-    include: {
-      funnelPage: {
-        orderBy: { order: "asc" },
-        take: 1,
+  let funnel = await db.query.funnel.findFirst({
+    where: and(
+      eq(funnelTable.customDomain, hostWithoutPort),
+      eq(funnelTable.status, "PUBLISHED"),
+      eq(funnelTable.domainType, "CUSTOM")
+    ),
+    with: {
+      funnelPages: {
+        orderBy: (page) => [asc(page.order)],
+        limit: 1,
       },
     },
   });
@@ -41,16 +43,16 @@ export default async function PublicRootPage() {
 
       // Don't treat "www" or the base domain as a subdomain
       if (subdomain !== "www" && subdomain !== "localhost" && !hostWithoutPort.startsWith("localhost")) {
-        funnel = await prisma.funnel.findFirst({
-          where: {
-            subdomain: subdomain,
-            status: "PUBLISHED",
-            domainType: "SUBDOMAIN",
-          },
-          include: {
-            funnelPage: {
-              orderBy: { order: "asc" },
-              take: 1,
+        funnel = await db.query.funnel.findFirst({
+          where: and(
+            eq(funnelTable.subdomain, subdomain),
+            eq(funnelTable.status, "PUBLISHED"),
+            eq(funnelTable.domainType, "SUBDOMAIN")
+          ),
+          with: {
+            funnelPages: {
+              orderBy: (page) => [asc(page.order)],
+              limit: 1,
             },
           },
         });
@@ -64,7 +66,7 @@ export default async function PublicRootPage() {
   }
 
   // Redirect to first page
-  const firstPage = funnel.funnelPage[0];
+  const firstPage = funnel.funnelPages[0];
   if (!firstPage) {
     notFound();
   }

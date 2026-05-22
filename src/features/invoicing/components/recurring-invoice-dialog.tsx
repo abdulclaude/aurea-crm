@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { BillingModel, RecurringFrequency } from "@prisma/client";
+import { BillingModel, RecurringFrequency } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 
@@ -55,9 +55,9 @@ const lineItemSchema = z.object({
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional(),
-  contactId: z.string().optional(),
-  contactName: z.string().min(1, "Client name is required"),
-  contactEmail: z.string().email("Invalid email").optional().or(z.literal("")),
+  clientId: z.string().optional(),
+  clientName: z.string().min(1, "Client name is required"),
+  clientEmail: z.string().email("Invalid email").optional().or(z.literal("")),
   frequency: z.nativeEnum(RecurringFrequency),
   interval: z.coerce.number().int().min(1, "Interval must be at least 1").default(1),
   startDate: z.date(),
@@ -101,9 +101,9 @@ export function RecurringInvoiceDialog({
     enabled: isEdit && open,
   });
 
-  // Fetch contacts for dropdown
-  const { data: contactsData } = useQuery({
-    ...trpc.contacts.list.queryOptions({
+  // Fetch clients for dropdown
+  const { data: clientsData } = useQuery({
+    ...trpc.clients.list.queryOptions({
       limit: 100,
     }),
     enabled: open,
@@ -120,8 +120,8 @@ export function RecurringInvoiceDialog({
     defaultValues: {
       name: "",
       description: "",
-      contactName: "",
-      contactEmail: "",
+      clientName: "",
+      clientEmail: "",
       frequency: RecurringFrequency.MONTHLY,
       interval: 1,
       startDate: new Date(),
@@ -154,9 +154,9 @@ export function RecurringInvoiceDialog({
       form.reset({
         name: recurringInvoice.name,
         description: recurringInvoice.description || "",
-        contactId: recurringInvoice.contactId || undefined,
-        contactName: recurringInvoice.contactName,
-        contactEmail: recurringInvoice.contactEmail || "",
+        clientId: recurringInvoice.clientId || undefined,
+        clientName: recurringInvoice.clientName,
+        clientEmail: recurringInvoice.clientEmail || "",
         frequency: recurringInvoice.frequency,
         interval: recurringInvoice.interval,
         startDate: new Date(recurringInvoice.startDate),
@@ -307,33 +307,33 @@ export function RecurringInvoiceDialog({
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control as any}
-                  name="contactId"
+                  name="clientId"
                   render={({ field }) => (
                     <FormItem className="col-span-2">
-                      <FormLabel>Select Contact (Optional)</FormLabel>
+                      <FormLabel>Select Client (Optional)</FormLabel>
                       <Select
                         onValueChange={(value) => {
                           field.onChange(value);
-                          const contact = contactsData?.items.find(
+                          const client = clientsData?.items.find(
                             (c) => c.id === value
                           );
-                          if (contact) {
-                            form.setValue("contactName", contact.name);
-                            form.setValue("contactEmail", contact.email || "");
+                          if (client) {
+                            form.setValue("clientName", client.name);
+                            form.setValue("clientEmail", client.email || "");
                           }
                         }}
                         value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select a contact" />
+                            <SelectValue placeholder="Select a client" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {contactsData?.items.map((contact) => (
-                            <SelectItem key={contact.id} value={contact.id}>
-                              {contact.name}
-                              {contact.email && ` (${contact.email})`}
+                          {clientsData?.items.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
+                              {client.name}
+                              {client.email && ` (${client.email})`}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -345,7 +345,7 @@ export function RecurringInvoiceDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactName"
+                  name="clientName"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Client Name</FormLabel>
@@ -359,7 +359,7 @@ export function RecurringInvoiceDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactEmail"
+                  name="clientEmail"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Client Email (Optional)</FormLabel>

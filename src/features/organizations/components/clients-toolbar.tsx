@@ -117,7 +117,7 @@ export function ClientsToolbar({
 
   // Fetch ALL clients (unfiltered) for filter options and preview calculation
   const { data: allClients = [] } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+    trpc.organizations.getClients.queryOptions(),
   );
 
   // Sync staged state when props change
@@ -138,7 +138,7 @@ export function ClientsToolbar({
     setStagedCountries((prev) =>
       prev.includes(country)
         ? prev.filter((c) => c !== country)
-        : [...prev, country]
+        : [...prev, country],
     );
   };
 
@@ -146,7 +146,7 @@ export function ClientsToolbar({
     setStagedIndustries((prev) =>
       prev.includes(industry)
         ? prev.filter((i) => i !== industry)
-        : [...prev, industry]
+        : [...prev, industry],
     );
   };
 
@@ -235,7 +235,7 @@ export function ClientsToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -273,7 +273,7 @@ export function ClientsToolbar({
                           <Checkbox
                             checked={stagedCountries.includes(country)}
                             onCheckedChange={() => handleToggleCountry(country)}
-                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
                           <span className="select-none">{country}</span>
                         </div>
@@ -318,7 +318,7 @@ export function ClientsToolbar({
                             onCheckedChange={() =>
                               handleToggleIndustry(industry)
                             }
-                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                            className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
                           <span className="select-none">{industry}</span>
                         </div>
@@ -347,7 +347,7 @@ export function ClientsToolbar({
               <div className="p-3 space-y-2">
                 <Button
                   onClick={handleApplyFilters}
-                  className="w-full justify-center text-xs h-8 rounded-lg bg-black dark:bg-white text-white dark:text-black hover:brightness-90"
+                  className="w-full justify-center text-xs h-8 rounded-lg bg-foreground text-background hover:bg-foreground/90"
                 >
                   Show {previewCount} client{previewCount !== 1 ? "s" : ""}
                 </Button>
@@ -425,7 +425,7 @@ function ColumnControls({
   const [open, setOpen] = React.useState(false);
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -435,22 +435,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -458,7 +458,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -469,7 +469,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -576,7 +576,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-primary-foreground/50 hover:text-black",
-          !checked && "text-primary/30"
+          !checked && "text-primary/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -587,7 +587,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3 shrink-0 text-primary transition",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate">{label}</span>

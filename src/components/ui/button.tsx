@@ -10,7 +10,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary-foreground hover:bg-primary-foreground/15 hover:text-black text-primary",
+          "bg-primary-foreground hover:bg-gray-200/80 hover:text-black text-primary",
         destructive:
           "rounded-lg border border-rose-300/20 border-b-rose-500/70 border-t-rose-300/70 bg-linear-to-b from-rose-400 to-rose-500 px-4 pb-3 pt-2.5 font-medium leading-none text-white antialiased shadow-md ring-1 ring-rose-500 w-full hover:brightness-110 text-shadow-2xs",
         outline:
@@ -40,7 +40,7 @@ const buttonVariants = cva(
       variant: "default",
       size: "default",
     },
-  }
+  },
 );
 
 function Button({

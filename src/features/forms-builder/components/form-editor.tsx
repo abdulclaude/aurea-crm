@@ -26,7 +26,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { FormFieldType, FormStatus } from "@prisma/client";
+import { FormFieldType, FormStatus } from "@/db/enums";
 
 interface FormEditorProps {
   formId: string;

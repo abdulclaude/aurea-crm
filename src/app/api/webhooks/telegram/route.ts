@@ -1,8 +1,26 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { credential as credentialTable } from "@/db/schema";
 import { enqueueTelegramUpdate } from "@/features/telegram/server/enqueue";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+
+const TelegramUpdateSchema = z.object({
+  update_id: z.number(),
+}).passthrough();
+
+function getWebhookSecret(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return undefined;
+  }
+
+  const record = metadata as Record<string, unknown>;
+  return typeof record.webhookSecret === "string"
+    ? record.webhookSecret
+    : undefined;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,9 +32,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const credential = await prisma.credential.findUnique({
-      where: { id: credentialId },
-    });
+    const [credential] = await db
+      .select()
+      .from(credentialTable)
+      .where(eq(credentialTable.id, credentialId))
+      .limit(1);
 
     if (!credential) {
       return NextResponse.json(
@@ -25,9 +45,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const expectedSecret = (
-      credential.metadata as { webhookSecret?: string } | null | undefined
-    )?.webhookSecret;
+    const expectedSecret = getWebhookSecret(credential.metadata);
     const providedSecret = request.headers.get(
       "x-telegram-bot-api-secret-token"
     );
@@ -39,7 +57,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const update = await request.json();
+    const updatePayload: unknown = await request.json();
+    const update = TelegramUpdateSchema.parse(updatePayload);
 
     await enqueueTelegramUpdate({
       credentialId,

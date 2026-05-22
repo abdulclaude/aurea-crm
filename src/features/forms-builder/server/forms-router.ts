@@ -5,13 +5,31 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { and, count, desc, eq, isNull, lt } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import db from "@/lib/db";
-import { FormStatus, FormFieldType } from "@prisma/client";
+import { db } from "@/db";
+import { form, formField, formStep, formSubmission } from "@/db/schema";
+import { FormStatus, FormFieldType } from "@/db/enums";
+
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+
+function requireOrganizationId(orgId: string | null): string {
+  if (!orgId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Organization context required",
+    });
+  }
+  return orgId;
+}
+
+const formScopeWhere = (formId: string, organizationId: string) =>
+  and(eq(form.id, formId), eq(form.organizationId, organizationId));
 
 export const formsRouter = createTRPCRouter({
   /**
-   * List all forms for the current organization/subaccount
+   * List all forms for the current organization/location
    */
   list: protectedProcedure
     .input(
@@ -22,22 +40,35 @@ export const formsRouter = createTRPCRouter({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      return await db.form.findMany({
-        where: {
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-          ...(input?.status && { status: input.status }),
-        },
-        include: {
-          _count: {
-            select: { formStep: true, formSubmission: true },
+      const organizationId = requireOrganizationId(ctx.orgId);
+      const forms = await db.query.form.findMany({
+        where: and(
+          eq(form.organizationId, organizationId),
+          ctx.locationId ? eq(form.locationId, ctx.locationId) : isNull(form.locationId),
+          input?.status ? eq(form.status, input.status) : undefined,
+        ),
+        with: {
+          workflow: {
+            columns: { id: true, name: true },
           },
-          Workflows: {
-            select: { id: true, name: true },
+          formSteps: {
+            columns: { id: true },
+          },
+          formSubmissions: {
+            columns: { id: true },
           },
         },
-        orderBy: { createdAt: "desc" },
+        orderBy: [desc(form.createdAt)],
       });
+
+      return forms.map((item) => ({
+        ...item,
+        Workflows: item.workflow,
+        _count: {
+          formStep: item.formSteps.length,
+          formSubmission: item.formSubmissions.length,
+        },
+      }));
     }),
 
   /**
@@ -46,34 +77,40 @@ export const formsRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const form = await db.form.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
-        include: {
-          formStep: {
-            include: {
-              formField: {
-                orderBy: { order: "asc" },
+      const organizationId = requireOrganizationId(ctx.orgId);
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(input.id, organizationId),
+        with: {
+          formSteps: {
+            with: {
+              formFields: {
+                orderBy: [formField.order],
               },
             },
-            orderBy: { order: "asc" },
+            orderBy: [formStep.order],
           },
-          Workflows: {
-            select: { id: true, name: true },
+          workflow: {
+            columns: { id: true, name: true },
           },
-          _count: {
-            select: { formSubmission: true },
+          formSubmissions: {
+            columns: { id: true },
           },
         },
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
-      return form;
+      return {
+        ...selectedForm,
+        formStep: selectedForm.formSteps.map((step) => ({
+          ...step,
+          formField: step.formFields,
+        })),
+        Workflows: selectedForm.workflow,
+        _count: { formSubmission: selectedForm.formSubmissions.length },
+      };
     }),
 
   /**
@@ -93,30 +130,33 @@ export const formsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const form = await db.form.create({
-        data: {
+      const organizationId = requireOrganizationId(ctx.orgId);
+      const createdForm = await db.transaction(async (tx) => {
+        const [newForm] = await tx
+          .insert(form)
+          .values({
           id: crypto.randomUUID(),
           ...input,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId,
+            organizationId,
+            locationId: ctx.locationId,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+          })
+          .returning();
 
       // Create initial step
-      await db.formStep.create({
-        data: {
+        await tx.insert(formStep).values({
           id: crypto.randomUUID(),
-          formId: form.id,
+          formId: newForm.id,
           name: "Step 1",
           order: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
+        });
+        return newForm;
       });
 
-      return form;
+      return createdForm;
     }),
 
   /**
@@ -139,23 +179,23 @@ export const formsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
+      const organizationId = requireOrganizationId(ctx.orgId);
 
       // Verify ownership
-      const form = await db.form.findFirst({
-        where: {
-          id,
-          organizationId: ctx.orgId!,
-        },
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(id, organizationId),
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
-      return await db.form.update({
-        where: { id },
-        data,
-      });
+      const [updatedForm] = await db
+        .update(form)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(form.id, id))
+        .returning();
+      return updatedForm;
     }),
 
   /**
@@ -164,39 +204,43 @@ export const formsRouter = createTRPCRouter({
   publish: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const organizationId = requireOrganizationId(ctx.orgId);
       // Verify ownership
-      const form = await db.form.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
-        include: {
-          formStep: {
-            include: { formField: true },
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(input.id, organizationId),
+        with: {
+          formSteps: {
+            with: { formFields: true },
           },
         },
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
       // Validate form has at least one field
-      const totalFields = form.formStep.reduce(
-        (sum, step) => sum + step.formField.length,
+      const totalFields = selectedForm.formSteps.reduce(
+        (sum, step) => sum + step.formFields.length,
         0
       );
       if (totalFields === 0) {
-        throw new Error("Cannot publish form with no fields");
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Cannot publish form with no fields",
+        });
       }
 
-      return await db.form.update({
-        where: { id: input.id },
-        data: {
+      const [updatedForm] = await db
+        .update(form)
+        .set({
           status: FormStatus.PUBLISHED,
           publishedAt: new Date(),
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(form.id, input.id))
+        .returning();
+      return updatedForm;
     }),
 
   /**
@@ -205,12 +249,15 @@ export const formsRouter = createTRPCRouter({
   unpublish: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return await db.form.update({
-        where: { id: input.id },
-        data: {
+      const [updatedForm] = await db
+        .update(form)
+        .set({
           status: FormStatus.DRAFT,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(form.id, input.id))
+        .returning();
+      return updatedForm;
     }),
 
   /**
@@ -219,12 +266,15 @@ export const formsRouter = createTRPCRouter({
   archive: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return await db.form.update({
-        where: { id: input.id },
-        data: {
+      const [updatedForm] = await db
+        .update(form)
+        .set({
           status: FormStatus.ARCHIVED,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(form.id, input.id))
+        .returning();
+      return updatedForm;
     }),
 
   /**
@@ -233,21 +283,21 @@ export const formsRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      const organizationId = requireOrganizationId(ctx.orgId);
       // Verify ownership
-      const form = await db.form.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(input.id, organizationId),
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
-      return await db.form.delete({
-        where: { id: input.id },
-      });
+      const [deletedForm] = await db
+        .delete(form)
+        .where(eq(form.id, input.id))
+        .returning();
+      return deletedForm;
     }),
 
   /**
@@ -258,32 +308,31 @@ export const formsRouter = createTRPCRouter({
       z.object({
         formId: z.string(),
         name: z.string().min(1),
-        showConditions: z.record(z.any(), z.any()).optional(),
+        showConditions: jsonObjectSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const organizationId = requireOrganizationId(ctx.orgId);
       // Verify form ownership
-      const form = await db.form.findFirst({
-        where: {
-          id: input.formId,
-          organizationId: ctx.orgId!,
-        },
-        include: {
-          formStep: { select: { order: true } },
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(input.formId, organizationId),
+        with: {
+          formSteps: { columns: { order: true } },
         },
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
-      const maxOrder = form.formStep.reduce(
+      const maxOrder = selectedForm.formSteps.reduce(
         (max, step) => Math.max(max, step.order),
         -1
       );
 
-      return await db.formStep.create({
-        data: {
+      const [createdStep] = await db
+        .insert(formStep)
+        .values({
           id: crypto.randomUUID(),
           formId: input.formId,
           name: input.name,
@@ -291,8 +340,9 @@ export const formsRouter = createTRPCRouter({
           showConditions: input.showConditions,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+        })
+        .returning();
+      return createdStep;
     }),
 
   /**
@@ -303,16 +353,18 @@ export const formsRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         name: z.string().min(1).optional(),
-        showConditions: z.record(z.any(), z.any()).optional(),
+        showConditions: jsonObjectSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
-      return await db.formStep.update({
-        where: { id },
-        data,
-      });
+      const [updatedStep] = await db
+        .update(formStep)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(formStep.id, id))
+        .returning();
+      return updatedStep;
     }),
 
   /**
@@ -321,32 +373,38 @@ export const formsRouter = createTRPCRouter({
   deleteStep: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const step = await db.formStep.findUnique({
-        where: { id: input.id },
-        include: { form: true },
+      const step = await db.query.formStep.findFirst({
+        where: eq(formStep.id, input.id),
+        with: { form: true },
       });
 
       if (!step) {
-        throw new Error("Step not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Step not found" });
       }
 
       // Verify ownership
       if (step.form.organizationId !== ctx.orgId) {
-        throw new Error("Unauthorized");
+        throw new TRPCError({ code: "FORBIDDEN", message: "Unauthorized" });
       }
 
       // Don't allow deleting the last step
-      const stepCount = await db.formStep.count({
-        where: { formId: step.formId },
-      });
+      const [stepCountRow] = await db
+        .select({ count: count() })
+        .from(formStep)
+        .where(eq(formStep.formId, step.formId));
 
-      if (stepCount <= 1) {
-        throw new Error("Cannot delete the last step");
+      if ((stepCountRow?.count ?? 0) <= 1) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Cannot delete the last step",
+        });
       }
 
-      return await db.formStep.delete({
-        where: { id: input.id },
-      });
+      const [deletedStep] = await db
+        .delete(formStep)
+        .where(eq(formStep.id, input.id))
+        .returning();
+      return deletedStep;
     }),
 
   /**
@@ -361,38 +419,39 @@ export const formsRouter = createTRPCRouter({
         placeholder: z.string().optional(),
         helpText: z.string().optional(),
         required: z.boolean().default(false),
-        validation: z.record(z.any(), z.any()).optional(),
+        validation: jsonObjectSchema.optional(),
         options: z.array(z.string()).optional(),
         defaultValue: z.string().optional(),
-        showConditions: z.record(z.any(), z.any()).optional(),
-        styles: z.record(z.any(), z.any()).optional(),
+        showConditions: jsonObjectSchema.optional(),
+        styles: jsonObjectSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const step = await db.formStep.findUnique({
-        where: { id: input.stepId },
-        include: {
+      const step = await db.query.formStep.findFirst({
+        where: eq(formStep.id, input.stepId),
+        with: {
           form: true,
-          formField: { select: { order: true } },
+          formFields: { columns: { order: true } },
         },
       });
 
       if (!step) {
-        throw new Error("Step not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Step not found" });
       }
 
       // Verify ownership
       if (step.form.organizationId !== ctx.orgId) {
-        throw new Error("Unauthorized");
+        throw new TRPCError({ code: "FORBIDDEN", message: "Unauthorized" });
       }
 
-      const maxOrder = step.formField.reduce(
+      const maxOrder = step.formFields.reduce(
         (max, field) => Math.max(max, field.order),
         -1
       );
 
-      return await db.formField.create({
-        data: {
+      const [createdField] = await db
+        .insert(formField)
+        .values({
           id: crypto.randomUUID(),
           stepId: input.stepId,
           type: input.type,
@@ -408,8 +467,9 @@ export const formsRouter = createTRPCRouter({
           showConditions: input.showConditions,
           styles: input.styles,
           order: maxOrder + 1,
-        },
-      });
+        })
+        .returning();
+      return createdField;
     }),
 
   /**
@@ -423,21 +483,23 @@ export const formsRouter = createTRPCRouter({
         placeholder: z.string().optional(),
         helpText: z.string().optional(),
         required: z.boolean().optional(),
-        validation: z.record(z.any(), z.any()).optional(),
+        validation: jsonObjectSchema.optional(),
         options: z.array(z.string()).optional(),
         defaultValue: z.string().optional(),
-        showConditions: z.record(z.any(), z.any()).optional(),
-        styles: z.record(z.any(), z.any()).optional(),
+        showConditions: jsonObjectSchema.optional(),
+        styles: jsonObjectSchema.optional(),
         order: z.number().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
-      return await db.formField.update({
-        where: { id },
-        data,
-      });
+      const [updatedField] = await db
+        .update(formField)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(formField.id, id))
+        .returning();
+      return updatedField;
     }),
 
   /**
@@ -446,9 +508,11 @@ export const formsRouter = createTRPCRouter({
   deleteField: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return await db.formField.delete({
-        where: { id: input.id },
-      });
+      const [deletedField] = await db
+        .delete(formField)
+        .where(eq(formField.id, input.id))
+        .returning();
+      return deletedField;
     }),
 
   /**
@@ -464,34 +528,31 @@ export const formsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       // Verify form ownership
-      const form = await db.form.findFirst({
-        where: {
-          id: input.formId,
-          organizationId: ctx.orgId!,
-        },
+      const organizationId = requireOrganizationId(ctx.orgId);
+      const selectedForm = await db.query.form.findFirst({
+        where: formScopeWhere(input.formId, organizationId),
       });
 
-      if (!form) {
-        throw new Error("Form not found");
+      if (!selectedForm) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Form not found" });
       }
 
-      const submissions = await db.formSubmission.findMany({
-        where: { formId: input.formId },
-        include: {
-          contact: {
-            select: {
+      const submissions = await db.query.formSubmission.findMany({
+        where: and(
+          eq(formSubmission.formId, input.formId),
+          input.cursor ? lt(formSubmission.id, input.cursor) : undefined,
+        ),
+        with: {
+          client: {
+            columns: {
               id: true,
               name: true,
               email: true,
             },
           },
         },
-        orderBy: { submittedAt: "desc" },
-        take: input.limit + 1,
-        ...(input.cursor && {
-          cursor: { id: input.cursor },
-          skip: 1,
-        }),
+        orderBy: [desc(formSubmission.submittedAt)],
+        limit: input.limit + 1,
       });
 
       let nextCursor: string | undefined;

@@ -31,7 +31,7 @@ import { useLogsParams } from "@/features/ai/logs/hooks/use-logs-params";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { LogsToolbar } from "./logs-toolbar";
-import { AILogStatus } from "@prisma/client";
+import { AILogStatus } from "@/db/enums";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type LogRow = RouterOutput["logs"]["list"]["items"][number];
@@ -309,8 +309,8 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
   const [pageSize, setPageSize] = useQueryState("pageSize", parseAsInteger.withDefault(20));
 
   // Client filter for all-clients view
-  const [selectedSubaccountId, setSelectedSubaccountId] = useQueryState(
-    "subaccountId",
+  const [selectedLocationId, setSelectedLocationId] = useQueryState(
+    "locationId",
     parseAsString.withDefault("")
   );
 
@@ -366,8 +366,8 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
       completedAtStart: completedAtStart || undefined,
       completedAtEnd: completedAtEnd || undefined,
       ...(scope === "all-clients" && {
-        includeAllClients: !selectedSubaccountId,
-        subaccountId: selectedSubaccountId || undefined,
+        includeAllClients: !selectedLocationId,
+        locationId: selectedLocationId || undefined,
       }),
     })
   );
@@ -611,8 +611,8 @@ export function LogsTable({ scope = "agency" }: LogsTableProps) {
               onCompletedAtChange={handleCompletedAtChange}
               stats={stats}
               scope={scope}
-              selectedSubaccountId={selectedSubaccountId}
-              onSubaccountChange={setSelectedSubaccountId}
+              selectedLocationId={selectedLocationId}
+              onLocationChange={setSelectedLocationId}
             />
           ),
         }}

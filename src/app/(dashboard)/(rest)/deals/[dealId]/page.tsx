@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { CalendarIcon, DollarSignIcon, TagIcon, UserIcon } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
@@ -33,6 +33,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useTRPC } from "@/trpc/client";
 import { formatCurrency } from "@/features/crm/lib/currency";
+import { NotesPanel } from "@/features/crm/components/notes-panel";
 
 const CURRENCIES = [
   { value: "USD", label: "USD - US Dollar", symbol: "$" },
@@ -52,7 +53,7 @@ const dealFormSchema = z.object({
   currency: z.string().optional(),
   deadline: z.date().optional(),
   source: z.string().optional(),
-  tags: z.string().optional(), // Comma-separated string for easier form handling
+  tags: z.string().optional(),
   description: z.string().optional(),
 });
 
@@ -64,14 +65,17 @@ export default function DealDetailPage() {
   const trpc = useTRPC();
 
   const { data: deal } = useSuspenseQuery(
-    trpc.deals.getById.queryOptions({ id: params.dealId })
+    trpc.deals.getById.queryOptions({ id: params.dealId }),
   );
 
   const { data: pipelines } = useSuspenseQuery(
-    trpc.pipelines.list.queryOptions()
+    trpc.pipelines.list.queryOptions(),
   );
 
-  // Get the stages for the selected pipeline
+  const { data: membersData } = useQuery(
+    trpc.clients.getLocationMembers.queryOptions(),
+  );
+
   const selectedPipeline = React.useMemo(() => {
     if (!deal.pipelineId) return null;
     return pipelines.items.find((p) => p.id === deal.pipelineId);
@@ -94,7 +98,6 @@ export default function DealDetailPage() {
 
   const watchedPipelineId = form.watch("pipelineId");
 
-  // Update stages when pipeline changes
   const availableStages = React.useMemo(() => {
     if (!watchedPipelineId) return [];
     const pipeline = pipelines.items.find((p) => p.id === watchedPipelineId);
@@ -110,7 +113,7 @@ export default function DealDetailPage() {
       onError: (error) => {
         toast.error(error.message || "Failed to update deal");
       },
-    })
+    }),
   );
 
   const onSubmit = async (data: DealFormValues) => {
@@ -124,7 +127,10 @@ export default function DealDetailPage() {
       deadline: data.deadline || null,
       source: data.source,
       tags: data.tags
-        ? data.tags.split(",").map((t) => t.trim()).filter(Boolean)
+        ? data.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
         : [],
       description: data.description,
     });
@@ -134,42 +140,34 @@ export default function DealDetailPage() {
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-2 p-6 pb-0">
         <div>
-          <h1 className="text-lg font-semibold text-white">Edit Deal</h1>
-          <p className="text-xs text-white/50">
+          <h1 className="text-lg font-semibold text-primary dark:text-primary">
+            Edit deal
+          </h1>
+          <p className="text-xs text-primary/75 dark:text-white/50">
             Update deal information and track progress.
           </p>
         </div>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs rounded-xs text-white/50 hover:text-white"
-          onClick={() => router.back()}
-        >
-          Cancel
-        </Button>
       </div>
 
-      <Separator className="bg-white/5" />
+      <Separator className="bg-black/5 dark:bg-white/5" />
 
       <div className="pb-6">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
             {/* Basic Info */}
-            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-white/5">
+            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-black/5 dark:border-white/5">
               <FormField
                 control={form.control}
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-white/50">
-                      Deal Name
+                    <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                      Deal name
                     </FormLabel>
-
                     <FormControl>
                       <Input
                         placeholder="e.g., Acme Corp - Enterprise Plan..."
-                        className="bg-[#202e32] border-white/5 text-white text-xs autofill-off"
+                        className="border-black/10 dark:border-white/5 text-primary text-xs"
                         {...field}
                       />
                     </FormControl>
@@ -183,14 +181,13 @@ export default function DealDetailPage() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-white/50">
-                      Description (Optional)
+                    <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                      Description
                     </FormLabel>
-
                     <FormControl>
                       <Textarea
-                        placeholder="Add notes about this deal..."
-                        className="bg-[#202e32] border-white/5 text-white text-xs resize-none"
+                        placeholder="Add a short summary for this deal..."
+                        className="border-black/10 dark:border-white/5 text-primary text-xs resize-none"
                         rows={3}
                         {...field}
                       />
@@ -200,29 +197,29 @@ export default function DealDetailPage() {
                 )}
               />
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="value"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
-                        <DollarSignIcon className="size-3 inline mr-1" />
-                        Deal Value
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                        Deal value
                       </FormLabel>
-
                       <FormControl>
                         <Input
                           type="number"
                           min={0}
                           step="0.01"
                           placeholder="0.00"
-                          className="bg-[#202e32] border-white/5 text-white text-xs"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
                           {...field}
                           value={field.value ?? ""}
                           onChange={(e) => {
                             const val = e.target.value;
-                            field.onChange(val === "" ? undefined : Number.parseFloat(val));
+                            field.onChange(
+                              val === "" ? undefined : Number.parseFloat(val),
+                            );
                           }}
                         />
                       </FormControl>
@@ -236,20 +233,19 @@ export default function DealDetailPage() {
                   name="currency"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
                         Currency
                       </FormLabel>
-
                       <Select
                         onValueChange={field.onChange}
                         defaultValue={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="bg-[#202e32] border-white/5 text-white text-xs">
+                          <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select currency" />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="bg-[#202e32] border-white/5">
+                        <SelectContent className="bg-background border-black/10 dark:border-white/5">
                           {CURRENCIES.map((currency) => (
                             <SelectItem
                               key={currency.value}
@@ -267,17 +263,15 @@ export default function DealDetailPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="deadline"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
-                        <CalendarIcon className="size-3 inline mr-1" />
-                        Deadline (Optional)
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                        Deadline
                       </FormLabel>
-
                       <DatePicker
                         date={field.value}
                         onSelect={field.onChange}
@@ -293,14 +287,13 @@ export default function DealDetailPage() {
                   name="source"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
-                        Source (Optional)
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                        Source
                       </FormLabel>
-
                       <FormControl>
                         <Input
                           placeholder="e.g., Website, Referral..."
-                          className="bg-[#202e32] border-white/5 text-white text-xs"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
                           {...field}
                         />
                       </FormControl>
@@ -315,19 +308,17 @@ export default function DealDetailPage() {
                 name="tags"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-white/50">
-                      <TagIcon className="size-3 inline mr-1" />
-                      Tags (Optional)
+                    <FormLabel className="text-xs text-primary/75 dark:text-white/50">
+                      Tags
                     </FormLabel>
-
                     <FormControl>
                       <Input
                         placeholder="e.g., enterprise, hot-lead, q4-target (comma-separated)"
-                        className="bg-[#202e32] border-white/5 text-white text-xs"
+                        className="border-black/10 dark:border-white/5 text-primary text-xs"
                         {...field}
                       />
                     </FormControl>
-                    <FormDescription className="text-[10px] text-white/50">
+                    <FormDescription className="text-[10px] text-primary/50 dark:text-white/50">
                       Separate tags with commas
                     </FormDescription>
                     <FormMessage className="text-xs" />
@@ -337,40 +328,38 @@ export default function DealDetailPage() {
             </div>
 
             {/* Pipeline & Stage */}
-            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-white/5">
+            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-black/5 dark:border-white/5">
               <div>
-                <h2 className="text-sm font-medium text-white">
-                  Pipeline & Stage
+                <h2 className="text-sm font-medium text-primary dark:text-primary">
+                  Pipeline & stage
                 </h2>
-                <p className="text-[11px] text-white/50 mt-1">
+                <p className="text-[11px] text-primary/75 dark:text-white/50 mt-1">
                   Assign this deal to a pipeline and stage.
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="pipelineId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
                         Pipeline
                       </FormLabel>
-
                       <Select
                         onValueChange={(value) => {
                           field.onChange(value);
-                          // Reset stage when pipeline changes
                           form.setValue("pipelineStageId", undefined);
                         }}
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="bg-[#202e32] border-white/5 text-white text-xs">
+                          <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select pipeline" />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="bg-[#202e32] border-white/5">
+                        <SelectContent className="bg-background border-black/10 dark:border-white/5">
                           {pipelines.items.map((pipeline) => (
                             <SelectItem
                               key={pipeline.id}
@@ -379,7 +368,7 @@ export default function DealDetailPage() {
                             >
                               {pipeline.name}
                               {pipeline.isDefault && (
-                                <span className="ml-2 text-[10px] uppercase bg-blue-500/20 text-blue-200 px-1.5 py-0.5 rounded-sm">
+                                <span className="ml-2 text-[10px] uppercase bg-blue-500/20 text-blue-600 dark:text-blue-200 px-1.5 py-0.5 rounded-sm">
                                   Default
                                 </span>
                               )}
@@ -397,21 +386,22 @@ export default function DealDetailPage() {
                   name="pipelineStageId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-white/50">
+                      <FormLabel className="text-xs text-primary/75 dark:text-white/50">
                         Stage
                       </FormLabel>
-
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
-                        disabled={!watchedPipelineId || availableStages.length === 0}
+                        disabled={
+                          !watchedPipelineId || availableStages.length === 0
+                        }
                       >
                         <FormControl>
-                          <SelectTrigger className="bg-[#202e32] border-white/5 text-white text-xs">
+                          <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select stage" />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="bg-[#202e32] border-white/5">
+                        <SelectContent className="bg-background border-black/10 dark:border-white/5">
                           {availableStages.map((stage: any) => (
                             <SelectItem
                               key={stage.id}
@@ -421,10 +411,12 @@ export default function DealDetailPage() {
                               <div className="flex items-center gap-2">
                                 <div
                                   className="size-2 rounded-full"
-                                  style={{ backgroundColor: stage.color || "#6366f1" }}
+                                  style={{
+                                    backgroundColor: stage.color || "#6366f1",
+                                  }}
                                 />
                                 <span>{stage.name}</span>
-                                <span className="text-white/50">
+                                <span className="text-primary/50 dark:text-white/50">
                                   ({stage.probability}%)
                                 </span>
                               </div>
@@ -439,35 +431,34 @@ export default function DealDetailPage() {
               </div>
             </div>
 
-            {/* Associated Contacts & Members */}
-            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-white/5">
+            {/* Associated Members & Instructors */}
+            <div className="space-y-6 p-6 pt-0 rounded-xs border-b border-black/5 dark:border-white/5">
               <div>
-                <h2 className="text-sm font-medium text-white">
-                  Associated Contacts & Members
+                <h2 className="text-sm font-medium text-primary dark:text-primary">
+                  Associated members & instructors
                 </h2>
-                <p className="text-[11px] text-white/50 mt-1">
-                  People and team members related to this deal.
+                <p className="text-[11px] text-primary/75 dark:text-white/50 mt-1">
+                  Clients and instructors related to this deal.
                 </p>
               </div>
 
-              {/* Contacts */}
-              {deal.contacts && deal.contacts.length > 0 && (
+              {deal.clients && deal.clients.length > 0 && (
                 <div>
-                  <label className="text-xs text-white/50 block mb-3">
+                  <label className="text-xs text-primary/75 dark:text-white/50 block mb-3">
                     <UserIcon className="size-3 inline mr-1" />
-                    Contacts
+                    Clients
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {deal.contacts.map((contact) => (
+                    {deal.clients.map((client) => (
                       <Badge
-                        key={contact.id}
+                        key={client.id}
                         variant="outline"
-                        className="bg-[#202e32]/40 border-white/10 text-white text-xs px-3 py-1.5"
+                        className="border-black/10 dark:border-white/10 text-primary text-xs px-3 py-1.5"
                       >
-                        {contact.name}
-                        {contact.companyName && (
-                          <span className="text-white/50 ml-1">
-                            ({contact.companyName})
+                        {client.name}
+                        {client.companyName && (
+                          <span className="text-primary/50 dark:text-white/50 ml-1">
+                            ({client.companyName})
                           </span>
                         )}
                       </Badge>
@@ -476,28 +467,29 @@ export default function DealDetailPage() {
                 </div>
               )}
 
-              {/* Members */}
               {deal.members && deal.members.length > 0 && (
                 <div>
-                  <label className="text-xs text-white/50 block mb-3">
-                    Team Members
+                  <label className="text-xs text-primary/75 dark:text-white/50 block mb-3">
+                    Instructors
                   </label>
                   <div className="flex flex-wrap gap-3">
                     {deal.members.map((member) => (
                       <div
                         key={member.id}
-                        className="flex items-center gap-2 bg-[#202e32]/40 border border-white/10 rounded-xs px-3 py-2"
+                        className="flex items-center gap-2 border border-black/10 dark:border-white/10 rounded-lg px-3 py-2"
                       >
                         <Avatar className="size-6">
                           <AvatarImage src={member.image || undefined} />
-                          <AvatarFallback className="bg-[#202e32] text-white text-[10px]">
+                          <AvatarFallback className="text-[10px]">
                             {member.name?.charAt(0).toUpperCase() || "?"}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex flex-col">
-                          <span className="text-xs text-white">{member.name}</span>
+                          <span className="text-xs text-primary">
+                            {member.name}
+                          </span>
                           {member.email && (
-                            <span className="text-[10px] text-white/50">
+                            <span className="text-[10px] text-primary/50 dark:text-white/50">
                               {member.email}
                             </span>
                           )}
@@ -511,41 +503,61 @@ export default function DealDetailPage() {
 
             {/* Metadata */}
             <div className="p-6 pt-0">
-              <div className="bg-[#202e32]/20 border border-white/5 rounded-xs p-4">
-                <h3 className="text-xs font-medium text-white/70 mb-3">
+              <div className="border border-black/5 dark:border-white/5 rounded-lg p-4">
+                <h3 className="text-xs font-medium text-primary/70 dark:text-white/70 mb-3">
                   Metadata
                 </h3>
                 <div className="grid grid-cols-2 gap-3 text-[11px]">
                   <div>
-                    <span className="text-white/50">Created:</span>
-                    <span className="text-white ml-2">
+                    <span className="text-primary/50 dark:text-white/50">
+                      Created:
+                    </span>
+                    <span className="text-primary dark:text-white ml-2">
                       {new Date(deal.createdAt).toLocaleDateString()}
                     </span>
                   </div>
                   <div>
-                    <span className="text-white/50">Last Updated:</span>
-                    <span className="text-white ml-2">
+                    <span className="text-primary/50 dark:text-white/50">
+                      Last Updated:
+                    </span>
+                    <span className="text-primary dark:text-white ml-2">
                       {new Date(deal.updatedAt).toLocaleDateString()}
                     </span>
                   </div>
                   {deal.lastActivityAt && (
                     <div>
-                      <span className="text-white/50">Last Activity:</span>
-                      <span className="text-white ml-2">
+                      <span className="text-primary/50 dark:text-white/50">
+                        Last Activity:
+                      </span>
+                      <span className="text-primary dark:text-white ml-2">
                         {new Date(deal.lastActivityAt).toLocaleDateString()}
                       </span>
                     </div>
                   )}
                   {deal.value && deal.currency && (
                     <div>
-                      <span className="text-white/50">Value:</span>
-                      <span className="text-white ml-2 font-medium">
+                      <span className="text-primary/50 dark:text-white/50">
+                        Value:
+                      </span>
+                      <span className="text-primary dark:text-white ml-2 font-medium">
                         {formatCurrency(Number(deal.value), deal.currency)}
                       </span>
                     </div>
                   )}
                 </div>
               </div>
+            </div>
+
+            <div className="space-y-4 px-6">
+              <div>
+                <h2 className="text-sm font-medium text-primary dark:text-primary">
+                  Notes
+                </h2>
+                <p className="text-[11px] text-primary/75 dark:text-white/50 mt-1">
+                  Add timestamped notes, mention teammates, and pin updates.
+                </p>
+              </div>
+              <NotesPanel dealId={deal.id} members={membersData ?? []} />
             </div>
 
             {/* Submit */}
@@ -555,7 +567,7 @@ export default function DealDetailPage() {
                 variant="ghost"
                 onClick={() => router.back()}
                 disabled={updateDeal.isPending}
-                className="text-xs rounded-xs hover:bg-[#202e32] hover:text-white font-normal hover:brightness-110!"
+                className="bg-rose-500 text-rose-100 hover:bg-rose-500/95 hover:text-white text-xs rounded-lg border border-black/10 dark:border-white/5 transition duration-150"
               >
                 Cancel
               </Button>
@@ -563,7 +575,7 @@ export default function DealDetailPage() {
               <Button
                 type="submit"
                 disabled={updateDeal.isPending}
-                className="text-xs rounded-xs bg-[#202e32] brightness-110 hover:brightness-120! text-white"
+                className="bg-background hover:bg-primary-foreground/50 hover:text-black text-xs rounded-lg border border-black/10 dark:border-white/5 transition duration-150"
               >
                 {updateDeal.isPending ? "Saving..." : "Save Changes"}
               </Button>

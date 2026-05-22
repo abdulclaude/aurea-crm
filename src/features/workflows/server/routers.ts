@@ -1,7 +1,24 @@
 import { PAGINATION } from "@/config/constants";
-import { NodeType, ActivityAction } from "@prisma/client";
+import { NodeType, ActivityAction } from "@/db/enums";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  type SQL,
+} from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import {
+  connection,
+  node as workflowNode,
+  workflows,
+} from "@/db/schema";
+import type { JsonObject, JsonValue } from "@/db/json";
 
 import {
   createTRPCRouter,
@@ -17,8 +34,8 @@ import {
 } from "@/features/google-calendar/server/subscriptions";
 import { syncGmailWorkflowSubscriptions } from "@/features/gmail/server/subscriptions";
 import { createNotification } from "@/lib/notifications";
-import { Prisma } from "@prisma/client";
 import { logAnalytics } from "@/lib/analytics-logger";
+import { studioStarterWorkflowTemplates } from "@/features/workflows/lib/studio-starter-templates";
 
 const nodePreviewSelect = {
   id: true,
@@ -27,29 +44,92 @@ const nodePreviewSelect = {
   createdAt: true,
 };
 
+const positionSchema = z.object({ x: z.number(), y: z.number() });
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+
 const workflowScopeWhere = (ctx: {
   auth: { user: { id: string } };
-  subaccountId?: string | null;
-}) => ({
-  userId: ctx.auth.user.id,
-  subaccountId: ctx.subaccountId ?? null,
-});
+  locationId?: string | null;
+}): SQL<unknown> =>
+  and(
+    eq(workflows.userId, ctx.auth.user.id),
+    ctx.locationId ? eq(workflows.locationId, ctx.locationId) : isNull(workflows.locationId),
+  ) ?? eq(workflows.userId, ctx.auth.user.id);
 
-const findWorkflowForCtx = (
+const findWorkflowForCtx = async (
   ctx: {
     auth: { user: { id: string } };
-    subaccountId?: string | null;
+    locationId?: string | null;
   },
   workflowId: string,
-  extra?: Prisma.WorkflowsWhereInput
-) =>
-  prisma.workflows.findFirstOrThrow({
-    where: {
-      id: workflowId,
-      ...workflowScopeWhere(ctx),
-      ...(extra ?? {}),
-    },
+  extra?: SQL<unknown>,
+) => {
+  const workflow = await db.query.workflows.findFirst({
+    where: and(
+      eq(workflows.id, workflowId),
+      workflowScopeWhere(ctx),
+      extra,
+    ),
   });
+  if (!workflow) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Workflow not found" });
+  }
+  return workflow;
+};
+
+const parsePosition = (value: unknown): { x: number; y: number } => {
+  const parsed = positionSchema.safeParse(value);
+  return parsed.success ? parsed.data : { x: 0, y: 0 };
+};
+
+async function createWorkflowWithInitialNode({
+  name,
+  userId,
+  organizationId,
+  locationId,
+  isBundle = false,
+  isTemplate = false,
+  description,
+}: {
+  name: string;
+  userId: string;
+  organizationId: string | null;
+  locationId: string | null;
+  isBundle?: boolean;
+  isTemplate?: boolean;
+  description?: string | null;
+}) {
+  return await db.transaction(async (tx) => {
+    const [createdWorkflow] = await tx
+      .insert(workflows)
+      .values({
+        id: crypto.randomUUID(),
+        name,
+        userId,
+        organizationId,
+        locationId,
+        isBundle,
+        isTemplate,
+        description,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    await tx.insert(workflowNode).values({
+      id: crypto.randomUUID(),
+      workflowId: createdWorkflow.id,
+      type: NodeType.INITIAL,
+      position: { x: 0, y: 0 },
+      name: NodeType.INITIAL,
+      data: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return createdWorkflow;
+  });
+}
 
 export const workflowsRouter = createTRPCRouter({
   execute: protectedProcedure
@@ -58,10 +138,16 @@ export const workflowsRouter = createTRPCRouter({
       const workflow = await findWorkflowForCtx(ctx, input.id);
 
       if (workflow.isTemplate) {
-        throw new Error("Templates cannot be executed.");
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Templates cannot be executed.",
+        });
       }
       if (workflow.archived) {
-        throw new Error("Archived workflows cannot be executed.");
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Archived workflows cannot be executed.",
+        });
       }
 
       await sendWorkflowExecution({
@@ -71,27 +157,11 @@ export const workflowsRouter = createTRPCRouter({
       return workflow;
     }),
   create: premiumProcedure.mutation(async ({ ctx }) => {
-    const workflow = await prisma.workflows.create({
-      data: {
-        id: crypto.randomUUID(),
-        name: generateSlug(3),
-        userId: ctx.auth.user.id,
-        organizationId: ctx.orgId ?? null,
-        subaccountId: ctx.subaccountId ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        Node: {
-          create: {
-            id: crypto.randomUUID(),
-            type: NodeType.INITIAL,
-            position: { x: 0, y: 0 },
-            name: NodeType.INITIAL,
-            data: {},
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        },
-      },
+    const workflow = await createWorkflowWithInitialNode({
+      name: generateSlug(3),
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId ?? null,
+      locationId: ctx.locationId ?? null,
     });
 
     // Send notification
@@ -103,13 +173,13 @@ export const workflowsRouter = createTRPCRouter({
       entityType: "workflow",
       entityId: workflow.id,
       organizationId: ctx.orgId ?? undefined,
-      subaccountId: ctx.subaccountId ?? undefined,
+      locationId: ctx.locationId ?? undefined,
     });
 
     // Log analytics
     await logAnalytics({
       organizationId: ctx.orgId ?? "",
-      subaccountId: ctx.subaccountId ?? null,
+      locationId: ctx.locationId ?? null,
       userId: ctx.auth.user.id,
       action: ActivityAction.CREATED,
       entityType: "workflow",
@@ -129,28 +199,12 @@ export const workflowsRouter = createTRPCRouter({
     return workflow;
   }),
   createBundle: premiumProcedure.mutation(({ ctx }) => {
-    return prisma.workflows.create({
-      data: {
-        id: crypto.randomUUID(),
-        name: `${generateSlug(3)}-bundle`,
-        userId: ctx.auth.user.id,
-        organizationId: ctx.orgId ?? null,
-        subaccountId: ctx.subaccountId ?? null,
-        isBundle: true,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        Node: {
-          create: {
-            id: crypto.randomUUID(),
-            type: NodeType.INITIAL,
-            position: { x: 0, y: 0 },
-            name: NodeType.INITIAL,
-            data: {},
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        },
-      },
+    return createWorkflowWithInitialNode({
+      name: `${generateSlug(3)}-bundle`,
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId ?? null,
+      locationId: ctx.locationId ?? null,
+      isBundle: true,
     });
   }),
   updateArchived: protectedProcedure
@@ -158,14 +212,14 @@ export const workflowsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const scoped = await findWorkflowForCtx(ctx, input.id);
       const oldArchived = scoped.archived;
-      const workflow = await prisma.workflows.update({
-        where: {
-          id: scoped.id,
-        },
-        data: {
+      const [workflow] = await db
+        .update(workflows)
+        .set({
           archived: input.archived,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(workflows.id, scoped.id))
+        .returning();
 
       if (workflow.archived) {
         await removeGoogleCalendarWorkflowSubscriptions(workflow.id);
@@ -178,10 +232,21 @@ export const workflowsRouter = createTRPCRouter({
 
       await syncGmailWorkflowSubscriptions({ userId: ctx.auth.user.id });
 
+      await createNotification({
+        type: input.archived ? "WORKFLOW_ARCHIVED" : "WORKFLOW_RESTORED",
+        title: input.archived ? "Workflow archived" : "Workflow restored",
+        message: `${ctx.auth.user.name} ${input.archived ? "archived" : "restored"} workflow ${workflow.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "workflow",
+        entityId: workflow.id,
+        organizationId: ctx.orgId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
+      });
+
       // Log analytics
       await logAnalytics({
         organizationId: ctx.orgId ?? "",
-        subaccountId: ctx.subaccountId ?? null,
+        locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "workflow",
@@ -206,11 +271,10 @@ export const workflowsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const scoped = await findWorkflowForCtx(ctx, input.id);
       await removeGoogleCalendarWorkflowSubscriptions(input.id);
-      const workflow = await prisma.workflows.delete({
-        where: {
-          id: scoped.id,
-        },
-      });
+      const [workflow] = await db
+        .delete(workflows)
+        .where(eq(workflows.id, scoped.id))
+        .returning();
 
       await syncGmailWorkflowSubscriptions({ userId: ctx.auth.user.id });
 
@@ -223,13 +287,13 @@ export const workflowsRouter = createTRPCRouter({
         entityType: "workflow",
         entityId: workflow.id,
         organizationId: ctx.orgId ?? undefined,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
       });
 
       // Log analytics
       await logAnalytics({
         organizationId: ctx.orgId ?? "",
-        subaccountId: ctx.subaccountId ?? null,
+        locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.DELETED,
         entityType: "workflow",
@@ -251,14 +315,14 @@ export const workflowsRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const oldWorkflow = await findWorkflowForCtx(ctx, input.id);
-      const workflow = await prisma.workflows.update({
-        where: {
-          id: input.id,
-        },
-        data: {
+      const [workflow] = await db
+        .update(workflows)
+        .set({
           name: input.name,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(workflows.id, input.id))
+        .returning();
 
       // Send notification
       await createNotification({
@@ -269,13 +333,13 @@ export const workflowsRouter = createTRPCRouter({
         entityType: "workflow",
         entityId: workflow.id,
         organizationId: ctx.orgId ?? undefined,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
       });
 
       // Log analytics
       await logAnalytics({
         organizationId: ctx.orgId ?? "",
-        subaccountId: ctx.subaccountId ?? null,
+        locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "workflow",
@@ -304,7 +368,7 @@ export const workflowsRouter = createTRPCRouter({
             id: z.string(),
             type: z.string().nullish(),
             position: z.object({ x: z.number(), y: z.number() }),
-            data: z.record(z.string(), z.any()).optional(),
+            data: jsonObjectSchema.optional(),
           })
         ),
         edges: z.array(
@@ -324,19 +388,15 @@ export const workflowsRouter = createTRPCRouter({
 
       // transaction to ensure consistency
 
-      const result = await prisma.$transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
         // delete all existing nodes and connections (cascade deletes connections when node is deleted)
 
-        await tx.node.deleteMany({
-          where: {
-            workflowId: id,
-          },
-        });
+        await tx.delete(workflowNode).where(eq(workflowNode.workflowId, id));
 
         // create the new nodes
 
-        await tx.node.createMany({
-          data: nodes.map((node) => ({
+        if (nodes.length > 0) {
+          await tx.insert(workflowNode).values(nodes.map((node) => ({
             id: node.id,
             workflowId: id,
             name: node.type || "unknown",
@@ -349,13 +409,13 @@ export const workflowsRouter = createTRPCRouter({
                 : null,
             createdAt: new Date(),
             updatedAt: new Date(),
-          })),
-        });
+          })));
+        }
 
         // create connections
 
-        await tx.connection.createMany({
-          data: edges.map((edge) => ({
+        if (edges.length > 0) {
+          await tx.insert(connection).values(edges.map((edge) => ({
             id: crypto.randomUUID(),
             workflowId: id,
             fromNodeId: edge.source,
@@ -364,19 +424,17 @@ export const workflowsRouter = createTRPCRouter({
             toInput: edge.targetHandle || "main",
             createdAt: new Date(),
             updatedAt: new Date(),
-          })),
-        });
+          })));
+        }
 
         // update workflows 'updatedAt' time stamp
 
-        await tx.workflows.update({
-          where: {
-            id,
-          },
-          data: {
+        await tx
+          .update(workflows)
+          .set({
             updatedAt: new Date(),
-          },
-        });
+          })
+          .where(eq(workflows.id, id));
 
         return workflow;
       });
@@ -392,39 +450,51 @@ export const workflowsRouter = createTRPCRouter({
 
       await syncGmailWorkflowSubscriptions({ userId: ctx.auth.user.id });
 
+      await createNotification({
+        type: "WORKFLOW_UPDATED",
+        title: "Workflow updated",
+        message: `${ctx.auth.user.name} updated workflow ${workflow.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "workflow",
+        entityId: workflow.id,
+        organizationId: ctx.orgId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
+      });
+
       return result;
     }),
 
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const workflow = await prisma.workflows.findFirstOrThrow({
-        where: {
-          id: input.id,
-          ...workflowScopeWhere(ctx),
-        },
-        include: { Node: true, Connection: true },
+      const workflow = await db.query.workflows.findFirst({
+        where: and(eq(workflows.id, input.id), workflowScopeWhere(ctx)),
+        with: { nodes: true, connections: true },
       });
+
+      if (!workflow) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workflow not found" });
+      }
 
       // transform server nodes to react-flow compatible nodes
 
-      const nodes: Node[] = workflow.Node.map((node) => ({
+      const nodes: Node[] = workflow.nodes.map((node) => ({
         id: node.id,
         type: node.type,
-        position: node.position as { x: number; y: number },
-        data: (node.data as Record<string, unknown>) || {},
+        position: parsePosition(node.position),
+        data: jsonObjectSchema.catch({}).parse(node.data),
       }));
 
       // transform server connections to react-flow compatible edges
       // Map default "main" handles to actual node handle IDs
-      const edges: Edge[] = workflow.Connection.map((connection) => ({
-        id: connection.id,
-        source: connection.fromNodeId,
-        target: connection.toNodeId,
+      const edges: Edge[] = workflow.connections.map((item) => ({
+        id: item.id,
+        source: item.fromNodeId,
+        target: item.toNodeId,
         sourceHandle:
-          connection.fromOutput === "main" ? "source-1" : connection.fromOutput,
+          item.fromOutput === "main" ? "source-1" : item.fromOutput,
         targetHandle:
-          connection.toInput === "main" ? "target-1" : connection.toInput,
+          item.toInput === "main" ? "target-1" : item.toInput,
       }));
 
       return {
@@ -453,34 +523,29 @@ export const workflowsRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const { page, pageSize, search, isBundle } = input;
 
-      const ownerWhere = workflowScopeWhere(ctx);
-      const where: Prisma.WorkflowsWhereInput = {
-        ...ownerWhere,
-        name: {
-          contains: search,
-          mode: "insensitive",
-        },
-        ...(isBundle !== undefined ? { isBundle } : {}),
-      };
+      const where = and(
+        workflowScopeWhere(ctx),
+        ilike(workflows.name, `%${search}%`),
+        isBundle !== undefined ? eq(workflows.isBundle, isBundle) : undefined,
+      );
 
       const [items, totalCount] = await Promise.all([
-        prisma.workflows.findMany({
-          skip: (page - 1) * pageSize,
-          take: pageSize,
+        db.query.workflows.findMany({
+          offset: (page - 1) * pageSize,
+          limit: pageSize,
           where,
-          include: {
-            Node: {
-              select: nodePreviewSelect,
+          with: {
+            nodes: {
+              columns: nodePreviewSelect,
             },
           },
-          orderBy: {
-            updatedAt: "desc",
-          },
+          orderBy: [desc(workflows.updatedAt)],
         }),
-        prisma.workflows.count({ where }),
+        db.select({ count: count() }).from(workflows).where(where),
       ]);
 
-      const totalPages = Math.ceil(totalCount / pageSize);
+      const total = totalCount[0]?.count ?? 0;
+      const totalPages = Math.ceil(total / pageSize);
       const hasNextPage = page < totalPages;
       const hasPreviousPage = page > 1;
 
@@ -488,7 +553,7 @@ export const workflowsRouter = createTRPCRouter({
         items,
         page,
         pageSize,
-        totalCount,
+        totalCount: total,
         totalPages,
         hasNextPage,
         hasPreviousPage,
@@ -509,44 +574,30 @@ export const workflowsRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const { page, pageSize, search } = input;
 
-      const ownerWhere = workflowScopeWhere(ctx);
+      const where = and(
+        workflowScopeWhere(ctx),
+        eq(workflows.isTemplate, false),
+        eq(workflows.archived, true),
+        ilike(workflows.name, `%${search}%`),
+      );
 
       const [items, totalCount] = await Promise.all([
-        prisma.workflows.findMany({
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-          where: {
-            ...ownerWhere,
-            isTemplate: false,
-            archived: true,
-            name: {
-              contains: search,
-              mode: "insensitive",
+        db.query.workflows.findMany({
+          offset: (page - 1) * pageSize,
+          limit: pageSize,
+          where,
+          with: {
+            nodes: {
+              columns: nodePreviewSelect,
             },
           },
-          include: {
-            Node: {
-              select: nodePreviewSelect,
-            },
-          },
-          orderBy: {
-            updatedAt: "desc",
-          },
+          orderBy: [desc(workflows.updatedAt)],
         }),
-        prisma.workflows.count({
-          where: {
-            ...ownerWhere,
-            isTemplate: false,
-            archived: true,
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-        }),
+        db.select({ count: count() }).from(workflows).where(where),
       ]);
 
-      const totalPages = Math.ceil(totalCount / pageSize);
+      const total = totalCount[0]?.count ?? 0;
+      const totalPages = Math.ceil(total / pageSize);
       const hasNextPage = page < totalPages;
       const hasPreviousPage = page > 1;
 
@@ -554,7 +605,7 @@ export const workflowsRouter = createTRPCRouter({
         items,
         page,
         pageSize,
-        totalCount,
+        totalCount: total,
         totalPages,
         hasNextPage,
         hasPreviousPage,
@@ -574,25 +625,19 @@ export const workflowsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const { search } = input;
-      const ownerWhere = workflowScopeWhere(ctx);
 
-      const items = await prisma.workflows.findMany({
-        where: {
-          ...ownerWhere,
-          isTemplate: true,
-          name: {
-            contains: search,
-            mode: "insensitive",
+      const items = await db.query.workflows.findMany({
+        where: and(
+          workflowScopeWhere(ctx),
+          eq(workflows.isTemplate, true),
+          ilike(workflows.name, `%${search}%`),
+        ),
+        with: {
+          nodes: {
+            columns: nodePreviewSelect,
           },
         },
-        include: {
-          Node: {
-            select: nodePreviewSelect,
-          },
-        },
-        orderBy: {
-          updatedAt: "desc",
-        },
+        orderBy: [desc(workflows.updatedAt)],
       });
 
       const totalCount = items.length;
@@ -616,20 +661,20 @@ export const workflowsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const template = await prisma.workflows.findFirstOrThrow({
-        where: {
-          id: input.id,
-          ...workflowScopeWhere(ctx),
-          isTemplate: true,
-        },
-      });
-      const data: Record<string, unknown> = {};
+      const template = await findWorkflowForCtx(
+        ctx,
+        input.id,
+        eq(workflows.isTemplate, true),
+      );
+      const data: Partial<typeof workflows.$inferInsert> = {};
       if (input.name !== undefined) data.name = input.name;
       if (input.description !== undefined) data.description = input.description;
-      return prisma.workflows.update({
-        where: { id: template.id },
-        data,
-      });
+      const [updatedTemplate] = await db
+        .update(workflows)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(workflows.id, template.id))
+        .returning();
+      return updatedTemplate;
     }),
   createTemplateFromWorkflow: protectedProcedure
     .input(
@@ -639,71 +684,167 @@ export const workflowsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const base = await prisma.workflows.findFirstOrThrow({
-        where: {
-          id: input.id,
-          ...workflowScopeWhere(ctx),
-        },
-        include: { Node: true, Connection: true },
+      const base = await db.query.workflows.findFirst({
+        where: and(eq(workflows.id, input.id), workflowScopeWhere(ctx)),
+        with: { nodes: true, connections: true },
       });
 
-      return await prisma.$transaction(async (tx) => {
-        const template = await tx.workflows.create({
-          data: {
+      if (!base) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workflow not found" });
+      }
+
+      return await db.transaction(async (tx) => {
+        const [template] = await tx
+          .insert(workflows)
+          .values({
             id: crypto.randomUUID(),
             name: input.name ?? `${base.name} Template`,
             userId: ctx.auth.user.id,
             organizationId: ctx.orgId ?? null,
             isTemplate: true,
-            subaccountId: ctx.subaccountId ?? null,
+            locationId: ctx.locationId ?? null,
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
 
         const oldToNewNodeId = new Map<string, string>();
 
         // clone nodes
-        for (const node of base.Node) {
-          const created = await tx.node.create({
-            data: {
+        for (const nodeItem of base.nodes) {
+          const [created] = await tx
+            .insert(workflowNode)
+            .values({
               id: crypto.randomUUID(),
               workflowId: template.id,
-              name: node.name,
-              type: node.type,
-              position: node.position as any,
-              data: node.data as any,
+              name: nodeItem.name,
+              type: nodeItem.type,
+              position: nodeItem.position,
+              data: nodeItem.data,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
-          });
-          oldToNewNodeId.set(node.id, created.id);
+            })
+            .returning();
+          oldToNewNodeId.set(nodeItem.id, created.id);
         }
 
         // clone connections
-        for (const connection of base.Connection) {
-          const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
-          const toNodeId = oldToNewNodeId.get(connection.toNodeId);
+        for (const connectionItem of base.connections) {
+          const fromNodeId = oldToNewNodeId.get(connectionItem.fromNodeId);
+          const toNodeId = oldToNewNodeId.get(connectionItem.toNodeId);
           if (!fromNodeId || !toNodeId) {
             continue;
           }
-          await tx.connection.create({
-            data: {
+          await tx.insert(connection).values({
               id: crypto.randomUUID(),
               workflowId: template.id,
               fromNodeId,
               toNodeId,
-              fromOutput: connection.fromOutput,
-              toInput: connection.toInput,
+              fromOutput: connectionItem.fromOutput,
+              toInput: connectionItem.toInput,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
           });
         }
 
         return template;
       });
     }),
+  installStudioStarterTemplates: protectedProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.orgId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Organization context required to install workflow templates",
+      });
+    }
+
+    const existingTemplates = await db.query.workflows.findMany({
+      where: and(
+        workflowScopeWhere(ctx),
+        eq(workflows.isTemplate, true),
+        inArray(
+          workflows.name,
+          studioStarterWorkflowTemplates.map((template) => template.name),
+        ),
+      ),
+      columns: { name: true },
+    });
+    const existingNames = new Set(
+      existingTemplates.map((template) => template.name),
+    );
+    const templatesToCreate = studioStarterWorkflowTemplates.filter(
+      (template) => !existingNames.has(template.name),
+    );
+
+    const createdTemplates = await db.transaction(async (tx) => {
+      const created: Array<{ id: string; name: string }> = [];
+
+      for (const templateDefinition of templatesToCreate) {
+        const [workflow] = await tx
+          .insert(workflows)
+          .values({
+            id: crypto.randomUUID(),
+            name: templateDefinition.name,
+            description: templateDefinition.description,
+            userId: ctx.auth.user.id,
+            organizationId: ctx.orgId,
+            locationId: ctx.locationId ?? null,
+            isTemplate: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+
+        const nodeIds = new Map<string, string>();
+
+        for (const templateNode of templateDefinition.nodes) {
+          const nodeId = crypto.randomUUID();
+          nodeIds.set(templateNode.key, nodeId);
+
+          await tx.insert(workflowNode).values({
+              id: nodeId,
+              workflowId: workflow.id,
+              name: templateNode.type,
+              type: templateNode.type,
+              position: templateNode.position,
+              data: templateNode.data,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+          });
+        }
+
+        for (const templateConnection of templateDefinition.connections) {
+          const fromNodeId = nodeIds.get(templateConnection.from);
+          const toNodeId = nodeIds.get(templateConnection.to);
+
+          if (!fromNodeId || !toNodeId) {
+            continue;
+          }
+
+          await tx.insert(connection).values({
+              id: crypto.randomUUID(),
+              workflowId: workflow.id,
+              fromNodeId,
+              toNodeId,
+              fromOutput: templateConnection.fromOutput ?? "main",
+              toInput: templateConnection.toInput ?? "main",
+              createdAt: new Date(),
+              updatedAt: new Date(),
+          });
+        }
+
+        created.push({ id: workflow.id, name: workflow.name });
+      }
+
+      return created;
+    });
+
+    return {
+      createdCount: createdTemplates.length,
+      skippedCount: existingNames.size,
+      templates: createdTemplates,
+    };
+  }),
   createWorkflowFromTemplate: protectedProcedure
     .input(
       z.object({
@@ -712,70 +853,74 @@ export const workflowsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const base = await prisma.workflows.findFirstOrThrow({
-        where: {
-          id: input.id,
-          ...workflowScopeWhere(ctx),
-        },
-        include: { Node: true, Connection: true },
+      const base = await db.query.workflows.findFirst({
+        where: and(eq(workflows.id, input.id), workflowScopeWhere(ctx)),
+        with: { nodes: true, connections: true },
       });
 
-      if (!base.isTemplate) {
-        throw new Error("Selected item is not a template.");
+      if (!base) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workflow not found" });
       }
 
-      const workflow = await prisma.$transaction(async (tx) => {
-        const workflow = await tx.workflows.create({
-          data: {
+      if (!base.isTemplate) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Selected item is not a template.",
+        });
+      }
+
+      const workflow = await db.transaction(async (tx) => {
+        const [workflow] = await tx
+          .insert(workflows)
+          .values({
             id: crypto.randomUUID(),
             name: input.name ?? generateSlug(3),
             userId: ctx.auth.user.id,
             organizationId: ctx.orgId ?? null,
             isTemplate: false,
             archived: false,
-            subaccountId: ctx.subaccountId ?? null,
+            locationId: ctx.locationId ?? null,
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
 
         const oldToNewNodeId = new Map<string, string>();
 
         // clone nodes
-        for (const node of base.Node) {
-          const created = await tx.node.create({
-            data: {
+        for (const nodeItem of base.nodes) {
+          const [created] = await tx
+            .insert(workflowNode)
+            .values({
               id: crypto.randomUUID(),
               workflowId: workflow.id,
-              name: node.name,
-              type: node.type,
-              position: node.position as any,
-              data: node.data as any,
+              name: nodeItem.name,
+              type: nodeItem.type,
+              position: nodeItem.position,
+              data: nodeItem.data,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
-          });
-          oldToNewNodeId.set(node.id, created.id);
+            })
+            .returning();
+          oldToNewNodeId.set(nodeItem.id, created.id);
         }
 
         // clone connections
-        for (const connection of base.Connection) {
-          const fromNodeId = oldToNewNodeId.get(connection.fromNodeId);
-          const toNodeId = oldToNewNodeId.get(connection.toNodeId);
+        for (const connectionItem of base.connections) {
+          const fromNodeId = oldToNewNodeId.get(connectionItem.fromNodeId);
+          const toNodeId = oldToNewNodeId.get(connectionItem.toNodeId);
           if (!fromNodeId || !toNodeId) {
             continue;
           }
-          await tx.connection.create({
-            data: {
+          await tx.insert(connection).values({
               id: crypto.randomUUID(),
               workflowId: workflow.id,
               fromNodeId,
               toNodeId,
-              fromOutput: connection.fromOutput,
-              toInput: connection.toInput,
+              fromOutput: connectionItem.fromOutput,
+              toInput: connectionItem.toInput,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
           });
         }
 
@@ -792,35 +937,33 @@ export const workflowsRouter = createTRPCRouter({
 
   // Bundle Workflow Management
   listBundles: protectedProcedure.query(async ({ ctx }) => {
-    return prisma.workflows.findMany({
-      where: {
-        ...workflowScopeWhere(ctx),
-        isBundle: true,
-        archived: false,
-      },
-      select: {
+    return db.query.workflows.findMany({
+      where: and(
+        workflowScopeWhere(ctx),
+        eq(workflows.isBundle, true),
+        eq(workflows.archived, false),
+      ),
+      columns: {
         id: true,
         name: true,
         description: true,
         bundleInputs: true,
         bundleOutputs: true,
       },
-      orderBy: {
-        updatedAt: "desc",
-      },
+      orderBy: [desc(workflows.updatedAt)],
     });
   }),
 
   getBundleById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input, ctx }) => {
-      const bundle = await prisma.workflows.findFirst({
-        where: {
-          id: input.id,
-          ...workflowScopeWhere(ctx),
-          isBundle: true,
-        },
-        select: {
+      const bundle = await db.query.workflows.findFirst({
+        where: and(
+          eq(workflows.id, input.id),
+          workflowScopeWhere(ctx),
+          eq(workflows.isBundle, true),
+        ),
+        columns: {
           id: true,
           name: true,
           description: true,
@@ -830,7 +973,7 @@ export const workflowsRouter = createTRPCRouter({
       });
 
       if (!bundle) {
-        throw new Error("Bundle workflow not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Bundle workflow not found" });
       }
 
       return bundle;
@@ -840,28 +983,32 @@ export const workflowsRouter = createTRPCRouter({
     .input(z.object({ bundleId: z.string() }))
     .query(async ({ ctx, input }) => {
       // Find all workflows that contain a BUNDLE_WORKFLOW node pointing to this bundleId
-      const workflows = await prisma.workflows.findMany({
-        where: {
-          ...workflowScopeWhere(ctx),
-          isBundle: false,
-          archived: false,
-        },
-        include: {
-          Node: {
-            orderBy: { position: "asc" },
-          },
-          Connection: true,
+      const parentCandidates = await db.query.workflows.findMany({
+        where: and(
+          workflowScopeWhere(ctx),
+          eq(workflows.isBundle, false),
+          eq(workflows.archived, false),
+        ),
+        with: {
+          nodes: true,
+          connections: true,
         },
       });
 
       // Filter workflows that have BUNDLE_WORKFLOW nodes referencing this bundle
-      const parentWorkflows = workflows.filter((wf) =>
-        wf.Node.some((node: any) => {
-          if (node.type !== NodeType.BUNDLE_WORKFLOW) return false;
-          const data = node.data as Record<string, any>;
+      const parentWorkflows = parentCandidates
+        .filter((wf) =>
+          wf.nodes.some((nodeItem) => {
+          if (nodeItem.type !== NodeType.BUNDLE_WORKFLOW) return false;
+          const data = jsonObjectSchema.catch({}).parse(nodeItem.data);
           return data?.bundleWorkflowId === input.bundleId;
-        })
-      );
+          }),
+        )
+        .map((wf) => ({
+          ...wf,
+          Node: wf.nodes,
+          Connection: wf.connections,
+        }));
 
       return parentWorkflows;
     }),
@@ -887,17 +1034,22 @@ export const workflowsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const scoped = await findWorkflowForCtx(ctx, input.id, {
-        isBundle: true,
-      });
+      const scoped = await findWorkflowForCtx(
+        ctx,
+        input.id,
+        eq(workflows.isBundle, true),
+      );
 
-      return prisma.workflows.update({
-        where: { id: scoped.id },
-        data: {
-          bundleInputs: input.bundleInputs as any,
-          bundleOutputs: input.bundleOutputs as any,
-        },
-      });
+      const [updatedWorkflow] = await db
+        .update(workflows)
+        .set({
+          bundleInputs: input.bundleInputs as JsonValue,
+          bundleOutputs: input.bundleOutputs as JsonValue,
+          updatedAt: new Date(),
+        })
+        .where(eq(workflows.id, scoped.id))
+        .returning();
+      return updatedWorkflow;
     }),
 
   toggleBundle: protectedProcedure
@@ -905,11 +1057,14 @@ export const workflowsRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const scoped = await findWorkflowForCtx(ctx, input.id);
 
-      return prisma.workflows.update({
-        where: { id: scoped.id },
-        data: {
+      const [updatedWorkflow] = await db
+        .update(workflows)
+        .set({
           isBundle: input.isBundle,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(workflows.id, scoped.id))
+        .returning();
+      return updatedWorkflow;
     }),
 });

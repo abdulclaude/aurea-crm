@@ -64,7 +64,7 @@ export const uploadRouter = {
       });
       return { url: file.ufsUrl };
     }),
-  workerProfilePhoto: f({
+  instructorProfilePhoto: f({
     image: {
       maxFileSize: "4MB",
       maxFileCount: 1,
@@ -76,14 +76,14 @@ export const uploadRouter = {
       return { userId: user.id };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] worker profile photo upload complete", {
+      console.log("[UT] instructor profile photo upload complete", {
         userId: metadata.userId,
         url: file.ufsUrl,
         key: file.key,
       });
       return { url: file.ufsUrl };
     }),
-  workerDocument: f({
+  instructorDocument: f({
     pdf: {
       maxFileSize: "16MB",
       maxFileCount: 1,
@@ -107,7 +107,7 @@ export const uploadRouter = {
       return { userId: user.id };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] worker document upload complete", {
+      console.log("[UT] instructor document upload complete", {
         userId: metadata.userId,
         url: file.ufsUrl,
         key: file.key,
@@ -116,6 +116,32 @@ export const uploadRouter = {
       });
       return {
         url: file.ufsUrl,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+      };
+    }),
+  mindbodyImportFile: f({
+    blob: {
+      maxFileSize: "512MB",
+      maxFileCount: 250,
+    },
+  })
+    .middleware(async () => {
+      const user = await auth();
+      return { userId: user.id };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      console.log("[UT] Mindbody import file upload complete", {
+        userId: metadata.userId,
+        url: file.ufsUrl,
+        key: file.key,
+        fileName: file.name,
+        fileSize: file.size,
+      });
+      return {
+        url: file.ufsUrl,
+        uploadKey: file.key,
         fileName: file.name,
         fileSize: file.size,
         mimeType: file.type,

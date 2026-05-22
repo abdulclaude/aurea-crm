@@ -4,7 +4,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
-  serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "geoip-lite"],
+  serverExternalPackages: [
+    "geoip-lite",
+    "pg",
+  ],
   transpilePackages: ["react-map-gl", "mapbox-gl"],
   images: {
     remotePatterns: [
@@ -25,6 +28,16 @@ const nextConfig: NextConfig = {
         hostname: "testing.localhost:3000",
       },
     ],
+  },
+  // Redirect old agency onboarding URL to new studio path
+  async redirects() {
+    return [
+      {
+        source: "/onboarding/agency",
+        destination: "/onboarding/studio",
+        permanent: true,
+      },
+    ];
   },
   // Allow subdomain access in development
   async headers() {

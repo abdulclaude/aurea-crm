@@ -16,7 +16,7 @@ import {
 import type { BlockDefinition, BlockTreeNode } from "../../../types";
 import { blockSearchAtom, dragSourceAtom } from "../../../lib/editor-store";
 import { activePageIdAtom } from "../../../lib/editor-store";
-import { FunnelBlockType } from "@prisma/client";
+import { FunnelBlockType } from "@/db/enums";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
@@ -25,7 +25,7 @@ export function BlocksPanel() {
   const [, setDragSource] = useAtom(dragSourceAtom);
   const [activePageId] = useAtom(activePageIdAtom);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set([...getAllCategories(), "Smart Sections"])
+    new Set([...getAllCategories(), "Smart Sections"]),
   );
 
   const trpc = useTRPC();
@@ -41,7 +41,7 @@ export function BlocksPanel() {
       onSuccess: async () => {
         await queryClient.invalidateQueries();
       },
-    })
+    }),
   );
 
   const { mutate: insertSection } = useMutation(
@@ -55,7 +55,7 @@ export function BlocksPanel() {
           description: error.message,
         });
       },
-    })
+    }),
   );
 
   const categories = getAllCategories();
@@ -70,12 +70,17 @@ export function BlocksPanel() {
     setExpandedCategories(newExpanded);
   };
 
-  const handleBlockClick = (blockType: FunnelBlockType, definition: BlockDefinition) => {
+  const handleBlockClick = (
+    blockType: FunnelBlockType,
+    definition: BlockDefinition,
+  ) => {
     if (!activePageId) return;
 
     // Check if we're in a smart section context
     const isSmartSection = activePageId.startsWith("smart-section:");
-    const actualId = isSmartSection ? activePageId.replace("smart-section:", "") : activePageId;
+    const actualId = isSmartSection
+      ? activePageId.replace("smart-section:", "")
+      : activePageId;
 
     createBlockMutation({
       pageId: isSmartSection ? undefined : actualId,
@@ -103,20 +108,23 @@ export function BlocksPanel() {
     });
   };
 
-  const filteredCategories = categories.map((category) => {
-    const blocks = getBlocksByCategory(category);
-    const filtered = searchQuery
-      ? blocks.filter((block) =>
-          block.label.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      : blocks;
+  const filteredCategories = categories
+    .map((category) => {
+      const blocks = getBlocksByCategory(category);
+      const filtered = searchQuery
+        ? blocks.filter((block) =>
+            block.label.toLowerCase().includes(searchQuery.toLowerCase()),
+          )
+        : blocks;
 
-    return { category, blocks: filtered };
-  }).filter((cat) => cat.blocks.length > 0);
+      return { category, blocks: filtered };
+    })
+    .filter((cat) => cat.blocks.length > 0);
 
-  const filteredSmartSections = smartSections?.filter((section) =>
-    section.name.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredSmartSections =
+    smartSections?.filter((section) =>
+      section.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    ) || [];
 
   return (
     <div className="flex flex-col h-full">
@@ -141,7 +149,7 @@ export function BlocksPanel() {
             <div className="space-y-1">
               <button
                 onClick={() => toggleCategory("Smart Sections")}
-                className="w-full flex items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                className="w-full flex items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-black transition-colors"
               >
                 <span className="flex items-center gap-1.5">
                   <Boxes className="h-3 w-3" />
@@ -162,7 +170,7 @@ export function BlocksPanel() {
                       className={cn(
                         "w-full rounded-md border bg-card p-3 text-left transition-all",
                         "hover:border-primary/50 hover:shadow-sm active:scale-95",
-                        !activePageId && "opacity-50 cursor-not-allowed"
+                        !activePageId && "opacity-50 cursor-not-allowed",
                       )}
                     >
                       <div className="flex items-start gap-2">
@@ -194,7 +202,8 @@ export function BlocksPanel() {
           )}
 
           {/* Regular Block Categories */}
-          {filteredCategories.length === 0 && filteredSmartSections.length === 0 ? (
+          {filteredCategories.length === 0 &&
+          filteredSmartSections.length === 0 ? (
             <div className="p-8 text-center text-sm text-muted-foreground">
               No blocks found matching "{searchQuery}"
             </div>
@@ -203,7 +212,7 @@ export function BlocksPanel() {
               <div key={category} className="space-y-1">
                 <button
                   onClick={() => toggleCategory(category)}
-                  className="w-full flex items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                  className="w-full flex items-center justify-between px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-black transition-colors"
                 >
                   <span>{category}</span>
                   <span className="text-xs">
@@ -265,7 +274,7 @@ function BlockCard({ block, onClick, disabled }: BlockCardProps) {
         "flex flex-col items-center gap-2 p-3 rounded-lg border bg-card text-card-foreground transition-all",
         "hover:border-primary/50 hover:shadow-sm active:scale-95 cursor-grab active:cursor-grabbing",
         disabled && "opacity-50 cursor-not-allowed hover:border-border",
-        isDragging && "opacity-50"
+        isDragging && "opacity-50",
       )}
     >
       <div className="w-8 h-8 rounded-md bg-primary/10 flex items-center justify-center">

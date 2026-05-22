@@ -13,19 +13,20 @@ import { GoogleCalendarNode } from "@/features/nodes/triggers/components/google-
 import { ManualTriggerNode } from "@/features/nodes/triggers/components/manual-trigger/node";
 import { StripeTriggerNode } from "@/features/nodes/triggers/components/stripe-trigger/node";
 import { WaitNode } from "@/features/nodes/executions/components/wait/node";
-import { CreateContactNode } from "@/features/nodes/executions/components/create-contact/node";
-import { UpdateContactNode } from "@/features/nodes/executions/components/update-contact/node";
-import { DeleteContactNode } from "@/features/nodes/executions/components/delete-contact/node";
+import { CreateClientNode } from "@/features/nodes/executions/components/create-client/node";
+import { UpdateClientNode } from "@/features/nodes/executions/components/update-client/node";
+import { DeleteClientNode } from "@/features/nodes/executions/components/delete-client/node";
 import { CreateDealNode } from "@/features/nodes/executions/components/create-deal/node";
 import { UpdateDealNode } from "@/features/nodes/executions/components/update-deal/node";
 import { DeleteDealNode } from "@/features/nodes/executions/components/delete-deal/node";
 import { UpdatePipelineNode } from "@/features/nodes/executions/components/update-pipeline/node";
-import { ContactCreatedTriggerNode } from "@/features/nodes/triggers/components/contact-created-trigger/node";
-import { ContactUpdatedTriggerNode } from "@/features/nodes/triggers/components/contact-updated-trigger/node";
-import { ContactFieldChangedTriggerNode } from "@/features/nodes/triggers/components/contact-field-changed-trigger/node";
-import { ContactDeletedTriggerNode } from "@/features/nodes/triggers/components/contact-deleted-trigger/node";
-import { ContactTypeChangedTriggerNode } from "@/features/nodes/triggers/components/contact-type-changed-trigger/node";
-import { ContactLifecycleStageChangedTriggerNode } from "@/features/nodes/triggers/components/contact-lifecycle-stage-changed-trigger/node";
+import { ClientCreatedTriggerNode } from "@/features/nodes/triggers/components/client-created-trigger/node";
+import { ClientUpdatedTriggerNode } from "@/features/nodes/triggers/components/client-updated-trigger/node";
+import { ClientFieldChangedTriggerNode } from "@/features/nodes/triggers/components/client-field-changed-trigger/node";
+import { ClientDeletedTriggerNode } from "@/features/nodes/triggers/components/client-deleted-trigger/node";
+import { ClientTypeChangedTriggerNode } from "@/features/nodes/triggers/components/client-type-changed-trigger/node";
+import { ClientLifecycleStageChangedTriggerNode } from "@/features/nodes/triggers/components/client-lifecycle-stage-changed-trigger/node";
+import { BirthdayTriggerNode } from "@/features/nodes/triggers/components/birthday-trigger/node";
 import { IfElseNode } from "@/features/nodes/executions/components/if-else/node";
 import { SetVariableNode } from "@/features/nodes/executions/components/set-variable/node";
 import { StopWorkflowNode } from "@/features/nodes/executions/components/stop-workflow/node";
@@ -41,7 +42,7 @@ import { DealUpdatedTriggerNode } from "@/features/nodes/triggers/components/dea
 import { DealDeletedTriggerNode } from "@/features/nodes/triggers/components/deal-deleted-trigger/node";
 import { DealStageChangedTriggerNode } from "@/features/nodes/triggers/components/deal-stage-changed-trigger/node";
 import { SlackSendMessageNode } from "@/features/nodes/executions/components/slack-send-message/node";
-import { FindContactsNode } from "@/features/nodes/executions/components/find-contacts/node";
+import { FindClientsNode } from "@/features/nodes/executions/components/find-clients/node";
 import { GmailSendEmailNode } from "@/features/nodes/executions/components/gmail-send-email/node";
 import { GmailReplyToEmailNode } from "@/features/nodes/executions/components/gmail-reply-to-email/node";
 import { GmailSearchEmailsNode } from "@/features/nodes/executions/components/gmail-search-emails/node";
@@ -55,8 +56,8 @@ import { GoogleDriveMoveFileNode } from "@/features/nodes/executions/components/
 import { GoogleDriveDeleteFileNode } from "@/features/nodes/executions/components/google-drive-delete-file/node";
 import { GoogleDriveCreateFolderNode } from "@/features/nodes/executions/components/google-drive-create-folder/node";
 import { GoogleFormReadResponsesNode } from "@/features/nodes/executions/components/google-form-read-responses/node";
-import { AddTagToContactNode } from "@/features/nodes/executions/components/add-tag-to-contact/node";
-import { RemoveTagFromContactNode } from "@/features/nodes/executions/components/remove-tag-from-contact/node";
+import { AddTagToClientNode } from "@/features/nodes/executions/components/add-tag-to-client/node";
+import { RemoveTagFromClientNode } from "@/features/nodes/executions/components/remove-tag-from-client/node";
 import { MoveDealStageNode } from "@/features/nodes/executions/components/move-deal-stage/node";
 import { AddDealNoteNode } from "@/features/nodes/executions/components/add-deal-note/node";
 import { GoogleCalendarEventCreatedNode } from "@/features/nodes/triggers/components/google-calendar-event-created/node";
@@ -125,8 +126,29 @@ import { GeminiSummariseNode } from "@/features/nodes/executions/components/gemi
 import { GeminiTransformNode } from "@/features/nodes/executions/components/gemini-transform/node";
 import { GeminiClassifyNode } from "@/features/nodes/executions/components/gemini-classify/node";
 import { ExecuteWorkflowNode } from "@/features/nodes/executions/components/execute-workflow/node";
+import {
+  AwardLoyaltyPointsNode,
+  CalculateChurnScoreNode,
+  ClassBookedTriggerNode,
+  ClassCancelledTriggerNode,
+  ClientTagAddedTriggerNode,
+  ClientTagRemovedTriggerNode,
+  IntroOfferRedeemedTriggerNode,
+  IntroOfferCompletedTriggerNode,
+  MemberClassCountTriggerNode,
+  MemberCheckedInTriggerNode,
+  MemberNoShowTriggerNode,
+  MembershipCancelledTriggerNode,
+  MembershipCreatedTriggerNode,
+  MembershipExpiringTriggerNode,
+  SendClassReminderNode,
+  SendSmsNode,
+  StudioPaymentFailedTriggerNode,
+  StudioPaymentSucceededTriggerNode,
+  WaitlistSpotOpenedTriggerNode,
+} from "@/features/nodes/studio/components/studio-workflow-nodes";
 
-import { NodeType } from "@prisma/client";
+import { NodeType } from "@/db/enums";
 import { NodeTypes } from "@xyflow/react";
 
 export const nodeComponents = {
@@ -145,20 +167,21 @@ export const nodeComponents = {
   [NodeType.DISCORD]: DiscordNode,
   [NodeType.SLACK]: SlackNode,
   [NodeType.WAIT]: WaitNode,
-  [NodeType.CREATE_CONTACT]: CreateContactNode,
-  [NodeType.UPDATE_CONTACT]: UpdateContactNode,
-  [NodeType.DELETE_CONTACT]: DeleteContactNode,
+  [NodeType.CREATE_CLIENT]: CreateClientNode,
+  [NodeType.UPDATE_CLIENT]: UpdateClientNode,
+  [NodeType.DELETE_CLIENT]: DeleteClientNode,
   [NodeType.CREATE_DEAL]: CreateDealNode,
   [NodeType.UPDATE_DEAL]: UpdateDealNode,
   [NodeType.DELETE_DEAL]: DeleteDealNode,
   [NodeType.UPDATE_PIPELINE]: UpdatePipelineNode,
-  [NodeType.CONTACT_CREATED_TRIGGER]: ContactCreatedTriggerNode,
-  [NodeType.CONTACT_UPDATED_TRIGGER]: ContactUpdatedTriggerNode,
-  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: ContactFieldChangedTriggerNode,
-  [NodeType.CONTACT_DELETED_TRIGGER]: ContactDeletedTriggerNode,
-  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: ContactTypeChangedTriggerNode,
-  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
-    ContactLifecycleStageChangedTriggerNode,
+  [NodeType.CLIENT_CREATED_TRIGGER]: ClientCreatedTriggerNode,
+  [NodeType.CLIENT_UPDATED_TRIGGER]: ClientUpdatedTriggerNode,
+  [NodeType.CLIENT_FIELD_CHANGED_TRIGGER]: ClientFieldChangedTriggerNode,
+  [NodeType.CLIENT_DELETED_TRIGGER]: ClientDeletedTriggerNode,
+  [NodeType.CLIENT_TYPE_CHANGED_TRIGGER]: ClientTypeChangedTriggerNode,
+  [NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
+    ClientLifecycleStageChangedTriggerNode,
+  [NodeType.BIRTHDAY_TRIGGER]: BirthdayTriggerNode,
   [NodeType.IF_ELSE]: IfElseNode,
   [NodeType.SET_VARIABLE]: SetVariableNode,
   [NodeType.STOP_WORKFLOW]: StopWorkflowNode,
@@ -176,7 +199,7 @@ export const nodeComponents = {
   [NodeType.DEAL_DELETED_TRIGGER]: DealDeletedTriggerNode,
   [NodeType.DEAL_STAGE_CHANGED_TRIGGER]: DealStageChangedTriggerNode,
   [NodeType.SLACK_SEND_MESSAGE]: SlackSendMessageNode,
-  [NodeType.FIND_CONTACTS]: FindContactsNode,
+  [NodeType.FIND_CLIENTS]: FindClientsNode,
   [NodeType.GMAIL_SEND_EMAIL]: GmailSendEmailNode,
   [NodeType.GMAIL_REPLY_TO_EMAIL]: GmailReplyToEmailNode,
   [NodeType.GMAIL_SEARCH_EMAILS]: GmailSearchEmailsNode,
@@ -190,8 +213,8 @@ export const nodeComponents = {
   [NodeType.GOOGLE_DRIVE_DELETE_FILE]: GoogleDriveDeleteFileNode,
   [NodeType.GOOGLE_DRIVE_CREATE_FOLDER]: GoogleDriveCreateFolderNode,
   [NodeType.GOOGLE_FORM_READ_RESPONSES]: GoogleFormReadResponsesNode,
-  [NodeType.ADD_TAG_TO_CONTACT]: AddTagToContactNode,
-  [NodeType.REMOVE_TAG_FROM_CONTACT]: RemoveTagFromContactNode,
+  [NodeType.ADD_TAG_TO_CLIENT]: AddTagToClientNode,
+  [NodeType.REMOVE_TAG_FROM_CLIENT]: RemoveTagFromClientNode,
   [NodeType.MOVE_DEAL_STAGE]: MoveDealStageNode,
   [NodeType.ADD_DEAL_NOTE]: AddDealNoteNode,
   [NodeType.GOOGLE_CALENDAR_EVENT_CREATED]: GoogleCalendarEventCreatedNode,
@@ -261,6 +284,26 @@ export const nodeComponents = {
   [NodeType.GEMINI_TRANSFORM]: GeminiTransformNode,
   [NodeType.GEMINI_CLASSIFY]: GeminiClassifyNode,
   [NodeType.EXECUTE_WORKFLOW]: ExecuteWorkflowNode,
+  [NodeType.CLASS_BOOKED_TRIGGER]: ClassBookedTriggerNode,
+  [NodeType.CLASS_CANCELLED_TRIGGER]: ClassCancelledTriggerNode,
+  [NodeType.MEMBER_CHECKED_IN_TRIGGER]: MemberCheckedInTriggerNode,
+  [NodeType.MEMBER_NO_SHOW_TRIGGER]: MemberNoShowTriggerNode,
+  [NodeType.MEMBERSHIP_CREATED_TRIGGER]: MembershipCreatedTriggerNode,
+  [NodeType.MEMBERSHIP_EXPIRING_TRIGGER]: MembershipExpiringTriggerNode,
+  [NodeType.MEMBERSHIP_CANCELLED_TRIGGER]: MembershipCancelledTriggerNode,
+  [NodeType.WAITLIST_SPOT_OPENED_TRIGGER]: WaitlistSpotOpenedTriggerNode,
+  [NodeType.INTRO_OFFER_REDEEMED_TRIGGER]: IntroOfferRedeemedTriggerNode,
+  [NodeType.INTRO_OFFER_COMPLETED_TRIGGER]: IntroOfferCompletedTriggerNode,
+  [NodeType.MEMBER_CLASS_COUNT_TRIGGER]: MemberClassCountTriggerNode,
+  [NodeType.CLIENT_TAG_ADDED_TRIGGER]: ClientTagAddedTriggerNode,
+  [NodeType.CLIENT_TAG_REMOVED_TRIGGER]: ClientTagRemovedTriggerNode,
+  [NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER]:
+    StudioPaymentSucceededTriggerNode,
+  [NodeType.STUDIO_PAYMENT_FAILED_TRIGGER]: StudioPaymentFailedTriggerNode,
+  [NodeType.SEND_CLASS_REMINDER]: SendClassReminderNode,
+  [NodeType.AWARD_LOYALTY_POINTS]: AwardLoyaltyPointsNode,
+  [NodeType.CALCULATE_CHURN_SCORE]: CalculateChurnScoreNode,
+  [NodeType.SEND_SMS]: SendSmsNode,
 } as const satisfies NodeTypes;
 
 export type RegisteredNodeType = keyof typeof nodeComponents;

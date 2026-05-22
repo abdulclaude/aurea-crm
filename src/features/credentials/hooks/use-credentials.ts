@@ -12,7 +12,7 @@ import {
 import { toast } from "sonner";
 
 import { useCredentialsParams } from "./use-credentials-params";
-import { CredentialType } from "@prisma/client";
+import { CredentialType } from "@/db/enums";
 
 // hook to fetch all credentials using suspense
 

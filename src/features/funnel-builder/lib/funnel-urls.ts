@@ -4,7 +4,7 @@
  * Helper functions for generating funnel URLs
  */
 
-import type { FunnelDomainType } from "@prisma/client";
+import type { FunnelDomainType } from "@/db/enums";
 
 export const PLATFORM_BASE_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || "localhost:3000";
 

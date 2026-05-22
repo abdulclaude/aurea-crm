@@ -24,13 +24,13 @@ import {
   RotateCcw,
 } from "lucide-react";
 
-import { IconContacts as ContactIcon } from "central-icons/IconContacts";
+import { IconContacts as ClientIcon } from "central-icons/IconContacts";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ActivityType, ActivityAction } from "@prisma/client";
+import type { ActivityType, ActivityAction } from "@/db/enums";
 import { Separator } from "@/components/ui/separator";
 
 interface ActivityTimelineProps {
@@ -42,7 +42,7 @@ interface ActivityTimelineProps {
 }
 
 const activityTypeIcons: Record<string, any> = {
-  CONTACT: ContactIcon,
+  CLIENT: ClientIcon,
   DEAL: Briefcase,
   WORKFLOW: Workflow,
   EXECUTION: Clock,
@@ -51,7 +51,7 @@ const activityTypeIcons: Record<string, any> = {
   MEETING: MessageCircle,
   NOTE: StickyNote,
   TASK: FileText,
-  WORKER: User,
+  INSTRUCTOR: User,
   TIME_LOG: Clock,
   INVOICE: FileText,
   PIPELINE: Workflow,
@@ -228,8 +228,8 @@ export function ActivityTimeline({
         );
 
         return (
-          <div>
-            <div key={activity.id} className="flex gap-3 group w-max p-6">
+          <div key={activity.id}>
+            <div className="flex gap-3 group w-max p-6">
               {/* User Avatar */}
               <Avatar className="size-10">
                 <AvatarImage src={activity.user.image || undefined} />

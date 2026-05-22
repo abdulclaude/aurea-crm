@@ -1,13 +1,17 @@
 import { z } from "zod";
-import { prisma } from "@/lib/db";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
-import { ShiftSwapStatus } from "@prisma/client";
+import { ShiftSwapStatus } from "@/db/enums";
 import { addDays } from "date-fns";
+import { createId } from "@paralleldrive/cuid2";
+import { and, desc, eq, lt, ne, or, type SQL } from "drizzle-orm";
+
+import { db } from "@/db";
+import { rota, shiftSwapRequest, instructor } from "@/db/schema";
 
 const createSwapRequestSchema = z.object({
   rotaId: z.string(),
-  targetWorkerId: z.string().optional(), // If provided, specific worker; otherwise open to all
+  targetInstructorId: z.string().optional(), // If provided, specific instructor; otherwise open to all
   reason: z.string().optional(),
   expiresInDays: z.number().default(7), // Auto-expire after 7 days
 });
@@ -26,14 +30,45 @@ const adminApprovalSchema = z.object({
 
 const listSwapRequestsSchema = z.object({
   status: z.nativeEnum(ShiftSwapStatus).optional(),
-  workerId: z.string().optional(), // Filter by specific worker
+  instructorId: z.string().optional(), // Filter by specific instructor
   limit: z.number().min(1).max(100).default(20),
   cursor: z.string().optional(),
 });
 
+const getSwapRequestWithRelations = async ({
+  id,
+  organizationId,
+}: {
+  id: string;
+  organizationId: string;
+}) => {
+  const swapRequest = await db.query.shiftSwapRequest.findFirst({
+    where: and(eq(shiftSwapRequest.id, id), eq(shiftSwapRequest.organizationId, organizationId)),
+    with: {
+      rota: {
+        with: {
+          client: true,
+          deal: true,
+        },
+      },
+      instructor_requesterId: true,
+      instructor_targetInstructorId: true,
+    },
+  });
+
+  if (!swapRequest) return null;
+  const { instructor_requesterId, instructor_targetInstructorId, ...rest } = swapRequest;
+
+  return {
+    ...rest,
+    requester: instructor_requesterId,
+    targetInstructor: instructor_targetInstructorId,
+  };
+};
+
 export const shiftSwapsRouter = createTRPCRouter({
   /**
-   * List swap requests (admin view or worker view)
+   * List swap requests (admin view or instructor view)
    */
   list: protectedProcedure
     .input(listSwapRequestsSchema)
@@ -45,36 +80,53 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
-        organizationId: ctx.orgId,
-        ...(input.status && { status: input.status }),
-        ...(input.workerId && {
-          OR: [
-            { requesterId: input.workerId },
-            { targetWorkerId: input.workerId },
-          ],
-        }),
-      };
+      const conditions: SQL[] = [eq(shiftSwapRequest.organizationId, ctx.orgId)];
+      if (input.status) conditions.push(eq(shiftSwapRequest.status, input.status));
+      if (input.instructorId) {
+        conditions.push(
+          or(
+            eq(shiftSwapRequest.requesterId, input.instructorId),
+            eq(shiftSwapRequest.targetInstructorId, input.instructorId)
+          )!
+        );
+      }
 
-      const items = await prisma.shiftSwapRequest.findMany({
-        where,
-        include: {
+      if (input.cursor) {
+        const cursor = await db.query.shiftSwapRequest.findFirst({
+          where: eq(shiftSwapRequest.id, input.cursor),
+          columns: { id: true, requestedAt: true },
+        });
+        if (cursor) {
+          conditions.push(
+            or(
+              lt(shiftSwapRequest.requestedAt, cursor.requestedAt),
+              and(eq(shiftSwapRequest.requestedAt, cursor.requestedAt), lt(shiftSwapRequest.id, cursor.id))
+            )!
+          );
+        }
+      }
+
+      const rows = await db.query.shiftSwapRequest.findMany({
+        where: and(...conditions),
+        with: {
           rota: {
-            include: {
-              contact: true,
+            with: {
+              client: true,
               deal: true,
             },
           },
-          requester: true,
-          targetWorker: true,
+          instructor_requesterId: true,
+          instructor_targetInstructorId: true,
         },
-        orderBy: { requestedAt: "desc" },
-        take: input.limit + 1,
-        ...(input.cursor && {
-          cursor: { id: input.cursor },
-          skip: 1,
-        }),
+        orderBy: [desc(shiftSwapRequest.requestedAt), desc(shiftSwapRequest.id)],
+        limit: input.limit + 1,
       });
+
+      const items = rows.map(({ instructor_requesterId, instructor_targetInstructorId, ...item }) => ({
+        ...item,
+        requester: instructor_requesterId,
+        targetInstructor: instructor_targetInstructorId,
+      }));
 
       let nextCursor: string | undefined;
       if (items.length > input.limit) {
@@ -101,21 +153,9 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const swapRequest = await prisma.shiftSwapRequest.findFirst({
-        where: {
-          id: input.swapRequestId,
-          organizationId: ctx.orgId,
-        },
-        include: {
-          rota: {
-            include: {
-              contact: true,
-              deal: true,
-            },
-          },
-          requester: true,
-          targetWorker: true,
-        },
+      const swapRequest = await getSwapRequestWithRelations({
+        id: input.swapRequestId,
+        organizationId: ctx.orgId,
       });
 
       if (!swapRequest) {
@@ -129,7 +169,7 @@ export const shiftSwapsRouter = createTRPCRouter({
     }),
 
   /**
-   * Create swap request (worker initiates)
+   * Create swap request (instructor initiates)
    */
   create: protectedProcedure
     .input(createSwapRequestSchema)
@@ -141,18 +181,13 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      // Get the rota and verify it belongs to a worker
-      const rota = await prisma.rota.findFirst({
-        where: {
-          id: input.rotaId,
-          organizationId: ctx.orgId,
-        },
-        include: {
-          worker: true,
-        },
+      // Get the rota and verify it belongs to a instructor
+      const existingRota = await db.query.rota.findFirst({
+        where: and(eq(rota.id, input.rotaId), eq(rota.organizationId, ctx.orgId)),
+        with: { instructor: true },
       });
 
-      if (!rota) {
+      if (!existingRota) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Shift not found",
@@ -160,11 +195,11 @@ export const shiftSwapsRouter = createTRPCRouter({
       }
 
       // Check if there's already a pending swap request for this rota
-      const existingRequest = await prisma.shiftSwapRequest.findFirst({
-        where: {
-          rotaId: input.rotaId,
-          status: ShiftSwapStatus.PENDING,
-        },
+      const existingRequest = await db.query.shiftSwapRequest.findFirst({
+        where: and(
+          eq(shiftSwapRequest.rotaId, input.rotaId),
+          eq(shiftSwapRequest.status, ShiftSwapStatus.PENDING)
+        ),
       });
 
       if (existingRequest) {
@@ -174,56 +209,49 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      // Verify target worker exists if provided
-      if (input.targetWorkerId) {
-        const targetWorker = await prisma.worker.findFirst({
-          where: {
-            id: input.targetWorkerId,
-            organizationId: ctx.orgId,
-            isActive: true,
-          },
+      // Verify target instructor exists if provided
+      if (input.targetInstructorId) {
+        const targetInstructor = await db.query.instructor.findFirst({
+          where: and(
+            eq(instructor.id, input.targetInstructorId),
+            eq(instructor.organizationId, ctx.orgId),
+            eq(instructor.isActive, true)
+          ),
         });
 
-        if (!targetWorker) {
+        if (!targetInstructor) {
           throw new TRPCError({
             code: "NOT_FOUND",
-            message: "Target worker not found or inactive",
+            message: "Target instructor not found or inactive",
           });
         }
       }
 
       const expiresAt = addDays(new Date(), input.expiresInDays);
+      const now = new Date();
 
-      const swapRequest = await prisma.shiftSwapRequest.create({
-        data: {
+      const [createdRequest] = await db
+        .insert(shiftSwapRequest)
+        .values({
+          id: createId(),
           organizationId: ctx.orgId,
-          subaccountId: rota.subaccountId,
+          locationId: existingRota.locationId,
           rotaId: input.rotaId,
-          requesterId: rota.workerId,
-          targetWorkerId: input.targetWorkerId,
+          requesterId: existingRota.instructorId,
+          targetInstructorId: input.targetInstructorId,
           reason: input.reason,
           expiresAt,
           status: ShiftSwapStatus.PENDING,
-        },
-        include: {
-          rota: {
-            include: {
-              contact: true,
-              deal: true,
-            },
-          },
-          requester: true,
-          targetWorker: true,
-        },
-      });
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({ id: shiftSwapRequest.id });
 
-      // TODO: Send notification to target worker or broadcast to eligible workers
-
-      return swapRequest;
+      return getSwapRequestWithRelations({ id: createdRequest.id, organizationId: ctx.orgId });
     }),
 
   /**
-   * Worker responds to swap request (accept/reject)
+   * Instructor responds to swap request (accept/reject)
    */
   respond: protectedProcedure
     .input(respondToSwapSchema)
@@ -235,18 +263,16 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const swapRequest = await prisma.shiftSwapRequest.findFirst({
-        where: {
-          id: input.swapRequestId,
-          organizationId: ctx.orgId,
-          status: ShiftSwapStatus.PENDING,
-        },
-        include: {
-          rota: true,
-        },
+      const existingRequest = await db.query.shiftSwapRequest.findFirst({
+        where: and(
+          eq(shiftSwapRequest.id, input.swapRequestId),
+          eq(shiftSwapRequest.organizationId, ctx.orgId),
+          eq(shiftSwapRequest.status, ShiftSwapStatus.PENDING)
+        ),
+        with: { rota: true },
       });
 
-      if (!swapRequest) {
+      if (!existingRequest) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Swap request not found or already processed",
@@ -254,11 +280,11 @@ export const shiftSwapsRouter = createTRPCRouter({
       }
 
       // Check if expired
-      if (swapRequest.expiresAt && swapRequest.expiresAt < new Date()) {
-        await prisma.shiftSwapRequest.update({
-          where: { id: input.swapRequestId },
-          data: { status: ShiftSwapStatus.EXPIRED },
-        });
+      if (existingRequest.expiresAt && existingRequest.expiresAt < new Date()) {
+        await db
+          .update(shiftSwapRequest)
+          .set({ status: ShiftSwapStatus.EXPIRED, updatedAt: new Date() })
+          .where(eq(shiftSwapRequest.id, input.swapRequestId));
 
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -266,33 +292,22 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const updatedRequest = await prisma.shiftSwapRequest.update({
-        where: { id: input.swapRequestId },
-        data: {
+      await db
+        .update(shiftSwapRequest)
+        .set({
           status: input.accept
-            ? ShiftSwapStatus.WORKER_ACCEPTED
-            : ShiftSwapStatus.WORKER_REJECTED,
+            ? ShiftSwapStatus.INSTRUCTOR_ACCEPTED
+            : ShiftSwapStatus.INSTRUCTOR_REJECTED,
           respondedAt: new Date(),
           respondedBy: ctx.auth.user.id,
           ...(input.rejectionReason && {
             rejectionReason: input.rejectionReason,
           }),
-        },
-        include: {
-          rota: {
-            include: {
-              contact: true,
-              deal: true,
-            },
-          },
-          requester: true,
-          targetWorker: true,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(shiftSwapRequest.id, input.swapRequestId));
 
-      // TODO: Send notification to requester and admin
-
-      return updatedRequest;
+      return getSwapRequestWithRelations({ id: input.swapRequestId, organizationId: ctx.orgId });
     }),
 
   /**
@@ -308,32 +323,29 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const swapRequest = await prisma.shiftSwapRequest.findFirst({
-        where: {
-          id: input.swapRequestId,
-          organizationId: ctx.orgId,
-        },
-        include: {
+      const existingRequest = await db.query.shiftSwapRequest.findFirst({
+        where: and(eq(shiftSwapRequest.id, input.swapRequestId), eq(shiftSwapRequest.organizationId, ctx.orgId)),
+        with: {
           rota: true,
-          targetWorker: true,
+          instructor_targetInstructorId: true,
         },
       });
 
-      if (!swapRequest) {
+      if (!existingRequest) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Swap request not found",
         });
       }
 
-      // Must be worker-accepted before admin can approve
+      // Must be instructor-accepted before admin can approve
       if (
         input.approve &&
-        swapRequest.status !== ShiftSwapStatus.WORKER_ACCEPTED
+        existingRequest.status !== ShiftSwapStatus.INSTRUCTOR_ACCEPTED
       ) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Swap must be accepted by worker before admin approval",
+          message: "Swap must be accepted by instructor before admin approval",
         });
       }
 
@@ -341,46 +353,37 @@ export const shiftSwapsRouter = createTRPCRouter({
         ? ShiftSwapStatus.ADMIN_APPROVED
         : ShiftSwapStatus.ADMIN_REJECTED;
 
-      // If approving, update the rota with new worker
-      if (input.approve && swapRequest.targetWorker) {
-        await prisma.rota.update({
-          where: { id: swapRequest.rotaId },
-          data: {
-            workerId: swapRequest.targetWorker.id,
-          },
-        });
-      }
+      await db.transaction(async (tx) => {
+        if (input.approve && existingRequest.instructor_targetInstructorId) {
+          await tx
+            .update(rota)
+            .set({
+              instructorId: existingRequest.instructor_targetInstructorId.id,
+              updatedAt: new Date(),
+            })
+            .where(eq(rota.id, existingRequest.rotaId));
+        }
 
-      const updatedRequest = await prisma.shiftSwapRequest.update({
-        where: { id: input.swapRequestId },
-        data: {
-          status: newStatus,
-          ...(input.approve
-            ? {
-                adminApprovedAt: new Date(),
-                adminApprovedBy: ctx.auth.user.id,
-              }
-            : {
-                adminRejectedAt: new Date(),
-                adminRejectedBy: ctx.auth.user.id,
-                rejectionReason: input.rejectionReason,
-              }),
-        },
-        include: {
-          rota: {
-            include: {
-              contact: true,
-              deal: true,
-            },
-          },
-          requester: true,
-          targetWorker: true,
-        },
+        await tx
+          .update(shiftSwapRequest)
+          .set({
+            status: newStatus,
+            ...(input.approve
+              ? {
+                  adminApprovedAt: new Date(),
+                  adminApprovedBy: ctx.auth.user.id,
+                }
+              : {
+                  adminRejectedAt: new Date(),
+                  adminRejectedBy: ctx.auth.user.id,
+                  rejectionReason: input.rejectionReason,
+                }),
+            updatedAt: new Date(),
+          })
+          .where(eq(shiftSwapRequest.id, input.swapRequestId));
       });
 
-      // TODO: Send notifications to both workers
-
-      return updatedRequest;
+      return getSwapRequestWithRelations({ id: input.swapRequestId, organizationId: ctx.orgId });
     }),
 
   /**
@@ -396,47 +399,39 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const swapRequest = await prisma.shiftSwapRequest.findFirst({
-        where: {
-          id: input.swapRequestId,
-          organizationId: ctx.orgId,
-          status: {
-            in: [ShiftSwapStatus.PENDING, ShiftSwapStatus.WORKER_ACCEPTED],
-          },
-        },
+      const existingRequest = await db.query.shiftSwapRequest.findFirst({
+        where: and(
+          eq(shiftSwapRequest.id, input.swapRequestId),
+          eq(shiftSwapRequest.organizationId, ctx.orgId),
+          or(
+            eq(shiftSwapRequest.status, ShiftSwapStatus.PENDING),
+            eq(shiftSwapRequest.status, ShiftSwapStatus.INSTRUCTOR_ACCEPTED)
+          )!
+        ),
       });
 
-      if (!swapRequest) {
+      if (!existingRequest) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Swap request not found or cannot be cancelled",
         });
       }
 
-      const updatedRequest = await prisma.shiftSwapRequest.update({
-        where: { id: input.swapRequestId },
-        data: {
+      await db
+        .update(shiftSwapRequest)
+        .set({
           status: ShiftSwapStatus.CANCELLED,
-        },
-        include: {
-          rota: {
-            include: {
-              contact: true,
-              deal: true,
-            },
-          },
-          requester: true,
-          targetWorker: true,
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(shiftSwapRequest.id, input.swapRequestId));
 
-      return updatedRequest;
+      return getSwapRequestWithRelations({ id: input.swapRequestId, organizationId: ctx.orgId });
     }),
 
   /**
-   * Get eligible workers for shift swap
+   * Get eligible instructors for shift swap
    */
-  getEligibleWorkers: protectedProcedure
+  getEligibleInstructors: protectedProcedure
     .input(z.object({ rotaId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -446,30 +441,25 @@ export const shiftSwapsRouter = createTRPCRouter({
         });
       }
 
-      const rota = await prisma.rota.findFirst({
-        where: {
-          id: input.rotaId,
-          organizationId: ctx.orgId,
-        },
+      const existingRota = await db.query.rota.findFirst({
+        where: and(eq(rota.id, input.rotaId), eq(rota.organizationId, ctx.orgId)),
       });
 
-      if (!rota) {
+      if (!existingRota) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Shift not found",
         });
       }
 
-      // Get all active workers excluding the current worker
-      const eligibleWorkers = await prisma.worker.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          isActive: true,
-          NOT: {
-            id: rota.workerId,
-          },
-        },
-        select: {
+      // Get all active instructors excluding the current instructor
+      const eligibleInstructors = await db.query.instructor.findMany({
+        where: and(
+          eq(instructor.organizationId, ctx.orgId),
+          eq(instructor.isActive, true),
+          ne(instructor.id, existingRota.instructorId)
+        ),
+        columns: {
           id: true,
           name: true,
           email: true,
@@ -479,8 +469,6 @@ export const shiftSwapsRouter = createTRPCRouter({
         },
       });
 
-      // TODO: Filter by availability, skills, etc.
-
-      return eligibleWorkers;
+      return eligibleInstructors;
     }),
 });

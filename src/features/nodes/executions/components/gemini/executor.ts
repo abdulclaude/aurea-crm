@@ -8,8 +8,11 @@ import { generateText } from "ai";
 
 import { geminiChannel } from "@/inngest/channels/gemini";
 import type { AVAILABLE_MODELS } from "./dialog";
-import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { credential as credentialTable } from "@/db/schema";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -62,11 +65,8 @@ export const geminiExecutor: NodeExecutor<GeminiData> = async ({
     // fetch credential that user selected
 
     const credential = await step.run("get-credential", () => {
-      return prisma.credential.findUnique({
-        where: {
-          id: data.credentialId,
-          userId,
-        },
+      return db.query.credential.findFirst({
+        where: and(eq(credentialTable.id, data.credentialId!), eq(credentialTable.userId, userId)),
       });
     });
 

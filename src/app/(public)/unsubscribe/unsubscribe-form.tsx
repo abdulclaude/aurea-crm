@@ -8,7 +8,7 @@ type UnsubscribeState = "loading" | "valid" | "invalid" | "success" | "error";
 
 interface TokenInfo {
   email: string;
-  contactName: string;
+  clientName: string;
 }
 
 export default function UnsubscribeForm() {
@@ -93,7 +93,7 @@ export default function UnsubscribeForm() {
           {error || "This unsubscribe link is invalid or has expired."}
         </p>
         <p className="text-sm text-gray-500 mt-4">
-          If you believe this is an error, please contact support.
+          If you believe this is an error, please client support.
         </p>
       </div>
     );

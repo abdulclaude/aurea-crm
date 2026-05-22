@@ -5,20 +5,27 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { and, count, desc, eq, isNull, ne } from "drizzle-orm";
+import { db } from "@/db";
+import { form, funnel, globalStylePreset } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import db from "@/lib/db";
+
+const jsonRecord = z.record(z.string(), z.unknown());
 
 export const globalStylesRouter = createTRPCRouter({
   /**
-   * List all style presets for the current organization/subaccount
+   * List all style presets for the current organization/location
    */
   list: protectedProcedure.query(async ({ ctx }) => {
-    return await db.globalStylePreset.findMany({
-      where: {
-        organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? null,
-      },
-      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+    return await db.query.globalStylePreset.findMany({
+      where: and(
+        eq(globalStylePreset.organizationId, ctx.orgId!),
+        ctx.locationId
+          ? eq(globalStylePreset.locationId, ctx.locationId)
+          : isNull(globalStylePreset.locationId)
+      ),
+      orderBy: [desc(globalStylePreset.isDefault), desc(globalStylePreset.createdAt)],
     });
   }),
 
@@ -28,15 +35,15 @@ export const globalStylesRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const preset = await db.globalStylePreset.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
+      const preset = await db.query.globalStylePreset.findFirst({
+        where: and(
+          eq(globalStylePreset.id, input.id),
+          eq(globalStylePreset.organizationId, ctx.orgId!)
+        ),
       });
 
       if (!preset) {
-        throw new Error("Style preset not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Style preset not found" });
       }
 
       return preset;
@@ -59,38 +66,46 @@ export const globalStylesRouter = createTRPCRouter({
         borderColor: z.string().optional(),
         fontFamily: z.string().optional(),
         headingFont: z.string().optional(),
-        fontSize: z.record(z.number(), z.any()).optional(),
-        fontWeight: z.record(z.number(), z.any()).optional(),
-        lineHeight: z.record(z.number(), z.any()).optional(),
-        spacing: z.record(z.number(), z.any()).optional(),
-        borderRadius: z.record(z.number(), z.any()).optional(),
-        buttonPresets: z.record(z.any(), z.any()).optional(),
+        fontSize: jsonRecord.optional(),
+        fontWeight: jsonRecord.optional(),
+        lineHeight: jsonRecord.optional(),
+        spacing: jsonRecord.optional(),
+        borderRadius: jsonRecord.optional(),
+        buttonPresets: jsonRecord.optional(),
         shadows: z.record(z.string(), z.string()).optional(),
         isDefault: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // If setting as default, unset other defaults first
-      if (input.isDefault) {
-        await db.globalStylePreset.updateMany({
-          where: {
-            organizationId: ctx.orgId!,
-            subaccountId: ctx.subaccountId ?? null,
-            isDefault: true,
-          },
-          data: { isDefault: false },
-        });
-      }
+      return await db.transaction(async (tx) => {
+        if (input.isDefault) {
+          await tx
+            .update(globalStylePreset)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(globalStylePreset.organizationId, ctx.orgId!),
+                ctx.locationId
+                  ? eq(globalStylePreset.locationId, ctx.locationId)
+                  : isNull(globalStylePreset.locationId),
+                eq(globalStylePreset.isDefault, true)
+              )
+            );
+        }
 
-      return await db.globalStylePreset.create({
-        data: {
-          id: crypto.randomUUID(),
-          ...input,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        const [preset] = await tx
+          .insert(globalStylePreset)
+          .values({
+            id: crypto.randomUUID(),
+            ...input,
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .returning();
+
+        return preset;
       });
     }),
 
@@ -112,12 +127,12 @@ export const globalStylesRouter = createTRPCRouter({
         borderColor: z.string().optional(),
         fontFamily: z.string().optional(),
         headingFont: z.string().optional(),
-        fontSize: z.record(z.number(), z.any()).optional(),
-        fontWeight: z.record(z.number(), z.any()).optional(),
-        lineHeight: z.record(z.number(), z.any()).optional(),
-        spacing: z.record(z.number(), z.any()).optional(),
-        borderRadius: z.record(z.number(), z.any()).optional(),
-        buttonPresets: z.record(z.any(), z.any()).optional(),
+        fontSize: jsonRecord.optional(),
+        fontWeight: jsonRecord.optional(),
+        lineHeight: jsonRecord.optional(),
+        spacing: jsonRecord.optional(),
+        borderRadius: jsonRecord.optional(),
+        buttonPresets: jsonRecord.optional(),
         shadows: z.record(z.string(), z.string()).optional(),
         isDefault: z.boolean().optional(),
       })
@@ -126,33 +141,41 @@ export const globalStylesRouter = createTRPCRouter({
       const { id, ...data } = input;
 
       // Verify ownership
-      const preset = await db.globalStylePreset.findFirst({
-        where: {
-          id,
-          organizationId: ctx.orgId!,
-        },
+      const preset = await db.query.globalStylePreset.findFirst({
+        where: and(
+          eq(globalStylePreset.id, id),
+          eq(globalStylePreset.organizationId, ctx.orgId!)
+        ),
       });
 
       if (!preset) {
-        throw new Error("Style preset not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Style preset not found" });
       }
 
-      // If setting as default, unset other defaults first
-      if (input.isDefault) {
-        await db.globalStylePreset.updateMany({
-          where: {
-            organizationId: ctx.orgId!,
-            subaccountId: ctx.subaccountId ?? null,
-            isDefault: true,
-            id: { not: id },
-          },
-          data: { isDefault: false },
-        });
-      }
+      return await db.transaction(async (tx) => {
+        if (input.isDefault) {
+          await tx
+            .update(globalStylePreset)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(globalStylePreset.organizationId, ctx.orgId!),
+                ctx.locationId
+                  ? eq(globalStylePreset.locationId, ctx.locationId)
+                  : isNull(globalStylePreset.locationId),
+                eq(globalStylePreset.isDefault, true),
+                ne(globalStylePreset.id, id)
+              )
+            );
+        }
 
-      return await db.globalStylePreset.update({
-        where: { id },
-        data,
+        const [updatedPreset] = await tx
+          .update(globalStylePreset)
+          .set({ ...data, updatedAt: new Date() })
+          .where(eq(globalStylePreset.id, id))
+          .returning();
+
+        return updatedPreset;
       });
     }),
 
@@ -163,32 +186,39 @@ export const globalStylesRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Verify ownership
-      const preset = await db.globalStylePreset.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
+      const preset = await db.query.globalStylePreset.findFirst({
+        where: and(
+          eq(globalStylePreset.id, input.id),
+          eq(globalStylePreset.organizationId, ctx.orgId!)
+        ),
       });
 
       if (!preset) {
-        throw new Error("Style preset not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Style preset not found" });
       }
 
       // Check if it's being used
       const [funnelCount, formCount] = await Promise.all([
-        db.funnel.count({ where: { stylePresetId: input.id } }),
-        db.form.count({ where: { stylePresetId: input.id } }),
+        db.select({ count: count(funnel.id) }).from(funnel).where(eq(funnel.stylePresetId, input.id)),
+        db.select({ count: count(form.id) }).from(form).where(eq(form.stylePresetId, input.id)),
       ]);
 
-      if (funnelCount > 0 || formCount > 0) {
-        throw new Error(
-          `Cannot delete preset. It's being used by ${funnelCount} funnel(s) and ${formCount} form(s).`
-        );
+      const usedFunnels = funnelCount[0]?.count ?? 0;
+      const usedForms = formCount[0]?.count ?? 0;
+
+      if (usedFunnels > 0 || usedForms > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Cannot delete preset. It's being used by ${usedFunnels} funnel(s) and ${usedForms} form(s).`,
+        });
       }
 
-      return await db.globalStylePreset.delete({
-        where: { id: input.id },
-      });
+      const [deletedPreset] = await db
+        .delete(globalStylePreset)
+        .where(eq(globalStylePreset.id, input.id))
+        .returning();
+
+      return deletedPreset;
     }),
 
   /**
@@ -197,28 +227,31 @@ export const globalStylesRouter = createTRPCRouter({
   duplicate: protectedProcedure
     .input(z.object({ id: z.string(), newName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const original = await db.globalStylePreset.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
+      const original = await db.query.globalStylePreset.findFirst({
+        where: and(
+          eq(globalStylePreset.id, input.id),
+          eq(globalStylePreset.organizationId, ctx.orgId!)
+        ),
       });
 
       if (!original) {
-        throw new Error("Style preset not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Style preset not found" });
       }
 
       const { id, createdAt, updatedAt, ...data } = original;
 
-      return await db.globalStylePreset.create({
-        data: {
+      const [duplicatedPreset] = await db
+        .insert(globalStylePreset)
+        .values({
           id: crypto.randomUUID(),
-          ...(data as any),
+          ...data,
           name: input.newName,
           isDefault: false,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+        })
+        .returning();
+
+      return duplicatedPreset;
     }),
 });

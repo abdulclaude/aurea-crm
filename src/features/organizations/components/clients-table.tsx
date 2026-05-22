@@ -7,7 +7,7 @@ import type {
   Updater,
   VisibilityState,
 } from "@tanstack/react-table";
-import { IconContacts as ContactIcon } from "central-icons/IconContacts";
+import { IconContacts as ClientIcon } from "central-icons/IconContacts";
 import { IconGroup2 as UsersIcon } from "central-icons/IconGroup2";
 import { IconInvite as InviteIcon } from "central-icons/IconInvite";
 
@@ -52,7 +52,7 @@ export type ClientMember = {
 
 export type ClientsTableRow = {
   id: string;
-  subaccountId: string;
+  locationId: string;
   name: string;
   slug: string | null;
   logo: string | null;
@@ -164,13 +164,13 @@ const clientColumns: ColumnDef<ClientsTableRow>[] = [
   {
     id: "members",
     header: "Team members",
-    meta: { label: "Members" },
+    meta: { label: "Team members" },
     enableSorting: false,
     cell: ({ row }) => (
       <MembersMenu
         members={row.original.members}
         pendingInvites={row.original.pendingInvites}
-        subaccountId={row.original.subaccountId}
+        locationId={row.original.locationId}
       />
     ),
   },
@@ -365,7 +365,7 @@ export function ClientsTable() {
         data={rows}
         columns={clientColumns}
         isLoading={isInitialLoading}
-        getRowId={(row) => row.subaccountId}
+        getRowId={(row) => row.locationId}
         sorting={sortingState}
         onSortingChange={handleSortingChange}
         columnVisibility={columnVisibility}
@@ -376,7 +376,7 @@ export function ClientsTable() {
         initialSorting={[{ id: "company", desc: false }]}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
-            No clients have been added yet. <br /> Start by adding a client.
+            No locations have been added yet. <br /> Start by adding a location.
           </div>
         }
         toolbar={{
@@ -500,13 +500,13 @@ function PhoneCell({ phone }: { phone?: string | null }) {
 type MembersMenuProps = {
   members: ClientMember[];
   pendingInvites: number;
-  subaccountId: string;
+  locationId: string;
 };
 
 function MembersMenu({
   members,
   pendingInvites,
-  subaccountId,
+  locationId,
 }: MembersMenuProps) {
   const [inviteDialogOpen, setInviteDialogOpen] = React.useState(false);
 
@@ -578,7 +578,7 @@ function MembersMenu({
                           alt={member.name ?? ""}
                         />
                       ) : (
-                        <AvatarFallback className="bg-[#202e32] text-white brightness-110">
+                        <AvatarFallback className="bg-muted text-muted-foreground">
                           {(member.name?.[0] ?? "U").toUpperCase()}
                         </AvatarFallback>
                       )}
@@ -600,8 +600,8 @@ function MembersMenu({
 
                   <DropdownMenuSubContent className="w-60 bg-background border-black/10 dark:border-white/5 rounded-lg mr-3 p-0">
                     <DropdownMenuItem className="gap-2 hover:bg-primary-foreground/50 text-xs text-primary p-3 rounded-none">
-                      <ContactIcon className="size-3.5" />
-                      Set as point of contact
+                      <ClientIcon className="size-3.5" />
+                      Set as point of client
                     </DropdownMenuItem>
 
                     <Separator className="bg-black/5 dark:bg-white/5" />
@@ -634,8 +634,8 @@ function MembersMenu({
       <InviteMemberDialog
         open={inviteDialogOpen}
         onOpenChange={setInviteDialogOpen}
-        mode="subaccount"
-        subaccountId={subaccountId}
+        mode="location"
+        locationId={locationId}
       />
     </>
   );

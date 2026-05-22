@@ -1,0 +1,9 @@
+export const metadata = { title: "Spot booking test" };
+
+export default function TestLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return <div className="h-screen bg-black">{children}</div>;
+}

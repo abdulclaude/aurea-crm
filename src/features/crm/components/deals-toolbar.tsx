@@ -80,8 +80,8 @@ export interface DealsToolbarProps {
   onColumnOrderChange: (order: ColumnOrderState) => void;
   initialColumnOrder: ColumnOrderState;
   scope?: "agency" | "all-clients";
-  selectedSubaccountId?: string;
-  onSubaccountChange?: (subaccountId: string) => void;
+  selectedLocationId?: string;
+  onLocationChange?: (locationId: string) => void;
   // Range filter props (overall min/max from all data)
   valueMin?: number;
   valueMax?: number;
@@ -97,9 +97,9 @@ export interface DealsToolbarProps {
   selectedProbabilityMin?: number;
   selectedProbabilityMax?: number;
   // Other filters
-  contacts?: string[];
-  selectedContacts?: string[];
-  onToggleContact?: (contactId: string) => void;
+  clients?: string[];
+  selectedClients?: string[];
+  onToggleClient?: (clientId: string) => void;
   members?: Array<{ id: string; name: string | null; image: string | null }>;
   selectedMembers?: string[];
   onToggleMember?: (memberId: string) => void;
@@ -121,7 +121,7 @@ export interface DealsToolbarProps {
   // For preview count calculation
   onApplyAllFilters?: (filters: {
     stages: string[];
-    contacts: string[];
+    clients: string[];
     members: string[];
     valueCurrency?: string;
     valueMin?: number;
@@ -157,8 +157,8 @@ export function DealsToolbar({
   onColumnOrderChange,
   initialColumnOrder,
   scope = "agency",
-  selectedSubaccountId = "",
-  onSubaccountChange,
+  selectedLocationId = "",
+  onLocationChange,
   valueMin,
   valueMax,
   maxValueCurrency,
@@ -171,9 +171,9 @@ export function DealsToolbar({
   selectedValueMax,
   selectedProbabilityMin,
   selectedProbabilityMax,
-  contacts = [],
-  selectedContacts = [],
-  onToggleContact,
+  clients = [],
+  selectedClients = [],
+  onToggleClient,
   members = [],
   selectedMembers = [],
   onToggleMember,
@@ -195,8 +195,8 @@ export function DealsToolbar({
 }: DealsToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
-  const [stagedContacts, setStagedContacts] =
-    React.useState<string[]>(selectedContacts);
+  const [stagedClients, setStagedClients] =
+    React.useState<string[]>(selectedClients);
   const [stagedMembers, setStagedMembers] =
     React.useState<string[]>(selectedMembers);
   const [stagedStages, setStagedStages] =
@@ -207,24 +207,24 @@ export function DealsToolbar({
 
   const trpc = useTRPC();
 
-  // Fetch available clients/subaccounts for "all-clients" scope
-  const { data: clients = [] } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+  // Fetch available clients/locations for "all-clients" scope
+  const { data: orgClients = [] } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions(),
   );
 
   // Fetch ALL deals (unfiltered) for preview calculation
   const { data: allDealsData } = useSuspenseQuery(
-    trpc.deals.list.queryOptions({})
+    trpc.deals.list.queryOptions({}),
   );
 
   // Fetch date range for filters
   const { data: dateRange } = useSuspenseQuery(
-    trpc.deals.dateRange.queryOptions()
+    trpc.deals.dateRange.queryOptions(),
   );
 
   const allDealsUnfiltered = React.useMemo(
     () => allDealsData?.items || [],
-    [allDealsData]
+    [allDealsData],
   );
   const [stagedValueMin, setStagedValueMin] = React.useState<
     number | undefined
@@ -233,10 +233,10 @@ export function DealsToolbar({
     number | undefined
   >(selectedValueMax);
   const [stagedProbMin, setStagedProbMin] = React.useState<number | undefined>(
-    selectedProbabilityMin
+    selectedProbabilityMin,
   );
   const [stagedProbMax, setStagedProbMax] = React.useState<number | undefined>(
-    selectedProbabilityMax
+    selectedProbabilityMax,
   );
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
@@ -245,8 +245,8 @@ export function DealsToolbar({
   }, [search]);
 
   React.useEffect(() => {
-    setStagedContacts(selectedContacts);
-  }, [selectedContacts]);
+    setStagedClients(selectedClients);
+  }, [selectedClients]);
 
   React.useEffect(() => {
     setStagedMembers(selectedMembers);
@@ -279,15 +279,15 @@ export function DealsToolbar({
     setStagedStages((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
-  const handleToggleContact = (value: string) => {
-    setStagedContacts((prev) =>
+  const handleToggleClient = (value: string) => {
+    setStagedClients((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -295,7 +295,7 @@ export function DealsToolbar({
     setStagedMembers((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -425,13 +425,13 @@ export function DealsToolbar({
           return false;
       }
 
-      // Check contacts filter (if any selected)
-      if (stagedContacts.length > 0) {
-        const dealContactIds = (deal.contacts || []).map((c: any) => c.id);
-        const hasMatchingContact = stagedContacts.some((contactId: string) =>
-          dealContactIds.includes(contactId)
+      // Check clients filter (if any selected)
+      if (stagedClients.length > 0) {
+        const dealClientIds = (deal.clients || []).map((c: any) => c.id);
+        const hasMatchingClient = stagedClients.some((clientId: string) =>
+          dealClientIds.includes(clientId),
         );
-        if (!hasMatchingContact) {
+        if (!hasMatchingClient) {
           return false;
         }
       }
@@ -440,7 +440,7 @@ export function DealsToolbar({
       if (stagedMembers.length > 0) {
         const dealMemberIds = (deal.members || []).map((m: any) => m.id);
         const hasMatchingMember = stagedMembers.some((memberId: string) =>
-          dealMemberIds.includes(memberId)
+          dealMemberIds.includes(memberId),
         );
         if (!hasMatchingMember) {
           return false;
@@ -469,7 +469,7 @@ export function DealsToolbar({
     stagedCurrency,
     stagedValueMin,
     stagedValueMax,
-    stagedContacts,
+    stagedClients,
     stagedMembers,
     stagedProbMin,
     stagedProbMax,
@@ -480,7 +480,7 @@ export function DealsToolbar({
     selectedValueCurrency ||
     typeof selectedValueMin === "number" ||
     typeof selectedValueMax === "number" ||
-    selectedContacts.length > 0 ||
+    selectedClients.length > 0 ||
     selectedMembers.length > 0 ||
     typeof selectedProbabilityMin === "number" ||
     typeof selectedProbabilityMax === "number";
@@ -490,7 +490,7 @@ export function DealsToolbar({
     minVal?: number,
     maxVal?: number,
     hist?: number[],
-    prefix?: string
+    prefix?: string,
   ) => {
     if (typeof minVal !== "number" || typeof maxVal !== "number") return "";
     const hasHist = Array.isArray(hist) && hist.length > 0;
@@ -511,7 +511,7 @@ export function DealsToolbar({
   };
 
   return (
-    <div className="flex justify-between w-full items-center">
+    <div className="flex justify-between w-full items-center py-6">
       <div className="flex items-center gap-2 w-full">
         {/* Search with filters inside */}
         <div className="flex w-128 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 hover:text-black rounded-lg h-8.5">
@@ -529,7 +529,7 @@ export function DealsToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -601,7 +601,7 @@ export function DealsToolbar({
                   {(() => {
                     const spikes = Array.from(
                       { length: 24 },
-                      (_, i) => (i + 1) / 25
+                      (_, i) => (i + 1) / 25,
                     );
                     // Use calculated min/max from actual deals, or histogram if available
                     const minH =
@@ -624,7 +624,7 @@ export function DealsToolbar({
                               value={stagedCurrency || "all"}
                               onValueChange={(value) => {
                                 setStagedCurrency(
-                                  value === "all" ? undefined : value
+                                  value === "all" ? undefined : value,
                                 );
                               }}
                             >
@@ -692,42 +692,40 @@ export function DealsToolbar({
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
 
-              {/* Contacts Filter */}
-              {contacts.length > 0 && (
+              {/* Members Filter */}
+              {clients.length > 0 && (
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="text-xs px-4 py-3 hover:brightness-120 rounded-lg">
-                    Contacts
+                  <DropdownMenuSubTrigger className="text-xs px-4 py-3 hover:bg-accent rounded-lg">
+                    Clients
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent
                     className="rounded-lg bg-[#202e32] border border-white/0 p-3 pt-2 w-[280px] ml-2.5"
                     alignOffset={-5}
                   >
                     <div className="max-h-64 overflow-auto pr-1">
-                      {contacts.map((contact) => {
-                        const selected = stagedContacts.includes(contact);
+                      {clients.map((client) => {
+                        const selected = stagedClients.includes(client);
                         return (
                           <div
-                            key={contact}
+                            key={client}
                             className="flex items-center gap-2 py-2 text-xs cursor-pointer rounded-lg group"
                           >
                             <Checkbox
                               checked={selected}
-                              onCheckedChange={() =>
-                                handleToggleContact(contact)
-                              }
+                              onCheckedChange={() => handleToggleClient(client)}
                               className="rounded-lg border-white/5 cursor-pointer group-hover:bg-[#202e32] data-[state=checked]:bg-[#202e32] data-[state=checked]:border-white/5"
                             />
-                            <span className="select-none">{contact}</span>
+                            <span className="select-none">{client}</span>
                           </div>
                         );
                       })}
                     </div>
                     <div className="pt-3 flex gap-2">
                       <Button
-                        className="flex-1 border border-white/5 bg-[#202e32] hover:bg-[#202e32] hover:brightness-120 rounded-lg text-xs text-white py-3"
+                        className="flex-1 border border-border bg-background hover:bg-accent rounded-lg text-xs text-black py-3"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setStagedContacts([]);
+                          setStagedClients([]);
                         }}
                       >
                         Clear
@@ -740,8 +738,8 @@ export function DealsToolbar({
               {/* Members Filter */}
               {members.length > 0 && (
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="text-xs px-4 py-3 hover:brightness-120 rounded-lg">
-                    Members assigned
+                  <DropdownMenuSubTrigger className="text-xs px-4 py-3 hover:bg-accent rounded-lg">
+                    Clients assigned
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent
                     className="rounded-lg bg-[#202e32] border border-white/0 p-3 pt-2 w-[280px] ml-2.5"
@@ -760,7 +758,7 @@ export function DealsToolbar({
                               onCheckedChange={() =>
                                 handleToggleMember(member.id)
                               }
-                              className="rounded-lg border-white/5 cursor-pointer group-hover:bg-[#202e32] data-[state=checked]:brightness-120 data-[state=checked]:border-white/5"
+                              className="rounded-lg border-white/5 cursor-pointer group-hover:bg-[#202e32] data-[state=checked]:bg-accent data-[state=checked]:border-white/5"
                             />
                             <span className="select-none">
                               {member.name || "Unknown"}
@@ -771,7 +769,7 @@ export function DealsToolbar({
                     </div>
                     <div className="pt-3 flex gap-2">
                       <Button
-                        className="flex-1 border border-white/5 bg-[#202e32] hover:bg-[#202e32] hover:brightness-120 rounded-lg text-xs text-white py-3"
+                        className="flex-1 border border-border bg-background hover:bg-accent rounded-lg text-xs text-black py-3"
                         onClick={(e) => {
                           e.stopPropagation();
                           setStagedMembers([]);
@@ -794,7 +792,7 @@ export function DealsToolbar({
                   {(() => {
                     const spikes = Array.from(
                       { length: 24 },
-                      (_, i) => (i + 1) / 25
+                      (_, i) => (i + 1) / 25,
                     );
                     return (
                       <>
@@ -877,7 +875,7 @@ export function DealsToolbar({
                     e.stopPropagation();
                     onApplyAllFilters?.({
                       stages: stagedStages,
-                      contacts: stagedContacts,
+                      clients: stagedClients,
                       members: stagedMembers,
                       valueCurrency: stagedCurrency,
                       valueMin: stagedValueMin,
@@ -896,13 +894,14 @@ export function DealsToolbar({
         </div>
 
         {/* Client Filter - Only show for "all-clients" scope */}
-        {scope === "all-clients" && onSubaccountChange && (
+        {scope === "all-clients" && onLocationChange && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="h-8.5! min-w-32">
-                {selectedSubaccountId
-                  ? clients.find((c: any) => c.subaccountId === selectedSubaccountId)
-                      ?.name || "Select client"
+                {selectedLocationId
+                  ? orgClients.find(
+                      (client) => client.locationId === selectedLocationId,
+                    )?.name || "Select client"
                   : "All clients"}
                 <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
               </Button>
@@ -913,8 +912,8 @@ export function DealsToolbar({
               className="bg-background border border-black/10 dark:border-white/5 w-[280px] p-1 max-h-[400px] overflow-auto"
             >
               <DropdownMenuCheckboxItem
-                checked={selectedSubaccountId === ""}
-                onSelect={() => onSubaccountChange("")}
+                checked={selectedLocationId === ""}
+                onSelect={() => onLocationChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
               >
                 All clients
@@ -922,11 +921,11 @@ export function DealsToolbar({
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />
 
-              {clients.map((client: any) => (
+              {orgClients.map((client) => (
                 <DropdownMenuCheckboxItem
-                  key={client.subaccountId}
-                  checked={selectedSubaccountId === client.subaccountId}
-                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  key={client.locationId}
+                  checked={selectedLocationId === client.locationId}
+                  onSelect={() => onLocationChange(client.locationId)}
                   className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
                 >
                   {client.name}
@@ -998,7 +997,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -1008,22 +1007,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -1031,7 +1030,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -1042,7 +1041,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -1152,7 +1151,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-primary-foreground/50 hover:text-black dark:hover:text-white",
-          !checked && "text-primary/80 dark:text-white/30"
+          !checked && "text-primary/80 dark:text-white/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -1163,7 +1162,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3.5 shrink-0 text-primary/80 dark:text-white transition",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate text-primary/80 hover:text-black dark:text-white">

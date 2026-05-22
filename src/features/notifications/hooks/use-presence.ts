@@ -25,7 +25,7 @@ export function usePresence() {
     updatePresence.mutate({
       status: "online",
       organizationId: active?.activeOrganizationId ?? undefined,
-      subaccountId: active?.activeSubaccountId ?? undefined,
+      locationId: active?.activeLocationId ?? undefined,
     });
 
     // Set up heartbeat interval (every 30 seconds)
@@ -33,7 +33,7 @@ export function usePresence() {
       updatePresence.mutate({
         status: "online",
         organizationId: active?.activeOrganizationId ?? undefined,
-        subaccountId: active?.activeSubaccountId ?? undefined,
+        locationId: active?.activeLocationId ?? undefined,
       });
     }, 30000);
 
@@ -43,13 +43,13 @@ export function usePresence() {
         updatePresence.mutate({
           status: "away",
           organizationId: active?.activeOrganizationId ?? undefined,
-          subaccountId: active?.activeSubaccountId ?? undefined,
+          locationId: active?.activeLocationId ?? undefined,
         });
       } else {
         updatePresence.mutate({
           status: "online",
           organizationId: active?.activeOrganizationId ?? undefined,
-          subaccountId: active?.activeSubaccountId ?? undefined,
+          locationId: active?.activeLocationId ?? undefined,
         });
       }
     };
@@ -61,7 +61,7 @@ export function usePresence() {
       updatePresence.mutate({
         status: "offline",
         organizationId: active?.activeOrganizationId ?? undefined,
-        subaccountId: active?.activeSubaccountId ?? undefined,
+        locationId: active?.activeLocationId ?? undefined,
       });
     };
 
@@ -79,10 +79,10 @@ export function usePresence() {
       updatePresence.mutate({
         status: "offline",
         organizationId: active?.activeOrganizationId ?? undefined,
-        subaccountId: active?.activeSubaccountId ?? undefined,
+        locationId: active?.activeLocationId ?? undefined,
       });
     };
-  }, [active?.activeOrganizationId, active?.activeSubaccountId]);
+  }, [active?.activeOrganizationId, active?.activeLocationId]);
 
   return {
     isTracking: true,

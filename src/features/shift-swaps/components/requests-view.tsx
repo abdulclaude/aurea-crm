@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Check, X, Clock, UserCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import type { ShiftSwapStatus, ApprovalStatus } from "@prisma/client";
+import type { ShiftSwapStatus, ApprovalStatus } from "@/db/enums";
 
 type SwapRequest = any;
 type TimeOffRequest = any;
@@ -28,12 +28,12 @@ function getSwapStatusBadge(status: ShiftSwapStatus) {
   switch (status) {
     case "PENDING":
       return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
-    case "WORKER_ACCEPTED":
-      return <Badge variant="default"><UserCheck className="h-3 w-3 mr-1" />Worker Accepted</Badge>;
+    case "INSTRUCTOR_ACCEPTED":
+      return <Badge variant="default"><UserCheck className="h-3 w-3 mr-1" />Instructor Accepted</Badge>;
     case "ADMIN_APPROVED":
       return <Badge className="bg-emerald-500 text-white"><Check className="h-3 w-3 mr-1" />Approved</Badge>;
     case "ADMIN_REJECTED":
-    case "WORKER_REJECTED":
+    case "INSTRUCTOR_REJECTED":
       return <Badge variant="destructive"><X className="h-3 w-3 mr-1" />Rejected</Badge>;
     case "CANCELLED":
       return <Badge variant="outline">Cancelled</Badge>;
@@ -165,7 +165,7 @@ export function RequestsView() {
   };
 
   const pendingSwaps = swapData?.items.filter(
-    (s) => s.status === "PENDING" || s.status === "WORKER_ACCEPTED"
+    (s) => s.status === "PENDING" || s.status === "INSTRUCTOR_ACCEPTED"
   ) || [];
   const pendingTimeOff = timeOffData?.items.filter(
     (t) => t.status === "PENDING"
@@ -228,14 +228,14 @@ export function RequestsView() {
                       <div className="flex justify-between">
                         <span className="text-primary/60">To:</span>
                         <span className="font-medium">
-                          {swap.targetWorker?.name || "Open to all"}
+                          {swap.targetInstructor?.name || "Open to all"}
                         </span>
                       </div>
-                      {swap.rota.contact && (
+                      {swap.rota.client && (
                         <div className="flex justify-between">
                           <span className="text-primary/60">Client:</span>
                           <span className="font-medium">
-                            {swap.rota.contact.name}
+                            {swap.rota.client.name}
                           </span>
                         </div>
                       )}
@@ -251,7 +251,7 @@ export function RequestsView() {
                       </div>
                     </div>
 
-                    {(swap.status === "PENDING" || swap.status === "WORKER_ACCEPTED") && (
+                    {(swap.status === "PENDING" || swap.status === "INSTRUCTOR_ACCEPTED") && (
                       <div className="flex gap-2 pt-2">
                         <Button
                           size="sm"
@@ -297,7 +297,7 @@ export function RequestsView() {
                           {request.type.replace("_", " ")}
                         </CardTitle>
                         <p className="text-sm text-primary/60">
-                          {request.worker.name}
+                          {request.instructor.name}
                         </p>
                       </div>
                       {getTimeOffStatusBadge(request.status)}
@@ -376,7 +376,7 @@ export function RequestsView() {
               </DialogTitle>
               <DialogDescription>
                 {reviewAction === "approve"
-                  ? `Approve shift swap from ${reviewingSwap.requester.name} to ${reviewingSwap.targetWorker?.name || "open"}`
+                  ? `Approve shift swap from ${reviewingSwap.requester.name} to ${reviewingSwap.targetInstructor?.name || "open"}`
                   : "Provide a reason for rejecting this swap request"}
               </DialogDescription>
             </DialogHeader>
@@ -453,7 +453,7 @@ export function RequestsView() {
               </DialogTitle>
               <DialogDescription>
                 {reviewAction === "approve"
-                  ? `Approve ${reviewingTimeOff.type.toLowerCase().replace("_", " ")} request from ${reviewingTimeOff.worker.name}`
+                  ? `Approve ${reviewingTimeOff.type.toLowerCase().replace("_", " ")} request from ${reviewingTimeOff.instructor.name}`
                   : "Provide a reason for rejecting this time off request"}
               </DialogDescription>
             </DialogHeader>
@@ -461,8 +461,8 @@ export function RequestsView() {
             <div className="space-y-4">
               <div className="rounded-lg border p-3 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-primary/60">Worker:</span>
-                  <span>{reviewingTimeOff.worker.name}</span>
+                  <span className="text-primary/60">Instructor:</span>
+                  <span>{reviewingTimeOff.instructor.name}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-primary/60">Type:</span>

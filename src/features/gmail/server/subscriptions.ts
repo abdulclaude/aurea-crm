@@ -1,14 +1,20 @@
 "use server";
 
-import prisma from "@/lib/db";
+import { and, eq, inArray, lte } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+
+import { db } from "@/db";
+import {
+  account as accountTable,
+  apps,
+  gmailSubscription,
+  gmailTriggerState,
+  node as workflowNode,
+  workflows,
+} from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@prisma/client";
-import type {
-  Account,
-  Node as PrismaNode,
-  GmailSubscription as PrismaGmailSubscription,
-} from "@prisma/client";
+import { AppProvider, NodeType } from "@/db/enums";
 import { fetchGmailMessages, type GmailTriggerConfig } from "./messages";
 import { fetchGmailProfile } from "./profile";
 
@@ -18,52 +24,71 @@ const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
 type SyncParams = {
   userId: string;
 };
+type Account = InferSelectModel<typeof accountTable>;
+type GmailSubscription = InferSelectModel<typeof gmailSubscription>;
+type TriggerNode = Pick<
+  InferSelectModel<typeof workflowNode>,
+  "id" | "workflowId" | "data"
+>;
+
+const gmailWorkflowNodesWhere = (userId: string) =>
+  and(
+    eq(workflowNode.type, NodeType.GMAIL_TRIGGER),
+    eq(workflows.userId, userId),
+    eq(workflows.archived, false),
+    eq(workflows.isTemplate, false),
+  );
+
+async function getGmailTriggerNodes(userId: string): Promise<TriggerNode[]> {
+  return await db
+    .select({
+      id: workflowNode.id,
+      workflowId: workflowNode.workflowId,
+      data: workflowNode.data,
+    })
+    .from(workflowNode)
+    .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
+    .where(gmailWorkflowNodesWhere(userId));
+}
+
+async function deleteGmailTriggerStatesForUser(
+  userId: string,
+  exceptNodeIds?: string[],
+): Promise<void> {
+  const rows = await db
+    .select({ id: gmailTriggerState.id, nodeId: gmailTriggerState.nodeId })
+    .from(gmailTriggerState)
+    .innerJoin(workflows, eq(gmailTriggerState.workflowId, workflows.id))
+    .where(eq(workflows.userId, userId));
+
+  const ids = rows
+    .filter((row) => !exceptNodeIds || !exceptNodeIds.includes(row.nodeId))
+    .map((row) => row.id);
+
+  if (ids.length > 0) {
+    await db.delete(gmailTriggerState).where(inArray(gmailTriggerState.id, ids));
+  }
+}
 
 export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
   try {
-    const gmailApp = await prisma.apps.findFirst({
-      where: {
-        userId,
-        provider: AppProvider.GMAIL,
-      },
+    const gmailApp = await db.query.apps.findFirst({
+      where: and(eq(apps.userId, userId), eq(apps.provider, AppProvider.GMAIL)),
     });
 
     if (!gmailApp) {
       await stopGmailWatchForUser(userId);
-      await prisma.gmailTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteGmailTriggerStatesForUser(userId);
       return;
     }
 
-    const nodes = await prisma.node.findMany({
-      where: {
-        type: NodeType.GMAIL_TRIGGER,
-        Workflows: {
-          userId,
-          archived: false,
-          isTemplate: false,
-        },
-      },
-      select: {
-        id: true,
-        workflowId: true,
-        data: true,
-      },
-    });
+    const nodes = await getGmailTriggerNodes(userId);
 
     if (nodes.length > 0) {
       const activeNodeIds = nodes.map((node) => node.id);
-      await prisma.gmailTriggerState.deleteMany({
-        where: {
-          Workflows: { userId },
-          nodeId: { notIn: activeNodeIds },
-        },
-      });
+      await deleteGmailTriggerStatesForUser(userId, activeNodeIds);
     } else {
-      await prisma.gmailTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteGmailTriggerStatesForUser(userId);
     }
 
     if (nodes.length === 0) {
@@ -86,9 +111,7 @@ export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
 
 export async function removeGmailSubscriptionsForUser(userId: string) {
   await stopGmailWatchForUser(userId);
-  await prisma.gmailTriggerState.deleteMany({
-    where: { Workflows: { userId } },
-  });
+  await deleteGmailTriggerStatesForUser(userId);
 }
 
 export async function enqueueGmailNotification({
@@ -114,39 +137,24 @@ export async function processGmailNotification({
   subscriptionId: string;
   historyId?: string;
 }) {
-  const subscription = await prisma.gmailSubscription.findUnique({
-    where: { id: subscriptionId },
+  const subscription = await db.query.gmailSubscription.findFirst({
+    where: eq(gmailSubscription.id, subscriptionId),
   });
 
   if (!subscription) {
     return;
   }
 
-  await prisma.gmailSubscription
-    .update({
-      where: { id: subscriptionId },
-      data: {
+  await db
+    .update(gmailSubscription)
+    .set({
         historyId: historyId ?? subscription.historyId,
         lastSyncedAt: new Date(),
-      },
     })
+    .where(eq(gmailSubscription.id, subscriptionId))
     .catch(() => {});
 
-  const nodes = await prisma.node.findMany({
-    where: {
-      type: NodeType.GMAIL_TRIGGER,
-      Workflows: {
-        userId: subscription.userId,
-        archived: false,
-        isTemplate: false,
-      },
-    },
-    select: {
-      id: true,
-      workflowId: true,
-      data: true,
-    },
-  });
+  const nodes = await getGmailTriggerNodes(subscription.userId);
 
   if (nodes.length === 0) {
     await stopGmailWatchForUser(subscription.userId);
@@ -178,19 +186,15 @@ export async function processGmailNotification({
 
 export async function renewGmailSubscriptions() {
   const threshold = new Date(Date.now() + WATCH_RENEWAL_WINDOW_MS);
-  const subscriptions = await prisma.gmailSubscription.findMany({
-    where: {
-      expiresAt: {
-        lte: threshold,
-      },
-    },
+  const subscriptions = await db.query.gmailSubscription.findMany({
+    where: lte(gmailSubscription.expiresAt, threshold),
   });
 
   for (const subscription of subscriptions) {
     try {
       await ensureGmailWatch({
         userId: subscription.userId,
-        labelIds: subscription.labelIds,
+        labelIds: subscription.labelIds ?? [],
         force: true,
       });
     } catch (error) {
@@ -208,7 +212,7 @@ async function maybeTriggerWorkflowFromNode({
   node,
   accessToken,
 }: {
-  node: Pick<PrismaNode, "id" | "workflowId" | "data">;
+  node: TriggerNode;
   accessToken: string;
 }) {
   const config = ((node.data || {}) as GmailTriggerConfig) || {};
@@ -221,8 +225,8 @@ async function maybeTriggerWorkflowFromNode({
 
   const latestId = payload.messages[0]?.id;
 
-  const state = await prisma.gmailTriggerState.findUnique({
-    where: { nodeId: node.id },
+  const state = await db.query.gmailTriggerState.findFirst({
+    where: eq(gmailTriggerState.nodeId, node.id),
   });
 
   if (state?.lastMessageId === latestId) {
@@ -241,14 +245,9 @@ async function maybeTriggerWorkflowFromNode({
     initialData,
   });
 
-  await prisma.gmailTriggerState.upsert({
-    where: { nodeId: node.id },
-    update: {
-      lastMessageId: latestId,
-      lastTriggeredAt: new Date(),
-      workflowId: node.workflowId,
-    },
-    create: {
+  await db
+    .insert(gmailTriggerState)
+    .values({
       id: crypto.randomUUID(),
       nodeId: node.id,
       workflowId: node.workflowId,
@@ -256,8 +255,16 @@ async function maybeTriggerWorkflowFromNode({
       lastTriggeredAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: gmailTriggerState.nodeId,
+      set: {
+      lastMessageId: latestId,
+      lastTriggeredAt: new Date(),
+      workflowId: node.workflowId,
+      updatedAt: new Date(),
+      },
+    });
 }
 
 async function ensureGmailWatch({
@@ -272,8 +279,8 @@ async function ensureGmailWatch({
   const topicName = getGmailTopicName();
   const normalizedLabels = labelIds.length ? labelIds : ["INBOX"];
 
-  const existing = await prisma.gmailSubscription.findUnique({
-    where: { userId },
+  const existing = await db.query.gmailSubscription.findFirst({
+    where: eq(gmailSubscription.userId, userId),
   });
 
   const needsRefresh =
@@ -281,16 +288,16 @@ async function ensureGmailWatch({
     !existing ||
     !existing.expiresAt ||
     existing.expiresAt.getTime() - Date.now() < WATCH_RENEWAL_WINDOW_MS ||
-    !sameSet(existing.labelIds, normalizedLabels);
+    !sameSet(existing.labelIds ?? [], normalizedLabels);
 
   if (!needsRefresh) {
-    if (!sameSet(existing.labelIds, normalizedLabels)) {
-      await prisma.gmailSubscription.update({
-        where: { id: existing.id },
-        data: {
+    if (!sameSet(existing.labelIds ?? [], normalizedLabels)) {
+      await db
+        .update(gmailSubscription)
+        .set({
           labelIds: normalizedLabels,
-        },
-      });
+        })
+        .where(eq(gmailSubscription.id, existing.id));
     }
     return;
   }
@@ -308,17 +315,9 @@ async function ensureGmailWatch({
       ? new Date(Number(payload.expiration))
       : null;
 
-  await prisma.gmailSubscription.upsert({
-    where: { userId },
-    update: {
-      emailAddress,
-      labelIds: normalizedLabels,
-      topicName,
-      historyId: payload?.historyId,
-      expiresAt,
-      lastSyncedAt: new Date(),
-    },
-    create: {
+  await db
+    .insert(gmailSubscription)
+    .values({
       id: crypto.randomUUID(),
       userId,
       emailAddress,
@@ -328,13 +327,24 @@ async function ensureGmailWatch({
       expiresAt,
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: gmailSubscription.userId,
+      set: {
+      emailAddress,
+      labelIds: normalizedLabels,
+      topicName,
+      historyId: payload?.historyId,
+      expiresAt,
+      lastSyncedAt: new Date(),
+      updatedAt: new Date(),
+      },
+    });
 }
 
 async function stopGmailWatchForUser(userId: string) {
-  const subscription = await prisma.gmailSubscription.findUnique({
-    where: { userId },
+  const subscription = await db.query.gmailSubscription.findFirst({
+    where: eq(gmailSubscription.userId, userId),
   });
 
   if (!subscription) {
@@ -353,10 +363,9 @@ async function stopGmailWatchForUser(userId: string) {
   } catch (error) {
     console.warn(`[Gmail] Failed to stop watch for user ${userId}:`, error);
   } finally {
-    await prisma.gmailSubscription
-      .delete({
-        where: { id: subscription.id },
-      })
+    await db
+      .delete(gmailSubscription)
+      .where(eq(gmailSubscription.id, subscription.id))
       .catch(() => {});
   }
 }
@@ -395,34 +404,31 @@ async function createWatch(
 }
 
 async function ensureGoogleAccessToken(userId: string) {
-  const account = await prisma.account.findFirst({
-    where: {
-      userId,
-      providerId: "google",
-    },
+  const selectedAccount = await db.query.account.findFirst({
+    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "google")),
   });
 
-  if (!account) {
+  if (!selectedAccount) {
     throw new Error(
       "Gmail requires a connected Google account. Connect Google under Integrations."
     );
   }
 
   if (
-    account.accessToken &&
-    account.accessTokenExpiresAt &&
-    account.accessTokenExpiresAt.getTime() > Date.now() + 60_000
+    selectedAccount.accessToken &&
+    selectedAccount.accessTokenExpiresAt &&
+    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
   ) {
-    return account.accessToken;
+    return selectedAccount.accessToken;
   }
 
-  if (!account.refreshToken) {
+  if (!selectedAccount.refreshToken) {
     throw new Error(
       "Gmail access token expired and no refresh token is available. Reconnect Google."
     );
   }
 
-  return refreshGoogleAccessToken(account);
+  return refreshGoogleAccessToken(selectedAccount);
 }
 
 async function refreshGoogleAccessToken(account: Account) {
@@ -465,19 +471,20 @@ async function refreshGoogleAccessToken(account: Account) {
 
   const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
 
-  await prisma.account.update({
-    where: { id: account.id },
-    data: {
+  await db
+    .update(accountTable)
+    .set({
       accessToken: payload.access_token,
       accessTokenExpiresAt: expiresAt,
       refreshToken: payload.refresh_token ?? refreshToken,
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(accountTable.id, account.id));
 
   return payload.access_token as string;
 }
 
-function buildLabelSet(nodes: Array<{ data: PrismaNode["data"] }>) {
+function buildLabelSet(nodes: Array<{ data: unknown }>) {
   const labels = new Set<string>();
   for (const node of nodes) {
     const config = ((node.data || {}) as GmailTriggerConfig) || {};

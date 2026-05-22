@@ -15,27 +15,28 @@ import { ActivityTimeline } from "@/features/activity/components/activity-timeli
 import { useTRPC } from "@/trpc/client";
 
 export default function PipelinesPage() {
-  const [activeTab, setActiveTab] = useState("agency-data");
   const trpc = useTRPC();
 
-  // Check if user is at agency level (no active subaccount)
+  // Check if user is at studio level (no active location)
   const { data: active } = useSuspenseQuery(
     trpc.organizations.getActive.queryOptions()
   );
 
-  const isAgencyLevel = !active?.activeSubaccountId;
+  const isStudioLevel = !active?.activeLocationId;
 
   // Define tabs based on context
-  const tabs = isAgencyLevel
+  const tabs = isStudioLevel
     ? [
-        { id: "agency-data", label: "Agency data" },
-        { id: "clients-data", label: "All clients data" },
+        { id: "studio-data", label: "Studio data" },
+        { id: "locations-data", label: "All locations data" },
         { id: "activity", label: "Activity timeline" },
       ]
     : [
         { id: "data", label: "Data table" },
         { id: "activity", label: "Activity timeline" },
       ];
+
+  const [activeTab, setActiveTab] = useState(tabs[0].id);
 
   return (
     <div className="space-y-0">
@@ -64,7 +65,7 @@ export default function PipelinesPage() {
         className="px-6"
       />
 
-      {activeTab === "data" || activeTab === "agency-data" ? (
+      {activeTab === "data" || activeTab === "studio-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">
@@ -75,7 +76,7 @@ export default function PipelinesPage() {
         >
           <PipelinesTable scope="agency" />
         </Suspense>
-      ) : activeTab === "clients-data" ? (
+      ) : activeTab === "locations-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary/75 flex items-center justify-center gap-3">

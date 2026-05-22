@@ -167,7 +167,7 @@ export function EventsToolbar({
     setStagedEventTypes((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -175,7 +175,7 @@ export function EventsToolbar({
     setStagedDeviceTypes((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -183,7 +183,7 @@ export function EventsToolbar({
     setStagedUsers((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -214,7 +214,7 @@ export function EventsToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -528,7 +528,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -538,22 +538,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -561,7 +561,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -572,7 +572,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -682,7 +682,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition hover:bg-primary-foreground/50 hover:text-black dark:hover:text-white",
-          !checked && "text-primary/80 dark:text-white/30"
+          !checked && "text-primary/80 dark:text-white/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -693,7 +693,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3.5 shrink-0 text-primary/80 dark:text-white transition",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate text-primary/80 hover:text-black dark:text-white">

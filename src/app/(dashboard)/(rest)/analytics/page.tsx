@@ -17,8 +17,8 @@ export default function AnalyticsPage() {
     ...trpc.analytics.getWorkflowAnalytics.queryOptions(),
   });
 
-  const { data: contactAnalytics } = useQuery({
-    ...trpc.analytics.getContactAnalytics.queryOptions(),
+  const { data: clientAnalytics } = useQuery({
+    ...trpc.analytics.getClientAnalytics.queryOptions(),
   });
 
   const { data: dealAnalytics } = useQuery({
@@ -51,8 +51,8 @@ export default function AnalyticsPage() {
   });
 
   // Fallback to old data sources for compatibility
-  const { data: contactsCount } = useQuery({
-    ...trpc.contacts.count.queryOptions(),
+  const { data: clientsCount } = useQuery({
+    ...trpc.clients.count.queryOptions(),
   });
 
   return (
@@ -71,7 +71,7 @@ export default function AnalyticsPage() {
           { id: "overview", label: "Overview" },
           { id: "invoicing", label: "Invoicing" },
           { id: "workflows", label: "Workflows" },
-          { id: "contacts", label: "Contacts" },
+          { id: "clients", label: "Clients" },
           { id: "deals", label: "Deals" },
           { id: "user-behavior", label: "User Behaviour" },
           { id: "funnels", label: "Funnels" },
@@ -99,13 +99,13 @@ export default function AnalyticsPage() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Contacts</CardTitle>
+                <CardTitle className="text-sm font-medium">Total Clients</CardTitle>
                 <Users className="size-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{contactsCount ?? 0}</div>
+                <div className="text-2xl font-bold">{clientsCount ?? 0}</div>
                 <p className="text-xs text-muted-foreground">
-                  Active contacts in system
+                  Active clients in system
                 </p>
               </CardContent>
             </Card>
@@ -490,18 +490,18 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {activeTab === "contacts" && (
+        {activeTab === "clients" && (
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Contacts</CardTitle>
+                  <CardTitle className="text-sm font-medium">Total Clients</CardTitle>
                   <Users className="size-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{contactsCount ?? 0}</div>
+                  <div className="text-2xl font-bold">{clientsCount ?? 0}</div>
                   <p className="text-xs text-muted-foreground">
-                    All contacts in system
+                    All clients in system
                   </p>
                 </CardContent>
               </Card>
@@ -527,7 +527,7 @@ export default function AnalyticsPage() {
                 <CardContent>
                   <div className="text-2xl font-bold">-</div>
                   <p className="text-xs text-muted-foreground">
-                    Contact quality
+                    Client quality
                   </p>
                 </CardContent>
               </Card>
@@ -535,21 +535,21 @@ export default function AnalyticsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Contact Analytics</CardTitle>
-                <CardDescription>Contact lifecycle, engagement, and conversion metrics</CardDescription>
+                <CardTitle>Client Analytics</CardTitle>
+                <CardDescription>Client lifecycle, engagement, and conversion metrics</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="rounded-md border p-4">
                   <p className="text-sm text-muted-foreground">
-                    Detailed contact analytics and lifecycle metrics
+                    Detailed client analytics and lifecycle metrics
                   </p>
                   <ul className="text-xs text-muted-foreground mt-4 space-y-2">
-                    <li>• Contact creation trends over time</li>
+                    <li>• Client creation trends over time</li>
                     <li>• Lifecycle stage movement analysis</li>
-                    <li>• Contact source attribution</li>
+                    <li>• Client source attribution</li>
                     <li>• Engagement scoring</li>
                     <li>• Lead quality metrics</li>
-                    <li>• Contact to deal conversion rates</li>
+                    <li>• Client to deal conversion rates</li>
                   </ul>
                 </div>
               </CardContent>
@@ -719,8 +719,8 @@ export default function AnalyticsPage() {
                   Funnel analytics dashboard
                 </p>
                 <ul className="text-xs text-muted-foreground mt-4 space-y-2">
-                  <li>• Lead to contact conversion</li>
-                  <li>• Contact to deal conversion</li>
+                  <li>• Lead to client conversion</li>
+                  <li>• Client to deal conversion</li>
                   <li>• Deal stage progression rates</li>
                   <li>• Drop-off analysis</li>
                   <li>• Optimization opportunities</li>

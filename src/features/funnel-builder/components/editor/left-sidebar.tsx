@@ -7,7 +7,7 @@ import { activeSidebarAtom } from "../../lib/editor-store";
 import { PagesPanel } from "./panels/pages-panel";
 import { DesignPanel } from "./panels/design-panel";
 import { BlocksPanel } from "./panels/blocks-panel";
-import type { Funnel, FunnelPage } from "@prisma/client";
+import type { Funnel, FunnelPage } from "@/db/types";
 
 interface LeftSidebarProps {
   funnelId: string;

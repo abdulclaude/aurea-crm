@@ -12,12 +12,39 @@ import { IconEar as WebhooksIcon } from "central-icons/IconEar";
 import { IconPlugin2 as AppsIcon } from "central-icons/IconPlugin2";
 import { IconCreditCard2 as BillingIcon } from "central-icons/IconCreditCard2";
 import { IconPlugin1 as ModulesIcon } from "central-icons/IconPlugin1";
-import { Palette as StylesIcon, Paintbrush as BrandingIcon, AlertCircle as DunningIcon, CreditCard as PaymentsIcon } from "lucide-react";
+import {
+  Palette as StylesIcon,
+  Paintbrush as BrandingIcon,
+  AlertCircle as DunningIcon,
+  CreditCard as PaymentsIcon,
+  Calendar as CalendarIcon,
+  Code2 as DeveloperIcon,
+  LayoutPanelLeft as WidgetsIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserStatusIndicator } from "@/components/user-status-indicator";
 import { NotificationBell } from "@/features/notifications/components/notification-bell";
+import { useIsInstructor } from "@/features/instructors/hooks/use-is-instructor";
+
+const instructorSettingsNavSections = [
+  {
+    title: "Account",
+    items: [
+      {
+        title: "Profile",
+        href: "/settings/profile",
+        icon: UserIcon,
+      },
+      {
+        title: "Notifications",
+        href: "/settings/notifications",
+        icon: BellIcon,
+      },
+    ],
+  },
+];
 
 const settingsNavSections = [
   {
@@ -44,8 +71,8 @@ const settingsNavSections = [
         icon: WorkspaceIcon,
       },
       {
-        title: "Members",
-        href: "/settings/members",
+        title: "Team",
+        href: "/settings/team",
         icon: MembersIcon,
       },
     ],
@@ -91,10 +118,20 @@ const settingsNavSections = [
     ],
   },
   {
+    title: "Bookings",
+    items: [
+      {
+        title: "Cal.com",
+        href: "/settings/integrations/calcom",
+        icon: CalendarIcon,
+      },
+    ],
+  },
+  {
     title: "Payments",
     items: [
       {
-        title: "Payment Methods",
+        title: "Payment methods",
         href: "/settings/payments",
         icon: PaymentsIcon,
       },
@@ -110,6 +147,36 @@ const settingsNavSections = [
       },
     ],
   },
+  {
+    title: "Studio",
+    items: [
+      {
+        title: "Membership Billing",
+        href: "/settings/studio-billing",
+        icon: PaymentsIcon,
+      },
+      {
+        title: "Instructor Payouts",
+        href: "/settings/instructor-payouts",
+        icon: BillingIcon,
+      },
+    ],
+  },
+  {
+    title: "Developer",
+    items: [
+      {
+        title: "API Keys",
+        href: "/settings/developer",
+        icon: DeveloperIcon,
+      },
+      {
+        title: "Widgets",
+        href: "/settings/widgets",
+        icon: WidgetsIcon,
+      },
+    ],
+  },
 ];
 
 export default function SettingsLayout({
@@ -119,6 +186,11 @@ export default function SettingsLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { isInstructor } = useIsInstructor();
+
+  const navSections = isInstructor
+    ? instructorSettingsNavSections
+    : settingsNavSections;
 
   return (
     <div className="flex flex-col h-full">
@@ -148,7 +220,7 @@ export default function SettingsLayout({
         {/* Settings Sidebar */}
         <aside className="w-64 border-r border-black/5 dark:border-white/5 bg-background overflow-y-auto">
           <nav className="p-4 space-y-6">
-            {settingsNavSections.map((section) => (
+            {navSections.map((section) => (
               <div key={section.title} className="space-y-1">
                 <h3 className="px-3 text-xs font-medium text-primary/60 mb-2">
                   {section.title}

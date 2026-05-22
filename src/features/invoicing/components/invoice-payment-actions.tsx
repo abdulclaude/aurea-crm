@@ -73,7 +73,7 @@ export function InvoicePaymentActions({
       setShowBankDetails(true);
     } else {
       toast.info(
-        "For bank transfer, please contact the merchant directly. Payment instructions may have been included in your invoice email.",
+        "For bank transfer, please client the merchant directly. Payment instructions may have been included in your invoice email.",
         { duration: 5000 }
       );
     }

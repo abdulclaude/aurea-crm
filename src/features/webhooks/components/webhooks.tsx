@@ -18,8 +18,8 @@ import {
 import { useRemoveWebhook, useSuspenseWebhooks } from "../hooks/use-webhooks";
 import { useWebhooksParams } from "../hooks/use-webhooks-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
-import type { Webhook } from "@prisma/client";
-import { WebhookProvider } from "@prisma/client";
+import type { Webhook } from "@/db/types";
+import { WebhookProvider } from "@/db/enums";
 
 const providerLogos: Record<WebhookProvider, string> = {
   [WebhookProvider.SLACK]: "/logos/slack.svg",

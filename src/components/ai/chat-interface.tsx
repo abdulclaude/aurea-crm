@@ -16,14 +16,14 @@ import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 
 interface ChatInterfaceProps {
-  subaccountId?: string;
+  locationId?: string;
   userImage?: string | null;
   userName?: string | null;
   className?: string;
 }
 
 export function ChatInterface({
-  subaccountId,
+  locationId,
   userImage,
   userName,
   className,
@@ -35,7 +35,7 @@ export function ChatInterface({
 
   const chat = useChat({
     body: {
-      subaccountId,
+      locationId,
     },
     onFinish: () => {
       setPendingEntities([]);
@@ -50,8 +50,8 @@ export function ChatInterface({
   }, [messages]);
 
   // Fetch suggestions for mentions and commands
-  const contactsQuery = useQuery(
-    trpc.contacts.list.queryOptions({ limit: 50 })
+  const clientsQuery = useQuery(
+    trpc.clients.list.queryOptions({ limit: 50 })
   );
 
   const dealsQuery = useQuery(trpc.deals.list.queryOptions({ limit: 50 }));
@@ -60,7 +60,7 @@ export function ChatInterface({
     trpc.pipelines.list.queryOptions({ limit: 50 })
   );
 
-  // Workflows available at both agency and subaccount level
+  // Workflows available at both agency and location level
   const workflowsQuery = useQuery(
     trpc.workflows.getMany.queryOptions({ pageSize: 50 })
   );
@@ -78,10 +78,10 @@ export function ChatInterface({
         const commands: SuggestionItem[] = [
           // CRM Actions
           {
-            id: "create-contact",
-            name: "create-contact",
+            id: "create-client",
+            name: "create-client",
             type: "action",
-            description: "Create a new contact",
+            description: "Create a new client",
           },
           {
             id: "create-deal",
@@ -171,10 +171,10 @@ export function ChatInterface({
           },
           // Search/Query Commands
           {
-            id: "show-contacts",
-            name: "show-contacts",
+            id: "show-clients",
+            name: "show-clients",
             type: "query",
-            description: "Show all contacts",
+            description: "Show all clients",
           },
           {
             id: "show-deals",
@@ -209,7 +209,7 @@ export function ChatInterface({
         }
       } else {
         // @ Mentions are ENTITIES
-        // Add workflows first (available at both agency and subaccount level)
+        // Add workflows first (available at both agency and location level)
         const workflows = workflowsQuery.data?.items || [];
         for (const workflow of workflows) {
           if (!query || workflow.name.toLowerCase().includes(lowerQuery)) {
@@ -222,20 +222,20 @@ export function ChatInterface({
           }
         }
 
-        // Add contacts (only in subaccount context)
-        const contacts = contactsQuery.data?.items || [];
-        for (const contact of contacts) {
-          if (!query || contact.name.toLowerCase().includes(lowerQuery)) {
+        // Add clients (only in location context)
+        const clients = clientsQuery.data?.items || [];
+        for (const client of clients) {
+          if (!query || client.name.toLowerCase().includes(lowerQuery)) {
             items.push({
-              id: contact.id,
-              name: contact.name,
-              type: "contact",
-              description: contact.email || contact.companyName || undefined,
+              id: client.id,
+              name: client.name,
+              type: "client",
+              description: client.email || client.companyName || undefined,
             });
           }
         }
 
-        // Add deals (only in subaccount context)
+        // Add deals (only in location context)
         const deals = dealsQuery.data?.items || [];
         for (const deal of deals) {
           if (!query || deal.name.toLowerCase().includes(lowerQuery)) {
@@ -248,7 +248,7 @@ export function ChatInterface({
           }
         }
 
-        // Add pipelines (only in subaccount context)
+        // Add pipelines (only in location context)
         const pipelines = pipelinesQuery.data?.items || [];
         for (const pipeline of pipelines) {
           if (!query || pipeline.name.toLowerCase().includes(lowerQuery)) {
@@ -265,7 +265,7 @@ export function ChatInterface({
       return items.slice(0, 10);
     },
     [
-      contactsQuery.data,
+      clientsQuery.data,
       dealsQuery.data,
       pipelinesQuery.data,
       workflowsQuery.data,
@@ -286,7 +286,7 @@ export function ChatInterface({
         },
         {
           body: {
-            subaccountId,
+            locationId,
             entities,
             html,
           },
@@ -296,7 +296,7 @@ export function ChatInterface({
       editorRef.current?.clear();
       editorRef.current?.focus();
     },
-    [chat, isLoading, subaccountId]
+    [chat, isLoading, locationId]
   );
 
   const handleClear = () => {
@@ -340,7 +340,7 @@ export function ChatInterface({
               CRM Assistant
             </h3>
             <p className="text-sm text-white/50 max-w-sm">
-              Ask questions about your contacts, deals, pipelines, and
+              Ask questions about your clients, deals, pipelines, and
               workflows. Use @ to mention entities or / for quick commands.
             </p>
           </div>
@@ -388,7 +388,7 @@ export function ChatInterface({
           <div className="flex-1">
             <ChatEditor
               ref={editorRef}
-              placeholder="Ask about contacts, deals, or use @ to mention..."
+              placeholder="Ask about clients, deals, or use @ to mention..."
               onSubmit={handleSubmit}
               disabled={isLoading}
               fetchSuggestions={fetchSuggestions}

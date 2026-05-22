@@ -33,7 +33,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { UserStatus } from "@prisma/client";
+import { UserStatus } from "@/db/enums";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
@@ -106,15 +106,15 @@ function UserStatusIndicatorInner() {
 
   // Fetch user status from API
   const { data: userStatus } = useSuspenseQuery(
-    trpc.users.getStatus.queryOptions()
+    trpc.users.getStatus.queryOptions(),
   );
 
   // Fetch organization and client data for quick switching
   const { data: active } = useSuspenseQuery(
-    trpc.organizations.getActive.queryOptions()
+    trpc.organizations.getActive.queryOptions(),
   );
   const { data: clients } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+    trpc.organizations.getClients.queryOptions(),
   );
 
   const updateStatus = useMutation({
@@ -126,8 +126,8 @@ function UserStatusIndicatorInner() {
     },
   });
 
-  const setActiveSubaccount = useMutation(
-    trpc.organizations.setActiveSubaccount.mutationOptions()
+  const setActiveLocation = useMutation(
+    trpc.organizations.setActiveLocation.mutationOptions(),
   );
 
   const currentStatus = userStatus?.status || UserStatus.ONLINE;
@@ -144,26 +144,26 @@ function UserStatusIndicatorInner() {
   };
 
   const handleQuickSwitch = async () => {
-    const activeSubaccountId = active?.activeSubaccountId;
+    const activeLocationId = active?.activeLocationId;
 
-    if (activeSubaccountId) {
+    if (activeLocationId) {
       // We're in a client account, switch to the next client or back to agency
       const currentIndex =
-        clients?.findIndex((c) => c.subaccountId === activeSubaccountId) ?? -1;
+        clients?.findIndex((c) => c.locationId === activeLocationId) ?? -1;
 
       if (currentIndex !== -1 && clients && currentIndex < clients.length - 1) {
         // Switch to next client
-        await setActiveSubaccount.mutateAsync({
-          subaccountId: clients[currentIndex + 1].subaccountId ?? null,
+        await setActiveLocation.mutateAsync({
+          locationId: clients[currentIndex + 1].locationId ?? null,
         });
       } else {
         // Go back to agency workspace
-        await setActiveSubaccount.mutateAsync({ subaccountId: null });
+        await setActiveLocation.mutateAsync({ locationId: null });
       }
     } else if (clients && clients.length > 0) {
       // We're in agency workspace, switch to first client
-      await setActiveSubaccount.mutateAsync({
-        subaccountId: clients[0].subaccountId ?? null,
+      await setActiveLocation.mutateAsync({
+        locationId: clients[0].locationId ?? null,
       });
     }
 
@@ -206,7 +206,7 @@ function UserStatusIndicatorInner() {
           <span
             className={cn(
               "absolute top-[calc(100%-8px)] left-[calc(100%-6px)] right-0 flex size-2 items-center justify-center rounded-full ring-2 ring-background text-[8px] font-bold text-white",
-              statusConfig.color
+              statusConfig.color,
             )}
           />
         </div>
@@ -253,7 +253,7 @@ function UserStatusIndicatorInner() {
                   statusConfig.color.includes("indigo") &&
                     "bg-indigo-500 text-indigo-100 ring-indigo-700/10",
                   statusConfig.color.includes("slate") &&
-                    "bg-slate-500 text-slate-100 ring-slate-700/10"
+                    "bg-slate-500 text-slate-100 ring-slate-700/10",
                 )}
               >
                 {statusConfig.label}
@@ -280,20 +280,20 @@ function UserStatusIndicatorInner() {
                       "flex items-center gap-2.5 cursor-pointer text-xs bg-background group",
                       config.textColorHover,
                       `hover:${config.bgColor}`,
-                      currentStatus === status && config.bgColor
+                      currentStatus === status && config.bgColor,
                     )}
                   >
                     <span
                       className={cn(
                         "flex size-2.5 items-center justify-center rounded-full text-[8px] font-bold text-white shrink-0",
-                        config.color
+                        config.color,
                       )}
                     />
 
                     <span
                       className={cn(
                         "font-medium dark:text-white",
-                        status === currentStatus && config.textColor
+                        status === currentStatus && config.textColor,
                       )}
                     >
                       {config.label}
@@ -344,7 +344,7 @@ function UserStatusIndicatorInner() {
               className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
             >
               <UsersIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
-              <span className="text-xs font-medium">Affiliate</span>
+              <span className="text-xs font-medium">Refer & earn</span>
             </DropdownMenuItem>
           </DropdownMenuGroup>
 
@@ -367,14 +367,14 @@ function UserStatusIndicatorInner() {
             disabled={!canQuickSwitch}
             className={cn(
               "flex items-center gap-3 cursor-pointer hover:bg-primary/5 hover:text-black group bg-transparent",
-              !canQuickSwitch && "opacity-50 cursor-not-allowed"
+              !canQuickSwitch && "opacity-50 cursor-not-allowed",
             )}
           >
             <WorkspaceIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
             <span className="text-xs font-medium">
-              {active?.activeSubaccountId
-                ? "Switch workspace"
-                : "Switch to client"}
+              {active?.activeLocationId
+                ? "Switch location"
+                : "Switch to a location"}
             </span>
             {canQuickSwitch && (
               <span className="ml-auto text-[10px] font-mono text-primary/50">
@@ -411,7 +411,7 @@ export function UserStatusBadge({ status }: { status: UserStatus }) {
     <span
       className={cn(
         "relative inline-flex size-3 items-center justify-center rounded-full text-[8px] font-bold text-white border-2 border-white",
-        config.color
+        config.color,
       )}
       title={`${config.label} - ${config.description}`}
     ></span>

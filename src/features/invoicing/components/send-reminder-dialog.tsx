@@ -45,8 +45,8 @@ interface SendReminderDialogProps {
   invoice: {
     id: string;
     invoiceNumber: string;
-    contactName: string;
-    contactEmail?: string | null;
+    clientName: string;
+    clientEmail?: string | null;
     amountDue: string;
     currency: string;
     dueDate: string;
@@ -81,7 +81,7 @@ export function SendReminderDialog({
   const paymentLink = (paymentLinkData as any)?.paymentLink || "";
 
   const defaultSubject = `Payment Reminder: Invoice ${invoice.invoiceNumber}`;
-  const defaultMessage = `Dear ${invoice.contactName},
+  const defaultMessage = `Dear ${invoice.clientName},
 
 This is a friendly reminder that invoice ${
     invoice.invoiceNumber
@@ -107,7 +107,7 @@ Best regards`;
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      to: invoice.contactEmail ?? "",
+      to: invoice.clientEmail ?? "",
       subject: defaultSubject,
       message: defaultMessage,
     },
@@ -144,7 +144,7 @@ Best regards`;
   const handleOpenChange = (newOpen: boolean) => {
     if (newOpen) {
       form.reset({
-        to: invoice.contactEmail ?? "",
+        to: invoice.clientEmail ?? "",
         subject: defaultSubject,
         message: defaultMessage,
       });
@@ -176,7 +176,7 @@ Best regards`;
 
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Client</span>
-                  <span className="font-medium">{invoice.contactName}</span>
+                  <span className="font-medium">{invoice.clientName}</span>
                 </div>
 
                 <div className="flex justify-between">

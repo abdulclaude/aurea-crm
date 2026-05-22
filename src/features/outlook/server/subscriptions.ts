@@ -1,10 +1,20 @@
 "use server";
 
-import prisma from "@/lib/db";
+import { and, eq, inArray, lte } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+
+import { db } from "@/db";
+import {
+  account as accountTable,
+  apps,
+  node as workflowNode,
+  outlookSubscription,
+  outlookTriggerState,
+  workflows,
+} from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@prisma/client";
-import type { Account, Node as PrismaNode } from "@prisma/client";
+import { AppProvider, NodeType } from "@/db/enums";
 
 const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
 const SUBSCRIPTION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 3; // 3 days (max allowed by Microsoft)
@@ -20,52 +30,67 @@ export type OutlookTriggerConfig = {
 type SyncParams = {
   userId: string;
 };
+type Account = InferSelectModel<typeof accountTable>;
+type OutlookNode = Pick<
+  InferSelectModel<typeof workflowNode>,
+  "id" | "workflowId" | "data"
+>;
+
+async function getOutlookTriggerNodes(userId: string): Promise<OutlookNode[]> {
+  return await db
+    .select({
+      id: workflowNode.id,
+      workflowId: workflowNode.workflowId,
+      data: workflowNode.data,
+    })
+    .from(workflowNode)
+    .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
+    .where(
+      and(
+        eq(workflowNode.type, NodeType.OUTLOOK_TRIGGER),
+        eq(workflows.userId, userId),
+        eq(workflows.archived, false),
+        eq(workflows.isTemplate, false),
+      ),
+    );
+}
+
+async function deleteOutlookTriggerStatesForUser(
+  userId: string,
+  exceptNodeIds?: string[],
+): Promise<void> {
+  const rows = await db
+    .select({ id: outlookTriggerState.id, nodeId: outlookTriggerState.nodeId })
+    .from(outlookTriggerState)
+    .innerJoin(workflows, eq(outlookTriggerState.workflowId, workflows.id))
+    .where(eq(workflows.userId, userId));
+  const ids = rows
+    .filter((row) => !exceptNodeIds || !exceptNodeIds.includes(row.nodeId))
+    .map((row) => row.id);
+  if (ids.length > 0) {
+    await db.delete(outlookTriggerState).where(inArray(outlookTriggerState.id, ids));
+  }
+}
 
 export async function syncOutlookWorkflowSubscriptions({ userId }: SyncParams) {
   try {
-    const outlookApp = await prisma.apps.findFirst({
-      where: {
-        userId,
-        provider: AppProvider.MICROSOFT,
-      },
+    const outlookApp = await db.query.apps.findFirst({
+      where: and(eq(apps.userId, userId), eq(apps.provider, AppProvider.MICROSOFT)),
     });
 
     if (!outlookApp) {
       await stopOutlookWatchForUser(userId);
-      await prisma.outlookTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteOutlookTriggerStatesForUser(userId);
       return;
     }
 
-    const nodes = await prisma.node.findMany({
-      where: {
-        type: NodeType.OUTLOOK_TRIGGER,
-        Workflows: {
-          userId,
-          archived: false,
-          isTemplate: false,
-        },
-      },
-      select: {
-        id: true,
-        workflowId: true,
-        data: true,
-      },
-    });
+    const nodes = await getOutlookTriggerNodes(userId);
 
     if (nodes.length > 0) {
       const activeNodeIds = nodes.map((node) => node.id);
-      await prisma.outlookTriggerState.deleteMany({
-        where: {
-          Workflows: { userId },
-          nodeId: { notIn: activeNodeIds },
-        },
-      });
+      await deleteOutlookTriggerStatesForUser(userId, activeNodeIds);
     } else {
-      await prisma.outlookTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteOutlookTriggerStatesForUser(userId);
     }
 
     if (nodes.length === 0) {
@@ -84,9 +109,7 @@ export async function syncOutlookWorkflowSubscriptions({ userId }: SyncParams) {
 
 export async function removeOutlookSubscriptionsForUser(userId: string) {
   await stopOutlookWatchForUser(userId);
-  await prisma.outlookTriggerState.deleteMany({
-    where: { Workflows: { userId } },
-  });
+  await deleteOutlookTriggerStatesForUser(userId);
 }
 
 export async function enqueueOutlookNotification({
@@ -113,38 +136,23 @@ export async function processOutlookNotification({
 }: {
   subscriptionId: string;
 }) {
-  const subscription = await prisma.outlookSubscription.findFirst({
-    where: { subscriptionId },
+  const subscription = await db.query.outlookSubscription.findFirst({
+    where: eq(outlookSubscription.subscriptionId, subscriptionId),
   });
 
   if (!subscription) {
     return;
   }
 
-  await prisma.outlookSubscription
-    .update({
-      where: { id: subscription.id },
-      data: {
+  await db
+    .update(outlookSubscription)
+    .set({
         lastSyncedAt: new Date(),
-      },
     })
+    .where(eq(outlookSubscription.id, subscription.id))
     .catch(() => {});
 
-  const nodes = await prisma.node.findMany({
-    where: {
-      type: NodeType.OUTLOOK_TRIGGER,
-      Workflows: {
-        userId: subscription.userId,
-        archived: false,
-        isTemplate: false,
-      },
-    },
-    select: {
-      id: true,
-      workflowId: true,
-      data: true,
-    },
-  });
+  const nodes = await getOutlookTriggerNodes(subscription.userId);
 
   if (nodes.length === 0) {
     await stopOutlookWatchForUser(subscription.userId);
@@ -176,12 +184,8 @@ export async function processOutlookNotification({
 
 export async function renewOutlookSubscriptions() {
   const threshold = new Date(Date.now() + SUBSCRIPTION_RENEWAL_WINDOW_MS);
-  const subscriptions = await prisma.outlookSubscription.findMany({
-    where: {
-      expiresAt: {
-        lte: threshold,
-      },
-    },
+  const subscriptions = await db.query.outlookSubscription.findMany({
+    where: lte(outlookSubscription.expiresAt, threshold),
   });
 
   for (const subscription of subscriptions) {
@@ -205,7 +209,7 @@ async function maybeTriggerWorkflowFromNode({
   node,
   accessToken,
 }: {
-  node: Pick<PrismaNode, "id" | "workflowId" | "data">;
+  node: OutlookNode;
   accessToken: string;
 }) {
   const config = ((node.data || {}) as OutlookTriggerConfig) || {};
@@ -238,8 +242,8 @@ async function maybeTriggerWorkflowFromNode({
     return;
   }
 
-  const state = await prisma.outlookTriggerState.findUnique({
-    where: { nodeId: node.id },
+  const state = await db.query.outlookTriggerState.findFirst({
+    where: eq(outlookTriggerState.nodeId, node.id),
   });
 
   if (state?.lastMessageId === latestId) {
@@ -258,14 +262,9 @@ async function maybeTriggerWorkflowFromNode({
     initialData,
   });
 
-  await prisma.outlookTriggerState.upsert({
-    where: { nodeId: node.id },
-    update: {
-      lastMessageId: latestId,
-      lastTriggeredAt: new Date(),
-      workflowId: node.workflowId,
-    },
-    create: {
+  await db
+    .insert(outlookTriggerState)
+    .values({
       id: crypto.randomUUID(),
       nodeId: node.id,
       workflowId: node.workflowId,
@@ -273,8 +272,16 @@ async function maybeTriggerWorkflowFromNode({
       lastTriggeredAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: outlookTriggerState.nodeId,
+      set: {
+        lastMessageId: latestId,
+        lastTriggeredAt: new Date(),
+        workflowId: node.workflowId,
+        updatedAt: new Date(),
+      },
+    });
 }
 
 async function ensureOutlookSubscription({
@@ -286,8 +293,8 @@ async function ensureOutlookSubscription({
 }) {
   const webhookUrl = getOutlookWebhookUrl();
 
-  const existing = await prisma.outlookSubscription.findUnique({
-    where: { userId },
+  const existing = await db.query.outlookSubscription.findFirst({
+    where: eq(outlookSubscription.userId, userId),
   });
 
   const needsRefresh =
@@ -320,15 +327,9 @@ async function ensureOutlookSubscription({
 
   const profile = await fetchOutlookProfile(accessToken);
 
-  await prisma.outlookSubscription.upsert({
-    where: { userId },
-    update: {
-      emailAddress: profile.mail || profile.userPrincipalName,
-      subscriptionId: subscription.id,
-      expiresAt,
-      lastSyncedAt: new Date(),
-    },
-    create: {
+  await db
+    .insert(outlookSubscription)
+    .values({
       id: crypto.randomUUID(),
       userId,
       emailAddress: profile.mail || profile.userPrincipalName,
@@ -336,13 +337,22 @@ async function ensureOutlookSubscription({
       expiresAt,
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: outlookSubscription.userId,
+      set: {
+        emailAddress: profile.mail || profile.userPrincipalName,
+        subscriptionId: subscription.id,
+        expiresAt,
+        lastSyncedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
 }
 
 async function stopOutlookWatchForUser(userId: string) {
-  const subscription = await prisma.outlookSubscription.findUnique({
-    where: { userId },
+  const subscription = await db.query.outlookSubscription.findFirst({
+    where: eq(outlookSubscription.userId, userId),
   });
 
   if (!subscription) {
@@ -360,10 +370,9 @@ async function stopOutlookWatchForUser(userId: string) {
       error
     );
   } finally {
-    await prisma.outlookSubscription
-      .delete({
-        where: { id: subscription.id },
-      })
+    await db
+      .delete(outlookSubscription)
+      .where(eq(outlookSubscription.id, subscription.id))
       .catch(() => {});
   }
 }
@@ -472,34 +481,31 @@ async function fetchOutlookProfile(accessToken: string) {
 }
 
 export async function ensureMicrosoftAccessToken(userId: string) {
-  const account = await prisma.account.findFirst({
-    where: {
-      userId,
-      providerId: "microsoft",
-    },
+  const selectedAccount = await db.query.account.findFirst({
+    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "microsoft")),
   });
 
-  if (!account) {
+  if (!selectedAccount) {
     throw new Error(
       "Outlook requires a connected Microsoft account. Connect Microsoft 365 under Apps."
     );
   }
 
   if (
-    account.accessToken &&
-    account.accessTokenExpiresAt &&
-    account.accessTokenExpiresAt.getTime() > Date.now() + 60_000
+    selectedAccount.accessToken &&
+    selectedAccount.accessTokenExpiresAt &&
+    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
   ) {
-    return account.accessToken;
+    return selectedAccount.accessToken;
   }
 
-  if (!account.refreshToken) {
+  if (!selectedAccount.refreshToken) {
     throw new Error(
       "Outlook access token expired and no refresh token is available. Reconnect Microsoft 365."
     );
   }
 
-  return refreshMicrosoftAccessToken(account);
+  return refreshMicrosoftAccessToken(selectedAccount);
 }
 
 async function refreshMicrosoftAccessToken(account: Account) {
@@ -547,14 +553,15 @@ async function refreshMicrosoftAccessToken(account: Account) {
 
   const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
 
-  await prisma.account.update({
-    where: { id: account.id },
-    data: {
+  await db
+    .update(accountTable)
+    .set({
       accessToken: payload.access_token,
       accessTokenExpiresAt: expiresAt,
       refreshToken: payload.refresh_token ?? refreshToken,
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(accountTable.id, account.id));
 
   return payload.access_token as string;
 }

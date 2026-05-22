@@ -2,8 +2,11 @@ import Handlebars from "handlebars";
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 import { moveDealStageChannel } from "@/inngest/channels/move-deal-stage";
-import prisma from "@/lib/db";
 import { decode } from "html-entities";
+import { eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { deal as dealTable, pipelineStage as pipelineStageTable } from "@/db/schema";
 
 type MoveDealStageData = {
   dealId: string;
@@ -42,8 +45,8 @@ export const moveDealStageExecutor: NodeExecutor<MoveDealStageData> = async ({
 
     const deal = await step.run("move-deal-stage", async () => {
       // Verify deal exists
-      const existingDeal = await prisma.deal.findUnique({
-        where: { id: dealId },
+      const existingDeal = await db.query.deal.findFirst({
+        where: eq(dealTable.id, dealId),
       });
 
       if (!existingDeal) {
@@ -53,9 +56,9 @@ export const moveDealStageExecutor: NodeExecutor<MoveDealStageData> = async ({
       }
 
       // Verify pipeline stage exists
-      const pipelineStage = await prisma.pipelineStage.findUnique({
-        where: { id: pipelineStageId },
-        include: { pipeline: true },
+      const pipelineStage = await db.query.pipelineStage.findFirst({
+        where: eq(pipelineStageTable.id, pipelineStageId),
+        with: { pipeline: true },
       });
 
       if (!pipelineStage) {
@@ -64,19 +67,31 @@ export const moveDealStageExecutor: NodeExecutor<MoveDealStageData> = async ({
         );
       }
 
-      return await prisma.deal.update({
-        where: { id: dealId },
-        data: {
+      await db
+        .update(dealTable)
+        .set({
           pipelineStageId: pipelineStageId,
           pipelineId: pipelineStage.pipelineId,
           lastActivityAt: new Date(),
           updatedAt: new Date(),
-        },
-        include: {
+        })
+        .where(eq(dealTable.id, dealId));
+
+      const updatedDeal = await db.query.deal.findFirst({
+        where: eq(dealTable.id, dealId),
+        with: {
           pipelineStage: true,
           pipeline: true,
         },
       });
+
+      if (!updatedDeal) {
+        throw new NonRetriableError(
+          `Move Deal Stage Node error: Deal with ID ${dealId} not found after update.`
+        );
+      }
+
+      return updatedDeal;
     });
 
     await publish(moveDealStageChannel().status({ nodeId, status: "success" }));

@@ -1,5 +1,5 @@
 import { inngest } from "../client";
-import { syncAllEmbeddings, syncSubaccountEmbeddings } from "@/lib/embeddings/sync";
+import { syncAllEmbeddings, syncLocationEmbeddings } from "@/lib/embeddings/sync";
 
 /**
  * Daily cron job to sync all embeddings
@@ -23,7 +23,7 @@ export const syncEmbeddingsDaily = inngest.createFunction(
       const syncResults = await syncAllEmbeddings({ onProgress });
 
       // Convert Map to object for serialization
-      const resultObject: Record<string, { contacts: number; deals: number; pipelines: number; workflows: number; total: number }> = {};
+      const resultObject: Record<string, { clients: number; deals: number; pipelines: number; workflows: number; total: number }> = {};
       syncResults.forEach((value, key) => {
         resultObject[key] = value;
       });
@@ -38,7 +38,7 @@ export const syncEmbeddingsDaily = inngest.createFunction(
 
     return {
       success: true,
-      subaccountsProcessed: Object.keys(results).length,
+      locationsProcessed: Object.keys(results).length,
       totalVectorsStored: totalVectors,
       results,
       logs,
@@ -47,18 +47,18 @@ export const syncEmbeddingsDaily = inngest.createFunction(
 );
 
 /**
- * Manual reindex for a specific subaccount
+ * Manual reindex for a specific location
  */
-export const reindexSubaccount = inngest.createFunction(
+export const reindexLocation = inngest.createFunction(
   {
-    id: "reindex-subaccount-embeddings",
+    id: "reindex-location-embeddings",
     retries: 2,
   },
   {
-    event: "embeddings/reindex.subaccount",
+    event: "embeddings/reindex.location",
   },
   async ({ event, step, logger }) => {
-    const { subaccountId } = event.data;
+    const { locationId } = event.data;
     const logs: string[] = [];
 
     const onProgress = (message: string) => {
@@ -66,13 +66,13 @@ export const reindexSubaccount = inngest.createFunction(
       logger.info(message);
     };
 
-    const result = await step.run("sync-subaccount-embeddings", async () => {
-      return await syncSubaccountEmbeddings(subaccountId, { onProgress });
+    const result = await step.run("sync-location-embeddings", async () => {
+      return await syncLocationEmbeddings(locationId, { onProgress });
     });
 
     return {
       success: true,
-      subaccountId,
+      locationId,
       result,
       logs,
     };

@@ -22,14 +22,14 @@ const Toaster = (props: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            "bg-background text-foreground ring-1! ring-black/10! shadow-lg! border-none! rounded-lg! px-4 py-3 gap-3",
+            "bg-background text-black ring-1! ring-black/10! shadow-lg! border-none! rounded-lg! px-4 py-3 gap-3",
           title: "font-medium text-xs",
           description: "text-xs text-muted-foreground",
           actionButton:
             "bg-primary text-primary-foreground px-3 py-1 rounded-md text-xs",
           cancelButton:
             "bg-muted hidden! text-muted-foreground px-3 py-1 rounded-md text-xs",
-          closeButton: "text-muted-foreground hover:text-foreground transition",
+          closeButton: "text-muted-foreground hover:text-black transition",
           icon: "mt-0.5",
           success: "bg-emerald-600! text-emerald-100!",
           info: "bg-blue-600! text-blue-100!",

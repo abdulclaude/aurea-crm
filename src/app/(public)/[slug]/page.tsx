@@ -1,7 +1,16 @@
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
-import prisma from "@/lib/db";
-import { generatePublishedPageHTML } from "@/features/funnel-builder/lib/published-funnel-renderer";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  funnel as funnelTable,
+  funnelPage as funnelPageTable,
+  funnelPixelIntegration as funnelPixelIntegrationTable,
+} from "@/db/schema";
+import {
+  generatePublishedPageHTML,
+  type PublishedPageData,
+} from "@/features/funnel-builder/lib/published-funnel-renderer";
 import type { Metadata } from "next";
 
 interface DomainFunnelPageProps {
@@ -18,12 +27,12 @@ async function getFunnelFromDomain(host: string) {
   const hostWithoutPort = host.split(":")[0];
 
   // Check if it's a custom domain
-  let funnel = await prisma.funnel.findFirst({
-    where: {
-      customDomain: hostWithoutPort,
-      status: "PUBLISHED",
-      domainType: "CUSTOM",
-    },
+  let funnel = await db.query.funnel.findFirst({
+    where: and(
+      eq(funnelTable.customDomain, hostWithoutPort),
+      eq(funnelTable.status, "PUBLISHED"),
+      eq(funnelTable.domainType, "CUSTOM")
+    ),
   });
 
   if (funnel) return funnel;
@@ -39,12 +48,12 @@ async function getFunnelFromDomain(host: string) {
 
     // Don't treat "www" or the base domain as a subdomain
     if (subdomain !== "www" && subdomain !== "localhost" && !hostWithoutPort.startsWith("localhost")) {
-      funnel = await prisma.funnel.findFirst({
-        where: {
-          subdomain: subdomain,
-          status: "PUBLISHED",
-          domainType: "SUBDOMAIN",
-        },
+      funnel = await db.query.funnel.findFirst({
+        where: and(
+          eq(funnelTable.subdomain, subdomain),
+          eq(funnelTable.status, "PUBLISHED"),
+          eq(funnelTable.domainType, "SUBDOMAIN")
+        ),
       });
     }
   }
@@ -69,11 +78,8 @@ export async function generateMetadata({
     };
   }
 
-  const page = await prisma.funnelPage.findFirst({
-    where: {
-      funnelId: funnel.id,
-      slug: slug,
-    },
+  const page = await db.query.funnelPage.findFirst({
+    where: and(eq(funnelPageTable.funnelId, funnel.id), eq(funnelPageTable.slug, slug)),
   });
 
   if (!page) {
@@ -114,20 +120,15 @@ export default async function DomainFunnelPage({
   }
 
   // Fetch page with all blocks, breakpoints, tracking events
-  const page = await prisma.funnelPage.findFirst({
-    where: {
-      funnelId: funnel.id,
-      slug: slug,
-    },
-    include: {
-      funnelBlock: {
-        include: {
-          funnelBreakpoint: true,
-          funnelBlockEvent: true,
+  const page = await db.query.funnelPage.findFirst({
+    where: and(eq(funnelPageTable.funnelId, funnel.id), eq(funnelPageTable.slug, slug)),
+    with: {
+      funnelBlocks: {
+        with: {
+          funnelBreakpoints: true,
+          funnelBlockEvents: true,
         },
-        orderBy: {
-          order: "asc",
-        },
+        orderBy: (block) => [asc(block.order)],
       },
     },
   });
@@ -137,16 +138,25 @@ export default async function DomainFunnelPage({
   }
 
   // Fetch pixel integrations for the funnel
-  const pixelIntegrations = await prisma.funnelPixelIntegration.findMany({
-    where: {
-      funnelId: funnel.id,
-      enabled: true,
-    },
+  const pixelIntegrations = await db.query.funnelPixelIntegration.findMany({
+    where: and(
+      eq(funnelPixelIntegrationTable.funnelId, funnel.id),
+      eq(funnelPixelIntegrationTable.enabled, true)
+    ),
   });
+
+  const renderPage: PublishedPageData["page"] = {
+    ...page,
+    blocks: page.funnelBlocks.map(({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
+      ...block,
+      breakpoints: funnelBreakpoints,
+      trackingEvent: funnelBlockEvents[0] ?? null,
+    })),
+  };
 
   // Generate complete HTML with tracking
   const html = generatePublishedPageHTML({
-    page: page as any,
+    page: renderPage,
     pixelIntegrations,
   });
 

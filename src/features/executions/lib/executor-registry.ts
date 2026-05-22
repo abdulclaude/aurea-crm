@@ -1,5 +1,5 @@
 import type { NodeExecutor } from "../types";
-import { NodeType } from "@prisma/client";
+import { NodeType } from "@/db/enums";
 import { manualTriggerExecutor } from "@/features/nodes/triggers/components/manual-trigger/executor";
 import { googleFormTriggerExecutor } from "@/features/nodes/triggers/components/google-form-trigger/executor";
 import { stripeTriggerExecutor } from "@/features/nodes/triggers/components/stripe-trigger/executor";
@@ -14,19 +14,20 @@ import { gmailExecutor } from "@/features/nodes/executions/components/gmail/exec
 import { telegramTriggerExecutor } from "@/features/nodes/triggers/components/telegram-trigger/executor";
 import { telegramExecutionExecutor } from "@/features/nodes/executions/components/telegram/executor";
 import { waitExecutor } from "@/features/nodes/executions/components/wait/executor";
-import { createContactExecutor } from "@/features/nodes/executions/components/create-contact/executor";
-import { updateContactExecutor } from "@/features/nodes/executions/components/update-contact/executor";
-import { deleteContactExecutor } from "@/features/nodes/executions/components/delete-contact/executor";
+import { createClientExecutor } from "@/features/nodes/executions/components/create-client/executor";
+import { updateClientExecutor } from "@/features/nodes/executions/components/update-client/executor";
+import { deleteClientExecutor } from "@/features/nodes/executions/components/delete-client/executor";
 import { createDealExecutor } from "@/features/nodes/executions/components/create-deal/executor";
 import { updateDealExecutor } from "@/features/nodes/executions/components/update-deal/executor";
 import { deleteDealExecutor } from "@/features/nodes/executions/components/delete-deal/executor";
 import { updatePipelineExecutor } from "@/features/nodes/executions/components/update-pipeline/executor";
-import { contactCreatedTriggerExecutor } from "@/features/nodes/triggers/components/contact-created-trigger/executor";
-import { contactUpdatedTriggerExecutor } from "@/features/nodes/triggers/components/contact-updated-trigger/executor";
-import { contactFieldChangedTriggerExecutor } from "@/features/nodes/triggers/components/contact-field-changed-trigger/executor";
-import { contactDeletedTriggerExecutor } from "@/features/nodes/triggers/components/contact-deleted-trigger/executor";
-import { contactTypeChangedTriggerExecutor } from "@/features/nodes/triggers/components/contact-type-changed-trigger/executor";
-import { contactLifecycleStageChangedTriggerExecutor } from "@/features/nodes/triggers/components/contact-lifecycle-stage-changed-trigger/executor";
+import { clientCreatedTriggerExecutor } from "@/features/nodes/triggers/components/client-created-trigger/executor";
+import { clientUpdatedTriggerExecutor } from "@/features/nodes/triggers/components/client-updated-trigger/executor";
+import { clientFieldChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-field-changed-trigger/executor";
+import { birthdayTriggerExecutor } from "@/features/nodes/triggers/components/birthday-trigger/executor";
+import { clientDeletedTriggerExecutor } from "@/features/nodes/triggers/components/client-deleted-trigger/executor";
+import { clientTypeChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-type-changed-trigger/executor";
+import { clientLifecycleStageChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-lifecycle-stage-changed-trigger/executor";
 import { ifElseExecutor } from "@/features/nodes/executions/components/if-else/executor";
 import { setVariableExecutor } from "@/features/nodes/executions/components/set-variable/executor";
 import { stopWorkflowExecutor } from "@/features/nodes/executions/components/stop-workflow/executor";
@@ -42,7 +43,7 @@ import { dealUpdatedTriggerExecutor } from "@/features/nodes/triggers/components
 import { dealDeletedTriggerExecutor } from "@/features/nodes/triggers/components/deal-deleted-trigger/executor";
 import { dealStageChangedTriggerExecutor } from "@/features/nodes/triggers/components/deal-stage-changed-trigger/executor";
 import { slackSendMessageExecutor } from "@/features/nodes/executions/components/slack-send-message/executor";
-import { findContactsExecutor } from "@/features/nodes/executions/components/find-contacts/executor";
+import { findClientsExecutor } from "@/features/nodes/executions/components/find-clients/executor";
 import { gmailSendEmailExecutor } from "@/features/nodes/executions/components/gmail-send-email/executor";
 import { gmailReplyToEmailExecutor } from "@/features/nodes/executions/components/gmail-reply-to-email/executor";
 import { gmailSearchEmailsExecutor } from "@/features/nodes/executions/components/gmail-search-emails/executor";
@@ -56,8 +57,8 @@ import { googleDriveMoveFileExecutor } from "@/features/nodes/executions/compone
 import { googleDriveDeleteFileExecutor } from "@/features/nodes/executions/components/google-drive-delete-file/executor";
 import { googleDriveCreateFolderExecutor } from "@/features/nodes/executions/components/google-drive-create-folder/executor";
 import { googleFormReadResponsesExecutor } from "@/features/nodes/executions/components/google-form-read-responses/executor";
-import { addTagToContactExecutor } from "@/features/nodes/executions/components/add-tag-to-contact/executor";
-import { removeTagFromContactExecutor } from "@/features/nodes/executions/components/remove-tag-from-contact/executor";
+import { addTagToClientExecutor } from "@/features/nodes/executions/components/add-tag-to-client/executor";
+import { removeTagFromClientExecutor } from "@/features/nodes/executions/components/remove-tag-from-client/executor";
 import { moveDealStageExecutor } from "@/features/nodes/executions/components/move-deal-stage/executor";
 import { addDealNoteExecutor } from "@/features/nodes/executions/components/add-deal-note/executor";
 import { googleCalendarEventCreatedExecutor } from "@/features/nodes/triggers/components/google-calendar-event-created/executor";
@@ -126,7 +127,25 @@ import { geminiSummariseExecutor } from "@/features/nodes/executions/components/
 import { geminiTransformExecutor } from "@/features/nodes/executions/components/gemini-transform/executor";
 import { geminiClassifyExecutor } from "@/features/nodes/executions/components/gemini-classify/executor";
 import { executeWorkflowExecutor } from "@/features/nodes/executions/components/execute-workflow/executor";
-import { stubExecutor } from "./stub-executor";
+import { classBookedTriggerExecutor } from "@/features/nodes/triggers/components/class-booked-trigger/executor";
+import { classCancelledTriggerExecutor } from "@/features/nodes/triggers/components/class-cancelled-trigger/executor";
+import { memberCheckedInTriggerExecutor } from "@/features/nodes/triggers/components/member-checked-in-trigger/executor";
+import { memberNoShowTriggerExecutor } from "@/features/nodes/triggers/components/member-no-show-trigger/executor";
+import { membershipCreatedTriggerExecutor } from "@/features/nodes/triggers/components/membership-created-trigger/executor";
+import { membershipExpiringTriggerExecutor } from "@/features/nodes/triggers/components/membership-expiring-trigger/executor";
+import { membershipCancelledTriggerExecutor } from "@/features/nodes/triggers/components/membership-cancelled-trigger/executor";
+import { waitlistSpotOpenedTriggerExecutor } from "@/features/nodes/triggers/components/waitlist-spot-opened-trigger/executor";
+import { introOfferRedeemedTriggerExecutor } from "@/features/nodes/triggers/components/intro-offer-redeemed-trigger/executor";
+import { introOfferCompletedTriggerExecutor } from "@/features/nodes/triggers/components/intro-offer-completed-trigger/executor";
+import { memberClassCountTriggerExecutor } from "@/features/nodes/triggers/components/member-class-count-trigger/executor";
+import { clientTagAddedTriggerExecutor } from "@/features/nodes/triggers/components/client-tag-added-trigger/executor";
+import { clientTagRemovedTriggerExecutor } from "@/features/nodes/triggers/components/client-tag-removed-trigger/executor";
+import { studioPaymentSucceededTriggerExecutor } from "@/features/nodes/triggers/components/studio-payment-succeeded-trigger/executor";
+import { studioPaymentFailedTriggerExecutor } from "@/features/nodes/triggers/components/studio-payment-failed-trigger/executor";
+import { sendClassReminderExecutor } from "@/features/nodes/executions/components/send-class-reminder/executor";
+import { awardLoyaltyPointsExecutor } from "@/features/nodes/executions/components/award-loyalty-points/executor";
+import { calculateChurnScoreExecutor } from "@/features/nodes/executions/components/calculate-churn-score/executor";
+import { sendSmsExecutor } from "@/features/nodes/executions/components/send-sms/executor";
 
 export const executorRegistry: Record<NodeType, NodeExecutor> = {
   // Core
@@ -220,22 +239,23 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.TELEGRAM_SEND_PHOTO]: telegramSendPhotoExecutor as NodeExecutor,
   [NodeType.TELEGRAM_SEND_DOCUMENT]: telegramSendDocumentExecutor as NodeExecutor,
 
-  // CRM Contact Triggers
-  [NodeType.CONTACT_CREATED_TRIGGER]: contactCreatedTriggerExecutor,
-  [NodeType.CONTACT_UPDATED_TRIGGER]: contactUpdatedTriggerExecutor,
-  [NodeType.CONTACT_FIELD_CHANGED_TRIGGER]: contactFieldChangedTriggerExecutor,
-  [NodeType.CONTACT_DELETED_TRIGGER]: contactDeletedTriggerExecutor,
-  [NodeType.CONTACT_TYPE_CHANGED_TRIGGER]: contactTypeChangedTriggerExecutor,
-  [NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
-    contactLifecycleStageChangedTriggerExecutor,
+  // CRM Client Triggers
+  [NodeType.CLIENT_CREATED_TRIGGER]: clientCreatedTriggerExecutor,
+  [NodeType.CLIENT_UPDATED_TRIGGER]: clientUpdatedTriggerExecutor,
+  [NodeType.CLIENT_FIELD_CHANGED_TRIGGER]: clientFieldChangedTriggerExecutor,
+  [NodeType.BIRTHDAY_TRIGGER]: birthdayTriggerExecutor,
+  [NodeType.CLIENT_DELETED_TRIGGER]: clientDeletedTriggerExecutor,
+  [NodeType.CLIENT_TYPE_CHANGED_TRIGGER]: clientTypeChangedTriggerExecutor,
+  [NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
+    clientLifecycleStageChangedTriggerExecutor,
 
-  // CRM Contact Executions
-  [NodeType.CREATE_CONTACT]: createContactExecutor as NodeExecutor,
-  [NodeType.UPDATE_CONTACT]: updateContactExecutor as NodeExecutor,
-  [NodeType.DELETE_CONTACT]: deleteContactExecutor as NodeExecutor,
-  [NodeType.FIND_CONTACTS]: findContactsExecutor as NodeExecutor,
-  [NodeType.ADD_TAG_TO_CONTACT]: addTagToContactExecutor as NodeExecutor,
-  [NodeType.REMOVE_TAG_FROM_CONTACT]: removeTagFromContactExecutor as NodeExecutor,
+  // CRM Client Executions
+  [NodeType.CREATE_CLIENT]: createClientExecutor as NodeExecutor,
+  [NodeType.UPDATE_CLIENT]: updateClientExecutor as NodeExecutor,
+  [NodeType.DELETE_CLIENT]: deleteClientExecutor as NodeExecutor,
+  [NodeType.FIND_CLIENTS]: findClientsExecutor as NodeExecutor,
+  [NodeType.ADD_TAG_TO_CLIENT]: addTagToClientExecutor as NodeExecutor,
+  [NodeType.REMOVE_TAG_FROM_CLIENT]: removeTagFromClientExecutor as NodeExecutor,
 
   // CRM Deal Triggers
   [NodeType.DEAL_CREATED_TRIGGER]: dealCreatedTriggerExecutor,
@@ -294,6 +314,29 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   // Bundle Workflow
   [NodeType.BUNDLE_WORKFLOW]: bundleWorkflowExecutor,
   [NodeType.EXECUTE_WORKFLOW]: executeWorkflowExecutor as NodeExecutor,
+
+  // Fitness studio triggers
+  [NodeType.CLASS_BOOKED_TRIGGER]: classBookedTriggerExecutor,
+  [NodeType.CLASS_CANCELLED_TRIGGER]: classCancelledTriggerExecutor,
+  [NodeType.MEMBER_CHECKED_IN_TRIGGER]: memberCheckedInTriggerExecutor,
+  [NodeType.MEMBER_NO_SHOW_TRIGGER]: memberNoShowTriggerExecutor,
+  [NodeType.MEMBERSHIP_CREATED_TRIGGER]: membershipCreatedTriggerExecutor,
+  [NodeType.MEMBERSHIP_EXPIRING_TRIGGER]: membershipExpiringTriggerExecutor,
+  [NodeType.MEMBERSHIP_CANCELLED_TRIGGER]: membershipCancelledTriggerExecutor,
+  [NodeType.WAITLIST_SPOT_OPENED_TRIGGER]: waitlistSpotOpenedTriggerExecutor,
+  [NodeType.INTRO_OFFER_REDEEMED_TRIGGER]: introOfferRedeemedTriggerExecutor,
+  [NodeType.INTRO_OFFER_COMPLETED_TRIGGER]: introOfferCompletedTriggerExecutor,
+  [NodeType.MEMBER_CLASS_COUNT_TRIGGER]: memberClassCountTriggerExecutor,
+  [NodeType.CLIENT_TAG_ADDED_TRIGGER]: clientTagAddedTriggerExecutor,
+  [NodeType.CLIENT_TAG_REMOVED_TRIGGER]: clientTagRemovedTriggerExecutor,
+  [NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER]: studioPaymentSucceededTriggerExecutor,
+  [NodeType.STUDIO_PAYMENT_FAILED_TRIGGER]: studioPaymentFailedTriggerExecutor,
+
+  // Fitness studio actions
+  [NodeType.SEND_CLASS_REMINDER]: sendClassReminderExecutor,
+  [NodeType.AWARD_LOYALTY_POINTS]: awardLoyaltyPointsExecutor,
+  [NodeType.CALCULATE_CHURN_SCORE]: calculateChurnScoreExecutor,
+  [NodeType.SEND_SMS]: sendSmsExecutor,
 };
 
 export const getExecutor = (type: NodeType): NodeExecutor => {

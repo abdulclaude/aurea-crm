@@ -1,5 +1,5 @@
 export type EntityType =
-  | "contact"
+  | "client"
   | "deal"
   | "pipeline"
   | "workflow";
@@ -8,7 +8,7 @@ export interface VectorMetadata {
   entityType: EntityType;
   entityId: string;
   name: string;
-  subaccountId: string;
+  locationId: string;
   fields: Record<string, unknown>;
   updatedAt: string;
 }

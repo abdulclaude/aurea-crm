@@ -12,7 +12,7 @@ export type DealsParamsState = {
   sort: string;
   stages: string[];
   hiddenColumns: string[];
-  contacts?: string[];
+  clients?: string[];
   members?: string[];
   valueCurrency?: string;
   valueMin?: number;
@@ -32,7 +32,7 @@ export const dealsParams = {
   hiddenColumns: parseAsArrayOf(parseAsString)
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
-  contacts: parseAsArrayOf(parseAsString)
+  clients: parseAsArrayOf(parseAsString)
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   members: parseAsArrayOf(parseAsString)

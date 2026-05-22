@@ -28,7 +28,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
-import { InvoiceStatus } from "@prisma/client";
+import { InvoiceStatus } from "@/db/enums";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SendReminderDialog } from "./send-reminder-dialog";
 
@@ -196,10 +196,10 @@ export function InvoiceDetailDialog({
                 <h3 className="text-xs font-medium text-primary/75">Bill to</h3>
 
                 <div>
-                  <p className="text-xs font-medium">{invoice.contactName}</p>
-                  {invoice.contactEmail && (
+                  <p className="text-xs font-medium">{invoice.clientName}</p>
+                  {invoice.clientEmail && (
                     <p className="text-xs text-muted-foreground">
-                      {invoice.contactEmail}
+                      {invoice.clientEmail}
                     </p>
                   )}
                 </div>

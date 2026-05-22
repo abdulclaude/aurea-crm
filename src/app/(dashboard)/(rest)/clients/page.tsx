@@ -1,73 +1,114 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
+import { Suspense, useState } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+
+import { ClientsTable } from "@/features/crm/components/clients-table";
+import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+import { PageTabs } from "@/components/ui/page-tabs";
+
 import { IconPeopleAdd as AddClientIcon } from "central-icons/IconPeopleAdd";
 import Link from "next/link";
-import { Suspense, useState } from "react";
-
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { ClientsTable } from "@/features/organizations/components/clients-table";
-import { LoaderCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { PageTabs } from "@/components/ui/page-tabs";
+import { useSearchParams } from "next/navigation";
 import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
+import { useTRPC } from "@/trpc/client";
 
 export default function ClientsPage() {
-  const [activeTab, setActiveTab] = useState("data");
+  const trpc = useTRPC();
+  const searchParams = useSearchParams();
+
+  // Check if user is at studio level (no active location)
+  const { data: active } = useSuspenseQuery(
+    trpc.organizations.getActive.queryOptions(),
+  );
+
+  const isStudioLevel = !active?.activeLocationId;
+
+  // Define tabs based on context
+  const tabs = isStudioLevel
+    ? [
+        { id: "studio-data", label: "Studio data" },
+        { id: "leads", label: "Leads" },
+        { id: "locations-data", label: "All locations data" },
+        { id: "activity", label: "Activity timeline" },
+      ]
+    : [
+        { id: "data", label: "Data table" },
+        { id: "leads", label: "Leads" },
+        { id: "activity", label: "Activity timeline" },
+      ];
+
+  const requestedView = searchParams.get("view");
+  const [activeTab, setActiveTab] = useState(
+    requestedView === "leads" ? "leads" : tabs[0].id,
+  );
 
   return (
     <div className="space-y-0">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between p-6 pb-6">
-        <div className="">
-          <h1 className="text-lg font-semibold">Manage all your clients</h1>
-          <p className=" text-primary/75 text-xs">
-            Filter, sort, and search every client workspace from one view.
+      <div className="flex items-end justify-between gap-2 p-6 pb-6">
+        <div>
+          <h1 className="text-lg font-semibold text-primary">Clients</h1>
+          <p className="text-xs text-primary/75">
+            Manage your studio clients and leads
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <Button asChild>
-            <Link
-              href="/clients/new"
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "h-8.5! bg-background! hover:bg-primary-foreground/50! hover:text-black!"
-              )}
-            >
-              <AddClientIcon className="size-3" />
-              <span>Add a new client</span>
-            </Link>
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" asChild>
+          <Link href="/clients/new">
+            <AddClientIcon className="size-3.5" />
+            Add member{" "}
+          </Link>
+        </Button>
       </div>
 
       <Separator className="bg-black/5 dark:bg-white/5" />
 
       <PageTabs
-        tabs={[
-          { id: "data", label: "Data table" },
-          { id: "activity", label: "Activity" },
-        ]}
+        tabs={tabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         className="px-6"
       />
 
-      {activeTab === "data" ? (
+      <Separator className="bg-black/5 dark:bg-white/5" />
+
+      {activeTab === "data" || activeTab === "studio-data" ? (
+        <Suspense
+          fallback={
+            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3 h-full">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading members...
+            </div>
+          }
+        >
+          <ClientsTable scope="agency" clientView="members" />
+        </Suspense>
+      ) : activeTab === "leads" ? (
+        <Suspense
+          fallback={
+            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3 h-full">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading leads...
+            </div>
+          }
+        >
+          <ClientsTable scope="agency" clientView="leads" />
+        </Suspense>
+      ) : activeTab === "locations-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3">
               <LoaderCircle className="size-3.5 animate-spin" />
-              Loading clients...
+              Loading members...
             </div>
           }
         >
-          <ClientsTable />
+          <ClientsTable scope="all-clients" />
         </Suspense>
       ) : (
-        <div className="p-6">
-          <ActivityTimeline limit={50} />
-        </div>
+        <ActivityTimeline limit={50} filterByEntityType="client" />
       )}
     </div>
   );

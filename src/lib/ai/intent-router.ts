@@ -23,17 +23,17 @@ export interface IntentDefinition {
 const intentDefinitions: IntentDefinition[] = [
   // CRM Actions
   {
-    name: "create-contact",
-    command: "/create-contact",
-    description: "Create a new contact in the CRM",
+    name: "create-client",
+    command: "/create-client",
+    description: "Create a new client in the CRM",
     examples: [
-      "create a contact",
-      "add new contact",
+      "create a client",
+      "add new client",
       "new customer",
       "add person",
       "create lead",
     ],
-    handler: "createContact",
+    handler: "createClient",
   },
   {
     name: "create-deal",
@@ -89,10 +89,10 @@ const intentDefinitions: IntentDefinition[] = [
   {
     name: "send-email",
     command: "/send-email",
-    description: "Send an email to a contact",
+    description: "Send an email to a client",
     examples: [
       "send email",
-      "email contact",
+      "email client",
       "send message",
       "compose email",
       "write email",
@@ -205,17 +205,17 @@ const intentDefinitions: IntentDefinition[] = [
   },
   // Query Actions
   {
-    name: "show-contacts",
-    command: "/show-contacts",
-    description: "Show all contacts",
+    name: "show-clients",
+    command: "/show-clients",
+    description: "Show all clients",
     examples: [
-      "show contacts",
-      "list contacts",
-      "all contacts",
-      "my contacts",
-      "view contacts",
+      "show clients",
+      "list clients",
+      "all clients",
+      "my clients",
+      "view clients",
     ],
-    handler: "showContacts",
+    handler: "showClients",
   },
   {
     name: "show-deals",
@@ -263,19 +263,19 @@ const intentDefinitions: IntentDefinition[] = [
   },
   // Natural Language Query Actions
   {
-    name: "query-contacts",
-    command: "/query-contacts",
-    description: "Query contacts with filters like date, company, or other criteria",
+    name: "query-clients",
+    command: "/query-clients",
+    description: "Query clients with filters like date, company, or other criteria",
     examples: [
-      "show me contacts from",
-      "find contacts created on",
-      "contacts from company",
-      "show all contacts from",
-      "list contacts where",
-      "contacts created this week",
-      "contacts from last month",
+      "show me clients from",
+      "find clients created on",
+      "clients from company",
+      "show all clients from",
+      "list clients where",
+      "clients created this week",
+      "clients from last month",
     ],
-    handler: "queryContacts",
+    handler: "queryClients",
   },
   {
     name: "query-deals",
@@ -336,7 +336,7 @@ Respond with ONLY a JSON object in this exact format:
 {"intent": "intent-name", "confidence": 0.9}
 
 The confidence should be between 0 and 1, where 1 means very confident.
-If creating something (contact, deal, pipeline), the intent should be create-X.
+If creating something (client, deal, pipeline), the intent should be create-X.
 If showing/listing something, the intent should be show-X.
 
 JSON:`;
@@ -378,14 +378,14 @@ function extractParams(
   const params: Record<string, any> = {};
 
   // Group entities by type
-  const contacts = entities.filter((e) => e.type === "contact");
+  const clients = entities.filter((e) => e.type === "client");
   const deals = entities.filter((e) => e.type === "deal");
   const pipelines = entities.filter((e) => e.type === "pipeline");
   const workflows = entities.filter((e) => e.type === "workflow");
 
-  if (contacts.length > 0) {
-    params.contactIds = contacts.map((c) => c.id);
-    params.contactNames = contacts.map((c) => c.name);
+  if (clients.length > 0) {
+    params.clientIds = clients.map((c) => c.id);
+    params.clientNames = clients.map((c) => c.name);
   }
 
   if (deals.length > 0) {

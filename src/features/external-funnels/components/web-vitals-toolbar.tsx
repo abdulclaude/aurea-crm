@@ -96,9 +96,12 @@ export function WebVitalsToolbar({
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   // Staged filters for preview
-  const [stagedMetrics, setStagedMetrics] = React.useState<string[]>(selectedMetrics);
-  const [stagedRatings, setStagedRatings] = React.useState<string[]>(selectedRatings);
-  const [stagedDeviceTypes, setStagedDeviceTypes] = React.useState<string[]>(selectedDeviceTypes);
+  const [stagedMetrics, setStagedMetrics] =
+    React.useState<string[]>(selectedMetrics);
+  const [stagedRatings, setStagedRatings] =
+    React.useState<string[]>(selectedRatings);
+  const [stagedDeviceTypes, setStagedDeviceTypes] =
+    React.useState<string[]>(selectedDeviceTypes);
 
   React.useEffect(() => {
     setSearchInput(search);
@@ -123,19 +126,25 @@ export function WebVitalsToolbar({
 
   const handleToggleMetric = (value: string) => {
     setStagedMetrics((prev) =>
-      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value],
     );
   };
 
   const handleToggleRating = (value: string) => {
     setStagedRatings((prev) =>
-      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value],
     );
   };
 
   const handleToggleDeviceType = (value: string) => {
     setStagedDeviceTypes((prev) =>
-      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value],
     );
   };
 
@@ -165,7 +174,7 @@ export function WebVitalsToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -287,10 +296,14 @@ export function WebVitalsToolbar({
                         >
                           <Checkbox
                             checked={stagedDeviceTypes.includes(deviceType)}
-                            onCheckedChange={() => handleToggleDeviceType(deviceType)}
+                            onCheckedChange={() =>
+                              handleToggleDeviceType(deviceType)
+                            }
                             className="rounded-lg border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
-                          <span className="select-none capitalize">{deviceType}</span>
+                          <span className="select-none capitalize">
+                            {deviceType}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -351,20 +364,32 @@ export function WebVitalsToolbar({
                     e.stopPropagation();
                     // Apply staged filters
                     if (onToggleMetric) {
-                      const toAdd = stagedMetrics.filter(m => !selectedMetrics.includes(m));
-                      const toRemove = selectedMetrics.filter(m => !stagedMetrics.includes(m));
+                      const toAdd = stagedMetrics.filter(
+                        (m) => !selectedMetrics.includes(m),
+                      );
+                      const toRemove = selectedMetrics.filter(
+                        (m) => !stagedMetrics.includes(m),
+                      );
                       toAdd.forEach(onToggleMetric);
                       toRemove.forEach(onToggleMetric);
                     }
                     if (onToggleRating) {
-                      const toAdd = stagedRatings.filter(r => !selectedRatings.includes(r));
-                      const toRemove = selectedRatings.filter(r => !stagedRatings.includes(r));
+                      const toAdd = stagedRatings.filter(
+                        (r) => !selectedRatings.includes(r),
+                      );
+                      const toRemove = selectedRatings.filter(
+                        (r) => !stagedRatings.includes(r),
+                      );
                       toAdd.forEach(onToggleRating);
                       toRemove.forEach(onToggleRating);
                     }
                     if (onToggleDeviceType) {
-                      const toAdd = stagedDeviceTypes.filter(d => !selectedDeviceTypes.includes(d));
-                      const toRemove = selectedDeviceTypes.filter(d => !stagedDeviceTypes.includes(d));
+                      const toAdd = stagedDeviceTypes.filter(
+                        (d) => !selectedDeviceTypes.includes(d),
+                      );
+                      const toRemove = selectedDeviceTypes.filter(
+                        (d) => !stagedDeviceTypes.includes(d),
+                      );
                       toAdd.forEach(onToggleDeviceType);
                       toRemove.forEach(onToggleDeviceType);
                     }

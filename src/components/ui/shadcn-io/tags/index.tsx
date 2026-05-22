@@ -123,21 +123,23 @@ export const TagsTrigger = ({
     <PopoverTrigger asChild>
       <Button
         className={cn(
-          "h-auto w-full justify-start p-2 rounded-sm text-primary hover:text-primary",
-          className
+          "h-auto w-full justify-start p-2 rounded-md text-primary hover:text-primary",
+          className,
         )}
         role="combobox"
         variant="outline"
         {...props}
       >
-        <div className="flex flex-wrap items-center justify-between gap-1 w-full">
-          {hasChildren ? (
-            children
-          ) : (
-            <span className="px-2 py-px text-primary/80 dark:text-white/50">
-              Select a tag...
-            </span>
-          )}
+        <div className="flex items-center justify-between gap-1 w-full">
+          <div className="flex flex-wrap items-center gap-1 min-w-0">
+            {hasChildren ? (
+              children
+            ) : (
+              <span className="px-2 py-px text-primary/80 dark:text-white/50">
+                Select a tag...
+              </span>
+            )}
+          </div>
 
           <ChevronDownIcon className="size-3 shrink-0 text-primary/80 dark:text-white/50" />
         </div>
@@ -164,7 +166,7 @@ export const TagsValue = ({
     <Badge
       className={cn(
         "flex items-center gap-2 bg-[#202e32] brightness-140",
-        className
+        className,
       )}
       {...props}
     >
@@ -173,7 +175,7 @@ export const TagsValue = ({
         // biome-ignore lint/a11y/noStaticElementInteractions: "This is a clickable badge"
         // biome-ignore lint/a11y/useKeyWithClickEvents: "This is a clickable badge"
         <div className="size-auto cursor-pointer" onClick={handleRemove}>
-          <XIcon className="text-white size-3" />
+          <XIcon className="text-current size-3" />
         </div>
       )}
     </Badge>

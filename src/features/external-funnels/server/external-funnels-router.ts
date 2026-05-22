@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import db from "@/lib/db";
+import db from "./drizzle-repository";
 import { TRPCError } from "@trpc/server";
 import { generateApiKey } from "@/lib/encryption";
 
@@ -42,7 +42,7 @@ export const externalFunnelsRouter = createTRPCRouter({
           name: input.name,
           description: input.description,
           organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId,
+          locationId: ctx.locationId,
 
           // External funnel specific
           funnelType: "EXTERNAL",
@@ -82,7 +82,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
           funnelType: "EXTERNAL",
         },
       });
@@ -154,7 +154,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -293,7 +293,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -339,7 +339,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -403,7 +403,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -482,7 +482,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -541,7 +541,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -608,7 +608,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -759,7 +759,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -904,7 +904,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1058,7 +1058,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1239,7 +1239,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1424,7 +1424,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1653,7 +1653,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1789,7 +1789,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1861,7 +1861,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -1934,7 +1934,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -2040,7 +2040,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -2110,7 +2110,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -2960,7 +2960,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3072,7 +3072,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3198,7 +3198,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3405,7 +3405,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3507,7 +3507,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3606,7 +3606,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3725,7 +3725,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -3915,7 +3915,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -4041,7 +4041,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           id: input.funnelId,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 

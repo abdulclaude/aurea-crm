@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import db from "@/lib/db";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+	anonymousUserProfiles,
+	funnel as funnelTable,
+	funnelEvent,
+	funnelSession,
+	funnelWebVital,
+} from "@/db/schema";
 
 const DeleteRequestSchema = z.object({
 	anonymousId: z.string().optional(),
@@ -30,12 +38,13 @@ export async function POST(req: NextRequest) {
 		}
 
 		// Verify funnel and API key
-		const funnel = await db.funnel.findFirst({
-			where: {
-				id: funnelId,
-				apiKey,
-				funnelType: "EXTERNAL",
-			},
+		const funnel = await db.query.funnel.findFirst({
+			where: and(
+				eq(funnelTable.id, funnelId),
+				eq(funnelTable.apiKey, apiKey),
+				eq(funnelTable.funnelType, "EXTERNAL")
+			),
+			columns: { id: true },
 		});
 
 		if (!funnel) {
@@ -66,89 +75,42 @@ export async function POST(req: NextRequest) {
 			);
 		}
 
-		// Delete all data for this user
-		const deleteOperations = [];
+		await db.transaction(async (tx) => {
+			if (anonymousId) {
+				await tx
+					.delete(funnelEvent)
+					.where(
+						and(eq(funnelEvent.anonymousId, anonymousId), eq(funnelEvent.funnelId, funnel.id))
+					);
+				await tx
+					.delete(funnelWebVital)
+					.where(
+						and(eq(funnelWebVital.anonymousId, anonymousId), eq(funnelWebVital.funnelId, funnel.id))
+					);
+				await tx
+					.delete(funnelSession)
+					.where(
+						and(eq(funnelSession.anonymousId, anonymousId), eq(funnelSession.funnelId, funnel.id))
+					);
+				await tx
+					.update(anonymousUserProfiles)
+					.set({ deletionRequestedAt: new Date() })
+					.where(eq(anonymousUserProfiles.id, anonymousId));
+			}
 
-		if (anonymousId) {
-			// Delete events
-			deleteOperations.push(
-				db.funnelEvent.deleteMany({
-					where: {
-						anonymousId,
-						funnelId: funnel.id,
-					},
-				}),
-			);
-
-			// Delete web vitals
-			deleteOperations.push(
-				db.funnelWebVital.deleteMany({
-					where: {
-						anonymousId,
-						funnelId: funnel.id,
-					},
-				}),
-			);
-
-			// Delete sessions
-			deleteOperations.push(
-				db.funnelSession.deleteMany({
-					where: {
-						anonymousId,
-						funnelId: funnel.id,
-					},
-				}),
-			);
-
-			// Delete or mark profile for deletion
-			deleteOperations.push(
-				db.anonymousUserProfile.updateMany({
-					where: {
-						id: anonymousId,
-					},
-					data: {
-						deletionRequestedAt: new Date(),
-					},
-				}),
-			);
-		}
-
-		if (userId) {
-			// Delete events
-			deleteOperations.push(
-				db.funnelEvent.deleteMany({
-					where: {
-						userId,
-						funnelId: funnel.id,
-					},
-				}),
-			);
-
-			// Delete sessions
-			deleteOperations.push(
-				db.funnelSession.deleteMany({
-					where: {
-						userId,
-						funnelId: funnel.id,
-					},
-				}),
-			);
-
-			// Update profiles
-			deleteOperations.push(
-				db.anonymousUserProfile.updateMany({
-					where: {
-						identifiedUserId: userId,
-					},
-					data: {
-						deletionRequestedAt: new Date(),
-					},
-				}),
-			);
-		}
-
-		// Execute all deletions in parallel
-		await Promise.all(deleteOperations);
+			if (userId) {
+				await tx
+					.delete(funnelEvent)
+					.where(and(eq(funnelEvent.userId, userId), eq(funnelEvent.funnelId, funnel.id)));
+				await tx
+					.delete(funnelSession)
+					.where(and(eq(funnelSession.userId, userId), eq(funnelSession.funnelId, funnel.id)));
+				await tx
+					.update(anonymousUserProfiles)
+					.set({ deletionRequestedAt: new Date() })
+					.where(eq(anonymousUserProfiles.identifiedUserId, userId));
+			}
+		});
 
 		return NextResponse.json(
 			{

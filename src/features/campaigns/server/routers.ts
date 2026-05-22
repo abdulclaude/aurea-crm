@@ -1,15 +1,26 @@
 import { z } from "zod";
+import { createId } from "@paralleldrive/cuid2";
+import { and, arrayOverlaps, count, desc, eq, inArray, isNotNull, isNull, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { campaign as campaignTable, campaignRecipient, client } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import type { SegmentFilter } from "../types";
-import type { Prisma, ContactType, LifecycleStage } from "@prisma/client";
+import type { CampaignSegmentType, ClientType, LifecycleStage } from "@/db/enums";
+import type { JsonValue } from "@/db/json";
+import { ActivityAction } from "@/db/enums";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import { createNotification } from "@/lib/notifications";
+
+const jsonSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonSchema), z.record(z.string(), jsonSchema)])
+);
 
 const emailContentSchema = z.object({
   subject: z.string(),
   preheader: z.string().optional(),
-  sections: z.array(z.any()), // We'll validate structure more loosely for flexibility
+  sections: z.array(jsonSchema),
 });
 
 const emailDesignSchema = z.object({
@@ -43,27 +54,27 @@ export const campaignsRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 20;
 
-      const campaigns = await prisma.campaign.findMany({
-        where: {
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-          ...(input?.status && { status: input.status }),
-        },
-        include: {
+      const campaigns = await db.query.campaign.findMany({
+        where: and(
+          eq(campaignTable.organizationId, ctx.orgId!),
+          ctx.locationId ? eq(campaignTable.locationId, ctx.locationId) : isNull(campaignTable.locationId),
+          input?.status ? eq(campaignTable.status, input.status) : undefined
+        ),
+        with: {
           emailDomain: true,
-          template: {
-            select: { id: true, name: true },
+          emailTemplate: {
+            columns: { id: true, name: true },
           },
         },
-        orderBy: { createdAt: "desc" },
-        take: limit + 1,
-        ...(input?.cursor && { cursor: { id: input.cursor }, skip: 1 }),
+        orderBy: [desc(campaignTable.createdAt)],
+        limit: limit + 1,
+        offset: input?.cursor ? Number(input.cursor) : 0,
       });
 
       let nextCursor: string | undefined;
       if (campaigns.length > limit) {
-        const nextItem = campaigns.pop();
-        nextCursor = nextItem?.id;
+        campaigns.pop();
+        nextCursor = String((input?.cursor ? Number(input.cursor) : 0) + limit);
       }
 
       return {
@@ -76,48 +87,40 @@ export const campaignsRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-        include: {
+      const selectedCampaign = await db.query.campaign.findFirst({
+        where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
+        with: {
           emailDomain: true,
-          template: true,
-          recipients: {
-            take: 100,
-            include: {
-              contact: {
-                select: { id: true, name: true, email: true },
+          emailTemplate: true,
+          campaignRecipients: {
+            limit: 100,
+            with: {
+              client: {
+                columns: { id: true, name: true, email: true },
               },
             },
-            orderBy: { createdAt: "desc" },
+            orderBy: [desc(campaignRecipient.createdAt)],
           },
         },
       });
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      return campaign;
+      return selectedCampaign;
     }),
 
   // Get campaign stats
   getStats: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-        select: {
+      const selectedCampaign = await db.query.campaign.findFirst({
+        where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
+        columns: {
           id: true,
           totalRecipients: true,
           delivered: true,
@@ -129,7 +132,7 @@ export const campaignsRouter = createTRPCRouter({
         },
       });
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
@@ -137,15 +140,15 @@ export const campaignsRouter = createTRPCRouter({
       }
 
       return {
-        ...campaign,
-        openRate: campaign.delivered > 0
-          ? ((campaign.opened / campaign.delivered) * 100).toFixed(1)
+        ...selectedCampaign,
+        openRate: selectedCampaign.delivered > 0
+          ? ((selectedCampaign.opened / selectedCampaign.delivered) * 100).toFixed(1)
           : "0.0",
-        clickRate: campaign.opened > 0
-          ? ((campaign.clicked / campaign.opened) * 100).toFixed(1)
+        clickRate: selectedCampaign.opened > 0
+          ? ((selectedCampaign.clicked / selectedCampaign.opened) * 100).toFixed(1)
           : "0.0",
-        bounceRate: campaign.totalRecipients > 0
-          ? ((campaign.bounced / campaign.totalRecipients) * 100).toFixed(1)
+        bounceRate: selectedCampaign.totalRecipients > 0
+          ? ((selectedCampaign.bounced / selectedCampaign.totalRecipients) * 100).toFixed(1)
           : "0.0",
       };
     }),
@@ -165,19 +168,21 @@ export const campaignsRouter = createTRPCRouter({
         fromEmail: z.string().optional(),
         replyTo: z.string().email().optional(),
         segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]).default("ALL"),
-        segmentFilter: z.any().optional(),
+        segmentFilter: jsonSchema.optional(),
         resendTemplateId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.create({
-        data: {
+      const [createdCampaign] = await db
+        .insert(campaignTable)
+        .values({
+          id: createId(),
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
           name: input.name,
           subject: input.subject,
           preheaderText: input.preheaderText,
-          content: input.content as Prisma.InputJsonValue,
+          content: input.content,
           templateId: input.templateId,
           resendTemplateId: input.resendTemplateId,
           emailDomainId: input.emailDomainId,
@@ -185,12 +190,41 @@ export const campaignsRouter = createTRPCRouter({
           fromEmail: input.fromEmail,
           replyTo: input.replyTo,
           segmentType: input.segmentType,
-          segmentFilter: input.segmentFilter as Prisma.InputJsonValue,
+          segmentFilter: input.segmentFilter,
           status: "DRAFT",
-        },
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      if (!createdCampaign) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create campaign",
+        });
+      }
+
+      await logAnalytics({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: createdCampaign.id,
+        entityName: createdCampaign.name,
+        action: ActivityAction.CREATED,
       });
 
-      return campaign;
+      await createNotification({
+        type: "CAMPAIGN_CREATED",
+        title: "Campaign created",
+        message: `${ctx.auth.user.name} created a campaign: ${createdCampaign.name}.`,
+        actorId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: createdCampaign.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? undefined,
+      });
+
+      return createdCampaign;
     }),
 
   // Update a campaign
@@ -209,27 +243,21 @@ export const campaignsRouter = createTRPCRouter({
         fromEmail: z.string().optional(),
         replyTo: z.string().email().optional().nullable(),
         segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]).optional(),
-        segmentFilter: z.any().optional(),
+        segmentFilter: jsonSchema.optional(),
         resendTemplateId: z.string().optional().nullable(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const existingCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
 
-      if (!campaign) {
+      if (!existingCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      if (campaign.status !== "DRAFT") {
+      if (existingCampaign.status !== "DRAFT") {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Only draft campaigns can be edited",
@@ -238,14 +266,44 @@ export const campaignsRouter = createTRPCRouter({
 
       const { id, ...updateData } = input;
 
-      const updatedCampaign = await prisma.campaign.update({
-        where: { id },
-        data: {
-          ...updateData,
-          content: updateData.content as Prisma.InputJsonValue,
-          segmentFilter: updateData.segmentFilter as Prisma.InputJsonValue,
-        },
-      });
+      const changes = getChangedFields(existingCampaign, input);
+
+      const [updatedCampaign] = await db
+        .update(campaignTable)
+        .set({ ...updateData, updatedAt: new Date() })
+        .where(eq(campaignTable.id, id))
+        .returning();
+
+      if (!updatedCampaign) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to update campaign",
+        });
+      }
+
+      if (Object.keys(changes ?? {}).length > 0) {
+        await logAnalytics({
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId ?? null,
+          userId: ctx.auth.user.id,
+          entityType: "campaign",
+          entityId: updatedCampaign.id,
+          entityName: updatedCampaign.name,
+          action: ActivityAction.UPDATED,
+          changes,
+        });
+
+        await createNotification({
+          type: "CAMPAIGN_UPDATED",
+          title: "Campaign updated",
+          message: `${ctx.auth.user.name} updated campaign ${updatedCampaign.name}.`,
+          actorId: ctx.auth.user.id,
+          entityType: "campaign",
+          entityId: updatedCampaign.id,
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId ?? undefined,
+        });
+      }
 
       return updatedCampaign;
     }),
@@ -259,22 +317,16 @@ export const campaignsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      if (campaign.status !== "DRAFT") {
+      if (selectedCampaign.status !== "DRAFT") {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Only draft campaigns can be scheduled",
@@ -289,12 +341,43 @@ export const campaignsRouter = createTRPCRouter({
         });
       }
 
-      const updatedCampaign = await prisma.campaign.update({
-        where: { id: input.id },
-        data: {
+      const [updatedCampaign] = await db
+        .update(campaignTable)
+        .set({
           scheduledAt,
           status: "SCHEDULED",
-        },
+          updatedAt: new Date(),
+        })
+        .where(eq(campaignTable.id, input.id))
+        .returning();
+
+      if (!updatedCampaign) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to schedule campaign",
+        });
+      }
+
+      await logAnalytics({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: updatedCampaign.id,
+        entityName: updatedCampaign.name,
+        action: ActivityAction.STATUS_CHANGED,
+        metadata: { status: "SCHEDULED" },
+      });
+
+      await createNotification({
+        type: "CAMPAIGN_SCHEDULED",
+        title: "Campaign scheduled",
+        message: `${ctx.auth.user.name} scheduled campaign ${updatedCampaign.name}.`,
+        actorId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: updatedCampaign.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? undefined,
       });
 
       return updatedCampaign;
@@ -304,35 +387,50 @@ export const campaignsRouter = createTRPCRouter({
   send: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-        include: {
-          emailDomain: true,
-        },
+      const selectedCampaign = await db.query.campaign.findFirst({
+        where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
+        with: { emailDomain: true },
       });
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      if (!["DRAFT", "SCHEDULED"].includes(campaign.status)) {
+      if (!["DRAFT", "SCHEDULED"].includes(selectedCampaign.status)) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "This campaign cannot be sent",
         });
       }
 
-      // Update status to QUEUED
-      await prisma.campaign.update({
-        where: { id: input.id },
-        data: { status: "QUEUED" },
+      await db
+        .update(campaignTable)
+        .set({ status: "QUEUED", updatedAt: new Date() })
+        .where(eq(campaignTable.id, input.id));
+
+      await logAnalytics({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: selectedCampaign.id,
+        entityName: selectedCampaign.name,
+        action: ActivityAction.STATUS_CHANGED,
+        metadata: { status: "QUEUED" },
+      });
+
+      await createNotification({
+        type: "CAMPAIGN_SENT",
+        title: "Campaign sending",
+        message: `${ctx.auth.user.name} queued campaign ${selectedCampaign.name} for sending.`,
+        actorId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: selectedCampaign.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? undefined,
       });
 
       // Trigger the Inngest function to send the campaign
@@ -341,7 +439,7 @@ export const campaignsRouter = createTRPCRouter({
         data: {
           campaignId: input.id,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
         },
       });
 
@@ -352,34 +450,59 @@ export const campaignsRouter = createTRPCRouter({
   cancel: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      if (!["SCHEDULED", "QUEUED"].includes(campaign.status)) {
+      if (!["SCHEDULED", "QUEUED"].includes(selectedCampaign.status)) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Only scheduled or queued campaigns can be cancelled",
         });
       }
 
-      const updatedCampaign = await prisma.campaign.update({
-        where: { id: input.id },
-        data: {
+      const [updatedCampaign] = await db
+        .update(campaignTable)
+        .set({
           status: "CANCELLED",
           scheduledAt: null,
-        },
+          updatedAt: new Date(),
+        })
+        .where(eq(campaignTable.id, input.id))
+        .returning();
+
+      if (!updatedCampaign) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to cancel campaign",
+        });
+      }
+
+      await logAnalytics({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: updatedCampaign.id,
+        entityName: updatedCampaign.name,
+        action: ActivityAction.STATUS_CHANGED,
+        metadata: { status: "CANCELLED" },
+      });
+
+      await createNotification({
+        type: "CAMPAIGN_CANCELLED",
+        title: "Campaign cancelled",
+        message: `${ctx.auth.user.name} cancelled campaign ${updatedCampaign.name}.`,
+        actorId: ctx.auth.user.id,
+        entityType: "campaign",
+        entityId: updatedCampaign.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? undefined,
       });
 
       return updatedCampaign;
@@ -389,39 +512,43 @@ export const campaignsRouter = createTRPCRouter({
   duplicate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      const newCampaign = await prisma.campaign.create({
-        data: {
-          organizationId: campaign.organizationId,
-          subaccountId: campaign.subaccountId,
-          name: `${campaign.name} (Copy)`,
-          subject: campaign.subject,
-          preheaderText: campaign.preheaderText,
-          content: campaign.content as Prisma.InputJsonValue,
-          templateId: campaign.templateId,
-          emailDomainId: campaign.emailDomainId,
-          fromName: campaign.fromName,
-          fromEmail: campaign.fromEmail,
-          replyTo: campaign.replyTo,
-          segmentType: campaign.segmentType,
-          segmentFilter: campaign.segmentFilter as Prisma.InputJsonValue,
+      const [newCampaign] = await db
+        .insert(campaignTable)
+        .values({
+          id: createId(),
+          organizationId: selectedCampaign.organizationId,
+          locationId: selectedCampaign.locationId,
+          name: `${selectedCampaign.name} (Copy)`,
+          subject: selectedCampaign.subject,
+          preheaderText: selectedCampaign.preheaderText,
+          content: selectedCampaign.content,
+          templateId: selectedCampaign.templateId,
+          emailDomainId: selectedCampaign.emailDomainId,
+          fromName: selectedCampaign.fromName,
+          fromEmail: selectedCampaign.fromEmail,
+          replyTo: selectedCampaign.replyTo,
+          segmentType: selectedCampaign.segmentType,
+          segmentFilter: selectedCampaign.segmentFilter,
           status: "DRAFT",
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .returning();
+
+      if (!newCampaign) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to duplicate campaign",
+        });
+      }
 
       return newCampaign;
     }),
@@ -430,31 +557,23 @@ export const campaignsRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const campaign = await prisma.campaign.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
 
-      if (!campaign) {
+      if (!selectedCampaign) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Campaign not found",
         });
       }
 
-      if (["SENDING", "QUEUED"].includes(campaign.status)) {
+      if (["SENDING", "QUEUED"].includes(selectedCampaign.status)) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: "Cannot delete a campaign that is currently sending",
         });
       }
 
-      await prisma.campaign.delete({
-        where: { id: input.id },
-      });
+      await db.delete(campaignTable).where(eq(campaignTable.id, input.id));
 
       return { success: true };
     }),
@@ -464,72 +583,84 @@ export const campaignsRouter = createTRPCRouter({
     .input(
       z.object({
         segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]),
-        segmentFilter: z.any().optional(),
+        segmentFilter: jsonSchema.optional(),
       })
     )
     .query(async ({ ctx, input }) => {
-      const where = buildContactWhereClause(
+      const where = buildClientWhereClause(
         ctx.orgId!,
-        ctx.subaccountId ?? null,
+        ctx.locationId ?? null,
         input.segmentType,
         input.segmentFilter as SegmentFilter | undefined
       );
 
-      const count = await prisma.contact.count({ where });
+      const [result] = await db.select({ value: count() }).from(client).where(where);
 
-      return { count };
+      return { count: result?.value ?? 0 };
     }),
 });
 
-// Helper function to build contact where clause based on segment
-function buildContactWhereClause(
+// Helper function to build client where clause based on segment
+function buildClientWhereClause(
   organizationId: string,
-  subaccountId: string | null,
-  segmentType: string,
+  locationId: string | null,
+  segmentType: CampaignSegmentType,
   segmentFilter?: SegmentFilter
-): Prisma.ContactWhereInput {
-  const baseWhere: Prisma.ContactWhereInput = {
-    organizationId,
-    subaccountId,
-    email: { not: null },
-    emailUnsubscribed: false,
-  };
+): SQL | undefined {
+  const baseConditions = [
+    eq(client.organizationId, organizationId),
+    locationId ? eq(client.locationId, locationId) : isNull(client.locationId),
+    isNotNull(client.email),
+    eq(client.emailUnsubscribed, false),
+  ];
 
   switch (segmentType) {
     case "ALL":
-      return baseWhere;
+      return and(...baseConditions);
 
-    case "BY_TYPE":
-      return {
-        ...baseWhere,
-        type: { in: (segmentFilter?.types || []) as ContactType[] },
-      };
+    case "BY_TYPE": {
+      const types = (segmentFilter?.types ?? []) as ClientType[];
+      return and(...baseConditions, types.length > 0 ? inArray(client.type, types) : undefined);
+    }
 
-    case "BY_TAGS":
-      return {
-        ...baseWhere,
-        tags: { hasSome: segmentFilter?.tags || [] },
-      };
+    case "BY_TAGS": {
+      const tags = segmentFilter?.tags ?? [];
+      return and(...baseConditions, tags.length > 0 ? arrayOverlaps(client.tags, tags) : undefined);
+    }
 
-    case "BY_LIFECYCLE":
-      return {
-        ...baseWhere,
-        lifecycleStage: { in: (segmentFilter?.lifecycleStages || []) as LifecycleStage[] },
-      };
+    case "BY_LIFECYCLE": {
+      const lifecycleStages = (segmentFilter?.lifecycleStages ?? []) as LifecycleStage[];
+      return and(
+        ...baseConditions,
+        lifecycleStages.length > 0 ? inArray(client.lifecycleStage, lifecycleStages) : undefined
+      );
+    }
 
-    case "BY_COUNTRY":
-      return {
-        ...baseWhere,
-        country: { in: segmentFilter?.countries || [] },
-      };
+    case "BY_COUNTRY": {
+      const countries = segmentFilter?.countries ?? [];
+      return and(...baseConditions, countries.length > 0 ? inArray(client.country, countries) : undefined);
+    }
 
     case "CUSTOM":
-      // Build custom filter - simplified for now
-      return baseWhere;
+      return and(...baseConditions);
 
     default:
-      return baseWhere;
+      return and(...baseConditions);
   }
 }
 
-export { buildContactWhereClause };
+function campaignOwnerWhere(id: string, organizationId: string, locationId: string | null): SQL | undefined {
+  return and(
+    eq(campaignTable.id, id),
+    eq(campaignTable.organizationId, organizationId),
+    locationId ? eq(campaignTable.locationId, locationId) : isNull(campaignTable.locationId)
+  );
+}
+
+async function getOwnedCampaign(id: string, organizationId: string, locationId: string | null) {
+  return db.query.campaign.findFirst({
+    where: campaignOwnerWhere(id, organizationId, locationId),
+  });
+}
+
+export { buildClientWhereClause };

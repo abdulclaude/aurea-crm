@@ -20,7 +20,8 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { deviceModeAtom, activePageIdAtom } from "../../../lib/editor-store";
-import type { FunnelBlock, FunnelBreakpoint, DeviceType } from "@prisma/client";
+import type { DeviceType } from "@/db/enums";
+import type { FunnelBlock, FunnelBreakpoint } from "@/db/types";
 import type { BlockStyles } from "../../../types";
 
 interface StylesPanelProps {

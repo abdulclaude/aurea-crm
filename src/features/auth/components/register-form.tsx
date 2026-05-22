@@ -32,6 +32,7 @@ import { authClient } from "@/lib/auth-client";
 
 const registerSchema = z
   .object({
+    name: z.string().min(1, "Your name is required."),
     email: z.email("Please enter a valid email address."),
     password: z.string().min(1, "A password is required."),
     confirmPassword: z.string(),
@@ -51,6 +52,7 @@ const RegisterForm = () => {
   const form = useForm({
     resolver: zodResolver(registerSchema),
     defaultValues: {
+      name: "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -62,7 +64,7 @@ const RegisterForm = () => {
       {
         email: values.email,
         password: values.password,
-        name: values.email,
+        name: values.name,
         callbackURL: callbackUrl,
       },
       {
@@ -123,6 +125,24 @@ const RegisterForm = () => {
                 </div>
 
                 <div className="grid gap-6">
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel> Full name </FormLabel>
+                        <FormControl>
+                          <Input
+                            type="text"
+                            placeholder="John Doe"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                   <FormField
                     control={form.control}
                     name="email"

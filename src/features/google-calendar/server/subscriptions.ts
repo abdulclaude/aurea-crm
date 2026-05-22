@@ -1,14 +1,16 @@
 "use server";
 
 import { createId } from "@paralleldrive/cuid2";
-import type {
-  GoogleCalendarSubscription,
-  Node as PrismaNode,
-  Account,
-} from "@prisma/client";
+import { and, eq, lte } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
 
-import { NodeType } from "@prisma/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { NodeType } from "@/db/enums";
+import {
+  account as accountTable,
+  googleCalendarSubscription,
+  node as workflowNode,
+} from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 
@@ -26,6 +28,9 @@ type TriggerNodeData = {
 };
 
 type EventType = "created" | "updated" | "deleted";
+type Account = InferSelectModel<typeof accountTable>;
+type GoogleCalendarSubscription = InferSelectModel<typeof googleCalendarSubscription>;
+type CalendarNode = InferSelectModel<typeof workflowNode>;
 
 export async function syncGoogleCalendarWorkflowSubscriptions({
   workflowId,
@@ -34,16 +39,16 @@ export async function syncGoogleCalendarWorkflowSubscriptions({
   workflowId: string;
   userId: string;
 }) {
-  const nodes = await prisma.node.findMany({
-    where: {
-      workflowId,
-      type: NodeType.GOOGLE_CALENDAR_TRIGGER,
-    },
+  const nodes = await db.query.node.findMany({
+    where: and(
+      eq(workflowNode.workflowId, workflowId),
+      eq(workflowNode.type, NodeType.GOOGLE_CALENDAR_TRIGGER),
+    ),
   });
 
   const existingSubscriptions =
-    await prisma.googleCalendarSubscription.findMany({
-      where: { workflowId },
+    await db.query.googleCalendarSubscription.findMany({
+      where: eq(googleCalendarSubscription.workflowId, workflowId),
     });
 
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
@@ -77,15 +82,15 @@ export async function syncGoogleCalendarWorkflowSubscriptions({
 export async function removeGoogleCalendarWorkflowSubscriptions(
   workflowId: string
 ) {
-  const subs = await prisma.googleCalendarSubscription.findMany({
-    where: { workflowId },
+  const subs = await db.query.googleCalendarSubscription.findMany({
+    where: eq(googleCalendarSubscription.workflowId, workflowId),
   });
   await Promise.all(subs.map((sub) => stopSubscription(sub)));
 }
 
 export async function removeGoogleCalendarSubscriptionsForUser(userId: string) {
-  const subs = await prisma.googleCalendarSubscription.findMany({
-    where: { userId },
+  const subs = await db.query.googleCalendarSubscription.findMany({
+    where: eq(googleCalendarSubscription.userId, userId),
   });
   await Promise.all(subs.map((sub) => stopSubscription(sub)));
 }
@@ -104,8 +109,8 @@ export async function enqueueGoogleCalendarNotification(params: {
 export async function processGoogleCalendarSubscription(
   subscriptionId: string
 ) {
-  const subscription = await prisma.googleCalendarSubscription.findUnique({
-    where: { id: subscriptionId },
+  const subscription = await db.query.googleCalendarSubscription.findFirst({
+    where: eq(googleCalendarSubscription.id, subscriptionId),
   });
 
   if (!subscription) {
@@ -122,12 +127,8 @@ export async function processGoogleCalendarSubscription(
 
 export async function renewExpiringGoogleCalendarSubscriptions() {
   const threshold = new Date(Date.now() + RENEWAL_WINDOW_MS);
-  const subs = await prisma.googleCalendarSubscription.findMany({
-    where: {
-      expiresAt: {
-        lte: threshold,
-      },
-    },
+  const subs = await db.query.googleCalendarSubscription.findMany({
+    where: lte(googleCalendarSubscription.expiresAt, threshold),
   });
 
   for (const sub of subs) {
@@ -144,7 +145,7 @@ async function ensureSubscriptionForNode({
   existing,
   force = false,
 }: {
-  node: PrismaNode;
+  node: CalendarNode;
   workflowId: string;
   userId: string;
   existing?: GoogleCalendarSubscription;
@@ -165,7 +166,7 @@ async function ensureSubscriptionForNode({
     force ||
     !existing ||
     existing.calendarId !== data.calendarId ||
-    !sameSet(existing.listenFor, listenFor) ||
+    !sameSet(existing.listenFor ?? [], listenFor) ||
     existing.variableName !== variableName ||
     !existing.syncToken ||
     !existing.expiresAt ||
@@ -173,10 +174,10 @@ async function ensureSubscriptionForNode({
 
   if (!requiresRefresh) {
     if (existing && existing.variableName !== variableName) {
-      await prisma.googleCalendarSubscription.update({
-        where: { id: existing.id },
-        data: { variableName },
-      });
+      await db
+        .update(googleCalendarSubscription)
+        .set({ variableName, updatedAt: new Date() })
+        .where(eq(googleCalendarSubscription.id, existing.id));
     }
     return;
   }
@@ -223,24 +224,9 @@ async function ensureSubscriptionForNode({
       ? new Date(Number(payload.expiration))
       : null;
 
-  await prisma.googleCalendarSubscription.upsert({
-    where: { nodeId: node.id },
-    update: {
-      calendarId: data.calendarId,
-      calendarName: data.calendarName,
-      listenFor,
-      channelId,
-      resourceId: payload.resourceId,
-      webhookToken,
-      syncToken,
-      expiresAt,
-      lastSyncedAt: new Date(),
-      timezone: data.timezone,
-      userId,
-      workflowId,
-      variableName,
-    },
-    create: {
+  await db
+    .insert(googleCalendarSubscription)
+    .values({
       id: crypto.randomUUID(),
       nodeId: node.id,
       calendarId: data.calendarId,
@@ -258,8 +244,26 @@ async function ensureSubscriptionForNode({
       variableName,
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: googleCalendarSubscription.nodeId,
+      set: {
+      calendarId: data.calendarId,
+      calendarName: data.calendarName,
+      listenFor,
+      channelId,
+      resourceId: payload.resourceId,
+      webhookToken,
+      syncToken,
+      expiresAt,
+      lastSyncedAt: new Date(),
+      timezone: data.timezone,
+      userId,
+      workflowId,
+      variableName,
+      updatedAt: new Date(),
+      },
+    });
 }
 
 async function fetchAndProcessChanges(
@@ -318,7 +322,7 @@ async function fetchAndProcessChanges(
 
     for (const event of items) {
       const eventType = resolveEventType(event);
-      if (!subscription.listenFor.includes(eventType)) {
+      if (!(subscription.listenFor ?? []).includes(eventType)) {
         continue;
       }
 
@@ -357,23 +361,25 @@ async function fetchAndProcessChanges(
     }
   }
 
-  await prisma.googleCalendarSubscription.update({
-    where: { id: subscription.id },
-    data: {
+  await db
+    .update(googleCalendarSubscription)
+    .set({
       syncToken: nextSyncToken,
       lastSyncedAt: new Date(),
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(googleCalendarSubscription.id, subscription.id));
 }
 
 async function recreateSubscription(subscription: GoogleCalendarSubscription) {
-  const node = await prisma.node.findUnique({
-    where: { id: subscription.nodeId },
+  const node = await db.query.node.findFirst({
+    where: eq(workflowNode.id, subscription.nodeId),
   });
 
   if (!node || node.type !== NodeType.GOOGLE_CALENDAR_TRIGGER) {
-    await prisma.googleCalendarSubscription
-      .delete({ where: { id: subscription.id } })
+    await db
+      .delete(googleCalendarSubscription)
+      .where(eq(googleCalendarSubscription.id, subscription.id))
       .catch(() => {});
     return;
   }
@@ -407,43 +413,39 @@ async function stopSubscription(subscription: GoogleCalendarSubscription) {
       error
     );
   } finally {
-    await prisma.googleCalendarSubscription
-      .delete({
-        where: { id: subscription.id },
-      })
+    await db
+      .delete(googleCalendarSubscription)
+      .where(eq(googleCalendarSubscription.id, subscription.id))
       .catch(() => {});
   }
 }
 
 async function ensureGoogleAccessToken(userId: string) {
-  const account = await prisma.account.findFirst({
-    where: {
-      userId,
-      providerId: "google",
-    },
+  const selectedAccount = await db.query.account.findFirst({
+    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "google")),
   });
 
-  if (!account) {
+  if (!selectedAccount) {
     throw new Error(
       "Google Calendar requires a connected Google account. Connect Google Calendar under Integrations."
     );
   }
 
   if (
-    account.accessToken &&
-    account.accessTokenExpiresAt &&
-    account.accessTokenExpiresAt.getTime() > Date.now() + 60_000
+    selectedAccount.accessToken &&
+    selectedAccount.accessTokenExpiresAt &&
+    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
   ) {
-    return account.accessToken;
+    return selectedAccount.accessToken;
   }
 
-  if (!account.refreshToken) {
+  if (!selectedAccount.refreshToken) {
     throw new Error(
       "Google Calendar access token expired and no refresh token is available. Reconnect Google Calendar."
     );
   }
 
-  return refreshGoogleAccessToken(account);
+  return refreshGoogleAccessToken(selectedAccount);
 }
 
 async function refreshGoogleAccessToken(account: Account) {
@@ -486,14 +488,15 @@ async function refreshGoogleAccessToken(account: Account) {
 
   const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
 
-  await prisma.account.update({
-    where: { id: account.id },
-    data: {
+  await db
+    .update(accountTable)
+    .set({
       accessToken: payload.access_token,
       accessTokenExpiresAt: expiresAt,
       refreshToken: payload.refresh_token ?? refreshToken,
-    },
-  });
+      updatedAt: new Date(),
+    })
+    .where(eq(accountTable.id, account.id));
 
   return payload.access_token as string;
 }

@@ -12,19 +12,19 @@ export const sendInvitationEmail = async ({
   organizationName,
   invitationUrl,
   role,
-  isSubaccount = false,
+  isLocation = false,
 }: {
   to: string;
   inviterName: string;
   organizationName: string;
   invitationUrl: string;
   role?: string;
-  isSubaccount?: boolean;
+  isLocation?: boolean;
 }) => {
   const fromEnv = process.env.RESEND_FROM_EMAIL || "noreply@aureacrm.com";
   const normalizedFrom = fromEnv.split("#")[0].trim();
   const subject = `You've been invited to join ${organizationName}`;
-  const entityType = isSubaccount ? "client workspace" : "organization";
+  const entityType = isLocation ? "client workspace" : "organization";
   const roleText = role ? ` as ${role}` : "";
 
   const html = `

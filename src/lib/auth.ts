@@ -1,10 +1,9 @@
 import { betterAuth } from "better-auth";
 import { organization } from "better-auth/plugins";
-import { prismaAdapter } from "better-auth/adapters/prisma";
-
-import prisma from "./db";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
 
 import { polar, checkout, portal } from "@polar-sh/better-auth";
+import { db, dbSchema } from "@/db";
 import { polarClient } from "@/lib/polar";
 
 const parseScopes = (value?: string) =>
@@ -28,8 +27,11 @@ export const auth = betterAuth({
   trustedOrigins: ["http://localhost:3000", process.env.APP_URL || ""].filter(
     Boolean
   ),
-  database: prismaAdapter(prisma, {
-    provider: "postgresql", // or "mysql", "postgresql", ...etc
+  database: drizzleAdapter(db, {
+    provider: "pg",
+    schema: dbSchema,
+    camelCase: true,
+    transaction: true,
   }),
   emailAndPassword: {
     enabled: true,

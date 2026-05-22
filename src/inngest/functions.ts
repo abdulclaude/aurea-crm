@@ -1,9 +1,91 @@
 import { getExecutor } from "@/features/executions/lib/executor-registry";
+import type { Realtime } from "@inngest/realtime";
 import { inngest } from "./client";
-import { ExecutionStatus, NodeType } from "@prisma/client";
-import prisma from "@/lib/db";
+import { ExecutionStatus, NodeType } from "@/db/enums";
+import { db } from "@/db";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  lte,
+  lt,
+  or,
+  type SQL,
+} from "drizzle-orm";
+import {
+  connection,
+  execution as executionTable,
+  instructorDocument,
+  invoice,
+  invoiceLineItem,
+  invoiceReminder,
+  location as locationTable,
+  organization,
+  recurringInvoice,
+  recurringInvoiceGeneration,
+  workflows,
+} from "@/db/schema";
 import { topologicalSort } from "./utils";
 import { NonRetriableError } from "inngest";
+import { createNotification } from "@/lib/notifications";
+import { recordAutomationEventsForExecution } from "@/features/executions/server/automation-events";
+import type { JsonValue } from "@/db/json";
+import { MINIMAL_TEMPLATE, type InvoiceTemplatePreset } from "@/features/invoicing/lib/template-presets";
+
+function hasRealtimePublish(
+  value: unknown
+): value is { publish: Realtime.PublishFn } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "publish" in value &&
+    typeof value.publish === "function"
+  );
+}
+
+const formatAddress = (
+  address:
+    | {
+        street?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
+        country?: string;
+      }
+    | undefined
+): string | undefined => {
+  if (!address) return undefined;
+  const formatted = [address.street, address.city, address.state, address.zip, address.country]
+    .filter(Boolean)
+    .join(", ");
+  return formatted || undefined;
+};
+
+const toInvoiceTemplatePreset = (
+  template:
+    | {
+        name: string;
+        description: string | null;
+        layout: unknown;
+        styles: unknown;
+      }
+    | null
+    | undefined
+): InvoiceTemplatePreset => {
+  if (!template || typeof template.layout !== "object" || typeof template.styles !== "object") {
+    return MINIMAL_TEMPLATE;
+  }
+
+  return {
+    name: template.name,
+    description: template.description ?? "",
+    layout: template.layout as InvoiceTemplatePreset["layout"],
+    styles: template.styles as InvoiceTemplatePreset["styles"],
+  };
+};
 
 import { httpRequestChannel } from "./channels/http-request";
 import { manualTriggerChannel } from "./channels/manual-trigger";
@@ -32,19 +114,20 @@ import { googleDriveCreateFolderChannel } from "./channels/google-drive-create-f
 import { googleFormReadResponsesChannel } from "./channels/google-form-read-responses";
 import { telegramChannel } from "./channels/telegram";
 import { waitChannel } from "./channels/wait";
-import { createContactChannel } from "./channels/create-contact";
-import { updateContactChannel } from "./channels/update-contact";
-import { deleteContactChannel } from "./channels/delete-contact";
+import { createClientChannel } from "./channels/create-client";
+import { updateClientChannel } from "./channels/update-client";
+import { deleteClientChannel } from "./channels/delete-client";
 import { createDealChannel } from "./channels/create-deal";
 import { updateDealChannel } from "./channels/update-deal";
 import { deleteDealChannel } from "./channels/delete-deal";
 import { updatePipelineChannel } from "./channels/update-pipeline";
-import { contactCreatedTriggerChannel } from "./channels/contact-created-trigger";
-import { contactUpdatedTriggerChannel } from "./channels/contact-updated-trigger";
-import { contactFieldChangedTriggerChannel } from "./channels/contact-field-changed-trigger";
-import { contactDeletedTriggerChannel } from "./channels/contact-deleted-trigger";
-import { contactTypeChangedTriggerChannel } from "./channels/contact-type-changed-trigger";
-import { contactLifecycleStageChangedTriggerChannel } from "./channels/contact-lifecycle-stage-changed-trigger";
+import { clientCreatedTriggerChannel } from "./channels/client-created-trigger";
+import { clientUpdatedTriggerChannel } from "./channels/client-updated-trigger";
+import { clientFieldChangedTriggerChannel } from "./channels/client-field-changed-trigger";
+import { birthdayTriggerChannel } from "./channels/birthday-trigger";
+import { clientDeletedTriggerChannel } from "./channels/client-deleted-trigger";
+import { clientTypeChangedTriggerChannel } from "./channels/client-type-changed-trigger";
+import { clientLifecycleStageChangedTriggerChannel } from "./channels/client-lifecycle-stage-changed-trigger";
 import { ifElseChannel } from "./channels/if-else";
 import { setVariableChannel } from "./channels/set-variable";
 import { stopWorkflowChannel } from "./channels/stop-workflow";
@@ -60,9 +143,28 @@ import { dealUpdatedTriggerChannel } from "./channels/deal-updated-trigger";
 import { dealDeletedTriggerChannel } from "./channels/deal-deleted-trigger";
 import { dealStageChangedTriggerChannel } from "./channels/deal-stage-changed-trigger";
 import { slackSendMessageChannel } from "./channels/slack-send-message";
-import { findContactsChannel } from "./channels/find-contacts";
-import { addTagToContactChannel } from "./channels/add-tag-to-contact";
-import { removeTagFromContactChannel } from "./channels/remove-tag-from-contact";
+import { findClientsChannel } from "./channels/find-clients";
+import { addTagToClientChannel } from "./channels/add-tag-to-client";
+import { removeTagFromClientChannel } from "./channels/remove-tag-from-client";
+import { classBookedTriggerChannel } from "./channels/class-booked-trigger";
+import { classCancelledTriggerChannel } from "./channels/class-cancelled-trigger";
+import { memberCheckedInTriggerChannel } from "./channels/member-checked-in-trigger";
+import { memberNoShowTriggerChannel } from "./channels/member-no-show-trigger";
+import { membershipCreatedTriggerChannel } from "./channels/membership-created-trigger";
+import { membershipExpiringTriggerChannel } from "./channels/membership-expiring-trigger";
+import { membershipCancelledTriggerChannel } from "./channels/membership-cancelled-trigger";
+import { waitlistSpotOpenedTriggerChannel } from "./channels/waitlist-spot-opened-trigger";
+import { introOfferRedeemedTriggerChannel } from "./channels/intro-offer-redeemed-trigger";
+import { introOfferCompletedTriggerChannel } from "./channels/intro-offer-completed-trigger";
+import { memberClassCountTriggerChannel } from "./channels/member-class-count-trigger";
+import { clientTagAddedTriggerChannel } from "./channels/client-tag-added-trigger";
+import { clientTagRemovedTriggerChannel } from "./channels/client-tag-removed-trigger";
+import { studioPaymentSucceededTriggerChannel } from "./channels/studio-payment-succeeded-trigger";
+import { studioPaymentFailedTriggerChannel } from "./channels/studio-payment-failed-trigger";
+import { sendClassReminderChannel } from "./channels/send-class-reminder";
+import { awardLoyaltyPointsChannel } from "./channels/award-loyalty-points";
+import { calculateChurnScoreChannel } from "./channels/calculate-churn-score";
+import { sendSmsChannel } from "./channels/send-sms";
 import {
   processGoogleCalendarSubscription,
   renewExpiringGoogleCalendarSubscriptions,
@@ -71,7 +173,7 @@ import {
   mindbodyFullSync,
   mindbodyClientsSync,
   mindbodyClassesSync,
-  mindbodyContactSync,
+  mindbodyClientSync,
   mindbodyScheduledSync,
 } from "./functions/mindbody-sync";
 import {
@@ -94,22 +196,68 @@ import { sendRotaMagicLinks } from "./functions/send-rota-magic-links";
 import { processTrackingEvents } from "./functions/process-tracking-events";
 import { cleanupOldEvents } from "./functions/cleanup-old-events";
 import { syncAdSpend } from "./functions/sync-ad-spend";
+import { processSmsQueue } from "./functions/process-sms-queue";
 
 export const executeWorkflow = inngest.createFunction(
   {
     id: "execute-workflow",
     retries: 0,
     onFailure: async ({ event }) => {
-      return prisma.execution.update({
-        where: {
-          inngestEventId: event.data.event.id,
-        },
-        data: {
+      const failedEventId = event.data.event.id;
+      if (!failedEventId) {
+        throw new NonRetriableError("Failed workflow event ID is missing.");
+      }
+
+      const [execution] = await db
+        .update(executionTable)
+        .set({
           status: ExecutionStatus.FAILED,
           error: event.data.error.message,
           errorStack: event.data.error.stack,
-        },
-      });
+        })
+        .where(eq(executionTable.inngestEventId, failedEventId))
+        .returning();
+
+      if (!execution) {
+        throw new NonRetriableError("Failed workflow execution record not found.");
+      }
+
+      const workflowId =
+        ((event.data as Record<string, unknown>).workflowId as string | undefined) ?? execution.workflowId;
+
+      if (workflowId) {
+        const workflow = await db.query.workflows.findFirst({
+          where: eq(workflows.id, workflowId),
+          columns: {
+            id: true,
+            name: true,
+            organizationId: true,
+            locationId: true,
+          },
+        });
+
+        if (workflow && workflow.organizationId) {
+          try {
+            await createNotification({
+              type: "WORKFLOW_FAILED",
+              title: "Workflow failed",
+              message: `Workflow ${workflow.name} failed to execute`,
+              entityType: "workflow",
+              entityId: workflow.id,
+              organizationId: workflow.organizationId,
+              locationId: workflow.locationId ?? undefined,
+              data: {
+                error: event.data.error.message,
+                executionId: execution.id,
+              },
+            });
+          } catch (error) {
+            console.error("Failed to notify workflow failure:", error);
+          }
+        }
+      }
+
+      return execution;
     },
   },
   {
@@ -142,19 +290,20 @@ export const executeWorkflow = inngest.createFunction(
       googleFormReadResponsesChannel(),
       telegramChannel(),
       waitChannel(),
-      createContactChannel(),
-      updateContactChannel(),
-      deleteContactChannel(),
+      createClientChannel(),
+      updateClientChannel(),
+      deleteClientChannel(),
       createDealChannel(),
       updateDealChannel(),
       deleteDealChannel(),
       updatePipelineChannel(),
-      contactCreatedTriggerChannel(),
-      contactUpdatedTriggerChannel(),
-      contactFieldChangedTriggerChannel(),
-      contactDeletedTriggerChannel(),
-      contactTypeChangedTriggerChannel(),
-      contactLifecycleStageChangedTriggerChannel(),
+      clientCreatedTriggerChannel(),
+      clientUpdatedTriggerChannel(),
+      clientFieldChangedTriggerChannel(),
+      birthdayTriggerChannel(),
+      clientDeletedTriggerChannel(),
+      clientTypeChangedTriggerChannel(),
+      clientLifecycleStageChangedTriggerChannel(),
       ifElseChannel(),
       setVariableChannel(),
       stopWorkflowChannel(),
@@ -170,12 +319,36 @@ export const executeWorkflow = inngest.createFunction(
       dealDeletedTriggerChannel(),
       dealStageChangedTriggerChannel(),
       slackSendMessageChannel(),
-      findContactsChannel(),
-      addTagToContactChannel(),
-      removeTagFromContactChannel(),
+      findClientsChannel(),
+      addTagToClientChannel(),
+      removeTagFromClientChannel(),
+      classBookedTriggerChannel(),
+      classCancelledTriggerChannel(),
+      memberCheckedInTriggerChannel(),
+      memberNoShowTriggerChannel(),
+      membershipCreatedTriggerChannel(),
+      membershipExpiringTriggerChannel(),
+      membershipCancelledTriggerChannel(),
+      waitlistSpotOpenedTriggerChannel(),
+      introOfferRedeemedTriggerChannel(),
+      introOfferCompletedTriggerChannel(),
+      memberClassCountTriggerChannel(),
+      clientTagAddedTriggerChannel(),
+      clientTagRemovedTriggerChannel(),
+      studioPaymentSucceededTriggerChannel(),
+      studioPaymentFailedTriggerChannel(),
+      sendClassReminderChannel(),
+      awardLoyaltyPointsChannel(),
+      calculateChurnScoreChannel(),
+      sendSmsChannel(),
     ],
   },
-  async ({ event, step, publish }) => {
+  async (args) => {
+    if (!hasRealtimePublish(args)) {
+      throw new NonRetriableError("Realtime publisher is missing.");
+    }
+
+    const { event, step, publish } = args;
     const inngestEventId = event.id;
     const workflowId = event.data.workflowId;
 
@@ -187,11 +360,11 @@ export const executeWorkflow = inngest.createFunction(
       throw new NonRetriableError("Workflow ID is missing.");
     }
 
-    await step.run("create-execution", async () => {
-      const workflowMeta = await prisma.workflows.findUnique({
-        where: { id: workflowId },
-        select: {
-          subaccountId: true,
+    const execution = await step.run("create-execution", async () => {
+      const workflowMeta = await db.query.workflows.findFirst({
+        where: eq(workflows.id, workflowId),
+        columns: {
+          locationId: true,
         },
       });
 
@@ -199,27 +372,43 @@ export const executeWorkflow = inngest.createFunction(
         throw new NonRetriableError("Workflow not found.");
       }
 
-      return prisma.execution.create({
-        data: {
+      const [createdExecution] = await db
+        .insert(executionTable)
+        .values({
           id: crypto.randomUUID(),
           workflowId,
           inngestEventId,
-          subaccountId: workflowMeta.subaccountId,
+          locationId: workflowMeta.locationId,
           startedAt: new Date(),
-        },
-      });
+        })
+        .returning();
+
+      return createdExecution;
     });
 
     const { workflow, userId } = await step.run(
       "prepare-workflow",
       async () => {
-        const workflow = await prisma.workflows.findUniqueOrThrow({
-          where: { id: workflowId },
-          include: {
-            Node: true,
-            Connection: true,
+        const workflowRecord = await db.query.workflows.findFirst({
+          where: eq(workflows.id, workflowId),
+          with: {
+            nodes: true,
+            connections: true,
           },
         });
+
+        if (!workflowRecord) {
+          throw new NonRetriableError("Workflow not found.");
+        }
+
+        const workflow = {
+          ...workflowRecord,
+          Node: workflowRecord.nodes.map((workflowNode) => ({
+            ...workflowNode,
+            data: workflowNode.data as JsonValue,
+          })),
+          Connection: workflowRecord.connections,
+        };
 
         return {
           workflow,
@@ -236,8 +425,8 @@ export const executeWorkflow = inngest.createFunction(
 
     // Get topologically sorted nodes for execution order
     const sortedNodes = topologicalSort(
-      workflow.Node as any,
-      workflow.Connection as any
+      workflow.Node,
+      workflow.Connection
     );
 
     // Build adjacency map for conditional branching
@@ -347,7 +536,7 @@ export const executeWorkflow = inngest.createFunction(
           // Fallback: use variable-based branch (for IF/ELSE compatibility)
           const nodeConfig = node.data as Record<string, unknown>;
           const variableName = nodeConfig.variableName as string;
-          const branchResult = (context.variables as Record<string, any>)?.[
+          const branchResult = (context.variables as Record<string, Record<string, unknown>>)?.[
             variableName
           ]?.branchToFollow;
 
@@ -367,14 +556,26 @@ export const executeWorkflow = inngest.createFunction(
       }
     }
 
-    await step.run("update-execution", async () => {
-      return prisma.execution.update({
-        where: { inngestEventId, workflowId },
-        data: {
+    const completedExecution = await step.run("update-execution", async () => {
+      const [updatedExecution] = await db
+        .update(executionTable)
+        .set({
           status: ExecutionStatus.SUCCESS,
           completedAt: new Date(),
-          output: context as any,
-        },
+          output: context,
+        })
+        .where(and(eq(executionTable.inngestEventId, inngestEventId), eq(executionTable.workflowId, workflowId)))
+        .returning();
+
+      return updatedExecution;
+    });
+
+    await step.run("record-automation-events", async () => {
+      return recordAutomationEventsForExecution({
+        executionId: completedExecution.id ?? execution.id,
+        workflow,
+        triggerNode,
+        context,
       });
     });
 
@@ -507,13 +708,8 @@ export const generateRecurringInvoices = inngest.createFunction(
     const now = new Date();
 
     // Find all active recurring invoices that are due
-    const dueRecurringInvoices = await prisma.recurringInvoice.findMany({
-      where: {
-        status: "ACTIVE",
-        nextRunDate: {
-          lte: now,
-        },
-      },
+    const dueRecurringInvoices = await db.query.recurringInvoice.findMany({
+      where: and(eq(recurringInvoice.status, "ACTIVE"), lte(recurringInvoice.nextRunDate, now)),
     });
 
     const results = {
@@ -529,10 +725,10 @@ export const generateRecurringInvoices = inngest.createFunction(
       try {
         // Check if we've reached the end date
         if (recurring.endDate && now > recurring.endDate) {
-          await prisma.recurringInvoice.update({
-            where: { id: recurring.id },
-            data: { status: "COMPLETED" },
-          });
+          await db
+            .update(recurringInvoice)
+            .set({ status: "COMPLETED", updatedAt: new Date() })
+            .where(eq(recurringInvoice.id, recurring.id));
           continue;
         }
 
@@ -558,18 +754,18 @@ export const generateRecurringInvoices = inngest.createFunction(
         }>;
 
         // Create the invoice
-        const invoice = await prisma.$transaction(async (tx) => {
-          // Create invoice
-          const newInvoice = await tx.invoice.create({
-            data: {
+        const createdInvoice = await db.transaction(async (tx) => {
+          const [newInvoice] = await tx
+            .insert(invoice)
+            .values({
               id: crypto.randomUUID(),
               organizationId: recurring.organizationId,
-              subaccountId: recurring.subaccountId,
+              locationId: recurring.locationId,
               invoiceNumber,
-              contactId: recurring.contactId,
-              contactName: recurring.contactName,
-              contactEmail: recurring.contactEmail,
-              contactAddress: recurring.contactAddress as any,
+              clientId: recurring.clientId,
+              clientName: recurring.clientName,
+              clientEmail: recurring.clientEmail,
+              clientAddress: recurring.clientAddress,
               title: `${recurring.name} - ${issueDate.toLocaleDateString()}`,
               status: recurring.autoSend ? "SENT" : "DRAFT",
               billingModel: recurring.billingModel,
@@ -587,30 +783,32 @@ export const generateRecurringInvoices = inngest.createFunction(
               templateId: recurring.templateId,
               createdAt: new Date(),
               updatedAt: new Date(),
-              invoiceLineItem: {
-                create: lineItems.map((item, index) => ({
-                  id: crypto.randomUUID(),
-                  description: item.description,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  amount: item.amount,
-                  order: index,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                })),
-              },
-            },
-          });
+            })
+            .returning();
+
+          if (lineItems.length > 0) {
+            await tx.insert(invoiceLineItem).values(
+              lineItems.map((item, index) => ({
+                id: crypto.randomUUID(),
+                invoiceId: newInvoice.id,
+                description: item.description,
+                quantity: String(item.quantity),
+                unitPrice: String(item.unitPrice),
+                amount: String(item.amount),
+                order: index,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              }))
+            );
+          }
 
           // Track generation
-          await tx.recurringInvoiceGeneration.create({
-            data: {
+          await tx.insert(recurringInvoiceGeneration).values({
               id: crypto.randomUUID(),
               recurringInvoiceId: recurring.id,
               invoiceId: newInvoice.id,
               periodStart: recurring.lastRunDate || recurring.startDate,
               periodEnd: now,
-            },
           });
 
           // Calculate next run date
@@ -624,20 +822,21 @@ export const generateRecurringInvoices = inngest.createFunction(
           });
 
           // Update recurring invoice
-          await tx.recurringInvoice.update({
-            where: { id: recurring.id },
-            data: {
+          await tx
+            .update(recurringInvoice)
+            .set({
               lastRunDate: now,
               nextRunDate,
               invoicesGenerated: recurring.invoicesGenerated + 1,
-            },
-          });
+              updatedAt: new Date(),
+            })
+            .where(eq(recurringInvoice.id, recurring.id));
 
           return newInvoice;
         });
 
         // Send email if auto-send is enabled
-        if (recurring.autoSend && recurring.contactEmail) {
+        if (recurring.autoSend && recurring.clientEmail) {
           try {
             const { sendInvoiceEmail } = await import("@/lib/email");
             const { generatePDF } = await import(
@@ -645,42 +844,50 @@ export const generateRecurringInvoices = inngest.createFunction(
             );
 
             // Load full invoice with template
-            const fullInvoice = await prisma.invoice.findUnique({
-              where: { id: invoice.id },
-              include: {
-                invoiceLineItem: { orderBy: { order: "asc" } },
+            const fullInvoice = await db.query.invoice.findFirst({
+              where: eq(invoice.id, createdInvoice.id),
+              with: {
+                invoiceLineItems: { orderBy: asc(invoiceLineItem.order) },
                 invoiceTemplate: true,
               },
             });
 
             if (fullInvoice) {
-              // Load organization and subaccount for branding
-              const org = await prisma.organization.findUnique({
-                where: { id: recurring.organizationId },
+              // Load organization and location for branding
+              const org = await db.query.organization.findFirst({
+                where: eq(organization.id, recurring.organizationId),
               });
 
-              const subaccount = recurring.subaccountId
-                ? await prisma.subaccount.findUnique({
-                    where: { id: recurring.subaccountId },
+              const invoiceLocation = recurring.locationId
+                ? await db.query.location.findFirst({
+                    where: eq(locationTable.id, recurring.locationId),
                   })
                 : null;
 
-              // Use subaccount branding if available, fallback to org branding
-              const brandingName = subaccount?.companyName || org?.name || "";
+              // Use location branding if available, fallback to org branding
+              const brandingName = invoiceLocation?.companyName || org?.name || "";
               const brandingEmail =
-                subaccount?.businessEmail || org?.businessEmail || "";
+                invoiceLocation?.businessEmail || org?.businessEmail || "";
               const brandingPhone =
-                subaccount?.businessPhone || org?.businessPhone || "";
+                invoiceLocation?.businessPhone || org?.businessPhone || "";
 
-              // Build address from subaccount or org
-              let brandingAddress;
-              if (subaccount) {
+              // Build address from location or org
+              let brandingAddress:
+                | {
+                    street?: string;
+                    city?: string;
+                    state?: string;
+                    zip?: string;
+                    country?: string;
+                  }
+                | undefined;
+              if (invoiceLocation) {
                 brandingAddress = {
-                  street: subaccount.addressLine1 || undefined,
-                  city: subaccount.city || undefined,
-                  state: subaccount.state || undefined,
-                  zip: subaccount.postalCode || undefined,
-                  country: subaccount.country || undefined,
+                  street: invoiceLocation.addressLine1 || undefined,
+                  city: invoiceLocation.city || undefined,
+                  state: invoiceLocation.state || undefined,
+                  zip: invoiceLocation.postalCode || undefined,
+                  country: invoiceLocation.country || undefined,
                 };
               } else if (org?.businessAddress) {
                 brandingAddress = org.businessAddress as {
@@ -696,10 +903,10 @@ export const generateRecurringInvoices = inngest.createFunction(
                 invoiceNumber: fullInvoice.invoiceNumber,
                 issueDate: fullInvoice.issueDate,
                 dueDate: fullInvoice.dueDate,
-                contactName: fullInvoice.contactName,
-                contactEmail: fullInvoice.contactEmail,
-                contactAddress: fullInvoice.contactAddress
-                  ? (fullInvoice.contactAddress as Record<string, unknown>)
+                clientName: fullInvoice.clientName,
+                clientEmail: fullInvoice.clientEmail,
+                clientAddress: fullInvoice.clientAddress
+                  ? (fullInvoice.clientAddress as Record<string, unknown>)
                   : null,
                 subtotal: fullInvoice.subtotal.toString(),
                 taxRate: fullInvoice.taxRate?.toString(),
@@ -709,28 +916,28 @@ export const generateRecurringInvoices = inngest.createFunction(
                 currency: fullInvoice.currency,
                 notes: fullInvoice.notes || "",
                 termsConditions: fullInvoice.termsConditions || "",
-                lineItems: fullInvoice.invoiceLineItem.map((item) => ({
+                lineItems: fullInvoice.invoiceLineItems.map((item) => ({
                   description: item.description,
-                  quantity: item.quantity.toNumber(),
+                  quantity: Number(item.quantity),
                   unitPrice: item.unitPrice.toString(),
                   amount: item.amount.toString(),
                 })),
                 businessName: brandingName,
                 businessEmail: brandingEmail,
                 businessPhone: brandingPhone,
-                businessAddress: brandingAddress,
+                businessAddress: formatAddress(brandingAddress),
               };
 
-              const template = fullInvoice.invoiceTemplate || { design: "minimal" };
-              const pdfBuffer = await generatePDF(invoiceData as any, template as any);
+              const template = toInvoiceTemplatePreset(fullInvoice.invoiceTemplate);
+              const pdfBuffer = await generatePDF(invoiceData, template);
 
               const appUrl = process.env.APP_URL || "http://localhost:3000";
               const paymentLink = `${appUrl}/invoices/pay/${fullInvoice.id}`;
 
               await sendInvoiceEmail({
-                to: recurring.contactEmail,
+                to: recurring.clientEmail,
                 invoiceNumber: fullInvoice.invoiceNumber,
-                contactName: recurring.contactName,
+                clientName: recurring.clientName,
                 total: fullInvoice.total.toString(),
                 currency: fullInvoice.currency,
                 dueDate: fullInvoice.dueDate,
@@ -739,10 +946,10 @@ export const generateRecurringInvoices = inngest.createFunction(
               });
 
               // Update invoice status to SENT
-              await prisma.invoice.update({
-                where: { id: invoice.id },
-                data: { status: "SENT" },
-              });
+              await db
+                .update(invoice)
+                .set({ status: "SENT", updatedAt: new Date() })
+                .where(eq(invoice.id, createdInvoice.id));
             }
           } catch (emailError) {
             console.error(
@@ -852,23 +1059,17 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     // Find all unpaid invoices that are overdue
-    const overdueInvoices = await prisma.invoice.findMany({
-      where: {
-        status: {
-          in: ["SENT", "PARTIALLY_PAID"],
-        },
-        dueDate: {
-          lt: today,
-        },
-        contactEmail: {
-          not: null,
-        },
-      },
-      include: {
-        invoiceLineItem: { orderBy: { order: "asc" } },
-        invoiceReminder: {
-          where: { isDunning: true },
-          orderBy: { sentAt: "desc" },
+    const overdueInvoices = await db.query.invoice.findMany({
+      where: and(
+        inArray(invoice.status, ["SENT", "PARTIALLY_PAID"]),
+        lt(invoice.dueDate, today),
+        isNotNull(invoice.clientEmail)
+      ),
+      with: {
+        invoiceLineItems: { orderBy: asc(invoiceLineItem.order) },
+        invoiceReminders: {
+          where: eq(invoiceReminder.isDunning, true),
+          orderBy: desc(invoiceReminder.sentAt),
         },
       },
     });
@@ -895,7 +1096,7 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
           (today.getTime() - invoice.dueDate.getTime()) / (1000 * 60 * 60 * 24)
         );
 
-        // Load dunning settings (prefer subaccount, fallback to org)
+        // Load dunning settings (prefer location, fallback to org)
         let dunningSettings: {
           enabled: boolean;
           days: number[];
@@ -904,25 +1105,25 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
           days: [7, 14, 30], // Default schedule
         };
 
-        if (invoice.subaccountId) {
-          const subaccount = await prisma.subaccount.findUnique({
-            where: { id: invoice.subaccountId },
-            select: {
+        if (invoice.locationId) {
+          const invoiceLocation = await db.query.location.findFirst({
+            where: eq(locationTable.id, invoice.locationId),
+            columns: {
               dunningEnabled: true,
               dunningDays: true,
             },
           });
 
-          if (subaccount) {
-            dunningSettings.enabled = subaccount.dunningEnabled;
-            if (subaccount.dunningDays) {
-              dunningSettings.days = subaccount.dunningDays as number[];
+          if (invoiceLocation) {
+            dunningSettings.enabled = invoiceLocation.dunningEnabled;
+            if (Array.isArray(invoiceLocation.dunningDays)) {
+              dunningSettings.days = invoiceLocation.dunningDays.filter((day): day is number => typeof day === "number");
             }
           }
         } else {
-          const org = await prisma.organization.findUnique({
-            where: { id: invoice.organizationId },
-            select: {
+          const org = await db.query.organization.findFirst({
+            where: eq(organization.id, invoice.organizationId),
+            columns: {
               dunningEnabled: true,
               dunningDays: true,
             },
@@ -930,8 +1131,8 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
 
           if (org) {
             dunningSettings.enabled = org.dunningEnabled;
-            if (org.dunningDays) {
-              dunningSettings.days = org.dunningDays as number[];
+            if (Array.isArray(org.dunningDays)) {
+              dunningSettings.days = org.dunningDays.filter((day): day is number => typeof day === "number");
             }
           }
         }
@@ -961,8 +1162,8 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
         }
 
         // Check if we already sent a reminder for this exact day count
-        const alreadySent = invoice.invoiceReminder.some(
-          (r: any) => r.isDunning && r.daysOverdue === daysOverdue
+        const alreadySent = invoice.invoiceReminders.some(
+          (reminder) => reminder.isDunning && reminder.daysOverdue === daysOverdue
         );
 
         if (alreadySent) {
@@ -986,19 +1187,19 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
         }
 
         // Load branding for email
-        const org = await prisma.organization.findUnique({
-          where: { id: invoice.organizationId },
+        const org = await db.query.organization.findFirst({
+          where: eq(organization.id, invoice.organizationId),
         });
 
-        const subaccount = invoice.subaccountId
-          ? await prisma.subaccount.findUnique({
-              where: { id: invoice.subaccountId },
+        const invoiceLocation = invoice.locationId
+          ? await db.query.location.findFirst({
+              where: eq(locationTable.id, invoice.locationId),
             })
           : null;
 
-        const fromName = subaccount?.companyName || org?.name || "";
+        const fromName = invoiceLocation?.companyName || org?.name || "";
         const fromEmail =
-          subaccount?.businessEmail || org?.businessEmail || "";
+          invoiceLocation?.businessEmail || org?.businessEmail || "";
 
         // Generate email content based on urgency
         const { sendInvoiceReminder } = await import("@/lib/email");
@@ -1007,20 +1208,28 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
         );
 
         // Build invoice data for PDF
-        const brandingName = subaccount?.companyName || org?.name || "";
+        const brandingName = invoiceLocation?.companyName || org?.name || "";
         const brandingEmail =
-          subaccount?.businessEmail || org?.businessEmail || "";
+          invoiceLocation?.businessEmail || org?.businessEmail || "";
         const brandingPhone =
-          subaccount?.businessPhone || org?.businessPhone || "";
+          invoiceLocation?.businessPhone || org?.businessPhone || "";
 
-        let brandingAddress;
-        if (subaccount) {
+        let brandingAddress:
+          | {
+              street?: string;
+              city?: string;
+              state?: string;
+              zip?: string;
+              country?: string;
+            }
+          | undefined;
+        if (invoiceLocation) {
           brandingAddress = {
-            street: subaccount.addressLine1 || undefined,
-            city: subaccount.city || undefined,
-            state: subaccount.state || undefined,
-            zip: subaccount.postalCode || undefined,
-            country: subaccount.country || undefined,
+            street: invoiceLocation.addressLine1 || undefined,
+            city: invoiceLocation.city || undefined,
+            state: invoiceLocation.state || undefined,
+            zip: invoiceLocation.postalCode || undefined,
+            country: invoiceLocation.country || undefined,
           };
         } else if (org?.businessAddress) {
           brandingAddress = org.businessAddress as {
@@ -1036,10 +1245,10 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
           invoiceNumber: invoice.invoiceNumber,
           issueDate: invoice.issueDate,
           dueDate: invoice.dueDate,
-          contactName: invoice.contactName,
-          contactEmail: invoice.contactEmail,
-          contactAddress: invoice.contactAddress
-            ? (invoice.contactAddress as Record<string, unknown>)
+          clientName: invoice.clientName,
+          clientEmail: invoice.clientEmail,
+          clientAddress: invoice.clientAddress
+            ? (invoice.clientAddress as Record<string, unknown>)
             : null,
           subtotal: invoice.subtotal.toString(),
           taxRate: invoice.taxRate?.toString(),
@@ -1049,19 +1258,19 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
           currency: invoice.currency,
           notes: invoice.notes || "",
           termsConditions: invoice.termsConditions || "",
-          lineItems: invoice.invoiceLineItem.map((item: any) => ({
+          lineItems: invoice.invoiceLineItems.map((item) => ({
             description: item.description,
-            quantity: item.quantity.toNumber(),
+            quantity: Number(item.quantity),
             unitPrice: item.unitPrice.toString(),
             amount: item.amount.toString(),
           })),
           businessName: brandingName,
           businessEmail: brandingEmail,
           businessPhone: brandingPhone,
-          businessAddress: brandingAddress,
+          businessAddress: formatAddress(brandingAddress),
         };
 
-        const pdfBuffer = await generatePDF(invoiceData as any, { design: "minimal" } as any);
+        const pdfBuffer = await generatePDF(invoiceData, MINIMAL_TEMPLATE);
 
         const appUrl = process.env.APP_URL || "http://localhost:3000";
         const paymentLink = `${appUrl}/invoices/pay/${invoice.id}`;
@@ -1072,7 +1281,7 @@ export const sendOverdueInvoiceReminders = inngest.createFunction(
 
         if (urgency === "gentle") {
           subject = `Gentle Reminder: Invoice ${invoice.invoiceNumber} is now overdue`;
-          message = `Hi ${invoice.contactName},
+          message = `Hi ${invoice.clientName},
 
 This is a friendly reminder that invoice ${invoice.invoiceNumber} for ${invoice.currency} ${invoice.amountDue} was due on ${invoice.dueDate.toLocaleDateString()}.
 
@@ -1081,7 +1290,7 @@ The invoice is now ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue. We
 You can view and pay the invoice using the link below.`;
         } else if (urgency === "firm") {
           subject = `Payment Required: Invoice ${invoice.invoiceNumber} is ${daysOverdue} days overdue`;
-          message = `Hi ${invoice.contactName},
+          message = `Hi ${invoice.clientName},
 
 We hope this message finds you well. We wanted to follow up regarding invoice ${invoice.invoiceNumber} for ${invoice.currency} ${invoice.amountDue}, which was due on ${invoice.dueDate.toLocaleDateString()}.
 
@@ -1090,20 +1299,20 @@ The invoice is now ${daysOverdue} days overdue. We kindly request that you proce
 If you have any questions or concerns about this invoice, please don't hesitate to reach out.`;
         } else {
           subject = `URGENT: Invoice ${invoice.invoiceNumber} is significantly overdue`;
-          message = `Hi ${invoice.contactName},
+          message = `Hi ${invoice.clientName},
 
 This is an urgent reminder regarding invoice ${invoice.invoiceNumber} for ${invoice.currency} ${invoice.amountDue}.
 
 The invoice was due on ${invoice.dueDate.toLocaleDateString()} and is now ${daysOverdue} days overdue.
 
-We kindly request immediate payment to avoid any service interruptions or late fees. If payment has already been made, please contact us to confirm.
+We kindly request immediate payment to avoid any service interruptions or late fees. If payment has already been made, please client us to confirm.
 
-Please process this payment as soon as possible or contact us to discuss payment arrangements.`;
+Please process this payment as soon as possible or client us to discuss payment arrangements.`;
         }
 
         // Send the reminder email
         await sendInvoiceReminder({
-          to: invoice.contactEmail || "",
+          to: invoice.clientEmail || "",
           subject,
           message,
           invoiceNumber: invoice.invoiceNumber,
@@ -1112,17 +1321,15 @@ Please process this payment as soon as possible or contact us to discuss payment
         });
 
         // Record the reminder in the database
-        await prisma.invoiceReminder.create({
-          data: {
+        await db.insert(invoiceReminder).values({
             id: crypto.randomUUID(),
             invoiceId: invoice.id,
-            sentTo: invoice.contactEmail || "",
+            sentTo: invoice.clientEmail || "",
             subject,
             message,
             isDunning: true,
             daysOverdue,
             createdAt: new Date(),
-          },
         });
 
         results.sent++;
@@ -1158,7 +1365,7 @@ Please process this payment as soon as possible or contact us to discuss payment
 );
 
 /**
- * Check for expiring worker documents and send reminders
+ * Check for expiring instructor documents and send reminders
  * Runs daily at 9am
  */
 export const checkExpiringDocuments = inngest.createFunction(
@@ -1169,7 +1376,7 @@ export const checkExpiringDocuments = inngest.createFunction(
   { cron: "0 9 * * *" }, // Daily at 9am
   async ({ step }) => {
     const { sendDocumentExpiryReminder } = await import(
-      "@/features/workers/lib/worker-emails"
+      "@/features/instructors/lib/instructor-emails"
     );
 
     const results = {
@@ -1189,23 +1396,17 @@ export const checkExpiringDocuments = inngest.createFunction(
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const documents = await prisma.workerDocument.findMany({
-      where: {
-        expiryDate: {
-          lte: thirtyDaysFromNow,
-        },
-        status: "APPROVED",
-        OR: [
-          { expiryNotificationSent: false },
-          {
-            expiryNotificationDate: {
-              lte: sevenDaysAgo,
-            },
-          },
-        ],
-      },
-      include: {
-        worker: true,
+    const documents = await db.query.instructorDocument.findMany({
+      where: and(
+        lte(instructorDocument.expiryDate, thirtyDaysFromNow),
+        eq(instructorDocument.status, "APPROVED"),
+        or(
+          eq(instructorDocument.expiryNotificationSent, false),
+          lte(instructorDocument.expiryNotificationDate, sevenDaysAgo)
+        )
+      ),
+      with: {
+        instructor: true,
       },
     });
 
@@ -1215,9 +1416,9 @@ export const checkExpiringDocuments = inngest.createFunction(
     results.checked = documents.length;
 
     for (const document of documents) {
-      if (!document.worker.isActive || !document.worker.email) {
+      if (!document.instructor.isActive || !document.instructor.email) {
         console.log(
-          `Skipping document ${document.id} - worker inactive or no email`
+          `Skipping document ${document.id} - instructor inactive or no email`
         );
         continue;
       }
@@ -1230,11 +1431,11 @@ export const checkExpiringDocuments = inngest.createFunction(
 
       // Send notification
       try {
-        const portalUrl = `${process.env.APP_URL || "http://localhost:3000"}/portal/${document.worker.id}/documents`;
+        const portalUrl = `${process.env.APP_URL || "http://localhost:3000"}/dashboard`;
 
         await sendDocumentExpiryReminder({
-          workerEmail: document.worker.email,
-          workerName: document.worker.name,
+          instructorEmail: document.instructor.email,
+          instructorName: document.instructor.name,
           documentName: document.name,
           documentType: document.type,
           expiryDate: expiryDate,
@@ -1243,25 +1444,25 @@ export const checkExpiringDocuments = inngest.createFunction(
         });
 
         // Update notification flag
-        await prisma.workerDocument.update({
-          where: { id: document.id },
-          data: {
+        await db
+          .update(instructorDocument)
+          .set({
             expiryNotificationSent: true,
             expiryNotificationDate: new Date(),
-          },
-        });
+          })
+          .where(eq(instructorDocument.id, document.id));
 
         results.sent++;
         console.log(
-          `Sent expiry notification for document ${document.id} to ${document.worker.email}`
+          `Sent expiry notification for document ${document.id} to ${document.instructor.email}`
         );
 
         // Update document status to EXPIRED if past expiry date
         if (daysUntilExpiry < 0 && document.status !== "EXPIRED") {
-          await prisma.workerDocument.update({
-            where: { id: document.id },
-            data: { status: "EXPIRED" },
-          });
+          await db
+            .update(instructorDocument)
+            .set({ status: "EXPIRED", updatedAt: new Date() })
+            .where(eq(instructorDocument.id, document.id));
           console.log(`Updated document ${document.id} status to EXPIRED`);
         }
       } catch (error) {

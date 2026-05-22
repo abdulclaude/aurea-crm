@@ -1,13 +1,62 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { activity, user as userTable } from "@/db/schema";
 import {
   createTRPCRouter,
   protectedProcedure,
 } from "@/trpc/init";
-import { ActivityType, ActivityAction } from "@prisma/client";
+import { ActivityType, ActivityAction } from "@/db/enums";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  isNull,
+  lt,
+  lte,
+  or,
+  type SQL,
+} from "drizzle-orm";
 
 const ACTIVITY_PAGE_SIZE = 50;
+
+const locationCondition = (locationId: string | null): SQL =>
+  locationId ? eq(activity.locationId, locationId) : isNull(activity.locationId);
+
+const scopedActivityConditions = ({
+  organizationId,
+  locationId,
+}: {
+  organizationId: string;
+  locationId: string | null;
+}): SQL[] => [
+  eq(activity.organizationId, organizationId),
+  locationCondition(locationId),
+];
+
+const activityWithUserSelect = {
+  activity,
+  user: {
+    id: userTable.id,
+    name: userTable.name,
+    email: userTable.email,
+    image: userTable.image,
+  },
+};
+
+const mapActivityRows = (
+  rows: Array<{
+    activity: typeof activity.$inferSelect;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      image: string | null;
+    };
+  }>
+) => rows.map((row) => ({ ...row.activity, user: row.user }));
 
 export const activityRouter = createTRPCRouter({
   // List activities with pagination and filters
@@ -33,57 +82,74 @@ export const activityRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
+      const conditions = scopedActivityConditions({
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? null,
-      };
+        locationId: ctx.locationId ?? null,
+      });
 
       if (input.entityType) {
-        where.entityType = input.entityType;
+        conditions.push(eq(activity.entityType, input.entityType));
       }
 
       if (input.entityId) {
-        where.entityId = input.entityId;
+        conditions.push(eq(activity.entityId, input.entityId));
       }
 
       if (input.type) {
-        where.type = input.type;
+        conditions.push(eq(activity.type, input.type));
       }
 
       if (input.action) {
-        where.action = input.action;
+        conditions.push(eq(activity.action, input.action));
       }
 
       if (input.userId) {
-        where.userId = input.userId;
+        conditions.push(eq(activity.userId, input.userId));
       }
 
-      if (input.startDate || input.endDate) {
-        where.createdAt = {};
-        if (input.startDate) {
-          where.createdAt.gte = input.startDate;
-        }
-        if (input.endDate) {
-          where.createdAt.lte = input.endDate;
+      if (input.startDate) {
+        conditions.push(gte(activity.createdAt, input.startDate));
+      }
+      if (input.endDate) {
+        conditions.push(lte(activity.createdAt, input.endDate));
+      }
+
+      if (input.cursor) {
+        const [cursorActivity] = await db
+          .select({ id: activity.id, createdAt: activity.createdAt })
+          .from(activity)
+          .where(
+            and(
+              eq(activity.id, input.cursor),
+              eq(activity.organizationId, ctx.orgId)
+            )
+          )
+          .limit(1);
+
+        if (cursorActivity) {
+          const cursorCondition = or(
+            lt(activity.createdAt, cursorActivity.createdAt),
+            and(
+              eq(activity.createdAt, cursorActivity.createdAt),
+              lt(activity.id, cursorActivity.id)
+            )
+          );
+
+          if (cursorCondition) {
+            conditions.push(cursorCondition);
+          }
         }
       }
 
-      const activities = await prisma.activity.findMany({
-        where,
-        take: input.limit + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
-        orderBy: { createdAt: "desc" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
-          },
-        },
-      });
+      const activities = mapActivityRows(
+        await db
+          .select(activityWithUserSelect)
+          .from(activity)
+          .innerJoin(userTable, eq(activity.userId, userTable.id))
+          .where(and(...conditions))
+          .orderBy(desc(activity.createdAt), desc(activity.id))
+          .limit(input.limit + 1)
+      );
 
       let nextCursor: string | undefined;
       if (activities.length > input.limit) {
@@ -114,26 +180,24 @@ export const activityRouter = createTRPCRouter({
         });
       }
 
-      const activities = await prisma.activity.findMany({
-        where: {
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-          entityType: input.entityType,
-          entityId: input.entityId,
-        },
-        take: input.limit,
-        orderBy: { createdAt: "desc" },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
-          },
-        },
-      });
+      const activities = mapActivityRows(
+        await db
+          .select(activityWithUserSelect)
+          .from(activity)
+          .innerJoin(userTable, eq(activity.userId, userTable.id))
+          .where(
+            and(
+              ...scopedActivityConditions({
+                organizationId: ctx.orgId,
+                locationId: ctx.locationId ?? null,
+              }),
+              eq(activity.entityType, input.entityType),
+              eq(activity.entityId, input.entityId)
+            )
+          )
+          .orderBy(desc(activity.createdAt), desc(activity.id))
+          .limit(input.limit)
+      );
 
       return activities;
     }),
@@ -154,84 +218,63 @@ export const activityRouter = createTRPCRouter({
         });
       }
 
-      const where: any = {
+      const conditions = scopedActivityConditions({
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? null,
-      };
+        locationId: ctx.locationId ?? null,
+      });
 
-      if (input.startDate || input.endDate) {
-        where.createdAt = {};
-        if (input.startDate) {
-          where.createdAt.gte = input.startDate;
-        }
-        if (input.endDate) {
-          where.createdAt.lte = input.endDate;
-        }
+      if (input.startDate) {
+        conditions.push(gte(activity.createdAt, input.startDate));
       }
+      if (input.endDate) {
+        conditions.push(lte(activity.createdAt, input.endDate));
+      }
+      const where = and(...conditions);
 
-      // Get activity counts by type
-      const byType = await prisma.activity.groupBy({
-        by: ["type"],
-        where,
-        _count: {
-          _all: true,
-        },
-      });
-
-      // Get activity counts by action
-      const byAction = await prisma.activity.groupBy({
-        by: ["action"],
-        where,
-        _count: {
-          _all: true,
-        },
-      });
-
-      // Get top users
-      const byUser = await prisma.activity.groupBy({
-        by: ["userId"],
-        where,
-        _count: {
-          userId: true,
-        },
-        orderBy: {
-          _count: {
-            userId: "desc",
-          },
-        },
-        take: 10,
-      });
-
-      // Get user details for top users
-      const userIds = byUser.map((item) => item.userId);
-      const users = await prisma.user.findMany({
-        where: {
-          id: {
-            in: userIds,
-          },
-        },
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          image: true,
-        },
-      });
-
-      const topUsers = byUser.map((item) => ({
-        user: users.find((u) => u.id === item.userId),
-        count: item._count.userId || 0,
-      }));
+      const [byType, byAction, topUsers] = await Promise.all([
+        db
+          .select({
+            type: activity.type,
+            count: count(),
+          })
+          .from(activity)
+          .where(where)
+          .groupBy(activity.type),
+        db
+          .select({
+            action: activity.action,
+            count: count(),
+          })
+          .from(activity)
+          .where(where)
+          .groupBy(activity.action),
+        db
+          .select({
+            user: {
+              id: userTable.id,
+              name: userTable.name,
+              email: userTable.email,
+              image: userTable.image,
+            },
+            count: count(activity.userId),
+          })
+          .from(activity)
+          .innerJoin(userTable, eq(activity.userId, userTable.id))
+          .where(where)
+          .groupBy(
+            activity.userId,
+            userTable.id,
+            userTable.name,
+            userTable.email,
+            userTable.image
+          )
+          .orderBy(desc(count(activity.userId)))
+          .limit(10),
+      ]);
 
       return {
-        byType: byType.map((item) => ({
-          type: item.type,
-          count: item._count._all,
-        })),
-        byAction: byAction.map((item) => ({
-          action: item.action,
-          count: item._count._all,
-        })),
+        byType,
+        byAction,
         topUsers,
       };
     }),
@@ -245,8 +288,8 @@ export const activityRouter = createTRPCRouter({
         entityType: z.string(),
         entityId: z.string(),
         entityName: z.string(),
-        changes: z.record(z.string(), z.any()).optional(),
-        metadata: z.record(z.string(), z.any()).optional(),
+        changes: z.record(z.string(), z.unknown()).optional(),
+        metadata: z.record(z.string(), z.unknown()).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -257,34 +300,39 @@ export const activityRouter = createTRPCRouter({
         });
       }
 
-      const activity = await prisma.activity.create({
-        data: {
+      const [createdActivity] = await db
+        .insert(activity)
+        .values({
           id: crypto.randomUUID(),
           organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
           userId: ctx.auth.user.id,
           type: input.type,
           action: input.action,
           entityType: input.entityType,
           entityId: input.entityId,
           entityName: input.entityName,
-          changes: input.changes as any,
-          metadata: input.metadata as any,
+          changes: input.changes,
+          metadata: input.metadata,
           createdAt: new Date(),
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
-          },
-        },
-      });
+        })
+        .returning();
 
-      return activity;
+      const [row] = await db
+        .select(activityWithUserSelect)
+        .from(activity)
+        .innerJoin(userTable, eq(activity.userId, userTable.id))
+        .where(eq(activity.id, createdActivity.id))
+        .limit(1);
+
+      if (!row) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to load created activity",
+        });
+      }
+
+      return mapActivityRows([row])[0];
     }),
 
   // Delete activity (admin only)
@@ -298,24 +346,25 @@ export const activityRouter = createTRPCRouter({
         });
       }
 
-      const activity = await prisma.activity.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const [deletedActivity] = await db
+        .delete(activity)
+        .where(
+          and(
+            eq(activity.id, input.id),
+            ...scopedActivityConditions({
+              organizationId: ctx.orgId,
+              locationId: ctx.locationId ?? null,
+            })
+          )
+        )
+        .returning({ id: activity.id });
 
-      if (!activity) {
+      if (!deletedActivity) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Activity not found",
         });
       }
-
-      await prisma.activity.delete({
-        where: { id: input.id },
-      });
 
       return { success: true };
     }),

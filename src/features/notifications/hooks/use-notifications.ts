@@ -34,44 +34,43 @@ export function useNotifications() {
 
   const unreadCount = unreadData?.count ?? 0;
 
-  // Set up SSE connection
+  // Set up SSE connection with exponential backoff
   useEffect(() => {
     let eventSource: EventSource | null = null;
+    let retryDelay = 2_000;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let unmounted = false;
 
     const connect = () => {
+      if (unmounted) return;
       try {
         eventSource = new EventSource("/api/notifications/stream");
 
         eventSource.addEventListener("connected", () => {
+          retryDelay = 2_000;
           setIsConnected(true);
-          console.log("Connected to notification stream");
         });
 
         eventSource.addEventListener("notification", (event) => {
           const data = JSON.parse(event.data);
-          console.log("Received notifications:", data.notifications);
 
-          // Invalidate queries to refetch notifications
           queryClient.invalidateQueries({
             queryKey: [["notifications", "getNotifications"]],
           });
           queryClient.invalidateQueries({
             queryKey: [["notifications", "getUnreadCount"]],
           });
-
-          // You could also show a toast notification here
         });
 
-        eventSource.onerror = (error) => {
-          console.error("SSE error:", error);
+        eventSource.onerror = () => {
           setIsConnected(false);
           eventSource?.close();
+          eventSource = null;
 
-          // Attempt to reconnect after 5 seconds
-          setTimeout(connect, 5000);
+          retryDelay = Math.min(retryDelay * 2, 60_000);
+          retryTimer = setTimeout(connect, retryDelay);
         };
-      } catch (error) {
-        console.error("Failed to connect to notification stream:", error);
+      } catch {
         setIsConnected(false);
       }
     };
@@ -79,6 +78,8 @@ export function useNotifications() {
     connect();
 
     return () => {
+      unmounted = true;
+      if (retryTimer) clearTimeout(retryTimer);
       eventSource?.close();
       setIsConnected(false);
     };

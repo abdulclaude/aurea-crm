@@ -1,17 +1,143 @@
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { NodeType } from "@/db/enums";
+import {
+  client,
+  clientAssignee,
+  connection,
+  deal,
+  dealAssignee,
+  dealClient,
+  locationMember,
+  pipeline,
+  pipelineStage,
+  node as workflowNode,
+  workflows,
+} from "@/db/schema";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lt, lte, type SQL } from "drizzle-orm";
 import type { RouteResult } from "./intent-router";
 import {
-  parseContactArgs,
+  parseClientArgs,
   parseDealArgs,
   parsePipelineArgs,
   getMissingFields,
   formatFieldName,
 } from "./argument-parser";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { generateWorkflow, generateBundleWorkflow } from "./workflow-generator";
+import { generateWorkflow, generateBundleWorkflow, type GeneratedWorkflow } from "./workflow-generator";
 import { polarClient } from "@/lib/polar";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
+const textParam = (value: unknown): string => (typeof value === "string" ? value : "");
+
+const stringArrayParam = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const optionalLocationCondition = (
+  column: typeof client.locationId | typeof deal.locationId | typeof pipeline.locationId | typeof workflows.locationId,
+  locationId: string | null
+): SQL | undefined => (locationId ? eq(column, locationId) : undefined);
+
+const strictLocationCondition = (
+  column: typeof client.locationId | typeof deal.locationId | typeof pipeline.locationId | typeof workflows.locationId,
+  locationId: string | null
+): SQL => (locationId ? eq(column, locationId) : isNull(column));
+
+const compactConditions = (conditions: Array<SQL | undefined>): SQL | undefined => {
+  const defined = conditions.filter((condition): condition is SQL => condition !== undefined);
+  return defined.length > 0 ? and(...defined) : undefined;
+};
+
+async function findLocationMemberByUserName(locationId: string, name: string): Promise<string | undefined> {
+  const members = await db.query.locationMember.findMany({
+    where: eq(locationMember.locationId, locationId),
+    with: {
+      user: true,
+    },
+  });
+
+  const search = name.toLowerCase();
+  return members.find((member) => member.user.name.toLowerCase().includes(search))?.id;
+}
+
+async function persistGeneratedWorkflow({
+  workflow,
+  context,
+  isBundle = false,
+}: {
+  workflow: GeneratedWorkflow;
+  context: ActionContext & { organizationId: string };
+  isBundle?: boolean;
+}): Promise<typeof workflows.$inferSelect & { Node: Array<typeof workflowNode.$inferSelect> }> {
+  return await db.transaction(async (tx) => {
+    const [createdWorkflow] = await tx
+      .insert(workflows)
+      .values({
+        id: crypto.randomUUID(),
+        userId: context.userId,
+        organizationId: context.organizationId,
+        locationId: context.locationId,
+        name: workflow.name,
+        description: workflow.description,
+        isBundle,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
+    const createdNodes =
+      workflow.nodes.length > 0
+        ? await tx
+            .insert(workflowNode)
+            .values(
+              workflow.nodes.map((node) => ({
+                id: crypto.randomUUID(),
+                workflowId: createdWorkflow.id,
+                name: node.name,
+                type: node.type as NodeType,
+                position: node.position,
+                data: node.data,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              }))
+            )
+            .returning()
+        : [];
+
+    const nodeIdMap = new Map<string, string>();
+    for (const generatedNode of workflow.nodes) {
+      const createdNode = createdNodes.find(
+        (node) => node.name === generatedNode.name && node.type === generatedNode.type
+      );
+      if (createdNode) {
+        nodeIdMap.set(generatedNode.id, createdNode.id);
+      }
+    }
+
+    const connectionsToInsert = workflow.connections
+      .map((workflowConnection) => {
+        const fromNodeId = nodeIdMap.get(workflowConnection.sourceId);
+        const toNodeId = nodeIdMap.get(workflowConnection.targetId);
+        if (!fromNodeId || !toNodeId) return null;
+
+        return {
+          id: crypto.randomUUID(),
+          workflowId: createdWorkflow.id,
+          fromNodeId,
+          toNodeId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      })
+      .filter((workflowConnection): workflowConnection is NonNullable<typeof workflowConnection> => workflowConnection !== null);
+
+    if (connectionsToInsert.length > 0) {
+      await tx.insert(connection).values(connectionsToInsert);
+    }
+
+    return { ...createdWorkflow, Node: createdNodes };
+  });
+}
 
 // Helper to check if user has active subscription
 async function hasActiveSubscription(userId: string): Promise<boolean> {
@@ -30,7 +156,7 @@ async function hasActiveSubscription(userId: string): Promise<boolean> {
 }
 
 // Extract structured data from natural language using AI
-async function extractContactFromNL(message: string): Promise<{
+async function extractClientFromNL(message: string): Promise<{
   name?: string;
   email?: string;
   phone?: string;
@@ -40,13 +166,13 @@ async function extractContactFromNL(message: string): Promise<{
 }> {
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-  const prompt = `Extract contact information from this message. Return ONLY valid JSON with these fields (omit fields if not mentioned):
+  const prompt = `Extract client information from this message. Return ONLY valid JSON with these fields (omit fields if not mentioned):
 - name: string (person's full name)
 - email: string
 - phone: string
 - companyName: string (company/organization they work for)
-- tags: string[] (array of tags/labels to categorize the contact, from phrases like "tag as", "label as", "tags:")
-- assigneeName: string (name of team member to assign contact to, from phrases like "assign to", "owner", "assigned to")
+- tags: string[] (array of tags/labels to categorize the client, from phrases like "tag as", "label as", "tags:")
+- assigneeName: string (name of team member to assign client to, from phrases like "assign to", "owner", "assigned to")
 
 Message: "${message}"
 
@@ -61,7 +187,7 @@ JSON:`;
       return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
-    console.error("Failed to extract contact from NL:", error);
+    console.error("Failed to extract client from NL:", error);
   }
   return {};
 }
@@ -71,7 +197,7 @@ async function extractDealFromNL(message: string): Promise<{
   value?: number;
   currency?: string;
   deadline?: string;
-  contactName?: string;
+  clientName?: string;
   assigneeName?: string;
   pipelineName?: string;
 }> {
@@ -84,7 +210,7 @@ async function extractDealFromNL(message: string): Promise<{
 - value: number (deal value without currency symbol)
 - currency: string (USD, GBP, EUR, etc. - default to USD)
 - deadline: string (ISO date format YYYY-MM-DD, for phrases like "due by", "deadline on", "by date")
-- contactName: string (name of contact to associate with deal, from phrases like "for contact", "assign to contact", "link to")
+- clientName: string (name of client to associate with deal, from phrases like "for client", "assign to client", "link to")
 - assigneeName: string (name of team member to assign, from phrases like "assign to", "owner", "assign team member")
 - pipelineName: string (name of pipeline to assign deal to, from phrases like "in pipeline", "to pipeline", "for pipeline")
 
@@ -134,8 +260,8 @@ JSON:`;
   return {};
 }
 
-// Extract contact query filters from natural language
-async function extractContactFiltersFromNL(message: string): Promise<{
+// Extract client query filters from natural language
+async function extractClientFiltersFromNL(message: string): Promise<{
   companyName?: string;
   name?: string;
   email?: string;
@@ -149,9 +275,9 @@ async function extractContactFiltersFromNL(message: string): Promise<{
 
   const today = new Date().toISOString().split("T")[0];
 
-  const prompt = `Extract contact filter criteria from this search query. Return ONLY valid JSON with these fields (omit fields if not mentioned):
+  const prompt = `Extract client filter criteria from this search query. Return ONLY valid JSON with these fields (omit fields if not mentioned):
 - companyName: string (company/organization name to filter by)
-- name: string (contact name to search for)
+- name: string (client name to search for)
 - email: string (email to search for)
 - createdAfter: string (ISO date format YYYY-MM-DD, for "after", "since", "from" dates)
 - createdBefore: string (ISO date format YYYY-MM-DD, for "before", "until" dates)
@@ -173,7 +299,7 @@ JSON:`;
       return JSON.parse(jsonMatch[0]);
     }
   } catch (error) {
-    console.error("Failed to extract contact filters from NL:", error);
+    console.error("Failed to extract client filters from NL:", error);
   }
   return {};
 }
@@ -237,69 +363,62 @@ JSON:`;
 export interface ActionContext {
   userId: string;
   organizationId: string | null;
-  subaccountId: string | null;
+  locationId: string | null;
 }
 
 export interface ActionResult {
   success: boolean;
   message: string;
-  data?: any;
+  data?: unknown;
   requiresMoreInfo?: boolean;
   missingFields?: string[];
 }
 
 type ActionHandler = (
-  params: Record<string, any>,
+  params: Record<string, unknown>,
   context: ActionContext
 ) => Promise<ActionResult>;
 
 const handlers: Record<string, ActionHandler> = {
   // CRM Actions
-  createContact: async (params, context) => {
-    if (!context.organizationId) {
+  createClient: async (params, context) => {
+    const organizationId = context.organizationId;
+    if (!organizationId) {
       return {
         success: false,
-        message: "Please select an organization to create a contact.",
+        message: "Please select an organization to create a client.",
         requiresMoreInfo: true,
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
     const isSlashCommand = rawMessage.startsWith("/");
 
     // Use regex parser for slash commands, AI for natural language
     const parsed = isSlashCommand
-      ? parseContactArgs(rawMessage)
-      : await extractContactFromNL(rawMessage);
+      ? parseClientArgs(rawMessage)
+      : await extractClientFromNL(rawMessage);
 
     const missing = getMissingFields(parsed, ["name"]);
 
-    // If we have at least a name, create the contact
+    // If we have at least a name, create the client
     if (parsed.name) {
+      const clientName = parsed.name;
       try {
         // Look up team member by name if provided
-        let subaccountMemberId: string | undefined;
-        if (parsed.assigneeName && context.subaccountId) {
-          const member = await prisma.subaccountMember.findFirst({
-            where: {
-              subaccountId: context.subaccountId,
-              user: {
-                name: {
-                  contains: parsed.assigneeName,
-                  mode: "insensitive",
-                },
-              },
-            },
-          });
-          subaccountMemberId = member?.id;
+        let locationMemberId: string | undefined;
+        if (parsed.assigneeName && context.locationId) {
+          locationMemberId = await findLocationMemberByUserName(context.locationId, parsed.assigneeName);
         }
 
-        const contact = await prisma.contact.create({
-          data: {
+        const createdClient = await db.transaction(async (tx) => {
+          const [newClient] = await tx
+            .insert(client)
+            .values({
             id: crypto.randomUUID(),
-            organizationId: context.organizationId,
-            subaccountId: context.subaccountId || null,
-            name: parsed.name,
+            organizationId,
+            locationId: context.locationId || null,
+            name: clientName,
             email: parsed.email || null,
             phone: parsed.phone || null,
             companyName: parsed.companyName || null,
@@ -307,34 +426,36 @@ const handlers: Record<string, ActionHandler> = {
             type: "LEAD", // Default type
             createdAt: new Date(),
             updatedAt: new Date(),
-            // Create assignee association if found
-            ...(subaccountMemberId && {
-              contactAssignee: {
-                create: {
-                  id: crypto.randomUUID(),
-                  subaccountMemberId,
-                },
-              },
-            }),
-          },
+            })
+            .returning();
+
+          if (locationMemberId) {
+            await tx.insert(clientAssignee).values({
+              id: crypto.randomUUID(),
+              clientId: newClient.id,
+              locationMemberId,
+            });
+          }
+
+          return newClient;
         });
 
-        let message = `Created contact **${contact.name}**`;
-        if (contact.email) message += ` (${contact.email})`;
-        if (contact.companyName) message += ` at ${contact.companyName}`;
+        let message = `Created client **${createdClient.name}**`;
+        if (createdClient.email) message += ` (${createdClient.email})`;
+        if (createdClient.companyName) message += ` at ${createdClient.companyName}`;
         if (parsed.tags && parsed.tags.length > 0) message += ` with tags: ${parsed.tags.join(", ")}`;
-        if (subaccountMemberId) message += ` assigned to team member`;
+        if (locationMemberId) message += ` assigned to team member`;
 
         return {
           success: true,
           message,
-          data: { contact },
+          data: { client: createdClient },
         };
       } catch (error) {
-        console.error("Failed to create contact:", error);
+        console.error("Failed to create client:", error);
         return {
           success: false,
-          message: "Failed to create contact. Please try again.",
+          message: "Failed to create client. Please try again.",
         };
       }
     }
@@ -343,14 +464,15 @@ const handlers: Record<string, ActionHandler> = {
     return {
       success: true,
       message:
-        "I can help you create a contact. Please provide at least the contact's name.\n\nExample: `/create-contact John Doe, john@email.com, Acme Corp`",
+        "I can help you create a client. Please provide at least the client's name.\n\nExample: `/create-client John Doe, john@email.com, Acme Corp`",
       requiresMoreInfo: true,
       missingFields: missing.map(formatFieldName),
     };
   },
 
   createDeal: async (params, context) => {
-    if (!context.organizationId) {
+    const organizationId = context.organizationId;
+    if (!organizationId) {
       return {
         success: false,
         message: "Please select an organization to create a deal.",
@@ -358,7 +480,7 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
     const isSlashCommand = rawMessage.startsWith("/");
 
     const parsed = isSlashCommand
@@ -368,113 +490,100 @@ const handlers: Record<string, ActionHandler> = {
     const missing = getMissingFields(parsed, ["name"]);
 
     if (parsed.name) {
+      const dealName = parsed.name;
       try {
         // Look up pipeline by name if provided, otherwise get default
         let targetPipeline;
         if (parsed.pipelineName) {
-          targetPipeline = await prisma.pipeline.findFirst({
-            where: {
-              organizationId: context.organizationId,
-              subaccountId: context.subaccountId || null,
-              name: {
-                contains: parsed.pipelineName,
-                mode: "insensitive",
-              },
-            },
-            include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
+          targetPipeline = await db.query.pipeline.findFirst({
+            where: and(
+              eq(pipeline.organizationId, organizationId),
+              strictLocationCondition(pipeline.locationId, context.locationId),
+              ilike(pipeline.name, `%${parsed.pipelineName}%`)
+            ),
+            with: { pipelineStages: { orderBy: asc(pipelineStage.position), limit: 1 } },
           });
         }
 
         // Fall back to default pipeline if no specific pipeline found or requested
         if (!targetPipeline) {
-          targetPipeline = await prisma.pipeline.findFirst({
-            where: {
-              organizationId: context.organizationId,
-              subaccountId: context.subaccountId || null,
-              isDefault: true,
-            },
-            include: { pipelineStage: { orderBy: { position: "asc" }, take: 1 } },
+          targetPipeline = await db.query.pipeline.findFirst({
+            where: and(
+              eq(pipeline.organizationId, organizationId),
+              strictLocationCondition(pipeline.locationId, context.locationId),
+              eq(pipeline.isDefault, true)
+            ),
+            with: { pipelineStages: { orderBy: asc(pipelineStage.position), limit: 1 } },
           });
         }
 
-        // Look up contact by name if provided
-        let contactId: string | undefined;
-        if (parsed.contactName) {
-          const contact = await prisma.contact.findFirst({
-            where: {
-              organizationId: context.organizationId,
-              subaccountId: context.subaccountId || null,
-              name: {
-                contains: parsed.contactName,
-                mode: "insensitive",
-              },
-            },
+        // Look up client by name if provided
+        let clientId: string | undefined;
+        if (parsed.clientName) {
+          const existingClient = await db.query.client.findFirst({
+            where: and(
+              eq(client.organizationId, organizationId),
+              strictLocationCondition(client.locationId, context.locationId),
+              ilike(client.name, `%${parsed.clientName}%`)
+            ),
           });
-          contactId = contact?.id;
+          clientId = existingClient?.id;
         }
 
         // Look up team member by name if provided
-        let subaccountMemberId: string | undefined;
-        if (parsed.assigneeName && context.subaccountId) {
-          const member = await prisma.subaccountMember.findFirst({
-            where: {
-              subaccountId: context.subaccountId,
-              user: {
-                name: {
-                  contains: parsed.assigneeName,
-                  mode: "insensitive",
-                },
-              },
-            },
-          });
-          subaccountMemberId = member?.id;
+        let locationMemberId: string | undefined;
+        if (parsed.assigneeName && context.locationId) {
+          locationMemberId = await findLocationMemberByUserName(context.locationId, parsed.assigneeName);
         }
 
-        const deal = await prisma.deal.create({
-          data: {
+        const createdDeal = await db.transaction(async (tx) => {
+          const [newDeal] = await tx
+            .insert(deal)
+            .values({
             id: crypto.randomUUID(),
-            organizationId: context.organizationId,
-            subaccountId: context.subaccountId || null,
-            name: parsed.name,
-            value: parsed.value || null,
+            organizationId,
+            locationId: context.locationId || null,
+            name: dealName,
+            value: parsed.value === undefined ? null : String(parsed.value),
             currency: parsed.currency || "USD",
             deadline: parsed.deadline ? new Date(parsed.deadline) : null,
             pipelineId: targetPipeline?.id || null,
-            pipelineStageId: targetPipeline?.pipelineStage[0]?.id || null,
+            pipelineStageId: targetPipeline?.pipelineStages[0]?.id || null,
             createdAt: new Date(),
             updatedAt: new Date(),
-            // Create contact association if found
-            ...(contactId && {
-              dealContact: {
-                create: {
-                  id: crypto.randomUUID(),
-                  contactId,
-                },
-              },
-            }),
-            // Create team member assignment if found
-            ...(subaccountMemberId && {
-              dealMember: {
-                create: {
-                  id: crypto.randomUUID(),
-                  subaccountMemberId,
-                },
-              },
-            }),
-          },
+            })
+            .returning();
+
+          if (clientId) {
+            await tx.insert(dealClient).values({
+              id: crypto.randomUUID(),
+              dealId: newDeal.id,
+              clientId,
+            });
+          }
+
+          if (locationMemberId) {
+            await tx.insert(dealAssignee).values({
+              id: crypto.randomUUID(),
+              dealId: newDeal.id,
+              locationMemberId,
+            });
+          }
+
+          return newDeal;
         });
 
-        let message = `Created deal **${deal.name}**`;
-        if (deal.value) message += ` worth ${deal.currency} ${deal.value}`;
+        let message = `Created deal **${createdDeal.name}**`;
+        if (createdDeal.value) message += ` worth ${createdDeal.currency} ${createdDeal.value}`;
         if (targetPipeline) message += ` in ${targetPipeline.name} pipeline`;
-        if (deal.deadline) message += ` with deadline ${new Date(deal.deadline).toLocaleDateString()}`;
-        if (contactId) message += ` linked to contact`;
-        if (subaccountMemberId) message += ` assigned to team member`;
+        if (createdDeal.deadline) message += ` with deadline ${new Date(createdDeal.deadline).toLocaleDateString()}`;
+        if (clientId) message += ` linked to client`;
+        if (locationMemberId) message += ` assigned to team member`;
 
         return {
           success: true,
           message,
-          data: { deal },
+          data: { deal: createdDeal },
         };
       } catch (error) {
         console.error("Failed to create deal:", error);
@@ -495,7 +604,8 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   createPipeline: async (params, context) => {
-    if (!context.organizationId) {
+    const organizationId = context.organizationId;
+    if (!organizationId) {
       return {
         success: false,
         message: "Please select an organization to create a pipeline.",
@@ -503,7 +613,7 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
     const isSlashCommand = rawMessage.startsWith("/");
 
     const parsed = isSlashCommand
@@ -513,32 +623,42 @@ const handlers: Record<string, ActionHandler> = {
     const missing = getMissingFields(parsed, ["name"]);
 
     if (parsed.name) {
+      const pipelineName = parsed.name;
       try {
-        const pipeline = await prisma.pipeline.create({
-          data: {
+        const createdPipeline = await db.transaction(async (tx) => {
+          const [newPipeline] = await tx
+            .insert(pipeline)
+            .values({
             id: crypto.randomUUID(),
-            organizationId: context.organizationId,
-            subaccountId: context.subaccountId || null,
-            name: parsed.name,
+            organizationId,
+            locationId: context.locationId || null,
+            name: pipelineName,
             description: parsed.description || null,
             createdAt: new Date(),
             updatedAt: new Date(),
-            pipelineStage: {
-              create: [
-                { id: crypto.randomUUID(), name: "Lead In", position: 0, createdAt: new Date(), updatedAt: new Date() },
-                { id: crypto.randomUUID(), name: "Qualified", position: 1, createdAt: new Date(), updatedAt: new Date() },
-                { id: crypto.randomUUID(), name: "Proposal", position: 2, createdAt: new Date(), updatedAt: new Date() },
-                { id: crypto.randomUUID(), name: "Negotiation", position: 3, createdAt: new Date(), updatedAt: new Date() },
-                { id: crypto.randomUUID(), name: "Won", position: 4, createdAt: new Date(), updatedAt: new Date() },
-              ],
-            },
-          },
+            })
+            .returning();
+
+          await tx.insert(pipelineStage).values(
+            [
+              { id: crypto.randomUUID(), name: "Lead In", position: 0, createdAt: new Date(), updatedAt: new Date() },
+              { id: crypto.randomUUID(), name: "Qualified", position: 1, createdAt: new Date(), updatedAt: new Date() },
+              { id: crypto.randomUUID(), name: "Proposal", position: 2, createdAt: new Date(), updatedAt: new Date() },
+              { id: crypto.randomUUID(), name: "Negotiation", position: 3, createdAt: new Date(), updatedAt: new Date() },
+              { id: crypto.randomUUID(), name: "Won", position: 4, createdAt: new Date(), updatedAt: new Date() },
+            ].map((stage) => ({
+              ...stage,
+              pipelineId: newPipeline.id,
+            }))
+          );
+
+          return newPipeline;
         });
 
         return {
           success: true,
-          message: `Created pipeline **${pipeline.name}** with 5 default stages.`,
-          data: { pipeline },
+          message: `Created pipeline **${createdPipeline.name}** with 5 default stages.`,
+          data: { pipeline: createdPipeline },
         };
       } catch (error) {
         return {
@@ -568,7 +688,7 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   logNote: async (params, context) => {
-    if (params.contactIds?.length > 0 || params.dealIds?.length > 0) {
+    if (stringArrayParam(params.clientIds).length > 0 || stringArrayParam(params.dealIds).length > 0) {
       return {
         success: true,
         message: "What would you like to note about this record?",
@@ -579,16 +699,17 @@ const handlers: Record<string, ActionHandler> = {
 
     return {
       success: true,
-      message: "Please mention a contact or deal to add a note to using @.",
+      message: "Please mention a client or deal to add a note to using @.",
       requiresMoreInfo: true,
     };
   },
 
   sendEmail: async (params, context) => {
-    if (params.contactIds?.length > 0) {
+    if (stringArrayParam(params.clientIds).length > 0) {
+      const clientNames = stringArrayParam(params.clientNames);
       return {
         success: true,
-        message: `I'll help you send an email to ${params.contactNames?.join(", ")}. What's the subject and message?`,
+        message: `I'll help you send an email to ${clientNames.join(", ")}. What's the subject and message?`,
         requiresMoreInfo: true,
         missingFields: ["subject", "body"],
       };
@@ -596,7 +717,7 @@ const handlers: Record<string, ActionHandler> = {
 
     return {
       success: true,
-      message: "Please mention a contact to email using @.",
+      message: "Please mention a client to email using @.",
       requiresMoreInfo: true,
     };
   },
@@ -623,15 +744,13 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    if (params.workflowIds?.length > 0) {
-      const workflowId = params.workflowIds[0];
+    const workflowIds = stringArrayParam(params.workflowIds);
+    if (workflowIds.length > 0) {
+      const workflowId = workflowIds[0];
 
       // Check if workflow exists and user has access
-      const workflow = await prisma.workflows.findFirst({
-        where: {
-          id: workflowId,
-          userId: context.userId,
-        },
+      const workflow = await db.query.workflows.findFirst({
+        where: and(eq(workflows.id, workflowId), eq(workflows.userId, context.userId)),
       });
 
       if (!workflow) {
@@ -668,21 +787,18 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const workflows = await prisma.workflows.findMany({
-      where: {
-        userId: context.userId,
-        archived: false,
-      },
-      select: {
+    const workflowRows = await db.query.workflows.findMany({
+      where: and(eq(workflows.userId, context.userId), eq(workflows.archived, false)),
+      columns: {
         id: true,
         name: true,
         description: true,
         archived: true,
       },
-      take: 10,
+      limit: 10,
     });
 
-    if (workflows.length === 0) {
+    if (workflowRows.length === 0) {
       return {
         success: true,
         message: "You don't have any workflows yet. Would you like to create one?",
@@ -690,14 +806,14 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const workflowList = workflows
-      .map((w: { name: string }) => `• ${w.name}`)
+    const workflowList = workflowRows
+      .map((w) => `• ${w.name}`)
       .join("\n");
 
     return {
       success: true,
       message: `Here are your workflows:\n\n${workflowList}`,
-      data: { workflows },
+      data: { workflows: workflowRows },
     };
   },
 
@@ -720,14 +836,14 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
 
     // Check if the message has enough detail to generate a workflow
     if (rawMessage.length < 20 || !rawMessage.toLowerCase().includes("workflow")) {
       return {
         success: true,
         message:
-          "Describe the workflow you want to create. What should trigger it and what actions should it perform?\n\nExample: 'Generate a workflow for application intake that creates a contact when a Google Form is submitted, then sends a welcome email'",
+          "Describe the workflow you want to create. What should trigger it and what actions should it perform?\n\nExample: 'Generate a workflow for application intake that creates a client when a Google Form is submitted, then sends a welcome email'",
         requiresMoreInfo: true,
         missingFields: ["description"],
       };
@@ -736,7 +852,7 @@ const handlers: Record<string, ActionHandler> = {
     try {
       const workflow = await generateWorkflow(rawMessage, {
         organizationId: context.organizationId,
-        subaccountId: context.subaccountId,
+        locationId: context.locationId,
       });
 
       if (!workflow) {
@@ -746,69 +862,10 @@ const handlers: Record<string, ActionHandler> = {
         };
       }
 
-      // Create the workflow in the database
-      const createdWorkflow = await prisma.workflows.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: context.userId,
-          organizationId: context.organizationId,
-          subaccountId: context.subaccountId,
-          name: workflow.name,
-          description: workflow.description,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          Node: {
-            create: workflow.nodes.map(node => ({
-              id: crypto.randomUUID(),
-              name: node.name,
-              type: node.type as any,
-              position: node.position,
-              data: node.data,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })),
-          },
-        },
-        include: {
-          Node: true,
-        },
+      const createdWorkflow = await persistGeneratedWorkflow({
+        workflow,
+        context: { ...context, organizationId: context.organizationId },
       });
-
-      // Create connections between nodes
-      // Map generated node IDs to created node IDs by matching name and type
-      const nodeIdMap = new Map<string, string>();
-      workflow.nodes.forEach((genNode) => {
-        const createdNode = createdWorkflow.Node.find(
-          (n: any) => n.name === genNode.name && n.type === genNode.type
-        );
-        if (createdNode) {
-          nodeIdMap.set(genNode.id, createdNode.id);
-        }
-      });
-
-      console.log("[Workflow Gen] Generated connections:", workflow.connections);
-      console.log("[Workflow Gen] Node ID map:", Object.fromEntries(nodeIdMap));
-
-      for (const conn of workflow.connections) {
-        const fromNodeId = nodeIdMap.get(conn.sourceId);
-        const toNodeId = nodeIdMap.get(conn.targetId);
-        console.log(`[Workflow Gen] Creating connection: ${conn.sourceId} -> ${conn.targetId}, mapped: ${fromNodeId} -> ${toNodeId}`);
-        if (fromNodeId && toNodeId) {
-          await prisma.connection.create({
-            data: {
-              id: crypto.randomUUID(),
-              workflowId: createdWorkflow.id,
-              fromNodeId,
-              toNodeId,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          });
-          console.log(`[Workflow Gen] Connection created successfully`);
-        } else {
-          console.log(`[Workflow Gen] Failed to map connection - missing node ID`);
-        }
-      }
 
       const nodeList = workflow.nodes.map(n => `• ${n.name} (${n.type})`).join("\n");
 
@@ -845,7 +902,7 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
 
     // Check if the message has enough detail to generate a bundle
     if (rawMessage.length < 15) {
@@ -861,7 +918,7 @@ const handlers: Record<string, ActionHandler> = {
     try {
       const workflow = await generateBundleWorkflow(rawMessage, {
         organizationId: context.organizationId,
-        subaccountId: context.subaccountId,
+        locationId: context.locationId,
       });
 
       if (!workflow) {
@@ -871,62 +928,11 @@ const handlers: Record<string, ActionHandler> = {
         };
       }
 
-      // Create the bundle workflow in the database
-      const createdWorkflow = await prisma.workflows.create({
-        data: {
-          id: crypto.randomUUID(),
-          userId: context.userId,
-          organizationId: context.organizationId,
-          subaccountId: context.subaccountId,
-          name: workflow.name,
-          description: workflow.description,
-          isBundle: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          Node: {
-            create: workflow.nodes.map(node => ({
-              id: crypto.randomUUID(),
-              name: node.name,
-              type: node.type as any,
-              position: node.position,
-              data: node.data,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })),
-          },
-        },
-        include: {
-          Node: true,
-        },
+      const createdWorkflow = await persistGeneratedWorkflow({
+        workflow,
+        context: { ...context, organizationId: context.organizationId },
+        isBundle: true,
       });
-
-      // Create connections between nodes
-      const nodeIdMap = new Map<string, string>();
-      workflow.nodes.forEach((genNode) => {
-        const createdNode = createdWorkflow.Node.find(
-          (n: any) => n.name === genNode.name && n.type === genNode.type
-        );
-        if (createdNode) {
-          nodeIdMap.set(genNode.id, createdNode.id);
-        }
-      });
-
-      for (const conn of workflow.connections) {
-        const fromNodeId = nodeIdMap.get(conn.sourceId);
-        const toNodeId = nodeIdMap.get(conn.targetId);
-        if (fromNodeId && toNodeId) {
-          await prisma.connection.create({
-            data: {
-              id: crypto.randomUUID(),
-              workflowId: createdWorkflow.id,
-              fromNodeId,
-              toNodeId,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          });
-        }
-      }
 
       const nodeList = workflow.nodes.map(n => `• ${n.name} (${n.type})`).join("\n");
 
@@ -946,13 +952,15 @@ const handlers: Record<string, ActionHandler> = {
 
   // AI Actions
   summarise: async (params, context) => {
-    if (params.contactIds?.length > 0 || params.dealIds?.length > 0) {
+    const clientIds = stringArrayParam(params.clientIds);
+    const dealIds = stringArrayParam(params.dealIds);
+    if (clientIds.length > 0 || dealIds.length > 0) {
       return {
         success: true,
         message: "I'll summarise the mentioned records for you.",
         data: {
-          contactIds: params.contactIds,
-          dealIds: params.dealIds,
+          clientIds,
+          dealIds,
         },
       };
     }
@@ -960,7 +968,7 @@ const handlers: Record<string, ActionHandler> = {
     return {
       success: true,
       message:
-        "What would you like me to summarise? You can mention a contact or deal using @.",
+        "What would you like me to summarise? You can mention a client or deal using @.",
       requiresMoreInfo: true,
     };
   },
@@ -975,10 +983,11 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   draftEmail: async (params, context) => {
-    if (params.contactIds?.length > 0) {
+    if (stringArrayParam(params.clientIds).length > 0) {
+      const clientNames = stringArrayParam(params.clientNames);
       return {
         success: true,
-        message: `I'll draft an email for ${params.contactNames?.join(", ")}. What's the purpose of this email?`,
+        message: `I'll draft an email for ${clientNames.join(", ")}. What's the purpose of this email?`,
         requiresMoreInfo: true,
         missingFields: ["purpose"],
       };
@@ -987,7 +996,7 @@ const handlers: Record<string, ActionHandler> = {
     return {
       success: true,
       message:
-        "I can draft an email for you. Mention a contact using @ and tell me the purpose.",
+        "I can draft an email for you. Mention a client using @ and tell me the purpose.",
       requiresMoreInfo: true,
     };
   },
@@ -996,7 +1005,7 @@ const handlers: Record<string, ActionHandler> = {
     return {
       success: true,
       message:
-        "What data would you like me to analyze? You can mention specific contacts, deals, or pipelines.",
+        "What data would you like me to analyze? You can mention specific clients, deals, or pipelines.",
       requiresMoreInfo: true,
     };
   },
@@ -1011,47 +1020,45 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   // Query Actions
-  showContacts: async (params, context) => {
+  showClients: async (params, context) => {
     if (!context.organizationId) {
       return {
         success: false,
-        message: "Please select an organization to view contacts.",
+        message: "Please select an organization to view clients.",
       };
     }
 
-    const where: any = { organizationId: context.organizationId };
-    if (context.subaccountId) {
-      where.subaccountId = context.subaccountId;
-    }
-
-    const contacts = await prisma.contact.findMany({
-      where,
-      select: {
+    const clients = await db.query.client.findMany({
+      where: compactConditions([
+        eq(client.organizationId, context.organizationId),
+        optionalLocationCondition(client.locationId, context.locationId),
+      ]),
+      columns: {
         id: true,
         name: true,
         email: true,
         companyName: true,
       },
-      take: 10,
-      orderBy: { createdAt: "desc" },
+      limit: 10,
+      orderBy: desc(client.createdAt),
     });
 
-    if (contacts.length === 0) {
+    if (clients.length === 0) {
       return {
         success: true,
-        message: "No contacts found. Would you like to create one?",
-        data: { contacts: [] },
+        message: "No clients found. Would you like to create one?",
+        data: { clients: [] },
       };
     }
 
-    const contactList = contacts
-      .map((c: { name: string; email: string | null }) => `• ${c.name}${c.email ? ` (${c.email})` : ""}`)
+    const clientList = clients
+      .map((c) => `• ${c.name}${c.email ? ` (${c.email})` : ""}`)
       .join("\n");
 
     return {
       success: true,
-      message: `Here are your recent contacts:\n\n${contactList}`,
-      data: { contacts },
+      message: `Here are your recent clients:\n\n${clientList}`,
+      data: { clients },
     };
   },
 
@@ -1063,23 +1070,23 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const where: any = { organizationId: context.organizationId };
-    if (context.subaccountId) {
-      where.subaccountId = context.subaccountId;
-    }
-
-    const deals = await prisma.deal.findMany({
-      where,
-      select: {
+    const deals = await db.query.deal.findMany({
+      where: compactConditions([
+        eq(deal.organizationId, context.organizationId),
+        optionalLocationCondition(deal.locationId, context.locationId),
+      ]),
+      columns: {
         id: true,
         name: true,
         value: true,
+      },
+      with: {
         pipelineStage: {
-          select: { name: true },
+          columns: { name: true },
         },
       },
-      take: 10,
-      orderBy: { createdAt: "desc" },
+      limit: 10,
+      orderBy: desc(deal.createdAt),
     });
 
     if (deals.length === 0) {
@@ -1112,21 +1119,21 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const where: any = { organizationId: context.organizationId };
-    if (context.subaccountId) {
-      where.subaccountId = context.subaccountId;
-    }
-
-    const pipelines = await prisma.pipeline.findMany({
-      where,
-      select: {
+    const pipelines = await db.query.pipeline.findMany({
+      where: compactConditions([
+        eq(pipeline.organizationId, context.organizationId),
+        optionalLocationCondition(pipeline.locationId, context.locationId),
+      ]),
+      columns: {
         id: true,
         name: true,
-        pipelineStage: {
-          select: { id: true },
+      },
+      with: {
+        pipelineStages: {
+          columns: { id: true },
         },
       },
-      take: 10,
+      limit: 10,
     });
 
     if (pipelines.length === 0) {
@@ -1138,7 +1145,7 @@ const handlers: Record<string, ActionHandler> = {
     }
 
     const pipelineList = pipelines
-      .map((p: { name: string; pipelineStage: { id: string }[] }) => `• ${p.name} (${p.pipelineStage.length} stages)`)
+      .map((p) => `• ${p.name} (${p.pipelineStages.length} stages)`)
       .join("\n");
 
     return {
@@ -1149,21 +1156,18 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   showWorkflows: async (params, context) => {
-    const workflows = await prisma.workflows.findMany({
-      where: {
-        userId: context.userId,
-        archived: false,
-      },
-      select: {
+    const workflowRows = await db.query.workflows.findMany({
+      where: and(eq(workflows.userId, context.userId), eq(workflows.archived, false)),
+      columns: {
         id: true,
         name: true,
         description: true,
         archived: true,
       },
-      take: 10,
+      limit: 10,
     });
 
-    if (workflows.length === 0) {
+    if (workflowRows.length === 0) {
       return {
         success: true,
         message: "No workflows found. Would you like to create one?",
@@ -1171,19 +1175,19 @@ const handlers: Record<string, ActionHandler> = {
       };
     }
 
-    const workflowList = workflows
-      .map((w: { name: string }) => `• ${w.name}`)
+    const workflowList = workflowRows
+      .map((w) => `• ${w.name}`)
       .join("\n");
 
     return {
       success: true,
       message: `Here are your workflows:\n\n${workflowList}`,
-      data: { workflows },
+      data: { workflows: workflowRows },
     };
   },
 
   search: async (params, context) => {
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
 
     if (!rawMessage) {
       return {
@@ -1198,7 +1202,7 @@ const handlers: Record<string, ActionHandler> = {
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const prompt = `Analyze this search query and determine what the user is looking for. Return ONLY valid JSON with these fields:
-- type: string ("contacts", "deals", "pipelines", or "workflows")
+- type: string ("clients", "deals", "pipelines", or "workflows")
 
 Query: "${rawMessage}"
 
@@ -1213,27 +1217,27 @@ JSON:`;
         const parsed = JSON.parse(jsonMatch[0]);
 
         // Route to the appropriate handler
-        if (parsed.type === "contacts") {
-          return handlers.queryContacts(params, context);
+        if (parsed.type === "clients") {
+          return handlers.queryClients(params, context);
         } else if (parsed.type === "deals") {
           return handlers.queryDeals(params, context);
         } else if (parsed.type === "pipelines") {
           return handlers.showPipelines(params, context);
         } else if (parsed.type === "workflows") {
           // Show workflows with basic filtering
-          const workflows = await prisma.workflows.findMany({
-            where: {
-              organizationId: context.organizationId,
-              subaccountId: context.subaccountId || null,
-            },
-            take: 10,
-            orderBy: { createdAt: "desc" },
+          const workflowRows = await db.query.workflows.findMany({
+            where: compactConditions([
+              context.organizationId ? eq(workflows.organizationId, context.organizationId) : undefined,
+              strictLocationCondition(workflows.locationId, context.locationId),
+            ]),
+            limit: 10,
+            orderBy: desc(workflows.createdAt),
           });
 
           return {
             success: true,
-            message: `Found ${workflows.length} workflow${workflows.length !== 1 ? "s" : ""}`,
-            data: { workflows },
+            message: `Found ${workflowRows.length} workflow${workflowRows.length !== 1 ? "s" : ""}`,
+            data: { workflows: workflowRows },
           };
         }
       }
@@ -1246,57 +1250,44 @@ JSON:`;
   },
 
   // Natural Language Query Handlers
-  queryContacts: async (params, context) => {
+  queryClients: async (params, context) => {
     if (!context.organizationId) {
       return {
         success: false,
-        message: "Please select an organization to query contacts.",
+        message: "Please select an organization to query clients.",
       };
     }
 
-    const rawMessage = params.rawMessage || "";
-    const filters = await extractContactFiltersFromNL(rawMessage);
+    const rawMessage = textParam(params.rawMessage);
+    const filters = await extractClientFiltersFromNL(rawMessage);
 
-    // Build Prisma where clause
-    const where: any = {
-      organizationId: context.organizationId,
-    };
-    if (context.subaccountId) {
-      where.subaccountId = context.subaccountId;
-    }
+    const conditions: SQL[] = [eq(client.organizationId, context.organizationId)];
+    const locationFilter = optionalLocationCondition(client.locationId, context.locationId);
+    if (locationFilter) conditions.push(locationFilter);
 
     // Company name filter (case-insensitive contains)
     if (filters.companyName) {
-      where.companyName = {
-        contains: filters.companyName,
-        mode: "insensitive",
-      };
+      conditions.push(ilike(client.companyName, `%${filters.companyName}%`));
     }
 
     // Name filter
     if (filters.name) {
-      where.name = {
-        contains: filters.name,
-        mode: "insensitive",
-      };
+      conditions.push(ilike(client.name, `%${filters.name}%`));
     }
 
     // Email filter
     if (filters.email) {
-      where.email = {
-        contains: filters.email,
-        mode: "insensitive",
-      };
+      conditions.push(ilike(client.email, `%${filters.email}%`));
     }
 
     // Type filter
     if (filters.type) {
-      where.type = filters.type;
+      conditions.push(eq(client.type, filters.type as typeof client.$inferSelect.type));
     }
 
     // Lifecycle stage filter
     if (filters.lifecycleStage) {
-      where.lifecycleStage = filters.lifecycleStage;
+      conditions.push(eq(client.lifecycleStage, filters.lifecycleStage as NonNullable<typeof client.$inferSelect.lifecycleStage>));
     }
 
     // Date filters
@@ -1304,28 +1295,19 @@ JSON:`;
       const date = new Date(filters.createdOn);
       const nextDay = new Date(date);
       nextDay.setDate(nextDay.getDate() + 1);
-      where.createdAt = {
-        gte: date,
-        lt: nextDay,
-      };
+      conditions.push(gte(client.createdAt, date), lt(client.createdAt, nextDay));
     } else {
       if (filters.createdAfter) {
-        where.createdAt = {
-          ...where.createdAt,
-          gte: new Date(filters.createdAfter),
-        };
+        conditions.push(gte(client.createdAt, new Date(filters.createdAfter)));
       }
       if (filters.createdBefore) {
-        where.createdAt = {
-          ...where.createdAt,
-          lte: new Date(filters.createdBefore),
-        };
+        conditions.push(lte(client.createdAt, new Date(filters.createdBefore)));
       }
     }
 
-    const contacts = await prisma.contact.findMany({
-      where,
-      select: {
+    const clients = await db.query.client.findMany({
+      where: and(...conditions),
+      columns: {
         id: true,
         name: true,
         email: true,
@@ -1334,11 +1316,11 @@ JSON:`;
         lifecycleStage: true,
         createdAt: true,
       },
-      take: 50,
-      orderBy: { createdAt: "desc" },
+      limit: 50,
+      orderBy: desc(client.createdAt),
     });
 
-    if (contacts.length === 0) {
+    if (clients.length === 0) {
       // Build description of filters applied
       const filterDesc: string[] = [];
       if (filters.companyName) filterDesc.push(`from "${filters.companyName}"`);
@@ -1349,8 +1331,8 @@ JSON:`;
 
       return {
         success: true,
-        message: `No contacts found${filterDesc.length > 0 ? ` ${filterDesc.join(", ")}` : ""}.`,
-        data: { contacts: [], filters },
+        message: `No clients found${filterDesc.length > 0 ? ` ${filterDesc.join(", ")}` : ""}.`,
+        data: { clients: [], filters },
       };
     }
 
@@ -1372,7 +1354,7 @@ JSON:`;
       urlParams.set("createdAtEnd", new Date(filters.createdBefore).toISOString());
     }
 
-    const contactsUrl = `/contacts${urlParams.toString() ? `?${urlParams.toString()}` : ""}`;
+    const clientsUrl = `/clients${urlParams.toString() ? `?${urlParams.toString()}` : ""}`;
 
     // Build filter description
     const filterDesc: string[] = [];
@@ -1384,8 +1366,8 @@ JSON:`;
 
     return {
       success: true,
-      message: `Found ${contacts.length} contact${contacts.length !== 1 ? "s" : ""}${filterDesc.length > 0 ? ` ${filterDesc.join(", ")}` : ""}`,
-      data: { contacts, filters, url: contactsUrl },
+      message: `Found ${clients.length} client${clients.length !== 1 ? "s" : ""}${filterDesc.length > 0 ? ` ${filterDesc.join(", ")}` : ""}`,
+      data: { clients, filters, url: clientsUrl },
     };
   },
 
@@ -1397,85 +1379,63 @@ JSON:`;
       };
     }
 
-    const rawMessage = params.rawMessage || "";
+    const rawMessage = textParam(params.rawMessage);
     const filters = await extractDealFiltersFromNL(rawMessage);
 
-    // Build Prisma where clause
-    const where: any = {
-      organizationId: context.organizationId,
-    };
-    if (context.subaccountId) {
-      where.subaccountId = context.subaccountId;
-    }
+    const conditions: SQL[] = [eq(deal.organizationId, context.organizationId)];
+    const locationFilter = optionalLocationCondition(deal.locationId, context.locationId);
+    if (locationFilter) conditions.push(locationFilter);
+    let stageIds: string[] = [];
 
     // Value filters
     if (filters.minValue !== undefined) {
-      where.value = {
-        ...where.value,
-        gte: filters.minValue,
-      };
+      conditions.push(gte(deal.value, String(filters.minValue)));
     }
     if (filters.maxValue !== undefined) {
-      where.value = {
-        ...where.value,
-        lte: filters.maxValue,
-      };
+      conditions.push(lte(deal.value, String(filters.maxValue)));
     }
 
     // Currency filter
     if (filters.currency) {
-      where.currency = filters.currency;
+      conditions.push(eq(deal.currency, filters.currency));
     }
 
     // Name filter
     if (filters.name) {
-      where.name = {
-        contains: filters.name,
-        mode: "insensitive",
-      };
+      conditions.push(ilike(deal.name, `%${filters.name}%`));
     }
 
     // Pipeline filter - need to look up by name
     if (filters.pipelineName) {
-      const pipelineWhere: any = {
-        organizationId: context.organizationId,
-        name: {
-          contains: filters.pipelineName,
-          mode: "insensitive",
-        },
-      };
-      if (context.subaccountId) {
-        pipelineWhere.subaccountId = context.subaccountId;
-      }
-      const pipeline = await prisma.pipeline.findFirst({
-        where: pipelineWhere,
+      const targetPipeline = await db.query.pipeline.findFirst({
+        where: compactConditions([
+          eq(pipeline.organizationId, context.organizationId),
+          optionalLocationCondition(pipeline.locationId, context.locationId),
+          ilike(pipeline.name, `%${filters.pipelineName}%`),
+        ]),
       });
-      if (pipeline) {
-        where.pipelineId = pipeline.id;
+      if (targetPipeline) {
+        conditions.push(eq(deal.pipelineId, targetPipeline.id));
       }
     }
 
     // Stage filter - need to look up by name
     if (filters.stageName) {
-      const stageWhere: any = {
-        name: {
-          contains: filters.stageName,
-          mode: "insensitive",
+      const stages = await db.query.pipelineStage.findMany({
+        where: ilike(pipelineStage.name, `%${filters.stageName}%`),
+        with: {
+          pipeline: true,
         },
-        pipeline: {
-          organizationId: context.organizationId,
-        },
-      };
-      if (context.subaccountId) {
-        stageWhere.pipeline.subaccountId = context.subaccountId;
-      }
-      const stages = await prisma.pipelineStage.findMany({
-        where: stageWhere,
       });
-      if (stages.length > 0) {
-        where.pipelineStageId = {
-          in: stages.map((s) => s.id),
-        };
+      stageIds = stages
+        .filter(
+          (stage) =>
+            stage.pipeline.organizationId === context.organizationId &&
+            (!context.locationId || stage.pipeline.locationId === context.locationId)
+        )
+        .map((stage) => stage.id);
+      if (stageIds.length > 0) {
+        conditions.push(inArray(deal.pipelineStageId, stageIds));
       }
     }
 
@@ -1484,72 +1444,54 @@ JSON:`;
       const date = new Date(filters.createdOn);
       const nextDay = new Date(date);
       nextDay.setDate(nextDay.getDate() + 1);
-      where.createdAt = {
-        gte: date,
-        lt: nextDay,
-      };
+      conditions.push(gte(deal.createdAt, date), lt(deal.createdAt, nextDay));
     } else {
       if (filters.createdAfter) {
-        where.createdAt = {
-          ...where.createdAt,
-          gte: new Date(filters.createdAfter),
-        };
+        conditions.push(gte(deal.createdAt, new Date(filters.createdAfter)));
       }
       if (filters.createdBefore) {
-        where.createdAt = {
-          ...where.createdAt,
-          lte: new Date(filters.createdBefore),
-        };
+        conditions.push(lte(deal.createdAt, new Date(filters.createdBefore)));
       }
     }
 
     // Deadline filters
     if (filters.hasPassedDeadline) {
       // Deals with deadline before today (overdue/passed)
-      where.deadline = {
-        lt: new Date(),
-      };
+      conditions.push(lt(deal.deadline, new Date()));
     } else if (filters.deadlineOn) {
       const date = new Date(filters.deadlineOn);
       const nextDay = new Date(date);
       nextDay.setDate(nextDay.getDate() + 1);
-      where.deadline = {
-        gte: date,
-        lt: nextDay,
-      };
+      conditions.push(gte(deal.deadline, date), lt(deal.deadline, nextDay));
     } else {
       if (filters.deadlineBefore) {
-        where.deadline = {
-          ...where.deadline,
-          lte: new Date(filters.deadlineBefore),
-        };
+        conditions.push(lte(deal.deadline, new Date(filters.deadlineBefore)));
       }
       if (filters.deadlineAfter) {
-        where.deadline = {
-          ...where.deadline,
-          gte: new Date(filters.deadlineAfter),
-        };
+        conditions.push(gte(deal.deadline, new Date(filters.deadlineAfter)));
       }
     }
 
-    const deals = await prisma.deal.findMany({
-      where,
-      select: {
+    const deals = await db.query.deal.findMany({
+      where: and(...conditions),
+      columns: {
         id: true,
         name: true,
         value: true,
         currency: true,
         createdAt: true,
         deadline: true,
+      },
+      with: {
         pipeline: {
-          select: { name: true },
+          columns: { name: true },
         },
         pipelineStage: {
-          select: { name: true },
+          columns: { name: true },
         },
       },
-      take: 50,
-      orderBy: { createdAt: "desc" },
+      limit: 50,
+      orderBy: desc(deal.createdAt),
     });
 
     if (deals.length === 0) {
@@ -1584,8 +1526,8 @@ JSON:`;
     if (filters.currency) urlParams.set("valueCurrency", filters.currency);
     if (filters.name) urlParams.set("search", filters.name);
     // For stage filter, we'd need the stage IDs - use stages param if we have them
-    if (filters.stageName && where.pipelineStageId?.in) {
-      urlParams.set("stages", where.pipelineStageId.in.join(","));
+    if (filters.stageName && stageIds.length > 0) {
+      urlParams.set("stages", stageIds.join(","));
     }
     // Deadline filters
     if (filters.deadlineBefore) urlParams.set("deadlineEnd", new Date(filters.deadlineBefore).toISOString());

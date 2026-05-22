@@ -54,7 +54,7 @@ export function StripeConnectCard() {
   const handleConnect = () => {
     setIsConnecting(true);
     // Redirect to Stripe Connect OAuth
-    // The backend will automatically get org/subaccount from session
+    // The backend will automatically get org/location from session
     window.location.href = `/api/stripe/connect`;
   };
 

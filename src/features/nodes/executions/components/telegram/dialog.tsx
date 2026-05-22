@@ -37,7 +37,7 @@ import { Switch } from "@/components/ui/switch";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import { useCredentialsByType } from "@/features/credentials/hooks/use-credentials";
-import { CredentialType } from "@prisma/client";
+import { CredentialType } from "@/db/enums";
 
 const formSchema = z.object({
   variableName: z

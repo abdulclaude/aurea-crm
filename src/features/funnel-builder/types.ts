@@ -1,4 +1,4 @@
-import type { FunnelBlockType, DeviceType } from "@prisma/client";
+import type { FunnelBlockType, DeviceType } from "@/db/enums";
 
 // Block property types
 export interface BlockProps {

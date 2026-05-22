@@ -33,11 +33,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { TagsInput } from "@/components/ui/tags-input";
-import type { Prisma } from "@prisma/client";
+import type { DecimalLike } from "@/db/json";
 
 const formSchema = z.object({
   name: z.string().min(2, "Name is required"),
-  contactIds: z.array(z.string()).min(1, "At least one contact is required"),
+  clientIds: z.array(z.string()).min(1, "At least one client is required"),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
   value: z.string().optional(),
@@ -60,13 +60,13 @@ interface DealEditSheetProps {
     pipelineStageId?: string | null;
     pipeline?: { id: string; name: string } | null;
     pipelineStage?: { id: string; name: string; probability: number } | null;
-    value?: Prisma.Decimal | number | null;
+    value?: DecimalLike | number | string | null;
     currency?: string | null;
     deadline?: Date | null;
     source?: string | null;
     tags: string[];
     description?: string | null;
-    contacts: Array<{ id: string; name: string }>;
+    clients: Array<{ id: string; name: string }>;
   };
 }
 
@@ -78,14 +78,14 @@ export function DealEditSheet({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const { data: contactsData } = useQuery(trpc.contacts.list.queryOptions());
+  const { data: clientsData } = useQuery(trpc.clients.list.queryOptions());
   const { data: pipelinesData } = useQuery(trpc.pipelines.list.queryOptions());
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: deal.name,
-      contactIds: deal.contacts.map((c) => c.id),
+      clientIds: deal.clients.map((c) => c.id),
       pipelineId: deal.pipelineId ?? "",
       pipelineStageId: deal.pipelineStageId ?? "",
       value:
@@ -135,7 +135,7 @@ export function DealEditSheet({
     const clean = {
       id: deal.id,
       name: values.name.trim(),
-      contactIds: values.contactIds,
+      clientIds: values.clientIds,
       pipelineId: values.pipelineId?.trim() || null,
       pipelineStageId: values.pipelineStageId?.trim() || null,
       value: values.value?.trim()
@@ -189,11 +189,11 @@ export function DealEditSheet({
 
               <FormField
                 control={form.control}
-                name="contactIds"
+                name="clientIds"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs text-muted-foreground">
-                      Contact(s)
+                      Member(s)
                     </FormLabel>
                     <Select
                       onValueChange={(value) => {
@@ -203,14 +203,14 @@ export function DealEditSheet({
                     >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select contact" />
+                          <SelectValue placeholder="Select member" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {contactsData?.items.map((contact) => (
-                          <SelectItem key={contact.id} value={contact.id}>
-                            {contact.name}
-                            {contact.companyName && ` - ${contact.companyName}`}
+                        {clientsData?.items.map((client) => (
+                          <SelectItem key={client.id} value={client.id}>
+                            {client.name}
+                            {client.companyName && ` - ${client.companyName}`}
                           </SelectItem>
                         ))}
                       </SelectContent>

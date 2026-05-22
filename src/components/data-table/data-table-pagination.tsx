@@ -29,8 +29,13 @@ export function DataTablePagination({
   onPageSizeChange,
   pageSizeOptions = [10, 20, 50, 100],
 }: DataTablePaginationProps) {
-  const startItem = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(currentPage * pageSize, totalItems);
+  const safeTotalPages = Math.max(1, totalPages);
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), safeTotalPages);
+  const startItem = totalItems === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1;
+  const endItem = Math.min(safeCurrentPage * pageSize, totalItems);
+  const goToPage = (page: number) => {
+    onPageChange(Math.min(Math.max(1, page), safeTotalPages));
+  };
 
   return (
     <div className="flex items-center justify-between px-6 py-4 border-t border-black/5 dark:border-white/5">
@@ -62,8 +67,8 @@ export function DataTablePagination({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onPageChange(1)}
-          disabled={currentPage === 1}
+          onClick={() => goToPage(1)}
+          disabled={safeCurrentPage === 1}
           className="h-8 w-8 p-0"
         >
           <ChevronsLeft className="h-4 w-4" />
@@ -72,8 +77,8 @@ export function DataTablePagination({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 1}
+          onClick={() => goToPage(safeCurrentPage - 1)}
+          disabled={safeCurrentPage === 1}
           className="h-8 w-8 p-0"
         >
           <ChevronLeft className="h-4 w-4" />
@@ -82,15 +87,15 @@ export function DataTablePagination({
 
         <div className="flex items-center gap-1 text-xs text-primary">
           <span>
-            Page {currentPage} of {totalPages}
+            Page {safeCurrentPage} of {safeTotalPages}
           </span>
         </div>
 
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
+          onClick={() => goToPage(safeCurrentPage + 1)}
+          disabled={safeCurrentPage === safeTotalPages}
           className="h-8 w-8 p-0"
         >
           <ChevronRight className="h-4 w-4" />
@@ -99,8 +104,8 @@ export function DataTablePagination({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => onPageChange(totalPages)}
-          disabled={currentPage === totalPages}
+          onClick={() => goToPage(safeTotalPages)}
+          disabled={safeCurrentPage === safeTotalPages}
           className="h-8 w-8 p-0"
         >
           <ChevronsRight className="h-4 w-4" />

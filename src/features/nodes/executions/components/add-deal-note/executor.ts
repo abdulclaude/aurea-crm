@@ -2,8 +2,12 @@ import Handlebars from "handlebars";
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 import { addDealNoteChannel } from "@/inngest/channels/add-deal-note";
-import prisma from "@/lib/db";
 import { decode } from "html-entities";
+import { eq } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
+
+import { db } from "@/db";
+import { deal as dealTable, note as noteTable } from "@/db/schema";
 
 type AddDealNoteData = {
   dealId: string;
@@ -38,12 +42,19 @@ export const addDealNoteExecutor: NodeExecutor<AddDealNoteData> = async ({
 
     // Compile fields with Handlebars
     const dealId = decode(Handlebars.compile(data.dealId)(context));
-    const note = decode(Handlebars.compile(data.note)(context));
+    const note = decode(Handlebars.compile(data.note)(context)).trim();
+
+    if (!note) {
+      await publish(addDealNoteChannel().status({ nodeId, status: "error" }));
+      throw new NonRetriableError(
+        "Add Deal Note Node error: Note content is empty."
+      );
+    }
 
     const deal = await step.run("add-deal-note", async () => {
-      // Verify deal exists
-      const existingDeal = await prisma.deal.findUnique({
-        where: { id: dealId },
+      const existingDeal = await db.query.deal.findFirst({
+        where: eq(dealTable.id, dealId),
+        columns: { id: true, name: true, organizationId: true, locationId: true },
       });
 
       if (!existingDeal) {
@@ -52,20 +63,28 @@ export const addDealNoteExecutor: NodeExecutor<AddDealNoteData> = async ({
         );
       }
 
-      // Append note to description
-      const currentDescription = existingDeal.description || "";
-      const timestamp = new Date().toISOString();
-      const newNote = `\n\n---\n**${timestamp}**\n${note}`;
-      const updatedDescription = currentDescription + newNote;
+      await db.insert(noteTable).values({
+          id: createId(),
+          organizationId: existingDeal.organizationId,
+          locationId: existingDeal.locationId,
+          dealId: existingDeal.id,
+          authorId: userId ?? null,
+          content: note,
+          pinned: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+      });
 
-      return await prisma.deal.update({
-        where: { id: dealId },
-        data: {
-          description: updatedDescription,
+      const [updatedDeal] = await db
+        .update(dealTable)
+        .set({
           lastActivityAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+        })
+        .where(eq(dealTable.id, dealId))
+        .returning();
+
+      return updatedDeal;
     });
 
     await publish(addDealNoteChannel().status({ nodeId, status: "success" }));
@@ -77,7 +96,6 @@ export const addDealNoteExecutor: NodeExecutor<AddDealNoteData> = async ({
             [data.variableName]: {
               id: deal.id,
               name: deal.name,
-              description: deal.description,
             },
           }
         : {}),

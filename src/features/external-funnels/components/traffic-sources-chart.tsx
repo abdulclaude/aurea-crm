@@ -188,8 +188,8 @@ export function TrafficSourcesChart({ funnelId }: TrafficSourcesChartProps) {
 											cx="50%"
 											cy="50%"
 											outerRadius={80}
-											label={({ source, sessions }) =>
-												`${source}: ${sessions}`
+											label={({ payload }) =>
+												`${payload?.source ?? "Unknown"}: ${payload?.sessions ?? 0}`
 											}
 											labelLine
 										>
@@ -209,7 +209,7 @@ export function TrafficSourcesChart({ funnelId }: TrafficSourcesChartProps) {
 																{name}
 															</span>
 															<span className="text-xs font-mono font-semibold">
-																{value.toLocaleString()} sessions
+																{Number(value ?? 0).toLocaleString()} sessions
 															</span>
 														</div>
 													)}
@@ -288,7 +288,7 @@ export function TrafficSourcesChart({ funnelId }: TrafficSourcesChartProps) {
 																		Sessions:
 																	</span>
 																	<span className="text-xs font-mono font-semibold">
-																		{value.toLocaleString()}
+																		{Number(value ?? 0).toLocaleString()}
 																	</span>
 																</div>
 																{item.revenue > 0 && (

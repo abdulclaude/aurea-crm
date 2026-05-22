@@ -6,10 +6,14 @@
 import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import prisma from "@/lib/db";
-import { InvoiceStatus } from "@prisma/client";
+import { createId } from "@paralleldrive/cuid2";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { invoice as invoiceTable, invoicePayment } from "@/db/schema";
+import { InvoiceStatus } from "@/db/enums";
 import { verifyStripeWebhook, handleCheckoutCompleted } from "@/lib/stripe";
 import { sendPaymentConfirmationEmail } from "@/lib/email";
+import { createNotification } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -47,8 +51,8 @@ export async function POST(req: NextRequest) {
         }
 
         // Find invoice
-        const invoice = await prisma.invoice.findUnique({
-          where: { id: paymentData.invoiceId },
+        const invoice = await db.query.invoice.findFirst({
+          where: eq(invoiceTable.id, paymentData.invoiceId),
         });
 
         if (!invoice) {
@@ -59,25 +63,20 @@ export async function POST(req: NextRequest) {
         // Record payment
         const amountPaid = paymentData.amountPaid / 100; // Convert from cents
 
-        await prisma.$transaction(async (tx) => {
-          // Create payment record
-          await tx.invoicePayment.create({
-            data: {
-              id: crypto.randomUUID(),
+        await db.transaction(async (tx) => {
+          await tx.insert(invoicePayment).values({
+              id: createId(),
               invoiceId: invoice.id,
-              amount: amountPaid,
+              amount: String(amountPaid),
               currency: invoice.currency,
               method: "STRIPE",
               stripePaymentId: paymentData.paymentIntentId,
               paidAt: new Date(),
-              createdAt: new Date(),
               updatedAt: new Date(),
-            },
           });
 
-          // Update invoice
-          const newAmountPaid = parseFloat(invoice.amountPaid.toString()) + amountPaid;
-          const newAmountDue = parseFloat(invoice.total.toString()) - newAmountPaid;
+          const newAmountPaid = Number(invoice.amountPaid) + amountPaid;
+          const newAmountDue = Number(invoice.total) - newAmountPaid;
 
           let newStatus = invoice.status;
           if (newAmountDue <= 0) {
@@ -86,36 +85,47 @@ export async function POST(req: NextRequest) {
             newStatus = InvoiceStatus.PARTIALLY_PAID;
           }
 
-          await tx.invoice.update({
-            where: { id: invoice.id },
-            data: {
-              amountPaid: newAmountPaid,
-              amountDue: Math.max(0, newAmountDue),
+          await tx
+            .update(invoiceTable)
+            .set({
+              amountPaid: String(newAmountPaid),
+              amountDue: String(Math.max(0, newAmountDue)),
               status: newStatus,
-            },
-          });
+              updatedAt: new Date(),
+            })
+            .where(eq(invoiceTable.id, invoice.id));
         });
 
         console.log(`Payment recorded for invoice ${invoice.invoiceNumber}: $${amountPaid}`);
 
         // Send payment confirmation email
-        if (invoice.contactEmail) {
+        if (invoice.clientEmail) {
           try {
             await sendPaymentConfirmationEmail({
-              to: invoice.contactEmail,
+              to: invoice.clientEmail,
               invoiceNumber: invoice.invoiceNumber,
-              contactName: invoice.contactName || "Valued Customer",
+              clientName: invoice.clientName || "Valued Customer",
               amountPaid: amountPaid.toString(),
               currency: invoice.currency,
               paidAt: new Date(),
               paymentMethod: "Credit Card (Stripe)",
             });
-            console.log(`Payment confirmation email sent to ${invoice.contactEmail}`);
+            console.log(`Payment confirmation email sent to ${invoice.clientEmail}`);
           } catch (emailError) {
             console.error("Failed to send payment confirmation email:", emailError);
             // Don't fail the webhook if email fails
           }
         }
+
+        await createNotification({
+          type: "INVOICE_PAID",
+          title: "Invoice paid",
+          message: `Invoice ${invoice.invoiceNumber} has been paid.`,
+          entityType: "invoice",
+          entityId: invoice.id,
+          organizationId: invoice.organizationId,
+          locationId: invoice.locationId ?? undefined,
+        });
 
         break;
       }

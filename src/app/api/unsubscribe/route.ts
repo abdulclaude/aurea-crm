@@ -1,30 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { CampaignRecipientStatus } from "@/db/enums";
+import {
+  campaign,
+  campaignRecipient,
+  client,
+  unsubscribeToken as unsubscribeTokenTable,
+} from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+
+const UnsubscribeBodySchema = z.object({
+  token: z.string().min(1),
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { token } = body;
+    const body: unknown = await request.json();
+    const parsedBody = UnsubscribeBodySchema.safeParse(body);
 
-    if (!token) {
+    if (!parsedBody.success) {
       return NextResponse.json(
         { success: false, error: "Token is required" },
         { status: 400 }
       );
     }
 
-    // Find the unsubscribe token with contact
-    const unsubscribeToken = await prisma.unsubscribeToken.findUnique({
-      where: { token },
-      include: {
-        contact: {
-          select: {
-            id: true,
-            emailUnsubscribed: true,
-          },
+    const { token } = parsedBody.data;
+
+    const [unsubscribeToken] = await db
+      .select({
+        token: unsubscribeTokenTable,
+        client: {
+          id: client.id,
+          emailUnsubscribed: client.emailUnsubscribed,
         },
-      },
-    });
+      })
+      .from(unsubscribeTokenTable)
+      .innerJoin(client, eq(unsubscribeTokenTable.clientId, client.id))
+      .where(eq(unsubscribeTokenTable.token, token))
+      .limit(1);
 
     if (!unsubscribeToken) {
       return NextResponse.json(
@@ -34,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if token is expired
-    if (unsubscribeToken.expiresAt < new Date()) {
+    if (unsubscribeToken.token.expiresAt < new Date()) {
       return NextResponse.json(
         { success: false, error: "This unsubscribe link has expired" },
         { status: 410 }
@@ -42,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if already used
-    if (unsubscribeToken.usedAt) {
+    if (unsubscribeToken.token.usedAt) {
       return NextResponse.json(
         { success: false, error: "This link has already been used" },
         { status: 410 }
@@ -50,11 +65,11 @@ export async function POST(request: NextRequest) {
     }
 
     // If already unsubscribed, just mark the token as used
-    if (unsubscribeToken.contact.emailUnsubscribed) {
-      await prisma.unsubscribeToken.update({
-        where: { token },
-        data: { usedAt: new Date() },
-      });
+    if (unsubscribeToken.client.emailUnsubscribed) {
+      await db
+        .update(unsubscribeTokenTable)
+        .set({ usedAt: new Date() })
+        .where(eq(unsubscribeTokenTable.token, token));
 
       return NextResponse.json({
         success: true,
@@ -62,43 +77,45 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Perform the unsubscribe in a transaction
-    await prisma.$transaction(async (tx) => {
-      // Update the contact
-      await tx.contact.update({
-        where: { id: unsubscribeToken.contactId },
-        data: {
+    await db.transaction(async (tx) => {
+      const now = new Date();
+
+      await tx
+        .update(client)
+        .set({
           emailUnsubscribed: true,
-          emailUnsubscribedAt: new Date(),
-        },
-      });
+          emailUnsubscribedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(client.id, unsubscribeToken.token.clientId));
 
-      // Mark the token as used
-      await tx.unsubscribeToken.update({
-        where: { token },
-        data: { usedAt: new Date() },
-      });
+      await tx
+        .update(unsubscribeTokenTable)
+        .set({ usedAt: now })
+        .where(eq(unsubscribeTokenTable.token, token));
 
-      // If there's a campaign, increment the unsubscribed count
-      if (unsubscribeToken.campaignId) {
-        await tx.campaign.update({
-          where: { id: unsubscribeToken.campaignId },
-          data: {
-            unsubscribed: { increment: 1 },
-          },
-        });
+      if (unsubscribeToken.token.campaignId) {
+        await tx
+          .update(campaign)
+          .set({
+            unsubscribed: sql`${campaign.unsubscribed} + 1`,
+            updatedAt: now,
+          })
+          .where(eq(campaign.id, unsubscribeToken.token.campaignId));
 
-        // Also update the campaign recipient status
-        await tx.campaignRecipient.updateMany({
-          where: {
-            campaignId: unsubscribeToken.campaignId,
-            contactId: unsubscribeToken.contactId,
-          },
-          data: {
-            status: "UNSUBSCRIBED",
-            unsubscribedAt: new Date(),
-          },
-        });
+        await tx
+          .update(campaignRecipient)
+          .set({
+            status: CampaignRecipientStatus.UNSUBSCRIBED,
+            unsubscribedAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(campaignRecipient.campaignId, unsubscribeToken.token.campaignId),
+              eq(campaignRecipient.clientId, unsubscribeToken.token.clientId)
+            )
+          );
       }
     });
 

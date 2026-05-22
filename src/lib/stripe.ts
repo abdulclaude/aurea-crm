@@ -1,6 +1,6 @@
 /**
  * Stripe Payment Service
- * Handles payment processing via Stripe with per-subaccount credentials
+ * Handles payment processing via Stripe with per-location credentials
  */
 
 import Stripe from "stripe";
@@ -13,7 +13,7 @@ const globalStripe = process.env.STRIPE_SECRET_KEY
   : null;
 
 /**
- * Get Stripe instance for a specific subaccount or use global instance
+ * Get Stripe instance for a specific location or use global instance
  */
 export function getStripeInstance(stripeSecretKey?: string): Stripe {
   if (!stripeSecretKey && !globalStripe) {
@@ -34,8 +34,8 @@ export interface CreatePaymentLinkParams {
   invoiceNumber: string;
   amount: number; // in cents
   currency: string;
-  contactEmail: string;
-  contactName: string;
+  clientEmail: string;
+  clientName: string;
   lineItems: Array<{
     name: string;
     quantity: number;
@@ -43,7 +43,7 @@ export interface CreatePaymentLinkParams {
   }>;
   successUrl: string;
   cancelUrl: string;
-  stripeSecretKey?: string; // Optional per-subaccount Stripe key
+  stripeSecretKey?: string; // Optional per-location Stripe key
 }
 
 /**
@@ -58,8 +58,8 @@ export async function createStripeCheckoutSession(params: CreatePaymentLinkParam
     invoiceNumber,
     amount,
     currency,
-    contactEmail,
-    contactName,
+    clientEmail,
+    clientName,
     lineItems,
     successUrl,
     cancelUrl,
@@ -88,12 +88,12 @@ export async function createStripeCheckoutSession(params: CreatePaymentLinkParam
       mode: "payment",
       success_url: successUrl,
       cancel_url: cancelUrl,
-      customer_email: contactEmail,
+      customer_email: clientEmail,
       client_reference_id: invoiceId,
       metadata: {
         invoiceId,
         invoiceNumber,
-        contactName,
+        clientName,
       },
       payment_intent_data: {
         metadata: {
@@ -195,13 +195,26 @@ export interface CreateConnectCheckoutParams {
   invoiceNumber: string;
   amount: number; // in cents
   currency: string;
-  contactEmail: string;
-  contactName: string;
+  clientEmail: string;
+  clientName: string;
   lineItems: Array<{
     name: string;
     quantity: number;
     amount: number; // in cents
   }>;
+  successUrl: string;
+  cancelUrl: string;
+  stripeAccountId: string; // Connected Stripe account ID
+  applicationFeeAmount?: number; // Platform fee in cents
+}
+
+export interface CreateBookingCheckoutParams {
+  bookingId: string;
+  bookingTitle: string;
+  amount: number; // in cents
+  currency: string;
+  attendeeEmail: string;
+  attendeeName: string;
   successUrl: string;
   cancelUrl: string;
   stripeAccountId: string; // Connected Stripe account ID
@@ -223,8 +236,8 @@ export async function createStripeCheckoutSessionForConnect(
     invoiceNumber,
     amount,
     currency,
-    contactEmail,
-    contactName,
+    clientEmail,
+    clientName,
     lineItems,
     successUrl,
     cancelUrl,
@@ -255,12 +268,12 @@ export async function createStripeCheckoutSessionForConnect(
         mode: "payment",
         success_url: successUrl,
         cancel_url: cancelUrl,
-        customer_email: contactEmail,
+        customer_email: clientEmail,
         client_reference_id: invoiceId,
         metadata: {
           invoiceId,
           invoiceNumber,
-          contactName,
+          clientName,
         },
         payment_intent_data: {
           metadata: {
@@ -290,6 +303,83 @@ export async function createStripeCheckoutSessionForConnect(
         error instanceof Error
           ? error.message
           : "Failed to create payment session",
+    };
+  }
+}
+
+/**
+ * Create a Stripe Checkout Session for booking payments via Stripe Connect
+ */
+export async function createStripeCheckoutSessionForBooking(
+  params: CreateBookingCheckoutParams
+) {
+  const stripe = getStripeInstance();
+
+  const {
+    bookingId,
+    bookingTitle,
+    amount,
+    currency,
+    attendeeEmail,
+    attendeeName,
+    successUrl,
+    cancelUrl,
+    stripeAccountId,
+    applicationFeeAmount,
+  } = params;
+
+  try {
+    const session = await stripe.checkout.sessions.create(
+      {
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: currency.toLowerCase(),
+              product_data: {
+                name: bookingTitle,
+                description: "Booking payment",
+              },
+              unit_amount: amount,
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        customer_email: attendeeEmail,
+        metadata: {
+          bookingId,
+          attendeeName,
+        },
+        payment_intent_data: {
+          metadata: {
+            bookingId,
+          },
+          ...(applicationFeeAmount && {
+            application_fee_amount: applicationFeeAmount,
+          }),
+        },
+      },
+      {
+        stripeAccount: stripeAccountId,
+      }
+    );
+
+    return {
+      success: true,
+      sessionId: session.id,
+      url: session.url,
+    };
+  } catch (error) {
+    console.error("Failed to create Stripe checkout session for booking:", error);
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to create booking payment session",
     };
   }
 }

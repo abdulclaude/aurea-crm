@@ -6,7 +6,59 @@
  */
 
 import { inngest } from "../client";
-import db from "@/lib/db";
+import { createId } from "@paralleldrive/cuid2";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { adPlatformCredential, adSpend } from "@/db/schema";
+
+type AdCampaignSpend = {
+  campaignId: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  revenue: number;
+};
+
+type ActionMetric = {
+  action_type?: string;
+  value?: string;
+};
+
+type MetaInsightRow = {
+  campaign_id?: string;
+  campaign_name?: string;
+  spend?: string;
+  impressions?: string;
+  clicks?: string;
+  actions?: ActionMetric[];
+  action_values?: ActionMetric[];
+};
+
+type GoogleAdsRow = {
+  campaign?: { id?: string; name?: string };
+  metrics?: {
+    costMicros?: string;
+    impressions?: string;
+    clicks?: string;
+    conversions?: string;
+    conversionsValue?: string;
+  };
+};
+
+type GoogleAdsBatch = { results?: GoogleAdsRow[] };
+
+type TikTokReportRow = {
+  dimensions?: { campaign_id?: string; campaign_name?: string };
+  metrics?: {
+    spend?: string;
+    impressions?: string;
+    clicks?: string;
+    complete_payment?: string;
+    complete_payment_value?: string;
+  };
+};
 
 /**
  * Meta Marketing API - Fetch ad spend
@@ -16,15 +68,7 @@ async function fetchMetaAdSpend(config: {
   accessToken: string;
   adAccountId: string;
   date: string; // Format: YYYY-MM-DD
-}): Promise<{
-  campaignId: string;
-  campaignName: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  conversions: number;
-  revenue: number;
-}[]> {
+}): Promise<AdCampaignSpend[]> {
   const { accessToken, adAccountId, date } = config;
 
   const fields = [
@@ -51,23 +95,22 @@ async function fetchMetaAdSpend(config: {
   const url = `https://graph.facebook.com/v18.0/act_${adAccountId}/insights?${params}`;
 
   const response = await fetch(url);
-  const result = await response.json();
+  const result = (await response.json()) as { error?: { message?: string }; data?: MetaInsightRow[] };
 
   if (!response.ok) {
     throw new Error(`Meta API error: ${result.error?.message || 'Unknown error'}`);
   }
 
-  return (result.data || []).map((row: any) => {
-    // Extract conversions and revenue from actions array
-    const conversions = row.actions?.find((a: any) => a.action_type === 'purchase')?.value || 0;
-    const revenue = row.action_values?.find((a: any) => a.action_type === 'purchase')?.value || 0;
+  return (result.data || []).map((row) => {
+    const conversions = row.actions?.find((action) => action.action_type === 'purchase')?.value || "0";
+    const revenue = row.action_values?.find((action) => action.action_type === 'purchase')?.value || "0";
 
     return {
-      campaignId: row.campaign_id,
-      campaignName: row.campaign_name,
-      spend: parseFloat(row.spend || 0),
-      impressions: parseInt(row.impressions || 0),
-      clicks: parseInt(row.clicks || 0),
+      campaignId: row.campaign_id ?? "",
+      campaignName: row.campaign_name ?? row.campaign_id ?? "Unknown",
+      spend: parseFloat(row.spend || "0"),
+      impressions: parseInt(row.impressions || "0"),
+      clicks: parseInt(row.clicks || "0"),
       conversions: parseInt(conversions),
       revenue: parseFloat(revenue),
     };
@@ -84,15 +127,7 @@ async function fetchGoogleAdSpend(config: {
   accessToken: string;
   loginCustomerId?: string;
   date: string; // Format: YYYY-MM-DD
-}): Promise<{
-  campaignId: string;
-  campaignName: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  conversions: number;
-  revenue: number;
-}[]> {
+}): Promise<AdCampaignSpend[]> {
   const { customerId, developerToken, accessToken, loginCustomerId, date } = config;
 
   // GAQL query for campaign performance
@@ -127,23 +162,23 @@ async function fetchGoogleAdSpend(config: {
     body: JSON.stringify({ query }),
   });
 
-  const result = await response.json();
+  const result = (await response.json()) as GoogleAdsBatch[] & { error?: { message?: string } };
 
   if (!response.ok) {
     throw new Error(`Google Ads API error: ${result.error?.message || 'Unknown error'}`);
   }
 
-  const campaigns: any[] = [];
+  const campaigns: AdCampaignSpend[] = [];
   for (const batch of result) {
     for (const row of batch.results || []) {
       campaigns.push({
-        campaignId: row.campaign.id,
-        campaignName: row.campaign.name,
-        spend: parseFloat(row.metrics.costMicros || 0) / 1000000, // Convert micros to dollars
-        impressions: parseInt(row.metrics.impressions || 0),
-        clicks: parseInt(row.metrics.clicks || 0),
-        conversions: parseFloat(row.metrics.conversions || 0),
-        revenue: parseFloat(row.metrics.conversionsValue || 0),
+        campaignId: row.campaign?.id ?? "",
+        campaignName: row.campaign?.name ?? row.campaign?.id ?? "Unknown",
+        spend: parseFloat(row.metrics?.costMicros || "0") / 1000000,
+        impressions: parseInt(row.metrics?.impressions || "0"),
+        clicks: parseInt(row.metrics?.clicks || "0"),
+        conversions: parseFloat(row.metrics?.conversions || "0"),
+        revenue: parseFloat(row.metrics?.conversionsValue || "0"),
       });
     }
   }
@@ -159,15 +194,7 @@ async function fetchTikTokAdSpend(config: {
   accessToken: string;
   advertiserId: string;
   date: string; // Format: YYYY-MM-DD
-}): Promise<{
-  campaignId: string;
-  campaignName: string;
-  spend: number;
-  impressions: number;
-  clicks: number;
-  conversions: number;
-  revenue: number;
-}[]> {
+}): Promise<AdCampaignSpend[]> {
   const { accessToken, advertiserId, date } = config;
 
   const body = {
@@ -198,20 +225,20 @@ async function fetchTikTokAdSpend(config: {
     body: JSON.stringify(body),
   });
 
-  const result = await response.json();
+  const result = (await response.json()) as { code?: number; message?: string; data?: { list?: TikTokReportRow[] } };
 
   if (result.code !== 0) {
     throw new Error(`TikTok API error: ${result.message || 'Unknown error'}`);
   }
 
-  return (result.data?.list || []).map((row: any) => ({
-    campaignId: row.dimensions.campaign_id,
-    campaignName: row.dimensions.campaign_name || row.dimensions.campaign_id,
-    spend: parseFloat(row.metrics.spend || 0),
-    impressions: parseInt(row.metrics.impressions || 0),
-    clicks: parseInt(row.metrics.clicks || 0),
-    conversions: parseInt(row.metrics.complete_payment || 0),
-    revenue: parseFloat(row.metrics.complete_payment_value || 0),
+  return (result.data?.list || []).map((row) => ({
+    campaignId: row.dimensions?.campaign_id ?? "",
+    campaignName: row.dimensions?.campaign_name || row.dimensions?.campaign_id || "Unknown",
+    spend: parseFloat(row.metrics?.spend || "0"),
+    impressions: parseInt(row.metrics?.impressions || "0"),
+    clicks: parseInt(row.metrics?.clicks || "0"),
+    conversions: parseInt(row.metrics?.complete_payment || "0"),
+    revenue: parseFloat(row.metrics?.complete_payment_value || "0"),
   }));
 }
 
@@ -253,11 +280,11 @@ export const syncAdSpend = inngest.createFunction(
     console.log(`[Ad Spend Sync] Starting sync for date: ${dateStr}`);
 
     // Get all active ad platform credentials
-    const credentials = await db.adPlatformCredential.findMany({
-      where: { isActive: true },
-      include: {
+    const credentials = await db.query.adPlatformCredential.findMany({
+      where: eq(adPlatformCredential.isActive, true),
+      with: {
         organization: true,
-        subaccount: true,
+        location: true,
       },
     });
 
@@ -266,7 +293,7 @@ export const syncAdSpend = inngest.createFunction(
     for (const credential of credentials) {
       await step.run(`sync-${credential.platform}-${credential.id}`, async () => {
         try {
-          let campaigns: any[] = [];
+          let campaigns: AdCampaignSpend[] = [];
 
           // Fetch spend based on platform
           if (credential.platform === 'facebook' && credential.accessToken && credential.accountId) {
@@ -299,48 +326,46 @@ export const syncAdSpend = inngest.createFunction(
           for (const campaign of campaigns) {
             const metrics = calculateMetrics(campaign);
 
-            await db.adSpend.upsert({
-              where: {
-                organizationId_platform_campaignId_date: {
-                  organizationId: credential.organizationId,
-                  platform: credential.platform,
-                  campaignId: campaign.campaignId,
-                  date: yesterday,
-                },
-              },
-              create: {
+            await db
+              .insert(adSpend)
+              .values({
+                id: createId(),
                 platform: credential.platform,
                 campaignId: campaign.campaignId,
                 campaignName: campaign.campaignName,
-                date: yesterday,
-                spend: campaign.spend,
-                currency: 'USD', // TODO: Get from campaign or credential
+                date: dateStr,
+                spend: String(campaign.spend),
+                currency: 'USD',
                 impressions: campaign.impressions,
                 clicks: campaign.clicks,
                 conversions: campaign.conversions,
-                revenue: campaign.revenue,
-                cpc: metrics.cpc,
-                cpm: metrics.cpm,
-                ctr: metrics.ctr,
-                conversionRate: metrics.conversionRate,
-                roas: metrics.roas,
+                revenue: String(campaign.revenue),
+                cpc: String(metrics.cpc),
+                cpm: String(metrics.cpm),
+                ctr: String(metrics.ctr),
+                conversionRate: String(metrics.conversionRate),
+                roas: String(metrics.roas),
                 organizationId: credential.organizationId,
-                subaccountId: credential.subaccountId,
-              },
-              update: {
-                campaignName: campaign.campaignName,
-                spend: campaign.spend,
-                impressions: campaign.impressions,
-                clicks: campaign.clicks,
-                conversions: campaign.conversions,
-                revenue: campaign.revenue,
-                cpc: metrics.cpc,
-                cpm: metrics.cpm,
-                ctr: metrics.ctr,
-                conversionRate: metrics.conversionRate,
-                roas: metrics.roas,
-              },
-            });
+                locationId: credential.locationId,
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: [adSpend.organizationId, adSpend.platform, adSpend.campaignId, adSpend.date],
+                set: {
+                  campaignName: campaign.campaignName,
+                  spend: String(campaign.spend),
+                  impressions: campaign.impressions,
+                  clicks: campaign.clicks,
+                  conversions: campaign.conversions,
+                  revenue: String(campaign.revenue),
+                  cpc: String(metrics.cpc),
+                  cpm: String(metrics.cpm),
+                  ctr: String(metrics.ctr),
+                  conversionRate: String(metrics.conversionRate),
+                  roas: String(metrics.roas),
+                  updatedAt: new Date(),
+                },
+              });
           }
 
           console.log(`[Ad Spend Sync] Synced ${campaigns.length} campaigns for ${credential.platform}`);

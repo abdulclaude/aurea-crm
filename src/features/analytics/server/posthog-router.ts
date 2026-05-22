@@ -46,9 +46,9 @@ export const posthogRouter = createTRPCRouter({
     }),
 
   /**
-   * Get contact analytics from PostHog
+   * Get client analytics from PostHog
    */
-  getContactStats: protectedProcedure
+  getClientStats: protectedProcedure
     .input(
       z
         .object({
@@ -75,7 +75,7 @@ export const posthogRouter = createTRPCRouter({
         // Placeholder - see note above
         return null;
       } catch (error) {
-        console.error("Failed to fetch contact stats from PostHog:", error);
+        console.error("Failed to fetch client stats from PostHog:", error);
         return null;
       }
     }),

@@ -1,8 +1,11 @@
 import { inngest } from "@/inngest/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { campaign as campaignTable, campaignRecipient, unsubscribeToken } from "@/db/schema";
+import { and, eq, lte } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
 import { Resend } from "resend";
 import { renderCampaignEmail, getFirstName } from "@/features/campaigns/lib/render-email";
-import { buildContactWhereClause } from "@/features/campaigns/server/routers";
+import { buildClientWhereClause } from "@/features/campaigns/server/routers";
 import type { EmailContent, EmailDesign, SegmentFilter, CampaignVariables } from "@/features/campaigns/types";
 import { randomBytes } from "crypto";
 
@@ -27,43 +30,43 @@ export const sendCampaign = inngest.createFunction(
   },
   { event: "campaign/send" },
   async ({ event, step }) => {
-    const { campaignId, organizationId, subaccountId } = event.data;
+    const { campaignId, organizationId, locationId } = event.data;
 
     // Step 1: Get campaign details
-    const campaign = await step.run("get-campaign", async () => {
-      return prisma.campaign.findUnique({
-        where: { id: campaignId },
-        include: {
+    const selectedCampaign = await step.run("get-campaign", async () => {
+      return db.query.campaign.findFirst({
+        where: eq(campaignTable.id, campaignId),
+        with: {
           emailDomain: true,
-          template: true,
+          emailTemplate: true,
         },
       });
     });
 
-    if (!campaign) {
+    if (!selectedCampaign) {
       throw new Error(`Campaign ${campaignId} not found`);
     }
 
     // Step 2: Update campaign status to SENDING
     await step.run("update-status-sending", async () => {
-      return prisma.campaign.update({
-        where: { id: campaignId },
-        data: { status: "SENDING" },
-      });
+      return db
+        .update(campaignTable)
+        .set({ status: "SENDING", updatedAt: new Date() })
+        .where(eq(campaignTable.id, campaignId));
     });
 
-    // Step 3: Get contacts based on segment
-    const contacts = await step.run("get-contacts", async () => {
-      const where = buildContactWhereClause(
+    // Step 3: Get clients based on segment
+    const clients = await step.run("get-clients", async () => {
+      const where = buildClientWhereClause(
         organizationId,
-        subaccountId,
-        campaign.segmentType,
-        campaign.segmentFilter as SegmentFilter | undefined
+        locationId,
+        selectedCampaign.segmentType,
+        selectedCampaign.segmentFilter as SegmentFilter | undefined
       );
 
-      return prisma.contact.findMany({
+      return db.query.client.findMany({
         where,
-        select: {
+        columns: {
           id: true,
           name: true,
           email: true,
@@ -72,40 +75,40 @@ export const sendCampaign = inngest.createFunction(
       });
     });
 
-    if (contacts.length === 0) {
+    if (clients.length === 0) {
       await step.run("update-status-sent-no-recipients", async () => {
-        return prisma.campaign.update({
-          where: { id: campaignId },
-          data: {
+        return db
+          .update(campaignTable)
+          .set({
             status: "SENT",
             sentAt: new Date(),
             totalRecipients: 0,
-          },
-        });
+            updatedAt: new Date(),
+          })
+          .where(eq(campaignTable.id, campaignId));
       });
 
-      return { success: true, sent: 0, message: "No contacts to send to" };
+      return { success: true, sent: 0, message: "No clients to send to" };
     }
 
     // Step 4: Create campaign recipients
     await step.run("create-recipients", async () => {
-      const recipientData = contacts.map((contact) => ({
+      const recipientData = clients.map((client) => ({
+        id: createId(),
         campaignId,
-        contactId: contact.id,
+        clientId: client.id,
         status: "PENDING" as const,
+        updatedAt: new Date(),
       }));
 
-      await prisma.campaignRecipient.createMany({
-        data: recipientData,
-        skipDuplicates: true,
-      });
+      await db.insert(campaignRecipient).values(recipientData).onConflictDoNothing();
     });
 
     // Step 5: Determine the from address
     const fromAddress = await step.run("determine-from-address", async () => {
-      let fromName = campaign.fromName;
-      let fromEmail = campaign.fromEmail;
-      let domain = campaign.emailDomain?.domain;
+      let fromName = selectedCampaign.fromName;
+      let fromEmail = selectedCampaign.fromEmail;
+      let domain = selectedCampaign.emailDomain?.domain;
 
       if (!domain) {
         // Fall back to system default
@@ -114,24 +117,24 @@ export const sendCampaign = inngest.createFunction(
       }
 
       if (!fromName) {
-        fromName = campaign.emailDomain?.defaultFromName || "Newsletter";
+        fromName = selectedCampaign.emailDomain?.defaultFromName || "Newsletter";
       }
 
       if (!fromEmail) {
-        fromEmail = campaign.emailDomain?.defaultFromEmail || "hello";
+        fromEmail = selectedCampaign.emailDomain?.defaultFromEmail || "hello";
       }
 
       return {
         from: `${fromName} <${fromEmail}@${domain}>`,
-        replyTo: campaign.replyTo || campaign.emailDomain?.defaultReplyTo || undefined,
+        replyTo: selectedCampaign.replyTo || selectedCampaign.emailDomain?.defaultReplyTo || undefined,
       };
     });
 
     // Step 6: Send emails in batches
     const BATCH_SIZE = 50; // Resend allows up to 100 emails per batch
     const batches = [];
-    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
-      batches.push(contacts.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < clients.length; i += BATCH_SIZE) {
+      batches.push(clients.slice(i, i + BATCH_SIZE));
     }
 
     let totalSent = 0;
@@ -142,74 +145,73 @@ export const sendCampaign = inngest.createFunction(
 
       const batchResults = await step.run(`send-batch-${batchIndex}`, async () => {
         const resend = getResendClient();
-        const results: { contactId: string; success: boolean; resendEmailId?: string; error?: string }[] = [];
+        const results: { clientId: string; success: boolean; resendEmailId?: string; error?: string }[] = [];
 
         // Send emails one by one (for personalization and tracking)
-        for (const contact of batch) {
+        for (const client of batch) {
           try {
             // Generate unsubscribe token
             const token = generateToken();
             const unsubscribeUrl = `${process.env.APP_URL || "http://localhost:3000"}/unsubscribe?token=${token}`;
 
             // Store unsubscribe token
-            await prisma.unsubscribeToken.create({
-              data: {
-                contactId: contact.id,
-                campaignId,
-                token,
-                expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
-              },
+            await db.insert(unsubscribeToken).values({
+              id: createId(),
+              clientId: client.id,
+              campaignId,
+              token,
+              expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
             });
 
             // Prepare variables for template
             const variables: CampaignVariables = {
-              name: contact.name,
-              firstName: getFirstName(contact.name),
-              email: contact.email!,
-              companyName: contact.companyName || undefined,
+              name: client.name,
+              firstName: getFirstName(client.name),
+              email: client.email!,
+              companyName: client.companyName || undefined,
               unsubscribe_url: unsubscribeUrl,
             };
 
-            const subject = campaign.subject
-              .replace(/\{\{contact\.firstName\}\}/g, variables.firstName)
-              .replace(/\{\{contact\.name\}\}/g, variables.name);
+            const subject = selectedCampaign.subject
+              .replace(/\{\{client\.firstName\}\}/g, variables.firstName)
+              .replace(/\{\{client\.name\}\}/g, variables.name);
 
-            if (campaign.resendTemplateId) {
+            if (selectedCampaign.resendTemplateId) {
               const templateVariables = {
-                "contact.name": variables.name,
-                "contact.firstName": variables.firstName,
-                "contact.email": variables.email,
-                "contact.companyName": variables.companyName || "",
-                contact_name: variables.name,
-                contact_first_name: variables.firstName,
-                contact_email: variables.email,
-                contact_company_name: variables.companyName || "",
+                "client.name": variables.name,
+                "client.firstName": variables.firstName,
+                "client.email": variables.email,
+                "client.companyName": variables.companyName || "",
+                client_name: variables.name,
+                client_first_name: variables.firstName,
+                client_email: variables.email,
+                client_company_name: variables.companyName || "",
                 unsubscribe_url: variables.unsubscribe_url,
                 view_in_browser_url: variables.view_in_browser_url || "",
               };
 
               const { data, error } = await resend.emails.send({
                 from: fromAddress.from,
-                to: contact.email!,
+                to: client.email!,
                 replyTo: fromAddress.replyTo,
                 subject,
                 template: {
-                  id: campaign.resendTemplateId,
+                  id: selectedCampaign.resendTemplateId,
                   variables: templateVariables,
                 },
               });
 
               if (error) {
-                results.push({ contactId: contact.id, success: false, error: error.message });
+                results.push({ clientId: client.id, success: false, error: error.message });
               } else {
-                results.push({ contactId: contact.id, success: true, resendEmailId: data?.id });
+                results.push({ clientId: client.id, success: true, resendEmailId: data?.id });
               }
               continue;
             }
 
             // Render email
-            const content = campaign.content as unknown as EmailContent;
-            const design = (campaign.template?.design as unknown as EmailDesign) || undefined;
+            const content = selectedCampaign.content as EmailContent;
+            const design = (selectedCampaign.emailTemplate?.design as EmailDesign | null) || undefined;
 
             const { html, text } = await renderCampaignEmail({
               content,
@@ -220,7 +222,7 @@ export const sendCampaign = inngest.createFunction(
             // Send email via Resend
             const { data, error } = await resend.emails.send({
               from: fromAddress.from,
-              to: contact.email!,
+              to: client.email!,
               replyTo: fromAddress.replyTo,
               subject,
               html,
@@ -228,13 +230,13 @@ export const sendCampaign = inngest.createFunction(
             });
 
             if (error) {
-              results.push({ contactId: contact.id, success: false, error: error.message });
+              results.push({ clientId: client.id, success: false, error: error.message });
             } else {
-              results.push({ contactId: contact.id, success: true, resendEmailId: data?.id });
+              results.push({ clientId: client.id, success: true, resendEmailId: data?.id });
             }
           } catch (err) {
             results.push({
-              contactId: contact.id,
+              clientId: client.id,
               success: false,
               error: err instanceof Error ? err.message : "Unknown error",
             });
@@ -248,27 +250,23 @@ export const sendCampaign = inngest.createFunction(
       await step.run(`update-recipients-${batchIndex}`, async () => {
         for (const result of batchResults) {
           if (result.success) {
-            await prisma.campaignRecipient.updateMany({
-              where: {
-                campaignId,
-                contactId: result.contactId,
-              },
-              data: {
+            await db
+              .update(campaignRecipient)
+              .set({
                 status: "SENT",
                 resendEmailId: result.resendEmailId,
-              },
-            });
+                updatedAt: new Date(),
+              })
+              .where(and(eq(campaignRecipient.campaignId, campaignId), eq(campaignRecipient.clientId, result.clientId)));
             totalSent++;
           } else {
-            await prisma.campaignRecipient.updateMany({
-              where: {
-                campaignId,
-                contactId: result.contactId,
-              },
-              data: {
+            await db
+              .update(campaignRecipient)
+              .set({
                 status: "FAILED",
-              },
-            });
+                updatedAt: new Date(),
+              })
+              .where(and(eq(campaignRecipient.campaignId, campaignId), eq(campaignRecipient.clientId, result.clientId)));
             totalFailed++;
           }
         }
@@ -282,21 +280,22 @@ export const sendCampaign = inngest.createFunction(
 
     // Step 7: Update campaign status to SENT
     await step.run("update-status-sent", async () => {
-      return prisma.campaign.update({
-        where: { id: campaignId },
-        data: {
+      return db
+        .update(campaignTable)
+        .set({
           status: "SENT",
           sentAt: new Date(),
-          totalRecipients: contacts.length,
+          totalRecipients: clients.length,
           delivered: totalSent, // Initially set to sent, webhooks will update later
-        },
-      });
+          updatedAt: new Date(),
+        })
+        .where(eq(campaignTable.id, campaignId));
     });
 
     return {
       success: true,
       campaignId,
-      totalRecipients: contacts.length,
+      totalRecipients: clients.length,
       sent: totalSent,
       failed: totalFailed,
     };
@@ -312,15 +311,12 @@ export const checkScheduledCampaigns = inngest.createFunction(
   async ({ step }) => {
     // Find campaigns that are scheduled and due
     const dueCampaigns = await step.run("get-due-campaigns", async () => {
-      return prisma.campaign.findMany({
-        where: {
-          status: "SCHEDULED",
-          scheduledAt: { lte: new Date() },
-        },
-        select: {
+      return db.query.campaign.findMany({
+        where: and(eq(campaignTable.status, "SCHEDULED"), lte(campaignTable.scheduledAt, new Date())),
+        columns: {
           id: true,
           organizationId: true,
-          subaccountId: true,
+          locationId: true,
         },
       });
     });
@@ -330,21 +326,20 @@ export const checkScheduledCampaigns = inngest.createFunction(
     }
 
     // Trigger send for each due campaign
-    for (const campaign of dueCampaigns) {
-      await step.run(`trigger-campaign-${campaign.id}`, async () => {
-        // Update status to QUEUED
-        await prisma.campaign.update({
-          where: { id: campaign.id },
-          data: { status: "QUEUED" },
-        });
+    for (const dueCampaign of dueCampaigns) {
+      await step.run(`trigger-campaign-${dueCampaign.id}`, async () => {
+        await db
+          .update(campaignTable)
+          .set({ status: "QUEUED", updatedAt: new Date() })
+          .where(eq(campaignTable.id, dueCampaign.id));
 
         // Send event to trigger the campaign
         await inngest.send({
           name: "campaign/send",
           data: {
-            campaignId: campaign.id,
-            organizationId: campaign.organizationId,
-            subaccountId: campaign.subaccountId,
+            campaignId: dueCampaign.id,
+            organizationId: dueCampaign.organizationId,
+            locationId: dueCampaign.locationId,
           },
         });
       });

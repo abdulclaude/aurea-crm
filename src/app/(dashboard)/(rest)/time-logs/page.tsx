@@ -16,21 +16,20 @@ import { ActivityTimeline } from "@/features/activity/components/activity-timeli
 import { useTRPC } from "@/trpc/client";
 
 export default function TimeLogsPage() {
-  const [activeTab, setActiveTab] = useState("agency-data");
   const trpc = useTRPC();
 
-  // Check if user is at agency level (no active subaccount)
+  // Check if user is at studio level (no active location)
   const { data: active } = useSuspenseQuery(
-    trpc.organizations.getActive.queryOptions()
+    trpc.organizations.getActive.queryOptions(),
   );
 
-  const isAgencyLevel = !active?.activeSubaccountId;
+  const isStudioLevel = !active?.activeLocationId;
 
   // Define tabs based on context
-  const tabs = isAgencyLevel
+  const tabs = isStudioLevel
     ? [
-        { id: "agency-data", label: "Agency data" },
-        { id: "clients-data", label: "All clients data" },
+        { id: "studio-data", label: "Studio data" },
+        { id: "locations-data", label: "All locations data" },
         { id: "activity", label: "Activity timeline" },
       ]
     : [
@@ -38,13 +37,15 @@ export default function TimeLogsPage() {
         { id: "activity", label: "Activity timeline" },
       ];
 
+  const [activeTab, setActiveTab] = useState(tabs[0].id);
+
   return (
     <div className="space-y-0">
       <div className="flex items-end justify-between gap-2 p-6 pb-6">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Time Logs</h1>
+          <h1 className="text-lg font-semibold text-primary">Time logs</h1>
           <p className="text-xs text-primary/75">
-            Track employee hours, shifts, and billable time
+            Track instructor hours, shifts, and billable time
           </p>
         </div>
 
@@ -57,14 +58,14 @@ export default function TimeLogsPage() {
           >
             <Link href="/time-logs/timesheet">
               <ReportIcon className="size-3.5" />
-              Timesheet Report
+              Timesheet report
             </Link>
           </Button>
 
           <Button variant="outline" size="sm" className="h-8.5!" asChild>
             <Link href="/time-logs/clock-in">
               <ClockIcon className="size-3.5" />
-              Clock In
+              Clock in
             </Link>
           </Button>
         </div>
@@ -79,7 +80,7 @@ export default function TimeLogsPage() {
         className="px-6"
       />
 
-      {activeTab === "data" || activeTab === "agency-data" ? (
+      {activeTab === "data" || activeTab === "studio-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3">
@@ -90,7 +91,7 @@ export default function TimeLogsPage() {
         >
           <TimeLogsTable scope="agency" />
         </Suspense>
-      ) : activeTab === "clients-data" ? (
+      ) : activeTab === "locations-data" ? (
         <Suspense
           fallback={
             <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3">

@@ -1,7 +1,10 @@
 "use server";
 
-import prisma from "@/lib/db";
-import { NodeType } from "@prisma/client";
+import { createId } from "@paralleldrive/cuid2";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { NodeType } from "@/db/enums";
+import { node as nodeTable, telegramTriggerState, workflows } from "@/db/schema";
 import { sendWorkflowExecution } from "@/inngest/utils";
 
 type TelegramChat = {
@@ -69,22 +72,23 @@ export async function processTelegramUpdate({
   }
 
   const chatId = String(primaryMessage.chat.id);
-  const nodes = await prisma.node.findMany({
-    where: {
-      type: NodeType.TELEGRAM_TRIGGER,
-      credentialId,
-      Workflows: {
-        userId,
-        archived: false,
-        isTemplate: false,
-      },
-    },
-    select: {
-      id: true,
-      workflowId: true,
-      data: true,
-    },
-  });
+  const nodes = await db
+    .select({
+      id: nodeTable.id,
+      workflowId: nodeTable.workflowId,
+      data: nodeTable.data,
+    })
+    .from(nodeTable)
+    .innerJoin(workflows, eq(workflows.id, nodeTable.workflowId))
+    .where(
+      and(
+        eq(nodeTable.type, NodeType.TELEGRAM_TRIGGER),
+        eq(nodeTable.credentialId, credentialId),
+        eq(workflows.userId, userId),
+        eq(workflows.archived, false),
+        eq(workflows.isTemplate, false)
+      )
+    );
 
   if (!nodes.length) {
     return;
@@ -103,8 +107,8 @@ export async function processTelegramUpdate({
       update.update_id ?? primaryMessage.message_id ?? Date.now()
     );
 
-    const state = await prisma.telegramTriggerState.findUnique({
-      where: { nodeId: node.id },
+    const state = await db.query.telegramTriggerState.findFirst({
+      where: eq(telegramTriggerState.nodeId, node.id),
     });
 
     if (
@@ -137,23 +141,25 @@ export async function processTelegramUpdate({
       initialData,
     });
 
-    await prisma.telegramTriggerState.upsert({
-      where: { nodeId: node.id },
-      update: {
-        lastUpdateId: incomingUpdateId,
-        lastTriggeredAt: new Date(),
-        workflowId: node.workflowId,
-      },
-      create: {
-        id: crypto.randomUUID(),
+    await db
+      .insert(telegramTriggerState)
+      .values({
+        id: createId(),
         nodeId: node.id,
         workflowId: node.workflowId,
         lastUpdateId: incomingUpdateId,
         lastTriggeredAt: new Date(),
-        createdAt: new Date(),
         updatedAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: telegramTriggerState.nodeId,
+        set: {
+        lastUpdateId: incomingUpdateId,
+        lastTriggeredAt: new Date(),
+        workflowId: node.workflowId,
+        updatedAt: new Date(),
+        },
+      });
   }
 }
 

@@ -2,16 +2,20 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+function Card({ className, children, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card"
       className={cn(
-        "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border border-black/5 py-6 shadow-sm",
+        "rounded-xl border border-black/[0.07] dark:border-white/[0.07] bg-white dark:bg-[#202e32] text-card-foreground p-1 shadow-xs",
         className
       )}
       {...props}
-    />
+    >
+      <div className="flex flex-col gap-6 rounded-[calc(var(--radius-xl)-4px)] border border-black/[0.04] dark:border-white/[0.04] py-6 h-full">
+        {children}
+      </div>
+    </div>
   );
 }
 

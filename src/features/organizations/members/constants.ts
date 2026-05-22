@@ -2,126 +2,126 @@ export const MEMBERS_DEFAULT_SORT = "name.asc";
 export const MEMBERS_PAGE_SIZE = 20;
 
 /**
- * AGENCY-LEVEL ROLES
+ * STUDIO-LEVEL ROLES
  *
- * Agency = your main account where your team manages all clients, billing, automations, templates, etc.
+ * Studio = your main account where you manage all locations, billing, scheduling, etc.
  */
 export const AGENCY_ROLES = [
   {
     value: "owner",
-    label: "Agency Owner",
+    label: "Owner",
     description: "Full access to everything",
     permissions: [
-      "Billing, subscriptions, Stripe, integrations",
-      "Edit/disable accounts",
-      "Manage agency team",
-      "Access all subaccounts",
-      "Equivalent to GHL 'Agency Admin'",
+      "Billing, subscriptions, integrations",
+      "Manage all locations and team",
+      "Configure studio-wide settings",
+      "Access all locations",
     ],
   },
   {
     value: "admin",
-    label: "Agency Admin",
+    label: "Admin",
     description: "Almost full access, except billing",
     permissions: [
-      "Manage all subaccounts",
-      "Edit pipelines, automations, templates",
-      "Manage agency-level integrations",
-      "Access all subaccounts",
-      "Cannot: change billing, delete accounts, modify agency settings",
+      "Manage all locations",
+      "Edit schedules, automations, templates",
+      "Manage studio-wide integrations",
+      "Access all locations",
+      "Cannot: change billing, delete accounts",
     ],
   },
   {
     value: "manager",
-    label: "Agency Manager",
-    description: "Access all subaccounts, limited settings",
+    label: "Manager",
+    description: "Access all locations, limited settings",
     permissions: [
-      "Access all subaccounts",
-      "Run operations across multiple clients",
-      "Cannot: change billing, delete accounts, modify agency settings",
+      "Access all locations",
+      "Run operations across multiple locations",
+      "Cannot: change billing, delete accounts, modify studio settings",
     ],
   },
   {
     value: "staff",
-    label: "Agency Staff",
-    description: "Access assigned subaccounts only",
+    label: "Instructor",
+    description: "Teach classes and access assigned locations",
     permissions: [
-      "Access only assigned subaccounts",
-      "Work day-to-day on campaigns, recruitment tasks, rotas",
-      "Cannot: modify system-level settings, install global integrations",
+      "Access only assigned locations",
+      "View and manage own class schedule",
+      "Check in members, view rosters",
+      "Cannot: modify studio-level settings",
     ],
   },
   {
     value: "viewer",
-    label: "Agency Viewer",
+    label: "Viewer",
     description: "Read-only access",
     permissions: [
-      "Read-only access to all subaccounts",
-      "Perfect for accountants, auditors, temporary contractors",
+      "Read-only access to all locations",
+      "Perfect for accountants or auditors",
       "Cannot make any changes",
     ],
   },
 ] as const;
 
 /**
- * SUBACCOUNT (CLIENT) ROLES
+ * LOCATION ROLES
  *
- * Subaccount = individual client workspace within the agency
+ * Location = individual studio location within the organization
  */
-export const SUBACCOUNT_ROLES = [
+export const LOCATION_ROLES = [
   {
     value: "AGENCY",
-    label: "Agency Team",
-    description: "Full access - Agency team member working on behalf of client",
+    label: "Studio team",
+    description: "Full access — studio team member managing this location",
     permissions: [
-      "Full access to all subaccount features",
-      "Manage workflows, contacts, deals, pipelines",
-      "Agency team member working on client's behalf",
-      "Cannot be removed by client admins",
+      "Full access to all location features",
+      "Manage schedules, members, classes",
+      "Studio team member managing this location",
+      "Cannot be removed by location admins",
     ],
   },
   {
     value: "ADMIN",
-    label: "Subaccount Admin",
-    description: "Full control within subaccount",
+    label: "Admin",
+    description: "Full control within this location",
     permissions: [
-      "Full control within this subaccount only",
-      "Manage team members (except AGENCY role)",
-      "Configure workflows, pipelines, integrations",
-      "Access all contacts and deals",
+      "Full control within this location only",
+      "Manage team members (except studio team role)",
+      "Configure schedules, classes, integrations",
+      "Access all members and reporting",
     ],
   },
   {
     value: "MANAGER",
     label: "Manager",
-    description: "Assign tasks, edit contacts, manage operations",
+    description: "Manage day-to-day operations and team",
     permissions: [
       "Assign tasks to team members",
-      "Edit contacts and deals",
+      "Edit member profiles and schedules",
       "Manage day-to-day operations",
       "Cannot: modify system settings, manage team",
     ],
   },
   {
     value: "STANDARD",
-    label: "Standard User",
-    description: "Day-to-day operations (recruiters, sales, etc)",
+    label: "Instructor",
+    description: "Teach classes and manage own schedule",
     permissions: [
-      "Day-to-day operations",
-      "Create and edit own contacts/deals",
-      "Execute workflows",
-      "Suitable for recruiters, sales reps, account managers",
+      "View and manage own class schedule",
+      "Check in members, view class rosters",
+      "Log hours and submit timesheets",
+      "Cannot: edit other instructors' schedules",
     ],
   },
   {
     value: "LIMITED",
-    label: "Limited User",
-    description: "Field workers, only assigned tasks",
+    label: "Front desk",
+    description: "Check-ins, bookings, and basic tasks",
     permissions: [
-      "Access only assigned tasks and contacts",
-      "Cannot create new records",
-      "Perfect for field workers, contractors",
-      "Minimal system access",
+      "Check in members and manage bookings",
+      "View class schedules",
+      "Cannot create or modify classes",
+      "Limited system access",
     ],
   },
   {
@@ -129,22 +129,19 @@ export const SUBACCOUNT_ROLES = [
     label: "Viewer",
     description: "Read-only access",
     permissions: [
-      "Read-only access to subaccount data",
+      "Read-only access to location data",
       "Cannot make any changes",
-      "Perfect for observers, auditors",
+      "Perfect for observers or auditors",
     ],
   },
 ] as const;
 
-// Role badge colors
 export const ROLE_COLORS = {
-  // Agency roles
   owner: "bg-indigo-500 text-indigo-100 border-black/10",
   admin: "bg-blue-500 text-blue-100 border-black/10",
   manager: "bg-cyan-500 text-cyan-100 border-black/10",
   staff: "bg-green-500 text-green-100 border-black/10",
   viewer: "bg-gray-500 text-gray-100 border-black/10",
-  // Subaccount roles
   AGENCY: "bg-indigo-500 text-indigo-100 border-black/10",
   ADMIN: "bg-orange-500 text-orange-100 border-black/10",
   MANAGER: "bg-teal-500 text-teal-100 border-black/10",

@@ -80,7 +80,7 @@ export function OrgLogoUploader({
         setIsUploading(false);
       }
     },
-    [startUpload, onChange]
+    [startUpload, onChange],
   );
 
   if (value) {
@@ -130,7 +130,7 @@ export function OrgLogoUploader({
               <Upload className="size-6 text-muted-foreground" />
             </div>
             <p className="font-medium text-sm mt-2">
-              Select your agency's logo
+              Select your studio's logo
             </p>
             <p className="text-muted-foreground text-xs">
               Max 1 file, up to 8MB

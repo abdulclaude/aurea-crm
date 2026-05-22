@@ -53,7 +53,7 @@ export const VariableSuggestionList = forwardRef<
         });
       }
     },
-    [currentItems, breadcrumb, props]
+    [currentItems, breadcrumb, props],
   );
 
   const goBack = useCallback(() => {
@@ -74,7 +74,7 @@ export const VariableSuggestionList = forwardRef<
 
   const upHandler = useCallback(() => {
     setSelectedIndex(
-      (selectedIndex + currentItems.length - 1) % currentItems.length
+      (selectedIndex + currentItems.length - 1) % currentItems.length,
     );
   }, [selectedIndex, currentItems.length]);
 
@@ -88,41 +88,41 @@ export const VariableSuggestionList = forwardRef<
 
   useEffect(() => setSelectedIndex(0), [currentItems]);
 
-  useImperativeHandle(ref, () => ({
-    onKeyDown: ({ event }: { event: KeyboardEvent }) => {
-      if (event.key === "ArrowUp") {
-        upHandler();
-        return true;
-      }
+  useImperativeHandle(
+    ref,
+    () => ({
+      onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+        if (event.key === "ArrowUp") {
+          upHandler();
+          return true;
+        }
 
-      if (event.key === "ArrowDown") {
-        downHandler();
-        return true;
-      }
+        if (event.key === "ArrowDown") {
+          downHandler();
+          return true;
+        }
 
-      if (event.key === "Enter") {
-        enterHandler();
-        return true;
-      }
+        if (event.key === "Enter") {
+          enterHandler();
+          return true;
+        }
 
-      if (event.key === "Backspace" && breadcrumb.length > 0) {
-        goBack();
-        return true;
-      }
+        if (event.key === "Backspace" && breadcrumb.length > 0) {
+          goBack();
+          return true;
+        }
 
-      return false;
-    },
-  }), [upHandler, downHandler, enterHandler, breadcrumb.length, goBack]);
+        return false;
+      },
+    }),
+    [upHandler, downHandler, enterHandler, breadcrumb.length, goBack],
+  );
 
   return (
     <div className="z-50 min-w-[280px] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md pointer-events-auto">
       {breadcrumb.length > 0 && (
         <div className="flex items-center gap-1 border-b px-3 py-2 text-xs text-muted-foreground">
-          <button
-            onClick={goBack}
-            className="hover:text-foreground"
-            type="button"
-          >
+          <button onClick={goBack} className="hover:text-black" type="button">
             ← Back
           </button>
           <span className="ml-2">
@@ -144,7 +144,7 @@ export const VariableSuggestionList = forwardRef<
                 "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm outline-none",
                 index === selectedIndex
                   ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50"
+                  : "hover:bg-accent/50",
               )}
               onClick={() => selectItem(index)}
             >
@@ -171,7 +171,7 @@ export const variableSuggestion = (items: VariableItem[]) => ({
     const filterItems = (items: VariableItem[]): VariableItem[] => {
       return items
         .filter((item) =>
-          item.label.toLowerCase().includes(query.toLowerCase())
+          item.label.toLowerCase().includes(query.toLowerCase()),
         )
         .map((item) => ({
           ...item,

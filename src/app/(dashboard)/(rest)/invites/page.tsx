@@ -10,7 +10,7 @@ import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
 function InvitesPageContent() {
   const trpc = useTRPC();
 
-  // Get active organization/subaccount context
+  // Get active organization/location context
   const { data: active } = useSuspenseQuery(
     trpc.organizations.getActive.queryOptions()
   );
@@ -21,10 +21,10 @@ function InvitesPageContent() {
 
   const activeOrg =
     orgs?.find((o) => o.id === active?.activeOrganizationId) ?? orgs?.[0];
-  const activeSubaccount = active?.activeSubaccount;
+  const activeLocation = active?.activeLocation;
 
-  // Allow access if user has either an organization OR a subaccount
-  if (!activeOrg && !activeSubaccount) {
+  // Allow access if user has either an organization OR a location
+  if (!activeOrg && !activeLocation) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <p className="text-sm text-muted-foreground">
@@ -43,16 +43,16 @@ function InvitesPageContent() {
 
         <p className="text-xs text-primary/60">
           Invite team members to join{" "}
-          {activeSubaccount
-            ? activeSubaccount.companyName
+          {activeLocation
+            ? activeLocation.companyName
             : (activeOrg?.name ?? "Organization")}
         </p>
       </div>
 
       <InviteMembersSection
-        mode={activeSubaccount ? "subaccount" : "organization"}
+        mode={activeLocation ? "location" : "organization"}
         organizationName={activeOrg?.name ?? "Organization"}
-        subaccountName={activeSubaccount?.companyName}
+        locationName={activeLocation?.companyName}
       />
     </div>
   );

@@ -3,11 +3,67 @@
  * Provides queries for ad spend, ROAS, and performance metrics
  */
 
-// @ts-nocheck - TypeScript cache needs refresh after Prisma generation (restart dev server)
-
 import { z } from "zod";
+import { and, asc, eq, gte, isNotNull, lte, type SQL } from "drizzle-orm";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import db from "@/lib/db";
+import { db } from "@/db";
+import { adSpend, funnelSession } from "@/db/schema";
+
+type AdRecord = typeof adSpend.$inferSelect;
+type AdMetrics = {
+	spend: number;
+	revenue: number;
+	impressions: number;
+	clicks: number;
+	conversions: number;
+};
+
+const emptyMetrics = (): AdMetrics => ({
+	spend: 0,
+	revenue: 0,
+	impressions: 0,
+	clicks: 0,
+	conversions: 0,
+});
+
+const addAdRecord = (metrics: AdMetrics, record: AdRecord): void => {
+	metrics.spend += Number(record.spend);
+	metrics.revenue += Number(record.revenue ?? 0);
+	metrics.impressions += record.impressions ?? 0;
+	metrics.clicks += record.clicks ?? 0;
+	metrics.conversions += record.conversions ?? 0;
+};
+
+const calculateDerivedMetrics = (metrics: AdMetrics) => {
+	const roas = metrics.spend > 0 ? (metrics.revenue / metrics.spend) * 100 : 0;
+	const cpa = metrics.conversions > 0 ? metrics.spend / metrics.conversions : 0;
+	const cpc = metrics.clicks > 0 ? metrics.spend / metrics.clicks : 0;
+	const cpm = metrics.impressions > 0 ? (metrics.spend / metrics.impressions) * 1000 : 0;
+	const ctr = metrics.impressions > 0 ? (metrics.clicks / metrics.impressions) * 100 : 0;
+	const conversionRate = metrics.clicks > 0 ? (metrics.conversions / metrics.clicks) * 100 : 0;
+
+	return { roas, cpa, cpc, cpm, ctr, conversionRate };
+};
+
+function adSpendWhere(input: {
+	organizationId: string;
+	locationId: string | null;
+	funnelId?: string;
+	startDate: string;
+	endDate: string;
+	platform?: "facebook" | "google" | "tiktok" | "all";
+	requireCampaign?: boolean;
+}): SQL | undefined {
+	return and(
+		eq(adSpend.organizationId, input.organizationId),
+		gte(adSpend.date, input.startDate),
+		lte(adSpend.date, input.endDate),
+		input.locationId ? eq(adSpend.locationId, input.locationId) : undefined,
+		input.funnelId ? eq(adSpend.funnelId, input.funnelId) : undefined,
+		input.platform && input.platform !== "all" ? eq(adSpend.platform, input.platform) : undefined,
+		input.requireCampaign ? isNotNull(adSpend.campaignId) : undefined
+	);
+}
 
 export const adsRouter = createTRPCRouter({
 	/**
@@ -28,82 +84,37 @@ export const adsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const { funnelId, startDate, endDate, platform } = input;
 
-			// Build where clause
-			const where: any = {
-				organizationId: ctx.orgId!,
-				date: {
-					gte: new Date(startDate),
-					lte: new Date(endDate),
-				},
-			};
+			const records = await db
+				.select()
+				.from(adSpend)
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate, platform }));
 
-			if (ctx.subaccountId) {
-				where.subaccountId = ctx.subaccountId;
+			const byPlatform = new Map<string, AdMetrics>();
+			for (const record of records) {
+				const metrics = byPlatform.get(record.platform) ?? emptyMetrics();
+				addAdRecord(metrics, record);
+				byPlatform.set(record.platform, metrics);
 			}
 
-			if (funnelId) {
-				where.funnelId = funnelId;
-			}
-
-			if (platform !== "all") {
-				where.platform = platform;
-			}
-
-			// Get aggregated data by platform
-			// @ts-ignore - adSpend model exists in DB, TypeScript cache needs refresh
-			const data = await db.adSpend.groupBy({
-				by: ["platform"],
-				where,
-				_sum: {
-					spend: true,
-					impressions: true,
-					clicks: true,
-					conversions: true,
-					revenue: true,
-				},
-			});
-
-			// Calculate metrics
-			const platforms = data.map((item: any) => {
-				const spend = item._sum.spend?.toNumber() || 0;
-				const revenue = item._sum.revenue?.toNumber() || 0;
-				const impressions = item._sum.impressions || 0;
-				const clicks = item._sum.clicks || 0;
-				const conversions = item._sum.conversions || 0;
-
-				const roas = spend > 0 ? (revenue / spend) * 100 : 0;
-				const cpa = conversions > 0 ? spend / conversions : 0;
-				const cpc = clicks > 0 ? spend / clicks : 0;
-				const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
-				const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
-				const conversionRate = clicks > 0 ? (conversions / clicks) * 100 : 0;
-
+			const platforms = Array.from(byPlatform.entries()).map(([platformName, metrics]) => {
+				const derived = calculateDerivedMetrics(metrics);
 				return {
-					platform: item.platform,
-					spend,
-					revenue,
-					impressions,
-					clicks,
-					conversions,
-					roas,
-					cpa,
-					cpc,
-					cpm,
-					ctr,
-					conversionRate,
-					profit: revenue - spend,
+					platform: platformName,
+					...metrics,
+					...derived,
+					profit: metrics.revenue - metrics.spend,
 				};
 			});
 
 			return {
 				platforms,
 				total: {
-					spend: platforms.reduce((acc: number, p: any) => acc + p.spend, 0),
-					revenue: platforms.reduce((acc: number, p: any) => acc + p.revenue, 0),
-					impressions: platforms.reduce((acc: number, p: any) => acc + p.impressions, 0),
-					clicks: platforms.reduce((acc: number, p: any) => acc + p.clicks, 0),
-					conversions: platforms.reduce((acc: number, p: any) => acc + p.conversions, 0),
-					profit: platforms.reduce((acc: number, p: any) => acc + p.profit, 0),
+					spend: platforms.reduce((acc, p) => acc + p.spend, 0),
+					revenue: platforms.reduce((acc, p) => acc + p.revenue, 0),
+					impressions: platforms.reduce((acc, p) => acc + p.impressions, 0),
+					clicks: platforms.reduce((acc, p) => acc + p.clicks, 0),
+					conversions: platforms.reduce((acc, p) => acc + p.conversions, 0),
+					profit: platforms.reduce((acc, p) => acc + p.profit, 0),
 				},
 			};
 		}),
@@ -127,83 +138,42 @@ export const adsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const { funnelId, startDate, endDate, platform, groupBy } = input;
 
-			// Build where clause
-			const where: any = {
-				organizationId: ctx.orgId!,
-				date: {
-					gte: new Date(startDate),
-					lte: new Date(endDate),
-				},
-			};
+			const records = await db
+				.select()
+				.from(adSpend)
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate, platform }))
+				.orderBy(asc(adSpend.date));
 
-			if (ctx.subaccountId) {
-				where.subaccountId = ctx.subaccountId;
-			}
-
-			if (funnelId) {
-				where.funnelId = funnelId;
-			}
-
-			if (platform !== "all") {
-				where.platform = platform;
-			}
-
-			// Get all spend records
-			// @ts-ignore - adSpend model exists in DB, TypeScript cache needs refresh
-			const records = await db.adSpend.findMany({
-				where,
-				orderBy: { date: "asc" },
-				select: {
-					date: true,
-					platform: true,
-					spend: true,
-					revenue: true,
-					impressions: true,
-					clicks: true,
-					conversions: true,
-				},
-			});
-
-			// Group by date
-			const grouped = new Map<string, any>();
+			const grouped = new Map<string, AdMetrics & { date: string }>();
 
 			for (const record of records) {
 				let dateKey: string;
 
 				if (groupBy === "day") {
-					dateKey = record.date.toISOString().split("T")[0];
+					dateKey = record.date;
 				} else if (groupBy === "week") {
-					// Get start of week (Monday)
 					const d = new Date(record.date);
 					const day = d.getDay();
 					const diff = d.getDate() - day + (day === 0 ? -6 : 1);
 					d.setDate(diff);
 					dateKey = d.toISOString().split("T")[0];
 				} else {
-					// month
-					dateKey = record.date.toISOString().substring(0, 7); // YYYY-MM
+					dateKey = record.date.substring(0, 7);
 				}
 
 				if (!grouped.has(dateKey)) {
 					grouped.set(dateKey, {
 						date: dateKey,
-						spend: 0,
-						revenue: 0,
-						impressions: 0,
-						clicks: 0,
-						conversions: 0,
+						...emptyMetrics(),
 					});
 				}
 
 				const group = grouped.get(dateKey);
-				group.spend += record.spend.toNumber();
-				group.revenue += record.revenue.toNumber();
-				group.impressions += record.impressions;
-				group.clicks += record.clicks;
-				group.conversions += record.conversions;
+				if (group) {
+					addAdRecord(group, record);
+				}
 			}
 
-			// Calculate ROAS for each group
 			const chartData = Array.from(grouped.values()).map((item) => ({
 				date: item.date,
 				spend: item.spend,
@@ -240,66 +210,46 @@ export const adsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const { funnelId, startDate, endDate, platform, orderBy, limit } = input;
 
-			// Build where clause
-			const where: any = {
-				organizationId: ctx.orgId!,
-				date: {
-					gte: new Date(startDate),
-					lte: new Date(endDate),
-				},
-				campaignId: {
-					not: null,
-				},
-			};
+			const records = await db
+				.select()
+				.from(adSpend)
+				.where(
+					adSpendWhere({
+						organizationId: ctx.orgId!,
+						locationId: ctx.locationId,
+						funnelId,
+						startDate,
+						endDate,
+						platform,
+						requireCampaign: true,
+					})
+				);
 
-			if (ctx.subaccountId) {
-				where.subaccountId = ctx.subaccountId;
+			const groupedCampaigns = new Map<string, AdMetrics & { platform: string; campaignId: string; campaignName: string }>();
+			for (const record of records) {
+				const campaignId = record.campaignId ?? "";
+				const key = `${record.platform}:${campaignId}:${record.campaignName ?? ""}`;
+				const metrics =
+					groupedCampaigns.get(key) ??
+					({ ...emptyMetrics(), platform: record.platform, campaignId, campaignName: record.campaignName || campaignId || "Unknown" });
+				addAdRecord(metrics, record);
+				groupedCampaigns.set(key, metrics);
 			}
 
-			if (funnelId) {
-				where.funnelId = funnelId;
-			}
-
-			if (platform !== "all") {
-				where.platform = platform;
-			}
-
-			// Get aggregated data by campaign
-			const data = await db.adSpend.groupBy({
-				by: ["platform", "campaignId", "campaignName"],
-				where,
-				_sum: {
-					spend: true,
-					impressions: true,
-					clicks: true,
-					conversions: true,
-					revenue: true,
-				},
-			});
-
-			// Calculate metrics and sort
-			const campaigns = data
+			const campaigns = Array.from(groupedCampaigns.values())
 				.map((item) => {
-					const spend = item._sum.spend?.toNumber() || 0;
-					const revenue = item._sum.revenue?.toNumber() || 0;
-					const impressions = item._sum.impressions || 0;
-					const clicks = item._sum.clicks || 0;
-					const conversions = item._sum.conversions || 0;
-
-					const roas = spend > 0 ? (revenue / spend) * 100 : 0;
-					const cpa = conversions > 0 ? spend / conversions : 0;
-
+					const derived = calculateDerivedMetrics(item);
 					return {
 						platform: item.platform,
-						campaignId: item.campaignId || "",
-						campaignName: item.campaignName || item.campaignId || "Unknown",
-						spend,
-						revenue,
-						impressions,
-						clicks,
-						conversions,
-						roas,
-						cpa,
+						campaignId: item.campaignId,
+						campaignName: item.campaignName,
+						spend: item.spend,
+						revenue: item.revenue,
+						impressions: item.impressions,
+						clicks: item.clicks,
+						conversions: item.conversions,
+						roas: derived.roas,
+						cpa: derived.cpa,
 					};
 				})
 				.sort((a, b) => {
@@ -335,17 +285,14 @@ export const adsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const { funnelId, startDate, endDate } = input;
 
-			// Get sessions with conversions
-			const sessions = await db.funnelSession.findMany({
-				where: {
-					funnelId,
-					converted: true,
-					createdAt: {
-						gte: new Date(startDate),
-						lte: new Date(endDate),
-					},
-				},
-				select: {
+			const sessions = await db.query.funnelSession.findMany({
+				where: and(
+					eq(funnelSession.funnelId, funnelId),
+					eq(funnelSession.converted, true),
+					gte(funnelSession.createdAt, new Date(startDate)),
+					lte(funnelSession.createdAt, new Date(endDate))
+				),
+				columns: {
 					conversionValue: true,
 					conversionPlatform: true,
 					firstFbclid: true,
@@ -389,7 +336,7 @@ export const adsRouter = createTRPCRouter({
 			};
 
 			for (const session of sessions) {
-				const value = session.conversionValue?.toNumber() || 0;
+				const value = Number(session.conversionValue ?? 0);
 
 				// First-touch
 				if (session.firstFbclid) {
@@ -449,60 +396,22 @@ export const adsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const { funnelId, startDate, endDate } = input;
 
-			// Build where clause
-			const where: any = {
-				organizationId: ctx.orgId!,
-				date: {
-					gte: new Date(startDate),
-					lte: new Date(endDate),
-				},
-			};
+			const records = await db
+				.select()
+				.from(adSpend)
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate }));
 
-			if (ctx.subaccountId) {
-				where.subaccountId = ctx.subaccountId;
-			}
-
-			if (funnelId) {
-				where.funnelId = funnelId;
-			}
-
-			// Get aggregated totals
-			const totals = await db.adSpend.aggregate({
-				where,
-				_sum: {
-					spend: true,
-					revenue: true,
-					impressions: true,
-					clicks: true,
-					conversions: true,
-				},
-			});
-
-			const spend = totals._sum.spend?.toNumber() || 0;
-			const revenue = totals._sum.revenue?.toNumber() || 0;
-			const impressions = totals._sum.impressions || 0;
-			const clicks = totals._sum.clicks || 0;
-			const conversions = totals._sum.conversions || 0;
-
-			const roas = spend > 0 ? (revenue / spend) * 100 : 0;
-			const cpa = conversions > 0 ? spend / conversions : 0;
-			const cpc = clicks > 0 ? spend / clicks : 0;
-			const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
-			const conversionRate = clicks > 0 ? (conversions / clicks) * 100 : 0;
+			const totals = records.reduce((acc, record) => {
+				addAdRecord(acc, record);
+				return acc;
+			}, emptyMetrics());
+			const derived = calculateDerivedMetrics(totals);
 
 			return {
-				spend,
-				revenue,
-				impressions,
-				clicks,
-				conversions,
-				roas,
-				cpa,
-				cpc,
-				ctr,
-				conversionRate,
-				profit: revenue - spend,
-				profitMargin: revenue > 0 ? ((revenue - spend) / revenue) * 100 : 0,
+				...totals,
+				...derived,
+				profit: totals.revenue - totals.spend,
+				profitMargin: totals.revenue > 0 ? ((totals.revenue - totals.spend) / totals.revenue) * 100 : 0,
 			};
 		}),
 });

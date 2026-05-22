@@ -4,7 +4,7 @@ import {
   buildVariableTree,
   exampleContexts,
 } from "@/components/tiptap/build-variable-tree";
-import { NodeType } from "@prisma/client";
+import { NodeType } from "@/db/enums";
 
 /**
  * Builds the available workflow context for a given node
@@ -162,7 +162,7 @@ export function getExampleContextForNodeType(
   if (nodeType === NodeType.GOOGLE_FORM_TRIGGER) {
     const baseContext = {
       formId: "example-id",
-      formTitle: "Contact Form",
+      formTitle: "Client Form",
       respondentEmail: "respondent@example.com",
       timestamp: "2025-01-01T00:00:00.000Z",
       responses: {} as Record<string, string>,
@@ -226,10 +226,10 @@ export function getExampleContextForNodeType(
 
   // CRM Executions
   if (
-    nodeType === NodeType.CREATE_CONTACT ||
-    nodeType === NodeType.UPDATE_CONTACT
+    nodeType === NodeType.CREATE_CLIENT ||
+    nodeType === NodeType.UPDATE_CLIENT
   ) {
-    return exampleContexts.contact.contact;
+    return exampleContexts.client.client;
   }
 
   if (nodeType === NodeType.CREATE_DEAL || nodeType === NodeType.UPDATE_DEAL) {

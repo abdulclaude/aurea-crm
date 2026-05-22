@@ -48,9 +48,9 @@ import { useTRPC } from "@/trpc/client";
 import { Separator } from "@/components/ui/separator";
 
 const formSchema = z.object({
-  contactId: z.string().optional(),
-  contactName: z.string().min(1, "Client name is required"),
-  contactEmail: z.string().email("Invalid email").optional().or(z.literal("")),
+  clientId: z.string().optional(),
+  clientName: z.string().min(1, "Client name is required"),
+  clientEmail: z.string().email("Invalid email").optional().or(z.literal("")),
   title: z.string().optional(),
   dueDate: z.date({
     message: "Due date is required",
@@ -59,7 +59,7 @@ const formSchema = z.object({
   discountAmount: z.coerce.number().min(0).optional(),
   notes: z.string().optional(),
   termsConditions: z.string().optional(),
-  groupBy: z.enum(["worker", "date", "all"]).default("worker"),
+  groupBy: z.enum(["instructor", "date", "all"]).default("instructor"),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -81,7 +81,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  // Fetch time logs to get contact information
+  // Fetch time logs to get client information
   const { data: timeLogsData } = useQuery({
     queryKey: ["timeLogs", "forInvoice", timeLogIds],
     queryFn: async () => {
@@ -91,28 +91,28 @@ export function GenerateInvoiceFromTimeLogsDialog({
     enabled: false, // We'll rely on server-side validation
   });
 
-  // Fetch contacts for dropdown
-  const { data: contactsData } = useQuery({
-    ...trpc.contacts.list.queryOptions({
+  // Fetch clients for dropdown
+  const { data: clientsData } = useQuery({
+    ...trpc.clients.list.queryOptions({
       limit: 100,
     }),
     enabled: open,
   });
 
-  const contacts = contactsData?.items ?? [];
+  const clients = clientsData?.items ?? [];
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema) as any,
     defaultValues: {
-      contactName: "",
-      contactEmail: "",
+      clientName: "",
+      clientEmail: "",
       title: "",
       dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
       taxRate: 0,
       discountAmount: 0,
       notes: "",
       termsConditions: "",
-      groupBy: "worker",
+      groupBy: "instructor",
     },
   });
 
@@ -127,7 +127,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
           queryKey: trpc.timeTracking.list.queryOptions({}).queryKey,
         });
         toast.success(
-          `Invoice ${invoice.invoiceNumber} created successfully from ${timeLogIds.length} time log(s)`
+          `Invoice ${invoice.invoiceNumber} created successfully from ${timeLogIds.length} time log(s)`,
         );
         onOpenChange(false);
         form.reset();
@@ -139,7 +139,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
       onError: (error) => {
         toast.error(error.message || "Failed to generate invoice");
       },
-    })
+    }),
   );
 
   const onSubmit = (values: FormValues) => {
@@ -149,28 +149,29 @@ export function GenerateInvoiceFromTimeLogsDialog({
     });
   };
 
-  // Watch contact selection to auto-fill email
-  const selectedContactId = form.watch("contactId");
+  // Watch client selection to auto-fill email
+  const selectedClientId = form.watch("clientId");
   useEffect(() => {
-    if (selectedContactId && contacts.length > 0) {
-      const contact = contacts.find((c) => c.id === selectedContactId);
-      if (contact) {
-        form.setValue("contactName", contact.name);
-        form.setValue("contactEmail", contact.email ?? "");
+    if (selectedClientId && clients.length > 0) {
+      const client = clients.find((c) => c.id === selectedClientId);
+      if (client) {
+        form.setValue("clientName", client.name);
+        form.setValue("clientEmail", client.email ?? "");
       }
     }
-  }, [selectedContactId, contacts, form]);
+  }, [selectedClientId, clients, form]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto px-0">
         <DialogHeader className="px-6">
-          <DialogTitle>Generate invoice from Time Logs</DialogTitle>
+          <DialogTitle>Generate invoice from Time logs</DialogTitle>
           <DialogDescription>
             Create an invoice from {timeLogIds.length} approved time log(s).
             <br />
             <span className="text-amber-600 dark:text-amber-500 text-xs font-medium">
-              Note: All selected time logs must have a contact (client) assigned and belong to the same contact.
+              Note: All selected time logs must have a client (client) assigned
+              and belong to the same client.
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -178,31 +179,34 @@ export function GenerateInvoiceFromTimeLogsDialog({
         <Separator className="bg-black/10 dark:bg-white/5" />
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6">
+          <form
+            onSubmit={form.handleSubmit(onSubmit as any)}
+            className="space-y-6"
+          >
             {/* Client Information */}
             <div className="space-y-4 px-6">
               <h3 className="text-sm font-medium">Client Information</h3>
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control as any}
-                  name="contactId"
+                  name="clientId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Select contact (optional)</FormLabel>
+                      <FormLabel>Select client (optional)</FormLabel>
                       <Select
                         value={field.value}
                         onValueChange={field.onChange}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Choose existing contact" />
+                            <SelectValue placeholder="Choose existing client" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {contacts.map((contact) => (
-                            <SelectItem key={contact.id} value={contact.id}>
-                              {contact.name}{" "}
-                              {contact.email && `(${contact.email})`}
+                          {clients.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
+                              {client.name}{" "}
+                              {client.email && `(${client.email})`}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -214,7 +218,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactName"
+                  name="clientName"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Client name</FormLabel>
@@ -222,7 +226,8 @@ export function GenerateInvoiceFromTimeLogsDialog({
                         <Input {...field} placeholder="John Doe" />
                       </FormControl>
                       <FormDescription className="text-xs">
-                        This name will be used in the invoice number when multiple workers are selected
+                        This name will be used in the invoice number when
+                        multiple instructors are selected
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -231,7 +236,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactEmail"
+                  name="clientEmail"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Client email</FormLabel>
@@ -277,10 +282,10 @@ export function GenerateInvoiceFromTimeLogsDialog({
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
                           <FormControl>
-                            <RadioGroupItem value="worker" />
+                            <RadioGroupItem value="instructor" />
                           </FormControl>
                           <FormLabel className="font-normal">
-                            By worker - One line per worker with total hours
+                            By instructor - One line per instructor with total hours
                           </FormLabel>
                         </FormItem>
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -329,7 +334,7 @@ export function GenerateInvoiceFromTimeLogsDialog({
                               variant="outline"
                               className={cn(
                                 "w-full pl-3 text-left font-normal",
-                                !field.value && "text-muted-foreground"
+                                !field.value && "text-muted-foreground",
                               )}
                             >
                               {field.value ? (

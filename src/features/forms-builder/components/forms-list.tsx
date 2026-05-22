@@ -33,7 +33,7 @@ import {
   FileText,
   Search,
 } from "lucide-react";
-import { FormStatus } from "@prisma/client";
+import { FormStatus } from "@/db/enums";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 

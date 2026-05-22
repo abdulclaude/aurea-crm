@@ -42,7 +42,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
-import { InvoiceStatus } from "@prisma/client";
+import { InvoiceStatus } from "@/db/enums";
 import { InvoiceDetailDialog } from "./invoice-detail-dialog";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SendReminderDialog } from "./send-reminder-dialog";
@@ -192,19 +192,19 @@ const createInvoiceColumns = (
     },
   },
   {
-    id: "contactName",
-    accessorKey: "contactName",
+    id: "clientName",
+    accessorKey: "clientName",
     header: "Client",
     meta: { label: "Client" },
     enableSorting: false,
     cell: ({ row }) => (
       <div className="min-w-0">
         <p className="text-xs text-primary dark:text-white/80">
-          {row.original.contactName}
+          {row.original.clientName}
         </p>
-        {row.original.contactEmail && (
+        {row.original.clientEmail && (
           <p className="text-[11px] text-primary/60 dark:text-white/50 truncate">
-            {row.original.contactEmail}
+            {row.original.clientEmail}
           </p>
         )}
       </div>
@@ -438,14 +438,14 @@ const createInvoiceColumns = (
 ];
 
 interface InvoicesTableProps {
-  entityType?: "agency" | "subaccount";
+  entityType?: "agency" | "location";
   entityId?: string;
   onEdit?: (invoiceId: string) => void;
   invoiceType?: "SENT" | "RECEIVED";
 }
 
 export function InvoicesTable({
-  entityType = "subaccount",
+  entityType = "location",
   entityId,
   onEdit,
   invoiceType = "SENT",
@@ -638,8 +638,8 @@ export function InvoicesTable({
           invoice={{
             id: selectedInvoice.id,
             invoiceNumber: selectedInvoice.invoiceNumber,
-            contactName: selectedInvoice.contactName,
-            contactEmail: selectedInvoice.contactEmail,
+            clientName: selectedInvoice.clientName,
+            clientEmail: selectedInvoice.clientEmail,
             amountDue: selectedInvoice.amountDue,
             currency: selectedInvoice.currency,
             dueDate: selectedInvoice.dueDate.toISOString(),

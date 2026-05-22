@@ -8,7 +8,9 @@ import {
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   getSortedRowModel,
+  type PaginationState,
   type SortingState,
   type Table as TanstackTable,
   type Updater,
@@ -38,7 +40,7 @@ export interface DataTableToolbarContext<TData> {
 }
 
 export type ToolbarRenderer<TData> = (
-  ctx: DataTableToolbarContext<TData>
+  ctx: DataTableToolbarContext<TData>,
 ) => React.ReactNode;
 
 export interface DataTableSearchConfig {
@@ -131,7 +133,7 @@ export function DataTable<TData, TValue>({
   const [sortingState, setSortingState] =
     React.useState<SortingState>(initialSorting);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
-    []
+    [],
   );
   const [globalFilterInternal, setGlobalFilterInternal] = React.useState("");
   const globalFilter = globalFilterValue ?? globalFilterInternal;
@@ -162,12 +164,17 @@ export function DataTable<TData, TValue>({
   const [rowSelectionState, setRowSelectionState] =
     React.useState<RowSelectionState>(initialRowSelection);
   const rowSelection = rowSelectionProp ?? rowSelectionState;
+  const [paginationState, setPaginationState] =
+    React.useState<PaginationState>({
+      pageIndex: 0,
+      pageSize: 20,
+    });
   const skeletonRowKeys = React.useMemo(
     () =>
       Array.from({ length: skeletonRowCount }).map(
-        (_, index) => `skeleton-${index}`
+        (_, index) => `skeleton-${index}`,
       ),
-    [skeletonRowCount]
+    [skeletonRowCount],
   );
 
   const searchColumns = toolbar?.search?.columns;
@@ -216,7 +223,7 @@ export function DataTable<TData, TValue>({
         setGlobalFilterInternal(nextValue);
       }
     },
-    [globalFilter, onGlobalFilterChange]
+    [globalFilter, onGlobalFilterChange],
   );
 
   const table = useReactTable({
@@ -229,6 +236,7 @@ export function DataTable<TData, TValue>({
       columnVisibility,
       columnOrder,
       rowSelection,
+      ...(!pagination ? { pagination: paginationState } : {}),
     },
     enableRowSelection,
     onSortingChange: React.useCallback(
@@ -240,7 +248,7 @@ export function DataTable<TData, TValue>({
           setSortingState(nextValue);
         }
       },
-      [onSortingChange, sorting]
+      [onSortingChange, sorting],
     ),
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: handleGlobalFilterChange,
@@ -253,7 +261,7 @@ export function DataTable<TData, TValue>({
           setColumnVisibilityState(nextValue);
         }
       },
-      [columnVisibility, onColumnVisibilityChange]
+      [columnVisibility, onColumnVisibilityChange],
     ),
     onColumnOrderChange: React.useCallback(
       (updater: Updater<ColumnOrderState>) => {
@@ -270,7 +278,7 @@ export function DataTable<TData, TValue>({
           setColumnOrderState(nextValue);
         }
       },
-      [columnOrder, onColumnOrderChange]
+      [columnOrder, onColumnOrderChange],
     ),
     onRowSelectionChange: React.useCallback(
       (updater: Updater<RowSelectionState>) => {
@@ -281,12 +289,15 @@ export function DataTable<TData, TValue>({
           setRowSelectionState(nextValue);
         }
       },
-      [rowSelection, onRowSelectionChange]
+      [rowSelection, onRowSelectionChange],
     ),
     globalFilterFn: enableGlobalSearch ? globalSearchFn : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: enableGlobalSearch ? getFilteredRowModel() : undefined,
     getSortedRowModel: getSortedRowModel(),
+    getPaginationRowModel: !pagination ? getPaginationRowModel() : undefined,
+    onPaginationChange: !pagination ? setPaginationState : undefined,
+    autoResetPageIndex: !pagination,
     getRowId,
   });
 
@@ -299,7 +310,7 @@ export function DataTable<TData, TValue>({
       columnVisibility,
       columnOrder,
     }),
-    [table, columnVisibility, columnOrder]
+    [table, columnVisibility, columnOrder],
   );
 
   const renderSearchInput = toolbar?.search ? (
@@ -308,7 +319,7 @@ export function DataTable<TData, TValue>({
         placeholder={toolbar.search.placeholder ?? "Search"}
         className={cn(
           "w-full text-xs rounded-sm border-black/5 dark:border-white/5 bg-background",
-          toolbar.search.inputClassName
+          toolbar.search.inputClassName,
         )}
         value={searchInputValue}
         onChange={(event) => setSearchInputValue(event.currentTarget.value)}
@@ -320,6 +331,22 @@ export function DataTable<TData, TValue>({
     toolbar?.filters || toolbar?.sort || toolbar?.view || toolbar?.search;
 
   const hasRows = table.getRowModel().rows.length > 0;
+
+  const resolvedPagination = React.useMemo<DataTablePaginationConfig>(() => {
+    if (pagination) return pagination;
+
+    const totalItems = table.getPrePaginationRowModel().rows.length;
+    const totalPages = Math.max(1, table.getPageCount());
+
+    return {
+      currentPage: paginationState.pageIndex + 1,
+      totalPages,
+      pageSize: paginationState.pageSize,
+      totalItems,
+      onPageChange: (page) => table.setPageIndex(Math.max(0, page - 1)),
+      onPageSizeChange: (size) => table.setPageSize(size),
+    };
+  }, [pagination, paginationState.pageIndex, paginationState.pageSize, table]);
 
   React.useEffect(() => {
     if (!toolbar?.search) return;
@@ -359,7 +386,7 @@ export function DataTable<TData, TValue>({
                     key={header.id}
                     className={cn(
                       "text-xs font-normal text-primary/80 dark:text-white/40 border-b border-black/5 whitespace-nowrap",
-                      header.column.id === "select" ? "p-6 px-6" : "p-6"
+                      header.column.id === "select" ? "p-6 px-6" : "p-6",
                     )}
                     style={
                       header.column.id === "select"
@@ -371,7 +398,7 @@ export function DataTable<TData, TValue>({
                       ? null
                       : flexRender(
                           header.column.columnDef.header,
-                          header.getContext()
+                          header.getContext(),
                         )}
                   </TableHead>
                 ))}
@@ -395,7 +422,7 @@ export function DataTable<TData, TValue>({
                   data-state={row.getIsSelected() ? "selected" : undefined}
                   className={cn(
                     "h-14 text-xs hover:bg-primary-foreground/50 hover:text-black border-y border-black/5",
-                    onRowClick && "cursor-pointer"
+                    onRowClick && "cursor-pointer",
                   )}
                   onClick={() => onRowClick?.(row.original)}
                 >
@@ -403,7 +430,7 @@ export function DataTable<TData, TValue>({
                     <TableCell
                       key={cell.id}
                       className={cn(
-                        cell.column.id === "select" ? "p-6 px-6" : "p-6 py-6"
+                        cell.column.id === "select" ? "p-6 px-6" : "p-6 py-6",
                       )}
                       style={
                         cell.column.id === "select"
@@ -417,7 +444,7 @@ export function DataTable<TData, TValue>({
                     >
                       {flexRender(
                         cell.column.columnDef.cell,
-                        cell.getContext()
+                        cell.getContext(),
                       )}
                     </TableCell>
                   ))}
@@ -439,15 +466,15 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* Pagination */}
-      {pagination && (
+      {resolvedPagination && (
         <DataTablePagination
-          currentPage={pagination.currentPage}
-          totalPages={pagination.totalPages}
-          pageSize={pagination.pageSize}
-          totalItems={pagination.totalItems}
-          onPageChange={pagination.onPageChange}
-          onPageSizeChange={pagination.onPageSizeChange}
-          pageSizeOptions={pagination.pageSizeOptions}
+          currentPage={resolvedPagination.currentPage}
+          totalPages={resolvedPagination.totalPages}
+          pageSize={resolvedPagination.pageSize}
+          totalItems={resolvedPagination.totalItems}
+          onPageChange={resolvedPagination.onPageChange}
+          onPageSizeChange={resolvedPagination.onPageSizeChange}
+          pageSizeOptions={resolvedPagination.pageSizeOptions}
         />
       )}
     </div>

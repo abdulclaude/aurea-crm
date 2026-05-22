@@ -2,21 +2,50 @@
 
 import { useState } from "react";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
-import { Calendar, Plus, CheckCircle, Clock, DollarSign, Users, TrendingUp } from "lucide-react";
-import { useSuspenseQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Calendar,
+  Plus,
+  CheckCircle,
+  Clock,
+  DollarSign,
+  Users,
+  TrendingUp,
+} from "lucide-react";
+import {
+  useSuspenseQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { PageTabs } from "@/components/ui/page-tabs";
 import { toast } from "sonner";
 import { PayrollRunsTable } from "./payroll-runs-table";
-import { PayrollWorkersTable } from "./payroll-workers-table";
+import { PayrollInstructorsTable } from "./payroll-instructors-table";
 
 function formatCurrency(amount: number | { toNumber?: () => number }): string {
   // Handle Prisma Decimal type
-  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+  if (
+    typeof amount === "object" &&
+    amount !== null &&
+    "toNumber" in amount &&
+    typeof amount.toNumber === "function"
+  ) {
     return `£${amount.toNumber().toFixed(2)}`;
   }
   return `£${Number(amount).toFixed(2)}`;
@@ -38,7 +67,7 @@ export function PayrollDashboard() {
     trpc.payroll.calculatePayroll.queryOptions({
       periodStart: selectedPeriod.start,
       periodEnd: selectedPeriod.end,
-    })
+    }),
   );
 
   const createPayrollMutation = useMutation(
@@ -51,7 +80,7 @@ export function PayrollDashboard() {
       onError: (error) => {
         toast.error(error.message || "Failed to create payroll run");
       },
-    })
+    }),
   );
 
   const handleCreatePayroll = () => {
@@ -83,12 +112,18 @@ export function PayrollDashboard() {
       {/* Header */}
       <div className="flex items-start justify-between gap-2 p-6 pb-6">
         <div>
-          <h2 className="text-lg font-semibold text-primary">Shift Tracking & Payroll</h2>
+          <h2 className="text-lg font-semibold text-primary">
+            Shift Tracking & Payroll
+          </h2>
           <p className="text-xs text-primary/75 mt-1">
             Track approved hours and process payments
           </p>
         </div>
-        <Button onClick={handleCreatePayroll} disabled={createPayrollMutation.isPending} size="sm">
+        <Button
+          onClick={handleCreatePayroll}
+          disabled={createPayrollMutation.isPending}
+          size="sm"
+        >
           <Plus className="size-4 mr-2" />
           Create Payroll Run
         </Button>
@@ -108,9 +143,12 @@ export function PayrollDashboard() {
           {/* Period Selector */}
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium text-primary">Preview Period Earnings</h3>
+              <h3 className="text-sm font-medium text-primary">
+                Preview Period Earnings
+              </h3>
               <p className="text-xs text-primary/60 mt-1">
-                Select a pay period to preview worker earnings before creating a payroll run
+                Select a pay period to preview instructor earnings before creating a
+                payroll run
               </p>
             </div>
             <Select
@@ -145,9 +183,11 @@ export function PayrollDashboard() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Users className="size-4 text-blue-500" />
-                  <span className="text-sm text-primary/60">Workers</span>
+                  <span className="text-sm text-primary/60">Instructors</span>
                 </div>
-                <div className="text-2xl font-bold">{payrollPreview?.summary.totalWorkers || 0}</div>
+                <div className="text-2xl font-bold">
+                  {payrollPreview?.summary.totalInstructors || 0}
+                </div>
               </CardContent>
             </Card>
 
@@ -155,10 +195,14 @@ export function PayrollDashboard() {
               <CardContent className="pt-6">
                 <div className="flex items-center gap-2 mb-2">
                   <Clock className="size-4 text-sky-500" />
-                  <span className="text-sm text-primary/60">Total Hours</span>
+                  <span className="text-sm text-primary/60">Total hours</span>
                 </div>
                 <div className="text-2xl font-bold">
-                  {((payrollPreview?.summary.totalRegularHours || 0) + (payrollPreview?.summary.totalOvertimeHours || 0)).toFixed(1)}h
+                  {(
+                    (payrollPreview?.summary.totalRegularHours || 0) +
+                    (payrollPreview?.summary.totalOvertimeHours || 0)
+                  ).toFixed(1)}
+                  h
                 </div>
               </CardContent>
             </Card>
@@ -188,20 +232,24 @@ export function PayrollDashboard() {
             </Card>
           </div>
 
-          {/* Workers Table */}
-          {payrollPreview && payrollPreview.workers.length > 0 && (
+          {/* Instructors Table */}
+          {payrollPreview && payrollPreview.instructors.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium mb-3">Workers in this period</h4>
-              <PayrollWorkersTable workers={payrollPreview.workers} />
+              <h4 className="text-sm font-medium mb-3">
+                Instructors in this period
+              </h4>
+              <PayrollInstructorsTable instructors={payrollPreview.instructors} />
             </div>
           )}
 
-          {payrollPreview && payrollPreview.workers.length === 0 && (
+          {payrollPreview && payrollPreview.instructors.length === 0 && (
             <div className="text-center py-12 border border-dashed border-primary/20 rounded-lg">
               <Clock className="size-12 mx-auto text-primary/20 mb-4" />
-              <p className="text-sm text-primary/60">No approved time logs in this period</p>
+              <p className="text-sm text-primary/60">
+                No approved time logs in this period
+              </p>
               <p className="text-xs text-primary/40 mt-1">
-                Workers need approved time logs to appear in the payroll preview
+                Instructors need approved time logs to appear in the payroll preview
               </p>
             </div>
           )}

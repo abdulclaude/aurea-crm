@@ -2,7 +2,9 @@
 
 import { randomBytes } from "node:crypto";
 
-import type { Prisma, Credential } from "@prisma/client";
+import { db } from "@/db";
+import { credential as credentialTable } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 
@@ -67,16 +69,22 @@ async function telegramApiRequest<T>({
   return payload as T;
 }
 
-type TransactionClient = Prisma.TransactionClient;
+type CredentialRow = typeof credentialTable.$inferSelect;
+
+function getMetadataRecord(metadata: unknown): Record<string, unknown> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return {};
+  }
+
+  return metadata as Record<string, unknown>;
+}
 
 export async function configureTelegramWebhook({
   credential,
   token,
-  tx,
 }: {
-  credential: Credential;
+  credential: CredentialRow;
   token: string;
-  tx: TransactionClient;
 }) {
   const baseUrl = await resolveTelegramWebhookBaseUrl();
   const webhookSecret = randomBytes(32).toString("hex");
@@ -107,15 +115,15 @@ export async function configureTelegramWebhook({
   });
 
   const metadata: TelegramCredentialMetadata = {
-    ...(credential.metadata as TelegramCredentialMetadata | null | undefined),
+    ...getMetadataRecord(credential.metadata),
     webhookSecret,
     botUsername: getMe?.result?.username,
   };
 
-  await tx.credential.update({
-    where: { id: credential.id },
-    data: { metadata },
-  });
+  await db
+    .update(credentialTable)
+    .set({ metadata, updatedAt: new Date() })
+    .where(eq(credentialTable.id, credential.id));
 }
 
 export async function removeTelegramWebhook({ token }: { token: string }) {

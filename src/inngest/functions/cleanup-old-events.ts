@@ -1,5 +1,12 @@
 import { inngest } from "../client";
-import db from "@/lib/db";
+import { and, eq, lt, notExists } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  anonymousUserProfiles,
+  funnel,
+  funnelEvent,
+  funnelSession,
+} from "@/db/schema";
 
 /**
  * Cleanup old funnel events based on data retention policy
@@ -18,13 +25,13 @@ export const cleanupOldEvents = inngest.createFunction(
   async ({ step }) => {
     // Step 1: Get all funnels with their retention policies
     const funnels = await step.run("get-funnels", async () => {
-      return db.funnel.findMany({
-        select: {
-          id: true,
-          name: true,
-          organizationId: true,
-        },
-      });
+      return db
+        .select({
+          id: funnel.id,
+          name: funnel.name,
+          organizationId: funnel.organizationId,
+        })
+        .from(funnel);
     });
 
     let totalEventsDeleted = 0;
@@ -34,8 +41,6 @@ export const cleanupOldEvents = inngest.createFunction(
     // Step 2: Process each funnel
     for (const funnel of funnels) {
       const result = await step.run(`cleanup-funnel-${funnel.id}`, async () => {
-        // TODO: In the future, fetch retention policy from organization settings
-        // For now, use default 90 days
         const retentionDays = 90;
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
@@ -45,59 +50,53 @@ export const cleanupOldEvents = inngest.createFunction(
         );
 
         // Delete old events
-        const deletedEvents = await db.funnelEvent.deleteMany({
-          where: {
-            funnelId: funnel.id,
-            timestamp: {
-              lt: cutoffDate,
-            },
-          },
-        });
+        const deletedEvents = await db
+          .delete(funnelEvent)
+          .where(
+            and(
+              eq(funnelEvent.funnelId, funnel.id),
+              lt(funnelEvent.timestamp, cutoffDate)
+            )
+          )
+          .returning({ id: funnelEvent.id });
 
         // Delete old sessions (that have no recent events)
-        const deletedSessions = await db.funnelSession.deleteMany({
-          where: {
-            funnelId: funnel.id,
-            startedAt: {
-              lt: cutoffDate,
-            },
-          },
-        });
+        const deletedSessions = await db
+          .delete(funnelSession)
+          .where(
+            and(
+              eq(funnelSession.funnelId, funnel.id),
+              lt(funnelSession.startedAt, cutoffDate)
+            )
+          )
+          .returning({ id: funnelSession.id });
 
         // Clean up anonymous profiles that have no sessions left
-        const orphanedProfiles = await db.anonymousUserProfile.findMany({
-          where: {
-            lastSeen: {
-              lt: cutoffDate,
-            },
-            // Only delete if they have no recent sessions
-            sessions: {
-              none: {},
-            },
-          },
-          select: {
-            id: true,
-          },
-        });
-
-        const deletedProfiles = await db.anonymousUserProfile.deleteMany({
-          where: {
-            id: {
-              in: orphanedProfiles.map((p) => p.id),
-            },
-          },
-        });
+        const deletedProfiles = await db
+          .delete(anonymousUserProfiles)
+          .where(
+            and(
+              lt(anonymousUserProfiles.lastSeen, cutoffDate),
+              notExists(
+                db
+                  .select({ id: funnelSession.id })
+                  .from(funnelSession)
+                  .where(eq(funnelSession.profileId, anonymousUserProfiles.id))
+              )
+            )
+          )
+          .returning({ id: anonymousUserProfiles.id });
 
         console.log(
-          `[Cleanup] Funnel ${funnel.name}: Deleted ${deletedEvents.count} events, ${deletedSessions.count} sessions, ${deletedProfiles.count} profiles`
+          `[Cleanup] Funnel ${funnel.name}: Deleted ${deletedEvents.length} events, ${deletedSessions.length} sessions, ${deletedProfiles.length} profiles`
         );
 
         return {
           funnelId: funnel.id,
           funnelName: funnel.name,
-          eventsDeleted: deletedEvents.count,
-          sessionsDeleted: deletedSessions.count,
-          profilesDeleted: deletedProfiles.count,
+          eventsDeleted: deletedEvents.length,
+          sessionsDeleted: deletedSessions.length,
+          profilesDeleted: deletedProfiles.length,
         };
       });
 

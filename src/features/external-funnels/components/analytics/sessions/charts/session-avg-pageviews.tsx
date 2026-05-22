@@ -105,7 +105,7 @@ export function SessionAvgPageViewsChart({
                           style={{ backgroundColor: entry.color }}
                         />
                         <span className="text-xs font-medium">
-                          Avg Page Views
+                          Average page views
                         </span>
                       </div>
                       <span className="text-xs font-mono font-semibold">

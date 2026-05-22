@@ -1,49 +1,47 @@
-import prisma from "@/lib/db";
+import { and, desc, eq, ilike, isNull, ne } from "drizzle-orm";
+import { db } from "@/db";
+import { invoice } from "@/db/schema";
 
 /**
  * Generate a unique invoice number
- * Format: INV-YYYY-NNNN (e.g., INV-2024-0001) or INV-JOHN-DOE-YYYY-NNNN for worker-specific invoices
+ * Format: INV-YYYY-NNNN (e.g., INV-2024-0001) or INV-JOHN-DOE-YYYY-NNNN for instructor-specific invoices
  *
  * @param organizationId - Organization ID
- * @param subaccountId - Optional subaccount ID for client-specific numbering
- * @param workerName - Optional worker/contact name for worker-specific numbering
+ * @param locationId - Optional location ID for client-specific numbering
+ * @param instructorName - Optional instructor/client name for instructor-specific numbering
  */
 export async function generateInvoiceNumber(
   organizationId: string,
-  subaccountId?: string,
-  workerName?: string
+  locationId?: string,
+  instructorName?: string
 ): Promise<string> {
   const year = new Date().getFullYear();
 
-  // If worker name is provided, format it for the invoice number
-  let workerSlug = "";
-  if (workerName) {
+  // If instructor name is provided, format it for the invoice number
+  let instructorSlug = "";
+  if (instructorName) {
     // Convert name to uppercase slug: "John Doe" -> "JOHN-DOE"
-    workerSlug = workerName
+    instructorSlug = instructorName
       .trim()
       .toUpperCase()
       .replace(/[^A-Z0-9\s]/g, "") // Remove special characters
       .replace(/\s+/g, "-") // Replace spaces with hyphens
       .substring(0, 20); // Limit length
 
-    workerSlug = workerSlug ? `${workerSlug}-` : "";
+    instructorSlug = instructorSlug ? `${instructorSlug}-` : "";
   }
 
-  const prefix = `INV-${workerSlug}${year}`;
+  const prefix = `INV-${instructorSlug}${year}`;
 
-  // Find the last invoice for this org/subaccount/worker in the current year
-  const lastInvoice = await prisma.invoice.findFirst({
-    where: {
-      organizationId,
-      subaccountId: subaccountId ?? null,
-      invoiceNumber: {
-        startsWith: prefix,
-      },
-    },
-    orderBy: {
-      invoiceNumber: "desc",
-    },
-    select: {
+  // Find the last invoice for this org/location/instructor in the current year
+  const lastInvoice = await db.query.invoice.findFirst({
+    where: and(
+      eq(invoice.organizationId, organizationId),
+      locationId ? eq(invoice.locationId, locationId) : isNull(invoice.locationId),
+      ilike(invoice.invoiceNumber, `${prefix}%`)
+    ),
+    orderBy: [desc(invoice.invoiceNumber)],
+    columns: {
       invoiceNumber: true,
     },
   });
@@ -67,7 +65,7 @@ export async function generateInvoiceNumber(
  * Validate invoice number format
  */
 export function validateInvoiceNumber(invoiceNumber: string): boolean {
-  // Format: INV-YYYY-NNNN or INV-WORKER-NAME-YYYY-NNNN
+  // Format: INV-YYYY-NNNN or INV-INSTRUCTOR-NAME-YYYY-NNNN
   const pattern = /^INV-([A-Z0-9-]+-)??\d{4}-\d{4}$/;
   return pattern.test(invoiceNumber);
 }
@@ -79,11 +77,12 @@ export async function isInvoiceNumberUnique(
   invoiceNumber: string,
   excludeId?: string
 ): Promise<boolean> {
-  const existing = await prisma.invoice.findFirst({
-    where: {
-      invoiceNumber,
-      ...(excludeId && { id: { not: excludeId } }),
-    },
+  const existing = await db.query.invoice.findFirst({
+    where: and(
+      eq(invoice.invoiceNumber, invoiceNumber),
+      excludeId ? ne(invoice.id, excludeId) : undefined
+    ),
+    columns: { id: true },
   });
 
   return !existing;

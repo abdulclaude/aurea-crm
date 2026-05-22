@@ -1,10 +1,19 @@
 "use server";
 
-import prisma from "@/lib/db";
+import { and, eq, inArray, lte } from "drizzle-orm";
+import type { InferSelectModel } from "drizzle-orm";
+
+import { db } from "@/db";
+import {
+  apps,
+  node as workflowNode,
+  oneDriveSubscription,
+  oneDriveTriggerState,
+  workflows,
+} from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@prisma/client";
-import type { Node as PrismaNode } from "@prisma/client";
+import { AppProvider, NodeType } from "@/db/enums";
 import { ensureMicrosoftAccessToken } from "@/features/outlook/server/subscriptions";
 
 const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
@@ -21,54 +30,68 @@ export type OneDriveTriggerConfig = {
 type SyncParams = {
   userId: string;
 };
+type OneDriveNode = Pick<
+  InferSelectModel<typeof workflowNode>,
+  "id" | "workflowId" | "data"
+>;
+
+async function getOneDriveTriggerNodes(userId: string): Promise<OneDriveNode[]> {
+  return await db
+    .select({
+      id: workflowNode.id,
+      workflowId: workflowNode.workflowId,
+      data: workflowNode.data,
+    })
+    .from(workflowNode)
+    .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
+    .where(
+      and(
+        eq(workflowNode.type, NodeType.ONEDRIVE_TRIGGER),
+        eq(workflows.userId, userId),
+        eq(workflows.archived, false),
+        eq(workflows.isTemplate, false),
+      ),
+    );
+}
+
+async function deleteOneDriveTriggerStatesForUser(
+  userId: string,
+  exceptNodeIds?: string[],
+): Promise<void> {
+  const rows = await db
+    .select({ id: oneDriveTriggerState.id, nodeId: oneDriveTriggerState.nodeId })
+    .from(oneDriveTriggerState)
+    .innerJoin(workflows, eq(oneDriveTriggerState.workflowId, workflows.id))
+    .where(eq(workflows.userId, userId));
+  const ids = rows
+    .filter((row) => !exceptNodeIds || !exceptNodeIds.includes(row.nodeId))
+    .map((row) => row.id);
+  if (ids.length > 0) {
+    await db.delete(oneDriveTriggerState).where(inArray(oneDriveTriggerState.id, ids));
+  }
+}
 
 export async function syncOneDriveWorkflowSubscriptions({
   userId,
 }: SyncParams) {
   try {
-    const oneDriveApp = await prisma.apps.findFirst({
-      where: {
-        userId,
-        provider: AppProvider.MICROSOFT,
-      },
+    const oneDriveApp = await db.query.apps.findFirst({
+      where: and(eq(apps.userId, userId), eq(apps.provider, AppProvider.MICROSOFT)),
     });
 
     if (!oneDriveApp) {
       await stopOneDriveWatchForUser(userId);
-      await prisma.oneDriveTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteOneDriveTriggerStatesForUser(userId);
       return;
     }
 
-    const nodes = await prisma.node.findMany({
-      where: {
-        type: NodeType.ONEDRIVE_TRIGGER,
-        Workflows: {
-          userId,
-          archived: false,
-          isTemplate: false,
-        },
-      },
-      select: {
-        id: true,
-        workflowId: true,
-        data: true,
-      },
-    });
+    const nodes = await getOneDriveTriggerNodes(userId);
 
     if (nodes.length > 0) {
       const activeNodeIds = nodes.map((node) => node.id);
-      await prisma.oneDriveTriggerState.deleteMany({
-        where: {
-          Workflows: { userId },
-          nodeId: { notIn: activeNodeIds },
-        },
-      });
+      await deleteOneDriveTriggerStatesForUser(userId, activeNodeIds);
     } else {
-      await prisma.oneDriveTriggerState.deleteMany({
-        where: { Workflows: { userId } },
-      });
+      await deleteOneDriveTriggerStatesForUser(userId);
     }
 
     if (nodes.length === 0) {
@@ -87,9 +110,7 @@ export async function syncOneDriveWorkflowSubscriptions({
 
 export async function removeOneDriveSubscriptionsForUser(userId: string) {
   await stopOneDriveWatchForUser(userId);
-  await prisma.oneDriveTriggerState.deleteMany({
-    where: { Workflows: { userId } },
-  });
+  await deleteOneDriveTriggerStatesForUser(userId);
 }
 
 export async function enqueueOneDriveNotification({
@@ -116,38 +137,23 @@ export async function processOneDriveNotification({
 }: {
   subscriptionId: string;
 }) {
-  const subscription = await prisma.oneDriveSubscription.findFirst({
-    where: { subscriptionId },
+  const subscription = await db.query.oneDriveSubscription.findFirst({
+    where: eq(oneDriveSubscription.subscriptionId, subscriptionId),
   });
 
   if (!subscription) {
     return;
   }
 
-  await prisma.oneDriveSubscription
-    .update({
-      where: { id: subscription.id },
-      data: {
+  await db
+    .update(oneDriveSubscription)
+    .set({
         lastSyncedAt: new Date(),
-      },
     })
+    .where(eq(oneDriveSubscription.id, subscription.id))
     .catch(() => {});
 
-  const nodes = await prisma.node.findMany({
-    where: {
-      type: NodeType.ONEDRIVE_TRIGGER,
-      Workflows: {
-        userId: subscription.userId,
-        archived: false,
-        isTemplate: false,
-      },
-    },
-    select: {
-      id: true,
-      workflowId: true,
-      data: true,
-    },
-  });
+  const nodes = await getOneDriveTriggerNodes(subscription.userId);
 
   if (nodes.length === 0) {
     await stopOneDriveWatchForUser(subscription.userId);
@@ -179,12 +185,8 @@ export async function processOneDriveNotification({
 
 export async function renewOneDriveSubscriptions() {
   const threshold = new Date(Date.now() + SUBSCRIPTION_RENEWAL_WINDOW_MS);
-  const subscriptions = await prisma.oneDriveSubscription.findMany({
-    where: {
-      expiresAt: {
-        lte: threshold,
-      },
-    },
+  const subscriptions = await db.query.oneDriveSubscription.findMany({
+    where: lte(oneDriveSubscription.expiresAt, threshold),
   });
 
   for (const subscription of subscriptions) {
@@ -208,7 +210,7 @@ async function maybeTriggerWorkflowFromNode({
   node,
   accessToken,
 }: {
-  node: Pick<PrismaNode, "id" | "workflowId" | "data">;
+  node: OneDriveNode;
   accessToken: string;
 }) {
   const config = ((node.data || {}) as OneDriveTriggerConfig) || {};
@@ -232,8 +234,8 @@ async function maybeTriggerWorkflowFromNode({
     return;
   }
 
-  const state = await prisma.oneDriveTriggerState.findUnique({
-    where: { nodeId: node.id },
+  const state = await db.query.oneDriveTriggerState.findFirst({
+    where: eq(oneDriveTriggerState.nodeId, node.id),
   });
 
   if (state?.lastDeltaLink === latestId) {
@@ -252,25 +254,26 @@ async function maybeTriggerWorkflowFromNode({
     initialData,
   });
 
-  await prisma.oneDriveTriggerState.upsert({
-    where: { nodeId: node.id },
-    update: {
-      lastDeltaLink: latestId,
-      lastTriggeredAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      workflowId: node.workflowId,
-    },
-    create: {
-        id: crypto.randomUUID(),
+  await db
+    .insert(oneDriveTriggerState)
+    .values({
+      id: crypto.randomUUID(),
       nodeId: node.id,
       workflowId: node.workflowId,
       lastDeltaLink: latestId,
       lastTriggeredAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: oneDriveTriggerState.nodeId,
+      set: {
+        lastDeltaLink: latestId,
+        lastTriggeredAt: new Date(),
+        updatedAt: new Date(),
+        workflowId: node.workflowId,
+      },
+    });
 }
 
 async function ensureOneDriveSubscription({
@@ -282,8 +285,8 @@ async function ensureOneDriveSubscription({
 }) {
   const webhookUrl = getOneDriveWebhookUrl();
 
-  const existing = await prisma.oneDriveSubscription.findUnique({
-    where: { userId },
+  const existing = await db.query.oneDriveSubscription.findFirst({
+    where: eq(oneDriveSubscription.userId, userId),
   });
 
   const needsRefresh =
@@ -314,29 +317,30 @@ async function ensureOneDriveSubscription({
     expirationDateTime: expiresAt.toISOString(),
   });
 
-  await prisma.oneDriveSubscription.upsert({
-    where: { userId },
-    update: {
-      subscriptionId: subscription.id,
-      expiresAt,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      lastSyncedAt: new Date(),
-    },
-    create: {
-        id: crypto.randomUUID(),
+  await db
+    .insert(oneDriveSubscription)
+    .values({
+      id: crypto.randomUUID(),
       userId,
       subscriptionId: subscription.id,
       expiresAt,
       createdAt: new Date(),
       updatedAt: new Date(),
-    },
-  });
+    })
+    .onConflictDoUpdate({
+      target: oneDriveSubscription.userId,
+      set: {
+        subscriptionId: subscription.id,
+        expiresAt,
+        updatedAt: new Date(),
+        lastSyncedAt: new Date(),
+      },
+    });
 }
 
 async function stopOneDriveWatchForUser(userId: string) {
-  const subscription = await prisma.oneDriveSubscription.findUnique({
-    where: { userId },
+  const subscription = await db.query.oneDriveSubscription.findFirst({
+    where: eq(oneDriveSubscription.userId, userId),
   });
 
   if (!subscription) {
@@ -354,10 +358,9 @@ async function stopOneDriveWatchForUser(userId: string) {
       error
     );
   } finally {
-    await prisma.oneDriveSubscription
-      .delete({
-        where: { id: subscription.id },
-      })
+    await db
+      .delete(oneDriveSubscription)
+      .where(eq(oneDriveSubscription.id, subscription.id))
       .catch(() => {});
   }
 }

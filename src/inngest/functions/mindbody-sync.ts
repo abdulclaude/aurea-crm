@@ -1,11 +1,37 @@
 import { inngest } from "../client";
-import prisma from "@/lib/db";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { db } from "@/db";
+import { apps } from "@/db/schema";
 import {
   fullMindbodySync,
   syncMindbodyClients,
   syncMindbodyClasses,
   syncClientBookingsAndMemberships,
 } from "@/features/modules/pilates-studio/server/sync";
+import type { JsonValue } from "@/db/json";
+
+type MindbodySyncApp = Parameters<typeof fullMindbodySync>[0];
+type MindbodyAppMetadata = {
+  organizationId?: string;
+  locationId?: string;
+  lastClientSync?: string;
+};
+
+function metadataRecord(value: JsonValue | null): MindbodyAppMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as MindbodyAppMetadata;
+}
+
+function toMindbodySyncApp(app: typeof apps.$inferSelect): MindbodySyncApp {
+  return {
+    ...app,
+    scopes: app.scopes ?? [],
+    metadata: app.metadata as MindbodySyncApp["metadata"],
+  };
+}
 
 /**
  * Full Mindbody sync - syncs all data from Mindbody
@@ -18,11 +44,11 @@ export const mindbodyFullSync = inngest.createFunction(
   },
   { event: "mindbody/sync.full" },
   async ({ event, step }) => {
-    const { appId, organizationId, subaccountId } = event.data;
+    const { appId, organizationId, locationId } = event.data;
 
     const syncResult = await step.run("full-sync", async () => {
-      const app = await prisma.apps.findUnique({
-        where: { id: appId },
+      const app = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!app) {
@@ -33,9 +59,9 @@ export const mindbodyFullSync = inngest.createFunction(
         throw new Error("Mindbody not connected - missing access token");
       }
 
-      return fullMindbodySync(app, {
+      return fullMindbodySync(toMindbodySyncApp(app), {
         organizationId,
-        subaccountId,
+        locationId,
       });
     });
 
@@ -75,20 +101,20 @@ export const mindbodyClientsSync = inngest.createFunction(
   },
   { event: "mindbody/sync.clients" },
   async ({ event, step }) => {
-    const { appId, organizationId, subaccountId, updatedAfter } = event.data;
+    const { appId, organizationId, locationId, updatedAfter } = event.data;
 
     const syncResult = await step.run("sync-clients", async () => {
-      const app = await prisma.apps.findUnique({
-        where: { id: appId },
+      const app = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!app) {
         throw new Error(`App ${appId} not found`);
       }
 
-      return syncMindbodyClients(app, {
+      return syncMindbodyClients(toMindbodySyncApp(app), {
         organizationId,
-        subaccountId,
+        locationId,
         updatedAfter: updatedAfter ? new Date(updatedAfter) : undefined,
       });
     });
@@ -108,11 +134,11 @@ export const mindbodyClassesSync = inngest.createFunction(
   },
   { event: "mindbody/sync.classes" },
   async ({ event, step }) => {
-    const { appId, organizationId, subaccountId, startDate, endDate } = event.data;
+    const { appId, organizationId, locationId, startDate, endDate } = event.data;
 
     const app = await step.run("fetch-app", async () => {
-      const foundApp = await prisma.apps.findUnique({
-        where: { id: appId },
+      const foundApp = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!foundApp) {
@@ -123,17 +149,17 @@ export const mindbodyClassesSync = inngest.createFunction(
     });
 
     const syncResult = await step.run("sync-classes", async () => {
-      const app = await prisma.apps.findUnique({
-        where: { id: appId },
+      const app = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!app) {
         throw new Error(`App ${appId} not found`);
       }
 
-      return syncMindbodyClasses(app, {
+      return syncMindbodyClasses(toMindbodySyncApp(app), {
         organizationId,
-        subaccountId,
+        locationId,
         startDate: startDate ? new Date(startDate) : undefined,
         endDate: endDate ? new Date(endDate) : undefined,
       });
@@ -144,22 +170,22 @@ export const mindbodyClassesSync = inngest.createFunction(
 );
 
 /**
- * Sync bookings and memberships for a specific contact
+ * Sync bookings and memberships for a specific client
  */
-export const mindbodyContactSync = inngest.createFunction(
+export const mindbodyClientSync = inngest.createFunction(
   {
-    id: "mindbody-contact-sync",
-    name: "Mindbody Contact Sync",
+    id: "mindbody-client-sync",
+    name: "Mindbody Client Sync",
     retries: 3,
   },
-  { event: "mindbody/sync.contact" },
+  { event: "mindbody/sync.client" },
   async ({ event, step }) => {
-    const { appId, subaccountId, contactId, mindbodyClientId } =
+    const { appId, locationId, clientId, mindbodyClientId } =
       event.data;
 
     const app = await step.run("fetch-app", async () => {
-      const foundApp = await prisma.apps.findUnique({
-        where: { id: appId },
+      const foundApp = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!foundApp) {
@@ -169,9 +195,9 @@ export const mindbodyContactSync = inngest.createFunction(
       return foundApp;
     });
 
-    const syncResult = await step.run("sync-contact-data", async () => {
-      const app = await prisma.apps.findUnique({
-        where: { id: appId },
+    const syncResult = await step.run("sync-client-data", async () => {
+      const app = await db.query.apps.findFirst({
+        where: eq(apps.id, appId),
       });
 
       if (!app) {
@@ -179,10 +205,10 @@ export const mindbodyContactSync = inngest.createFunction(
       }
 
       return syncClientBookingsAndMemberships(
-        app,
-        contactId,
+        toMindbodySyncApp(app),
+        clientId,
         mindbodyClientId,
-        { subaccountId },
+        { locationId },
       );
     });
 
@@ -201,37 +227,35 @@ export const mindbodyScheduledSync = inngest.createFunction(
   { cron: "0 3 * * *" }, // Run daily at 3 AM instead of every 4 hours (83% reduction)
   async ({ step }) => {
     const appIds = await step.run("fetch-mindbody-apps", async () => {
-      const apps = await prisma.apps.findMany({
-        where: {
-          provider: "MINDBODY",
-          accessToken: { not: null },
-        },
-        select: {
+      const mindbodyApps = await db.query.apps.findMany({
+        where: and(eq(apps.provider, "MINDBODY"), isNotNull(apps.accessToken)),
+        columns: {
           id: true,
           metadata: true,
         },
       });
-      return apps.map((app) => ({
-        id: app.id,
-        organizationId: (app.metadata as any)?.organizationId as string | undefined,
-        subaccountId: (app.metadata as any)?.subaccountId as string | undefined,
-        lastClientSync: (app.metadata as any)?.lastClientSync as
-          | string
-          | undefined,
-      }));
+      return mindbodyApps.map((app) => {
+        const metadata = metadataRecord(app.metadata as JsonValue | null);
+        return {
+          id: app.id,
+          organizationId: metadata.organizationId,
+          locationId: metadata.locationId,
+          lastClientSync: metadata.lastClientSync,
+        };
+      });
     });
 
     const results = [];
 
     for (const appInfo of appIds) {
-      // Skip if we don't have either organizationId or subaccountId
-      if (!appInfo.organizationId && !appInfo.subaccountId) continue;
+      // Skip if we don't have either organizationId or locationId
+      if (!appInfo.organizationId && !appInfo.locationId) continue;
 
       try {
         await step.run(`sync-${appInfo.id}`, async () => {
           // Fetch fresh app data
-          const app = await prisma.apps.findUnique({
-            where: { id: appInfo.id },
+          const app = await db.query.apps.findFirst({
+            where: eq(apps.id, appInfo.id),
           });
 
           if (!app) {
@@ -244,16 +268,16 @@ export const mindbodyScheduledSync = inngest.createFunction(
             : undefined;
 
           // Incremental sync for clients (only updated since last sync)
-          await syncMindbodyClients(app, {
+          await syncMindbodyClients(toMindbodySyncApp(app), {
             organizationId: appInfo.organizationId,
-            subaccountId: appInfo.subaccountId,
+            locationId: appInfo.locationId,
             updatedAfter: lastSync,
           });
 
           // Always sync upcoming classes (next 7 days)
-          await syncMindbodyClasses(app, {
+          await syncMindbodyClasses(toMindbodySyncApp(app), {
             organizationId: appInfo.organizationId,
-            subaccountId: appInfo.subaccountId,
+            locationId: appInfo.locationId,
             startDate: new Date(),
             endDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           });

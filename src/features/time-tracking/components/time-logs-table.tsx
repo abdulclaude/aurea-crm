@@ -26,7 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { TimeLogStatus } from "@prisma/client";
+import { TimeLogStatus } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { useTRPC } from "@/trpc/client";
@@ -38,7 +38,7 @@ import {
   useDeleteTimeLog,
 } from "../hooks/use-time-tracking";
 import { GenerateInvoiceFromTimeLogsDialog } from "@/features/invoicing/components/generate-invoice-from-timelogs-dialog";
-import { BulkAssignContactDialog } from "./bulk-assign-contact-dialog";
+import { BulkAssignClientDialog } from "./bulk-assign-client-dialog";
 import { TimeLogEditSheet } from "./time-log-edit-sheet";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
@@ -80,7 +80,7 @@ function formatDuration(minutes: number | null | undefined): string {
 
 function formatCurrency(
   amount: number | null | undefined,
-  currency?: string | null
+  currency?: string | null,
 ): string {
   if (!amount) return "—";
   return new Intl.NumberFormat("en-US", {
@@ -134,12 +134,14 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   const [params, setParams] = useTimeLogsParams();
   const [rowSelection, setRowSelection] = React.useState({});
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = React.useState(false);
-  const [isBulkAssignContactDialogOpen, setIsBulkAssignContactDialogOpen] = React.useState(false);
-  const [selectedTimeLog, setSelectedTimeLog] = React.useState<TimeLogRow | null>(null);
+  const [isBulkAssignClientDialogOpen, setIsBulkAssignClientDialogOpen] =
+    React.useState(false);
+  const [selectedTimeLog, setSelectedTimeLog] =
+    React.useState<TimeLogRow | null>(null);
   const [isEditSheetOpen, setIsEditSheetOpen] = React.useState(false);
 
   // Client filter for "all-clients" scope (agency viewing all client data)
-  const [selectedSubaccountId, setSelectedSubaccountId] =
+  const [selectedLocationId, setSelectedLocationId] =
     React.useState<string>("");
 
   const { mutate: approveTimeLog } = useApproveTimeLog();
@@ -150,9 +152,9 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       page: params.page,
       pageSize: params.pageSize,
       search: params.search || undefined,
-      workers:
-        params.workers && params.workers.length > 0
-          ? params.workers
+      instructors:
+        params.instructors && params.instructors.length > 0
+          ? params.instructors
           : undefined,
       deals: params.deals && params.deals.length > 0 ? params.deals : undefined,
       statuses:
@@ -165,12 +167,12 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       durationMax: params.durationMax ?? undefined,
       amountMin: params.amountMin ?? undefined,
       amountMax: params.amountMax ?? undefined,
-      // For "all-clients" scope, pass the selected subaccount filter
+      // For "all-clients" scope, pass the selected location filter
       ...(scope === "all-clients" && {
-        includeAllClients: !selectedSubaccountId, // If no specific client selected, show all
-        subaccountId: selectedSubaccountId || undefined, // If client selected, filter by it
+        includeAllClients: !selectedLocationId, // If no specific client selected, show all
+        locationId: selectedLocationId || undefined, // If client selected, filter by it
       }),
-    })
+    }),
   );
 
   const handleApprove = React.useCallback(
@@ -185,10 +187,10 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
           onError: (error: any) => {
             toast.error(error.message);
           },
-        }
+        },
       );
     },
-    [approveTimeLog, refetch]
+    [approveTimeLog, refetch],
   );
 
   const handleReject = React.useCallback(
@@ -203,10 +205,10 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
           onError: (error: any) => {
             toast.error(error.message);
           },
-        }
+        },
       );
     },
-    [approveTimeLog, refetch]
+    [approveTimeLog, refetch],
   );
 
   const handleDelete = React.useCallback(
@@ -222,11 +224,11 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
             onError: (error: any) => {
               toast.error(error.message);
             },
-          }
+          },
         );
       }
     },
-    [deleteTimeLog, refetch]
+    [deleteTimeLog, refetch],
   );
 
   const timeLogColumns: ColumnDef<TimeLogRow>[] = [
@@ -254,15 +256,15 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       enableHiding: false,
     },
     {
-      id: "worker",
-      accessorFn: (row) => row.worker?.name || row.contact?.name || "—",
-      header: "Worker",
-      meta: { label: "Worker" },
+      id: "instructor",
+      accessorFn: (row) => row.instructor?.name || row.client?.name || "—",
+      header: "Instructor",
+      meta: { label: "Instructor" },
       enableHiding: false,
       cell: ({ row }) => {
-        const worker = row.original.worker;
-        const contact = row.original.contact;
-        const person = worker || contact;
+        const instructor = row.original.instructor;
+        const client = row.original.client;
+        const person = instructor || client;
 
         if (!person) {
           return <span className="text-xs text-primary/40">—</span>;
@@ -279,14 +281,14 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
               <p className="text-xs font-medium text-primary truncate">
                 {person.name}
               </p>
-              {worker?.role && (
+              {instructor?.role && (
                 <p className="text-[11px] text-primary/60 truncate">
-                  {worker.role}
+                  {instructor.role}
                 </p>
               )}
-              {!worker && contact?.email && (
+              {!instructor && client?.email && (
                 <p className="text-[11px] text-primary/60 truncate">
-                  {contact.email}
+                  {client.email}
                 </p>
               )}
             </div>
@@ -296,13 +298,13 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
     },
     {
       id: "client",
-      accessorFn: (row) => row.contact?.name || "—",
+      accessorFn: (row) => row.client?.name || "—",
       header: "Client",
       meta: { label: "Client" },
       cell: ({ row }) => {
-        const contact = row.original.contact;
+        const client = row.original.client;
 
-        if (!contact) {
+        if (!client) {
           return (
             <span className="text-xs text-primary/40 italic">No client</span>
           );
@@ -312,16 +314,16 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
           <div className="flex items-center gap-2">
             <Avatar className="size-7">
               <AvatarFallback className="bg-primary/5 text-primary text-[10px]">
-                {(contact.name?.[0] ?? "C").toUpperCase()}
+                {(client.name?.[0] ?? "C").toUpperCase()}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
               <p className="text-xs font-medium text-primary truncate">
-                {contact.name}
+                {client.name}
               </p>
-              {contact.email && (
+              {client.email && (
                 <p className="text-[11px] text-primary/60 truncate">
-                  {contact.email}
+                  {client.email}
                 </p>
               )}
             </div>
@@ -423,7 +425,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         <span className="text-xs font-medium text-primary">
           {formatCurrency(
             row.original.totalAmount ? Number(row.original.totalAmount) : null,
-            row.original.currency
+            row.original.currency,
           )}
         </span>
       ),
@@ -501,7 +503,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   ];
 
   const TIME_LOGS_COLUMN_IDS = timeLogColumns.map(
-    (column, index) => (column.id ?? `column-${index}`) as string
+    (column, index) => (column.id ?? `column-${index}`) as string,
   );
   const COLUMN_ORDER_STORAGE_KEY = "timesheet-table.column-order";
 
@@ -509,7 +511,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
     React.useState<ColumnOrderState>(TIME_LOGS_COLUMN_IDS);
   const hiddenColumns = React.useMemo(
     () => normalizeHiddenColumns(params.hiddenColumns ?? []),
-    [params.hiddenColumns]
+    [params.hiddenColumns],
   );
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>(() => visibilityFromHidden(hiddenColumns));
@@ -523,7 +525,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       const next = normalizeColumnOrder(
         order,
         TIME_LOGS_COLUMN_IDS,
-        PRIMARY_COLUMN_ID
+        PRIMARY_COLUMN_ID,
       );
       if (shallowEqualArrays(next, TIME_LOGS_COLUMN_IDS)) {
         window.localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
@@ -531,10 +533,10 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       }
       window.localStorage.setItem(
         COLUMN_ORDER_STORAGE_KEY,
-        JSON.stringify(next)
+        JSON.stringify(next),
       );
     },
-    [TIME_LOGS_COLUMN_IDS]
+    [TIME_LOGS_COLUMN_IDS],
   );
 
   React.useEffect(() => {
@@ -547,7 +549,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         const next = normalizeColumnOrder(
           parsed,
           TIME_LOGS_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         setColumnOrder(next);
       }
@@ -569,7 +571,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
 
   const sortingState = React.useMemo(
     () => sortValueToState(params.sort),
-    [params.sort]
+    [params.sort],
   );
 
   const handleSortingChange = React.useCallback(
@@ -577,26 +579,26 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       const nextValue = sortingStateToValue(state) ?? TIME_LOGS_DEFAULT_SORT;
       setParams((prev) => ({ ...prev, sort: nextValue }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleSortChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, sort: value }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleSearchChange = React.useCallback(
     (value: string) => {
       setParams((prev) => ({ ...prev, search: value, page: 1 }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleApplyAllFilters = React.useCallback(
     (filters: {
-      workers: string[];
+      instructors: string[];
       deals: string[];
       statuses: string[];
       durationMin?: number;
@@ -607,7 +609,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       setParams((prev) => ({
         ...prev,
         page: 1, // Reset to page 1 on filter change
-        workers: filters.workers,
+        instructors: filters.instructors,
         deals: filters.deals,
         statuses: filters.statuses,
         durationMin: filters.durationMin,
@@ -616,13 +618,13 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         amountMax: filters.amountMax,
       }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleClearFilters = React.useCallback(() => {
     setParams((prev) => ({
       ...prev,
-      workers: [],
+      instructors: [],
       deals: [],
       statuses: [],
       durationMin: undefined,
@@ -642,21 +644,21 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         endDate: end ? toYMD(end) : "",
       }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handlePageChange = React.useCallback(
     (newPage: number) => {
       setParams((prev) => ({ ...prev, page: newPage }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handlePageSizeChange = React.useCallback(
     (newPageSize: number) => {
       setParams((prev) => ({ ...prev, pageSize: newPageSize, page: 1 }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnVisibilityChange = React.useCallback(
@@ -670,7 +672,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       pendingHiddenRef.current = normalizedHidden;
       setParams((prev) => ({ ...prev, hiddenColumns: normalizedHidden }));
     },
-    [setParams]
+    [setParams],
   );
 
   const handleColumnOrderChange = React.useCallback(
@@ -680,13 +682,13 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         const next = normalizeColumnOrder(
           resolved,
           TIME_LOGS_COLUMN_IDS,
-          PRIMARY_COLUMN_ID
+          PRIMARY_COLUMN_ID,
         );
         persistColumnOrder(next);
         return next;
       });
     },
-    [persistColumnOrder, TIME_LOGS_COLUMN_IDS]
+    [persistColumnOrder, TIME_LOGS_COLUMN_IDS],
   );
 
   const searchValue = params.search ?? "";
@@ -702,19 +704,19 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       // Calculate totals
       const totalMinutes = data.items.reduce(
         (sum, log) => sum + (log.duration ?? 0),
-        0
+        0,
       );
       const totalHours = totalMinutes / 60;
       const totalAmount = data.items.reduce(
         (sum, log) => sum + Number(log.totalAmount ?? 0),
-        0
+        0,
       );
 
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Time Logs Export</title>
+            <title>Time logs export</title>
             <style>
               body {
                 font-family: system-ui, -apple-system, sans-serif;
@@ -752,7 +754,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
                 font-size: 13px;
                 color: #333;
               }
-              .worker-cell {
+              .instructor-cell {
                 font-weight: 500;
               }
               .role-text {
@@ -820,7 +822,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
             </style>
           </head>
           <body>
-            <h1>Time Logs Export</h1>
+            <h1>Time logs export</h1>
             <p class="subtitle">
               Exported on ${format(new Date(), "MMM d, yyyy 'at' h:mm a")}
             </p>
@@ -828,7 +830,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
             <table>
               <thead>
                 <tr>
-                  <th>Worker</th>
+                  <th>Instructor</th>
                   <th>Title</th>
                   <th>Job/Deal</th>
                   <th>Date</th>
@@ -845,14 +847,14 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
                         .map(
                           (log) => `
                   <tr>
-                    <td class="worker-cell">
-                      ${log.worker?.name || log.contact?.name || "—"}
+                    <td class="instructor-cell">
+                      ${log.instructor?.name || log.client?.name || "—"}
                       ${
-                        log.worker?.role
-                          ? `<span class="role-text">${log.worker.role}</span>`
-                          : log.contact?.email
-                          ? `<span class="role-text">${log.contact.email}</span>`
-                          : ""
+                        log.instructor?.role
+                          ? `<span class="role-text">${log.instructor.role}</span>`
+                          : log.client?.email
+                            ? `<span class="role-text">${log.client.email}</span>`
+                            : ""
                       }
                     </td>
                     <td>${log.title || "—"}</td>
@@ -879,10 +881,10 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
                     </td>
                     <td>${formatCurrency(
                       log.totalAmount ? Number(log.totalAmount) : null,
-                      log.currency
+                      log.currency,
                     )}</td>
                   </tr>
-                `
+                `,
                         )
                         .join("")
                     : '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #999;">No time logs found</td></tr>'
@@ -892,14 +894,14 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
 
             <div class="totals-section">
               <div class="total-item">
-                <div class="total-label">Total Hours</div>
+                <div class="total-label">Total hours</div>
                 <div class="total-value">${totalHours.toFixed(2)}h</div>
               </div>
               <div class="total-item">
-                <div class="total-label">Total Amount</div>
+                <div class="total-label">Total amount</div>
                 <div class="total-value">${formatCurrency(
                   totalAmount,
-                  null
+                  null,
                 )}</div>
               </div>
             </div>
@@ -925,7 +927,8 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   const selectedRowIds = Object.keys(rowSelection);
   const selectedApprovedTimeLogs = data.items.filter(
     (item) =>
-      selectedRowIds.includes(item.id) && item.status === TimeLogStatus.APPROVED
+      selectedRowIds.includes(item.id) &&
+      item.status === TimeLogStatus.APPROVED,
   );
 
   // Handle row click to open edit sheet
@@ -940,12 +943,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
   }, [refetch]);
 
   return (
-    <div
-      className={cn(
-        "space-y-4",
-        selectedApprovedTimeLogs.length === 0 && "pt-6"
-      )}
-    >
+    <div className={cn("space-y-4")}>
       {/* Bulk Actions Bar - Approved Time Logs */}
       {selectedApprovedTimeLogs.length > 0 && (
         <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/20 px-8 py-4">
@@ -957,11 +955,11 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
           <div className="flex items-center gap-2">
             <Button
               size="sm"
-              onClick={() => setIsBulkAssignContactDialogOpen(true)}
+              onClick={() => setIsBulkAssignClientDialogOpen(true)}
               className="gap-2 w-max"
               variant="outline"
             >
-              Assign Contact
+              Assign Client
             </Button>
             <Button
               size="sm"
@@ -977,22 +975,24 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
       )}
 
       {/* Bulk Actions Bar - All Selected Time Logs (for non-approved) */}
-      {Object.keys(rowSelection).length > 0 && selectedApprovedTimeLogs.length === 0 && (
-        <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/20 px-8 py-4">
-          <div className="text-xs text-blue-600 dark:text-blue-100">
-            <strong>({Object.keys(rowSelection).length})</strong> time log(s) selected
-          </div>
+      {Object.keys(rowSelection).length > 0 &&
+        selectedApprovedTimeLogs.length === 0 && (
+          <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-950/20 px-8 py-4">
+            <div className="text-xs text-blue-600 dark:text-blue-100">
+              <strong>({Object.keys(rowSelection).length})</strong> time log(s)
+              selected
+            </div>
 
-          <Button
-            size="sm"
-            onClick={() => setIsBulkAssignContactDialogOpen(true)}
-            className="gap-2 w-max"
-            variant="outline"
-          >
-            Assign Contact
-          </Button>
-        </div>
-      )}
+            <Button
+              size="sm"
+              onClick={() => setIsBulkAssignClientDialogOpen(true)}
+              className="gap-2 w-max"
+              variant="outline"
+            >
+              Assign Client
+            </Button>
+          </div>
+        )}
 
       <DataTable
         data={data.items}
@@ -1013,7 +1013,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         onRowClick={handleRowClick}
         emptyState={
           <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-xs text-primary/80 dark:text-white/50 leading-4.5">
-            No time logs found. <br /> Time logs will appear here once workers
+            No time logs found. <br /> Time logs will appear here once instructors
             clock in.
           </div>
         }
@@ -1029,7 +1029,7 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
               columnOrder={columnOrder}
               onColumnOrderChange={handleColumnOrderChange}
               initialColumnOrder={TIME_LOGS_COLUMN_IDS}
-              selectedWorkers={params.workers ?? []}
+              selectedInstructors={params.instructors ?? []}
               selectedDeals={params.deals ?? []}
               selectedStatuses={params.statuses ?? []}
               startDate={
@@ -1045,8 +1045,8 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
               onStartDateChange={handleDateChange}
               onExportPDF={handleExportPDF}
               scope={scope}
-              selectedSubaccountId={selectedSubaccountId}
-              onSubaccountChange={setSelectedSubaccountId}
+              selectedLocationId={selectedLocationId}
+              onLocationChange={setSelectedLocationId}
             />
           ),
         }}
@@ -1071,10 +1071,10 @@ export function TimeLogsTable({ scope = "agency" }: TimeLogsTableProps) {
         }}
       />
 
-      {/* Bulk Assign Contact Dialog */}
-      <BulkAssignContactDialog
-        open={isBulkAssignContactDialogOpen}
-        onOpenChange={setIsBulkAssignContactDialogOpen}
+      {/* Bulk Assign Client Dialog */}
+      <BulkAssignClientDialog
+        open={isBulkAssignClientDialogOpen}
+        onOpenChange={setIsBulkAssignClientDialogOpen}
         timeLogIds={Object.keys(rowSelection)}
         onSuccess={() => {
           setRowSelection({});
@@ -1108,7 +1108,7 @@ function normalizeHiddenColumns(columns: string[]): string[] {
 function normalizeColumnOrder(
   order: string[],
   defaults: string[],
-  fixedFirst?: string
+  fixedFirst?: string,
 ) {
   const seen = new Set<string>();
   const next: string[] = [];

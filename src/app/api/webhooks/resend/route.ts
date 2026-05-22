@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db";
+import { eq, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { campaign, campaignRecipient, client } from "@/db/schema";
 import { Webhook } from "svix";
 
 // Resend webhook event types
@@ -77,13 +79,8 @@ export async function POST(request: NextRequest) {
     console.log(`Resend webhook received: ${type} for email ${emailId}`);
 
     // Find the campaign recipient by resendEmailId
-    const recipient = await prisma.campaignRecipient.findFirst({
-      where: { resendEmailId: emailId },
-      include: {
-        campaign: {
-          select: { id: true },
-        },
-      },
+    const recipient = await db.query.campaignRecipient.findFirst({
+      where: eq(campaignRecipient.resendEmailId, emailId),
     });
 
     if (!recipient) {
@@ -98,106 +95,101 @@ export async function POST(request: NextRequest) {
     // Process based on event type
     switch (type) {
       case "email.delivered":
-        await prisma.$transaction([
-          prisma.campaignRecipient.update({
-            where: { id: recipient.id },
-            data: {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipient)
+            .set({
               status: "DELIVERED",
               deliveredAt: now,
-            },
-          }),
-          prisma.campaign.update({
-            where: { id: campaignId },
-            data: {
-              delivered: { increment: 1 },
-            },
-          }),
-        ]);
+              updatedAt: now,
+            })
+            .where(eq(campaignRecipient.id, recipient.id));
+          await tx
+            .update(campaign)
+            .set({ delivered: sql`${campaign.delivered} + 1`, updatedAt: now })
+            .where(eq(campaign.id, campaignId));
+        });
         break;
 
       case "email.opened":
         // Only count first open
         if (!recipient.openedAt) {
-          await prisma.$transaction([
-            prisma.campaignRecipient.update({
-              where: { id: recipient.id },
-              data: {
+          await db.transaction(async (tx) => {
+            await tx
+              .update(campaignRecipient)
+              .set({
                 status: "OPENED",
                 openedAt: now,
-              },
-            }),
-            prisma.campaign.update({
-              where: { id: campaignId },
-              data: {
-                opened: { increment: 1 },
-              },
-            }),
-          ]);
+                updatedAt: now,
+              })
+              .where(eq(campaignRecipient.id, recipient.id));
+            await tx
+              .update(campaign)
+              .set({ opened: sql`${campaign.opened} + 1`, updatedAt: now })
+              .where(eq(campaign.id, campaignId));
+          });
         }
         break;
 
       case "email.clicked":
         // Only count first click
         if (!recipient.clickedAt) {
-          await prisma.$transaction([
-            prisma.campaignRecipient.update({
-              where: { id: recipient.id },
-              data: {
+          await db.transaction(async (tx) => {
+            await tx
+              .update(campaignRecipient)
+              .set({
                 status: "CLICKED",
                 clickedAt: now,
-              },
-            }),
-            prisma.campaign.update({
-              where: { id: campaignId },
-              data: {
-                clicked: { increment: 1 },
-              },
-            }),
-          ]);
+                updatedAt: now,
+              })
+              .where(eq(campaignRecipient.id, recipient.id));
+            await tx
+              .update(campaign)
+              .set({ clicked: sql`${campaign.clicked} + 1`, updatedAt: now })
+              .where(eq(campaign.id, campaignId));
+          });
         }
         break;
 
       case "email.bounced":
-        await prisma.$transaction([
-          prisma.campaignRecipient.update({
-            where: { id: recipient.id },
-            data: {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipient)
+            .set({
               status: "BOUNCED",
               bouncedAt: now,
-            },
-          }),
-          prisma.campaign.update({
-            where: { id: campaignId },
-            data: {
-              bounced: { increment: 1 },
-            },
-          }),
-        ]);
+              updatedAt: now,
+            })
+            .where(eq(campaignRecipient.id, recipient.id));
+          await tx
+            .update(campaign)
+            .set({ bounced: sql`${campaign.bounced} + 1`, updatedAt: now })
+            .where(eq(campaign.id, campaignId));
+        });
         break;
 
       case "email.complained":
-        await prisma.$transaction([
-          prisma.campaignRecipient.update({
-            where: { id: recipient.id },
-            data: {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(campaignRecipient)
+            .set({
               status: "COMPLAINED",
-            },
-          }),
-          prisma.campaign.update({
-            where: { id: campaignId },
-            data: {
-              complained: { increment: 1 },
-            },
-          }),
-          // Also unsubscribe the contact when they complain
-          prisma.contact.update({
-            where: { id: recipient.contactId },
-            data: {
+              updatedAt: now,
+            })
+            .where(eq(campaignRecipient.id, recipient.id));
+          await tx
+            .update(campaign)
+            .set({ complained: sql`${campaign.complained} + 1`, updatedAt: now })
+            .where(eq(campaign.id, campaignId));
+          await tx
+            .update(client)
+            .set({
               emailUnsubscribed: true,
               emailUnsubscribedAt: now,
-            },
-          }),
-        ]);
+              updatedAt: now,
+            })
+            .where(eq(client.id, recipient.clientId));
+        });
         break;
 
       case "email.delivery_delayed":

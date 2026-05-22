@@ -25,7 +25,7 @@ import { IconDumbell } from "central-icons/IconDumbell";
 import { IconChevronRightSmall as BulletpointIcon } from "central-icons/IconChevronRightSmall";
 import { toast } from "sonner";
 import { useState } from "react";
-import { ModuleType } from "@prisma/client";
+import { ModuleType } from "@/db/enums";
 import { Separator } from "@/components/ui/separator";
 
 export const ModulesContainer = ({
@@ -55,6 +55,7 @@ const moduleIcons: Record<ModuleType, any> = {
   [ModuleType.DOCUMENT_SIGNING]: IconSignature,
   [ModuleType.PROJECT_MANAGEMENT]: KanbanIcon,
   [ModuleType.PILATES_STUDIO]: IconDumbell,
+  [ModuleType.STUDIO_CORE]: IconDumbell,
 };
 
 type ModuleCardProps = {
@@ -155,8 +156,8 @@ export const ModulesList = () => {
     trpc.modules.listAvailable.queryOptions()
   );
 
-  // Check if all modules are disabled (no subaccount context)
-  const hasSubaccount = modules.some((m) => m.enabled);
+  // Check if all modules are disabled (no location context)
+  const hasLocation = modules.some((m) => m.enabled);
 
   const { mutate: enableModule } = useMutation(
     trpc.modules.enable.mutationOptions({
@@ -168,7 +169,7 @@ export const ModulesList = () => {
       onError: (error: any) => {
         toast.error(
           error.message ||
-            "Failed to enable module. Please select a subaccount first."
+            "Failed to enable module. Please select a location first."
         );
         setLoadingModule(null);
       },
@@ -209,12 +210,12 @@ export const ModulesList = () => {
 
   return (
     <div className="space-y-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-      {/* {!hasSubaccount && (
+      {/* {!hasLocation && (
         <Card className="border-yellow-500/20 bg-yellow-500/5">
           <CardContent className="p-4">
             <p className="text-sm text-yellow-600 dark:text-yellow-500">
-              <strong>Note:</strong> Please select a subaccount (client) to
-              enable modules. Modules are configured per subaccount.
+              <strong>Note:</strong> Please select a location (client) to
+              enable modules. Modules are configured per location.
             </p>
           </CardContent>
         </Card>

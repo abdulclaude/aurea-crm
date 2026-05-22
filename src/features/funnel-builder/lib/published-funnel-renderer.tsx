@@ -8,14 +8,8 @@
  * - Custom CSS/JS
  */
 
-import type {
-  FunnelPage,
-  FunnelBlock,
-  FunnelBlockEvent,
-  FunnelPixelIntegration,
-  FunnelBreakpoint,
-  DeviceType,
-} from "@prisma/client";
+import type { DeviceType } from "@/db/enums";
+import type { FunnelPage, FunnelBlock, FunnelBlockEvent, FunnelPixelIntegration, FunnelBreakpoint } from "@/db/types";
 import { generateAllTrackingScripts } from "./tracking-scripts";
 
 export interface PublishedPageData {

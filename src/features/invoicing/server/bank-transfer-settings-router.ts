@@ -1,21 +1,24 @@
 import { TRPCError } from "@trpc/server";
+import { createId } from "@paralleldrive/cuid2";
+import { and, eq, isNull } from "drizzle-orm";
 import z from "zod";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { bankTransferSettings } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 export const bankTransferSettingsRouter = createTRPCRouter({
-  // Get bank transfer settings for organization/subaccount
+  // Get bank transfer settings for organization/location
   get: protectedProcedure
     .input(
       z.object({
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
       try {
         const orgId = input.organizationId || ctx.orgId;
-        const subaccountId = input.subaccountId || ctx.subaccountId;
+        const locationId = input.locationId || ctx.locationId;
 
         if (!orgId) {
           throw new TRPCError({
@@ -24,13 +27,15 @@ export const bankTransferSettingsRouter = createTRPCRouter({
           });
         }
 
-        console.log('[BankTransfer] Fetching settings for:', { orgId, subaccountId });
+        console.log('[BankTransfer] Fetching settings for:', { orgId, locationId });
 
-        const settings = await prisma.bankTransferSettings.findFirst({
-          where: {
-            organizationId: orgId,
-            subaccountId: subaccountId || null,
-          },
+        const settings = await db.query.bankTransferSettings.findFirst({
+          where: and(
+            eq(bankTransferSettings.organizationId, orgId),
+            locationId
+              ? eq(bankTransferSettings.locationId, locationId)
+              : isNull(bankTransferSettings.locationId)
+          ),
         });
 
         console.log('[BankTransfer] Found settings:', settings);
@@ -47,7 +52,7 @@ export const bankTransferSettingsRouter = createTRPCRouter({
     .input(
       z.object({
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
         enabled: z.boolean(),
         transferType: z.enum(["UK_DOMESTIC", "INTERNATIONAL", "US_DOMESTIC"]).optional(),
         bankName: z.string().optional(),
@@ -77,7 +82,7 @@ export const bankTransferSettingsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       try {
         const orgId = input.organizationId || ctx.orgId;
-        const subaccountId = input.subaccountId || ctx.subaccountId;
+        const locationId = input.locationId || ctx.locationId;
 
         if (!orgId) {
           throw new TRPCError({
@@ -86,17 +91,16 @@ export const bankTransferSettingsRouter = createTRPCRouter({
           });
         }
 
-        console.log('[BankTransfer] Upserting settings:', { orgId, subaccountId, input });
+        console.log('[BankTransfer] Upserting settings:', { orgId, locationId, input });
 
         const {
           organizationId: _orgId,
-          subaccountId: _subaccountId,
+          locationId: _locationId,
           bankAddress,
           reminderDays,
           ...data
         } = input;
 
-        // Prepare data for upsert, handling JSON fields properly
         const updateData = {
           ...data,
           bankAddress: bankAddress || null,
@@ -106,37 +110,39 @@ export const bankTransferSettingsRouter = createTRPCRouter({
         console.log('[BankTransfer] Update data:', updateData);
 
         // Check if settings already exist
-        const existing = await prisma.bankTransferSettings.findFirst({
-          where: {
-            organizationId: orgId,
-            subaccountId: subaccountId || null,
-          },
+        const existing = await db.query.bankTransferSettings.findFirst({
+          where: and(
+            eq(bankTransferSettings.organizationId, orgId),
+            locationId
+              ? eq(bankTransferSettings.locationId, locationId)
+              : isNull(bankTransferSettings.locationId)
+          ),
         });
 
         console.log('[BankTransfer] Existing settings:', existing);
 
         let settings;
         if (existing) {
-          // Update existing settings
-          settings = await prisma.bankTransferSettings.update({
-            where: { id: existing.id },
-            data: {
-              ...(updateData as any),
+          [settings] = await db
+            .update(bankTransferSettings)
+            .set({
+              ...updateData,
               updatedAt: new Date(),
-            },
-          });
+            })
+            .where(eq(bankTransferSettings.id, existing.id))
+            .returning();
         } else {
-          // Create new settings
-          settings = await prisma.bankTransferSettings.create({
-            data: {
-              id: crypto.randomUUID(),
+          [settings] = await db
+            .insert(bankTransferSettings)
+            .values({
+              id: createId(),
               organizationId: orgId,
-              subaccountId: subaccountId || null,
-              ...(updateData as any),
+              locationId: locationId || null,
+              ...updateData,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
-          });
+            })
+            .returning();
         }
 
         console.log('[BankTransfer] Saved settings:', settings);
@@ -153,12 +159,12 @@ export const bankTransferSettingsRouter = createTRPCRouter({
     .input(
       z.object({
         organizationId: z.string().optional(),
-        subaccountId: z.string().optional(),
+        locationId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = input.organizationId || ctx.orgId;
-      const subaccountId = input.subaccountId || ctx.subaccountId;
+      const locationId = input.locationId || ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -168,11 +174,13 @@ export const bankTransferSettingsRouter = createTRPCRouter({
       }
 
       // Find the settings first
-      const settings = await prisma.bankTransferSettings.findFirst({
-        where: {
-          organizationId: orgId,
-          subaccountId: subaccountId || null,
-        },
+      const settings = await db.query.bankTransferSettings.findFirst({
+        where: and(
+          eq(bankTransferSettings.organizationId, orgId),
+          locationId
+            ? eq(bankTransferSettings.locationId, locationId)
+            : isNull(bankTransferSettings.locationId)
+        ),
       });
 
       if (!settings) {
@@ -182,11 +190,9 @@ export const bankTransferSettingsRouter = createTRPCRouter({
         });
       }
 
-      await prisma.bankTransferSettings.delete({
-        where: {
-          id: settings.id,
-        },
-      });
+      await db
+        .delete(bankTransferSettings)
+        .where(eq(bankTransferSettings.id, settings.id));
 
       return { success: true };
     }),

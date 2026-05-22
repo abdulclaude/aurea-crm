@@ -254,6 +254,29 @@ export const useCreateWorkflowFromTemplate = () => {
   );
 };
 
+export const useInstallStudioStarterTemplates = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    trpc.workflows.installStudioStarterTemplates.mutationOptions({
+      onSuccess: (data) => {
+        if (data.createdCount > 0) {
+          toast.success(`${data.createdCount} starter templates installed.`);
+        } else {
+          toast.success("Starter templates are already installed.");
+        }
+        queryClient.invalidateQueries(
+          trpc.workflows.getTemplates.queryOptions({}),
+        );
+      },
+      onError: (error) => {
+        toast.error(`Failed to install templates: ${error.message}`);
+      },
+    }),
+  );
+};
+
 // update template metadata
 
 export const useUpdateTemplateMeta = () => {

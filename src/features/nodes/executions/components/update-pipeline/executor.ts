@@ -1,8 +1,10 @@
 import Handlebars from "handlebars";
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { deal as dealTable, node as nodeTable, pipelineStage as pipelineStageTable } from "@/db/schema";
 import { updatePipelineChannel } from "@/inngest/channels/update-pipeline";
-import prisma from "@/lib/db";
 import { decode } from "html-entities";
 
 type UpdatePipelineData = {
@@ -47,25 +49,28 @@ export const updatePipelineExecutor: NodeExecutor<
     }
 
     const workflow = await step.run("get-workflow-context", async () => {
-      const node = await prisma.node.findUnique({
-        where: { id: nodeId },
-        include: {
-          Workflows: {
-            select: {
-              subaccountId: true,
+      const node = await db.query.node.findFirst({
+        where: eq(nodeTable.id, nodeId),
+        with: {
+          workflow: {
+            columns: {
+              locationId: true,
               organizationId: true,
             },
           },
         },
       });
 
-      if (!node?.Workflows?.organizationId) {
+      if (!node?.workflow?.organizationId) {
         throw new NonRetriableError(
           "Update Pipeline Node error: This workflow must be in an organization context."
         );
       }
 
-      return node.Workflows;
+      return {
+        organizationId: node.workflow.organizationId,
+        locationId: node.workflow.locationId,
+      };
     });
 
     const dealId = decode(Handlebars.compile(data.dealId)(context));
@@ -73,15 +78,13 @@ export const updatePipelineExecutor: NodeExecutor<
 
     // Verify the pipeline stage exists and get the pipeline ID
     const pipelineStage = await step.run("verify-pipeline-stage", async () => {
-      const stage = await prisma.pipelineStage.findUnique({
-        where: {
-          id: pipelineStageId,
-        },
-        include: {
+      const stage = await db.query.pipelineStage.findFirst({
+        where: eq(pipelineStageTable.id, pipelineStageId),
+        with: {
           pipeline: {
-            select: {
+            columns: {
               id: true,
-              subaccountId: true,
+              locationId: true,
             },
           },
         },
@@ -93,11 +96,11 @@ export const updatePipelineExecutor: NodeExecutor<
         );
       }
 
-      // Verify pipeline belongs to same context (subaccount or organization)
-      if (workflow.subaccountId) {
-        if (stage.pipeline.subaccountId !== workflow.subaccountId) {
+      // Verify pipeline belongs to same context (location or organization)
+      if (workflow.locationId) {
+        if (stage.pipeline.locationId !== workflow.locationId) {
           throw new NonRetriableError(
-            "Update Pipeline Node error: Pipeline stage does not belong to this subaccount."
+            "Update Pipeline Node error: Pipeline stage does not belong to this location."
           );
         }
       }
@@ -106,23 +109,45 @@ export const updatePipelineExecutor: NodeExecutor<
     });
 
     const deal = await step.run("update-deal-stage", async () => {
-      return await prisma.deal.update({
-        where: {
-          id: dealId,
-          ...(workflow.subaccountId
-            ? { subaccountId: workflow.subaccountId }
-            : { organizationId: workflow.organizationId! }),
-        },
-        data: {
+      const dealWhere = and(
+        eq(dealTable.id, dealId),
+        workflow.locationId
+          ? eq(dealTable.locationId, workflow.locationId)
+          : eq(dealTable.organizationId, workflow.organizationId)
+      );
+
+      const [updatedDeal] = await db
+        .update(dealTable)
+        .set({
           pipelineId: pipelineStage.pipelineId,
-          pipelineStageId: pipelineStageId,
+          pipelineStageId,
           lastActivityAt: new Date(),
-        },
-        include: {
+          updatedAt: new Date(),
+        })
+        .where(dealWhere)
+        .returning({ id: dealTable.id });
+
+      if (!updatedDeal) {
+        throw new NonRetriableError(
+          "Update Pipeline Node error: Deal not found in this workflow context."
+        );
+      }
+
+      const reloadedDeal = await db.query.deal.findFirst({
+        where: eq(dealTable.id, updatedDeal.id),
+        with: {
           pipeline: true,
           pipelineStage: true,
         },
       });
+
+      if (!reloadedDeal) {
+        throw new NonRetriableError(
+          "Update Pipeline Node error: Updated deal could not be loaded."
+        );
+      }
+
+      return reloadedDeal;
     });
 
     await publish(
@@ -138,7 +163,7 @@ export const updatePipelineExecutor: NodeExecutor<
         pipelineStageId: deal.pipelineStageId,
         pipelineName: deal.pipeline?.name,
         pipelineStageName: deal.pipelineStage?.name,
-        updatedAt: typeof deal.updatedAt === 'string' ? deal.updatedAt : (deal.updatedAt as Date).toISOString(),
+        updatedAt: deal.updatedAt,
       },
     };
   } catch (error) {

@@ -42,14 +42,14 @@ function getStatusColor(status: string): EventColor {
 function rotasToEvents(rotas: RotaData[]): CalendarEvent[] {
   return rotas.map((rota) => {
     // Check if this is a virtual occurrence of a recurring rota
-    const isVirtual = (rota as any).isVirtual === true;
-    const parentRotaId = (rota as any).parentRotaId;
+    const isVirtual = rota.isVirtual === true;
+    const parentRotaId = rota.parentRotaId;
 
     return {
       id: rota.id,
-      title: rota.worker.name,
+      title: rota.instructor.name,
       description: [
-        rota.contact?.name,
+        rota.client?.name,
         rota.companyName,
         rota.title,
         rota.location,

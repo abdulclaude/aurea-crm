@@ -43,6 +43,12 @@ const getLifecycleBadgeVariant = (stage: string | null) => {
   }
 };
 
+function asStringRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 export function VisitorProfileDetail({ funnelId, anonymousId }: VisitorProfileDetailProps) {
   const trpc = useTRPC();
   const router = useRouter();
@@ -72,6 +78,9 @@ export function VisitorProfileDetail({ funnelId, anonymousId }: VisitorProfileDe
     return <div>Profile not found</div>;
   }
 
+  const userProperties = asStringRecord(profile.userProperties);
+  const identifiedEmail =
+    typeof userProperties.email === "string" ? userProperties.email : null;
   const currentSessionId = selectedSessionId || sessions[0]?.sessionId;
   const currentSession = sessions.find(s => s.sessionId === currentSessionId);
 
@@ -101,7 +110,7 @@ export function VisitorProfileDetail({ funnelId, anonymousId }: VisitorProfileDe
                   {profile.identifiedUserId ? (
                     <>
                       <Badge variant="default" className="mr-2">Identified</Badge>
-                      {(profile.userProperties as any)?.email || profile.identifiedUserId}
+                      {identifiedEmail || profile.identifiedUserId}
                     </>
                   ) : (
                     <Badge variant="outline">Anonymous</Badge>
@@ -205,7 +214,7 @@ export function VisitorProfileDetail({ funnelId, anonymousId }: VisitorProfileDe
       </div>
 
       {/* User Properties */}
-      {profile.identifiedUserId && profile.userProperties && Object.keys(profile.userProperties).length > 0 && (
+      {profile.identifiedUserId && Object.keys(userProperties).length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>User Properties</CardTitle>
@@ -213,7 +222,7 @@ export function VisitorProfileDetail({ funnelId, anonymousId }: VisitorProfileDe
           </CardHeader>
           <CardContent>
             <div className="grid gap-2 md:grid-cols-2">
-              {Object.entries(profile.userProperties as Record<string, any>).map(([key, value]) => (
+              {Object.entries(userProperties).map(([key, value]) => (
                 <div key={key} className="flex items-start gap-2">
                   <span className="text-sm text-muted-foreground font-medium">{key}:</span>
                   <span className="text-sm">

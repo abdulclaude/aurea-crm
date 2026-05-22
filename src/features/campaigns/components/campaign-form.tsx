@@ -131,7 +131,7 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
       subject: initialData?.subject || "",
       preheader: initialData?.preheaderText || "",
       sections: [
-        createTextSection("Hello {{contact.firstName}},\n\nStart writing your email here..."),
+        createTextSection("Hello {{client.firstName}},\n\nStart writing your email here..."),
       ],
     }
   );
@@ -487,7 +487,7 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Use {"{{contact.firstName}}"} or {"{{contact.name}}"} for personalization
+                    Use {"{{client.firstName}}"} or {"{{client.name}}"} for personalization
                   </p>
                 </div>
 
@@ -675,8 +675,8 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                       <SelectValue placeholder="Select audience" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ALL">All contacts with email</SelectItem>
-                      <SelectItem value="BY_TYPE">By contact type</SelectItem>
+                      <SelectItem value="ALL">All clients with email</SelectItem>
+                      <SelectItem value="BY_TYPE">By client type</SelectItem>
                       <SelectItem value="BY_LIFECYCLE">By lifecycle stage</SelectItem>
                       <SelectItem value="BY_TAGS">By tags</SelectItem>
                       <SelectItem value="BY_COUNTRY">By country</SelectItem>
@@ -687,7 +687,7 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                 <div className="p-4 bg-muted/50 rounded-lg">
                   <p className="text-sm">
                     <span className="font-medium">{recipientCount.toLocaleString()}</span>{" "}
-                    contact{recipientCount !== 1 ? "s" : ""} will receive this campaign
+                    client{recipientCount !== 1 ? "s" : ""} will receive this campaign
                   </p>
                 </div>
               </CardContent>

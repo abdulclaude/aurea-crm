@@ -1,18 +1,59 @@
-import { z } from "zod";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
 import { TRPCError } from "@trpc/server";
-import { ActivityAction } from "@prisma/client";
+import {
+  and,
+  avg,
+  count,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lte,
+  sql,
+  sum,
+  type SQL,
+} from "drizzle-orm";
+import { z } from "zod";
 
-/**
- * Analytics Router
- * Aggregates data from activity logs to provide analytics insights
- * This data mirrors what's sent to PostHog for consistent analytics
- */
+import { ActivityAction } from "@/db/enums";
+import { db } from "@/db";
+import { activity, client, deal, execution, pipelineStage } from "@/db/schema";
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+
+function scopedActivityConditions(
+  orgId: string,
+  locationId: string | null,
+  input?: { dateFrom?: Date; dateTo?: Date }
+) {
+  const conditions: (SQL | undefined)[] = [eq(activity.organizationId, orgId)];
+
+  if (locationId) {
+    conditions.push(eq(activity.locationId, locationId));
+  }
+
+  if (input?.dateFrom) {
+    conditions.push(gte(activity.createdAt, input.dateFrom));
+  }
+
+  if (input?.dateTo) {
+    conditions.push(lte(activity.createdAt, input.dateTo));
+  }
+
+  return conditions;
+}
+
+function scopedEntityConditions(
+  table: typeof client | typeof deal,
+  orgId: string,
+  locationId: string | null
+) {
+  return and(
+    eq(table.organizationId, orgId),
+    locationId ? eq(table.locationId, locationId) : undefined
+  );
+}
+
 export const analyticsRouter = createTRPCRouter({
-  /**
-   * Get workflow analytics
-   */
   getWorkflowAnalytics: protectedProcedure
     .input(
       z
@@ -24,13 +65,14 @@ export const analyticsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         return {
           totalExecuted: 0,
           successCount: 0,
           failedCount: 0,
+          successRate: 0,
           avgDuration: 0,
           totalCreated: 0,
           totalUpdated: 0,
@@ -38,108 +80,78 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter =
-        input?.dateFrom || input?.dateTo
-          ? {
-              createdAt: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+      const executionConditions: (SQL | undefined)[] = [
+        locationId ? eq(execution.locationId, locationId) : undefined,
+        input?.dateFrom ? gte(execution.startedAt, input.dateFrom) : undefined,
+        input?.dateTo ? lte(execution.startedAt, input.dateTo) : undefined,
+      ];
+      const workflowConditions = [
+        ...scopedActivityConditions(orgId, locationId, input),
+        eq(activity.entityType, "workflow"),
+      ];
 
-      const baseWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-        entityType: "workflow",
-        ...dateFilter,
-      };
+      const [
+        totalExecutions,
+        successfulExecutions,
+        failedExecutions,
+        executionsWithTimes,
+        created,
+        updated,
+        archived,
+      ] = await Promise.all([
+        db.select({ total: count() }).from(execution).where(and(...executionConditions)),
+        db
+          .select({ total: count() })
+          .from(execution)
+          .where(and(...executionConditions, isNull(execution.error))),
+        db
+          .select({ total: count() })
+          .from(execution)
+          .where(and(...executionConditions, isNotNull(execution.error))),
+        db.query.execution.findMany({
+          where: and(...executionConditions, isNotNull(execution.completedAt)),
+          columns: { startedAt: true, completedAt: true },
+          limit: 1000,
+        }),
+        db
+          .select({ total: count() })
+          .from(activity)
+          .where(and(...workflowConditions, eq(activity.action, ActivityAction.CREATED))),
+        db
+          .select({ total: count() })
+          .from(activity)
+          .where(and(...workflowConditions, eq(activity.action, ActivityAction.UPDATED))),
+        db
+          .select({ total: count() })
+          .from(activity)
+          .where(and(...workflowConditions, eq(activity.action, ActivityAction.ARCHIVED))),
+      ]);
 
-      // Get execution stats from Execution table instead of Activity
-      // (Workflow executions are tracked separately)
-      const executionWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-        ...(input?.dateFrom && { createdAt: { gte: input.dateFrom } }),
-      };
-
-      const totalExecutions = await prisma.execution.count({
-        where: executionWhere,
-      });
-
-      const successfulExecutions = await prisma.execution.count({
-        where: {
-          ...executionWhere,
-          error: null, // No error means successful
-        },
-      });
-
-      const failedExecutions = await prisma.execution.count({
-        where: {
-          ...executionWhere,
-          error: { not: null }, // Has error means failed
-        },
-      });
-
-      // Calculate average duration from completedAt - startedAt
-      const executionsWithTimes = await prisma.execution.findMany({
-        where: {
-          ...executionWhere,
-          completedAt: { not: null },
-        },
-        select: {
-          startedAt: true,
-          completedAt: true,
-        },
-        take: 1000, // Limit for performance
-      });
-
-      const totalDuration = executionsWithTimes.reduce((sum, exec) => {
-        if (exec.completedAt) {
-          const duration =
-            exec.completedAt.getTime() - exec.startedAt.getTime();
-          return sum + duration;
+      const totalDuration = executionsWithTimes.reduce((acc, item) => {
+        if (!item.completedAt) {
+          return acc;
         }
-        return sum;
+        return acc + item.completedAt.getTime() - item.startedAt.getTime();
       }, 0);
-
-      const avgDuration =
-        executionsWithTimes.length > 0
-          ? totalDuration / executionsWithTimes.length
-          : 0;
-
-      // Count other workflow actions
-      const created = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.CREATED },
-      });
-
-      const updated = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.UPDATED },
-      });
-
-      const archived = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.ARCHIVED },
-      });
+      const totalExecuted = totalExecutions[0]?.total ?? 0;
+      const successCount = successfulExecutions[0]?.total ?? 0;
 
       return {
-        totalExecuted: totalExecutions,
-        successCount: successfulExecutions,
-        failedCount: failedExecutions,
-        successRate:
-          totalExecutions > 0
-            ? (successfulExecutions / totalExecutions) * 100
+        totalExecuted,
+        successCount,
+        failedCount: failedExecutions[0]?.total ?? 0,
+        successRate: totalExecuted > 0 ? (successCount / totalExecuted) * 100 : 0,
+        avgDuration:
+          executionsWithTimes.length > 0
+            ? Math.round(totalDuration / executionsWithTimes.length)
             : 0,
-        avgDuration: Math.round(avgDuration),
-        totalCreated: created,
-        totalUpdated: updated,
-        totalArchived: archived,
+        totalCreated: created[0]?.total ?? 0,
+        totalUpdated: updated[0]?.total ?? 0,
+        totalArchived: archived[0]?.total ?? 0,
       };
     }),
 
-  /**
-   * Get contact analytics
-   */
-  getContactAnalytics: protectedProcedure
+  getClientAnalytics: protectedProcedure
     .input(
       z
         .object({
@@ -149,10 +161,7 @@ export const analyticsRouter = createTRPCRouter({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
-
-      if (!orgId) {
+      if (!ctx.orgId) {
         return {
           totalCreated: 0,
           totalUpdated: 0,
@@ -162,83 +171,60 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter =
-        input?.dateFrom || input?.dateTo
-          ? {
-              createdAt: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+      const base = [
+        ...scopedActivityConditions(ctx.orgId, ctx.locationId, input),
+        eq(activity.entityType, "client"),
+      ];
+      const [created, updated, lifecycleChanges, clientsByStage, avgScore] =
+        await Promise.all([
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(and(...base, eq(activity.action, ActivityAction.CREATED))),
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(and(...base, eq(activity.action, ActivityAction.UPDATED))),
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(
+              and(
+                ...base,
+                eq(activity.action, ActivityAction.UPDATED),
+                sql`${activity.changes} ? 'lifecycleStage'`
+              )
+            ),
+          db
+            .select({
+              lifecycleStage: client.lifecycleStage,
+              total: count(),
+            })
+            .from(client)
+            .where(scopedEntityConditions(client, ctx.orgId, ctx.locationId))
+            .groupBy(client.lifecycleStage),
+          db
+            .select({ value: avg(client.score) })
+            .from(client)
+            .where(scopedEntityConditions(client, ctx.orgId, ctx.locationId)),
+        ]);
 
-      const baseWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-        entityType: "contact",
-        ...dateFilter,
-      };
-
-      const created = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.CREATED },
-      });
-
-      const updated = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.UPDATED },
-      });
-
-      // Use UPDATED action with lifecycle changes (since LIFECYCLE_CHANGED doesn't exist in enum)
-      const lifecycleChanges = await prisma.activity.count({
-        where: {
-          ...baseWhere,
-          action: ActivityAction.UPDATED,
-          changes: {
-            path: ["lifecycleStage"],
-            not: undefined as any,
-          },
-        },
-      });
-
-      // Get current contact count by lifecycle stage
-      const contactsByStage = await prisma.contact.groupBy({
-        by: ["lifecycleStage"],
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        _count: true,
-      });
-
-      const byLifecycleStage = contactsByStage.reduce((acc, stage) => {
-        if (stage.lifecycleStage) {
-          acc[stage.lifecycleStage] = stage._count;
+      const byLifecycleStage: Record<string, number> = {};
+      for (const row of clientsByStage) {
+        if (row.lifecycleStage) {
+          byLifecycleStage[row.lifecycleStage] = row.total;
         }
-        return acc;
-      }, {} as Record<string, number>);
-
-      // Get average contact score
-      const avgScore = await prisma.contact.aggregate({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        _avg: {
-          score: true,
-        },
-      });
+      }
 
       return {
-        totalCreated: created,
-        totalUpdated: updated,
-        lifecycleChanges,
-        avgLeadScore: avgScore._avg?.score || 0,
+        totalCreated: created[0]?.total ?? 0,
+        totalUpdated: updated[0]?.total ?? 0,
+        lifecycleChanges: lifecycleChanges[0]?.total ?? 0,
+        avgLeadScore: Number(avgScore[0]?.value ?? 0),
         byLifecycleStage,
       };
     }),
 
-  /**
-   * Get deal analytics
-   */
   getDealAnalytics: protectedProcedure
     .input(
       z
@@ -249,123 +235,69 @@ export const analyticsRouter = createTRPCRouter({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
-
-      if (!orgId) {
+      if (!ctx.orgId) {
         return {
           totalCreated: 0,
           totalUpdated: 0,
           stageChanges: 0,
           wonCount: 0,
           lostCount: 0,
+          winRate: 0,
           totalValue: 0,
           avgDealValue: 0,
         };
       }
 
-      const dateFilter =
-        input?.dateFrom || input?.dateTo
-          ? {
-              createdAt: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+      const base = [
+        ...scopedActivityConditions(ctx.orgId, ctx.locationId, input),
+        eq(activity.entityType, "deal"),
+      ];
+      const dealScope = scopedEntityConditions(deal, ctx.orgId, ctx.locationId);
+      const [created, updated, stageChanges, aggregates, wonCount, lostCount] =
+        await Promise.all([
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(and(...base, eq(activity.action, ActivityAction.CREATED))),
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(and(...base, eq(activity.action, ActivityAction.UPDATED))),
+          db
+            .select({ total: count() })
+            .from(activity)
+            .where(and(...base, eq(activity.action, ActivityAction.STAGE_CHANGED))),
+          db
+            .select({ total: sum(deal.value), average: avg(deal.value) })
+            .from(deal)
+            .where(dealScope),
+          db
+            .select({ total: count() })
+            .from(deal)
+            .innerJoin(pipelineStage, eq(deal.pipelineStageId, pipelineStage.id))
+            .where(and(dealScope, eq(pipelineStage.probability, 100))),
+          db
+            .select({ total: count() })
+            .from(deal)
+            .innerJoin(pipelineStage, eq(deal.pipelineStageId, pipelineStage.id))
+            .where(and(dealScope, eq(pipelineStage.probability, 0))),
+        ]);
 
-      const baseWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-        entityType: "deal",
-        ...dateFilter,
-      };
-
-      const created = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.CREATED },
-      });
-
-      const updated = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.UPDATED },
-      });
-
-      const stageChanges = await prisma.activity.count({
-        where: { ...baseWhere, action: ActivityAction.STAGE_CHANGED },
-      });
-
-      // Count won/lost from activities
-      const wonActivities = await prisma.activity.findMany({
-        where: {
-          ...baseWhere,
-          action: ActivityAction.STAGE_CHANGED,
-          metadata: {
-            path: ["newStageId"],
-            not: undefined,
-          },
-        },
-        // include: {
-        //   _count: true,
-        // },
-      });
-
-      // Get current deal values
-      const dealAggregates = await prisma.deal.aggregate({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        _sum: {
-          value: true,
-        },
-        _avg: {
-          value: true,
-        },
-        _count: true,
-      });
-
-      // Count won and lost deals from current state
-      const wonCount = await prisma.deal.count({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-          pipelineStage: {
-            probability: 100,
-          },
-        },
-      });
-
-      const lostCount = await prisma.deal.count({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-          pipelineStage: {
-            probability: 0,
-          },
-        },
-      });
+      const won = wonCount[0]?.total ?? 0;
+      const lost = lostCount[0]?.total ?? 0;
 
       return {
-        totalCreated: created,
-        totalUpdated: updated,
-        stageChanges,
-        wonCount,
-        lostCount,
-        winRate:
-          wonCount + lostCount > 0
-            ? (wonCount / (wonCount + lostCount)) * 100
-            : 0,
-        totalValue: dealAggregates._sum.value
-          ? Number(dealAggregates._sum.value)
-          : 0,
-        avgDealValue: dealAggregates._avg.value
-          ? Number(dealAggregates._avg.value)
-          : 0,
+        totalCreated: created[0]?.total ?? 0,
+        totalUpdated: updated[0]?.total ?? 0,
+        stageChanges: stageChanges[0]?.total ?? 0,
+        wonCount: won,
+        lostCount: lost,
+        winRate: won + lost > 0 ? (won / (won + lost)) * 100 : 0,
+        totalValue: Number(aggregates[0]?.total ?? 0),
+        avgDealValue: Number(aggregates[0]?.average ?? 0),
       };
     }),
 
-  /**
-   * Get user behavior analytics
-   */
   getUserBehaviorAnalytics: protectedProcedure
     .input(
       z
@@ -376,10 +308,7 @@ export const analyticsRouter = createTRPCRouter({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
-
-      if (!orgId) {
+      if (!ctx.orgId) {
         return {
           totalActivities: 0,
           uniqueUsers: 0,
@@ -388,71 +317,37 @@ export const analyticsRouter = createTRPCRouter({
         };
       }
 
-      const dateFilter =
-        input?.dateFrom || input?.dateTo
-          ? {
-              createdAt: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
-
-      const baseWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-        ...dateFilter,
-      };
-
-      // Total activities
-      const totalActivities = await prisma.activity.count({
-        where: baseWhere,
-      });
-
-      // Unique users
-      const uniqueUsers = await prisma.activity.findMany({
-        where: baseWhere,
-        select: {
-          userId: true,
-        },
-        distinct: ["userId"],
-      });
-
-      // Activities by type
-      const byType = await prisma.activity.groupBy({
-        by: ["type"],
-        where: baseWhere,
-        _count: true,
-      });
-
-      const activitiesByType = byType.reduce((acc, item) => {
-        acc[item.type] = item._count;
-        return acc;
-      }, {} as Record<string, number>);
-
-      // Activities by action
-      const byAction = await prisma.activity.groupBy({
-        by: ["action"],
-        where: baseWhere,
-        _count: true,
-      });
-
-      const activitiesByAction = byAction.reduce((acc, item) => {
-        acc[item.action] = item._count;
-        return acc;
-      }, {} as Record<string, number>);
+      const conditions = scopedActivityConditions(ctx.orgId, ctx.locationId, input);
+      const [totalActivities, uniqueUsers, byType, byAction] = await Promise.all([
+        db.select({ total: count() }).from(activity).where(and(...conditions)),
+        db
+          .selectDistinct({ userId: activity.userId })
+          .from(activity)
+          .where(and(...conditions)),
+        db
+          .select({ type: activity.type, total: count() })
+          .from(activity)
+          .where(and(...conditions))
+          .groupBy(activity.type),
+        db
+          .select({ action: activity.action, total: count() })
+          .from(activity)
+          .where(and(...conditions))
+          .groupBy(activity.action),
+      ]);
 
       return {
-        totalActivities,
+        totalActivities: totalActivities[0]?.total ?? 0,
         uniqueUsers: uniqueUsers.length,
-        activitiesByType,
-        activitiesByAction,
+        activitiesByType: Object.fromEntries(
+          byType.map((item) => [item.type, item.total])
+        ),
+        activitiesByAction: Object.fromEntries(
+          byAction.map((item) => [item.action, item.total])
+        ),
       };
     }),
 
-  /**
-   * Get top entities by activity
-   */
   getTopEntities: protectedProcedure
     .input(
       z.object({
@@ -463,44 +358,27 @@ export const analyticsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
-
-      if (!orgId) {
+      if (!ctx.orgId) {
         return [];
       }
 
-      const dateFilter =
-        input.dateFrom || input.dateTo
-          ? {
-              createdAt: {
-                ...(input.dateFrom && { gte: input.dateFrom }),
-                ...(input.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+      const rows = await db
+        .select({
+          id: activity.entityId,
+          name: activity.entityName,
+          activityCount: count(),
+        })
+        .from(activity)
+        .where(
+          and(
+            ...scopedActivityConditions(ctx.orgId, ctx.locationId, input),
+            eq(activity.entityType, input.entityType)
+          )
+        )
+        .groupBy(activity.entityId, activity.entityName)
+        .orderBy(desc(count()))
+        .limit(input.limit);
 
-      const topEntities = await prisma.activity.groupBy({
-        by: ["entityId", "entityName"],
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-          entityType: input.entityType,
-          ...dateFilter,
-        },
-        _count: true,
-        orderBy: {
-          _count: {
-            entityId: "desc",
-          },
-        },
-        take: input.limit,
-      });
-
-      return topEntities.map((entity) => ({
-        id: entity.entityId,
-        name: entity.entityName,
-        activityCount: entity._count,
-      }));
+      return rows;
     }),
 });

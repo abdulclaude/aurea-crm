@@ -85,7 +85,7 @@ const uniqueNewEvents = newEvents.filter((e: any) =>
 ✅ Clean, readable real-time feed
 ```
 
-## Event Types in Feed
+## Event types in Feed
 
 **Now Showing:**
 - ✅ `page_view` - Page visits

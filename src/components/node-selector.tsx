@@ -7,15 +7,30 @@ import { IconWorld as HttpRequestIcon } from "central-icons/IconWorld";
 import React, { useCallback, useState, useMemo } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { ChevronRight, Search } from "lucide-react";
+import {
+  Bell,
+  Cake,
+  CalendarCheck,
+  CalendarX,
+  ChevronRight,
+  CreditCard,
+  Gift,
+  HeartPulse,
+  MessageSquare,
+  Search,
+  Trophy,
+  UserCheck,
+  UserMinus,
+  Users,
+} from "lucide-react";
 
 import { IconCursorClick as ManualTriggerIcon } from "central-icons/IconCursorClick";
-import { IconPeopleAdd as CreateContactIcon } from "central-icons/IconPeopleAdd";
-import { IconPeopleEdit as UpdateContactIcon } from "central-icons/IconPeopleEdit";
-import { IconMagicEdit as ContactFieldChangedIcon } from "central-icons/IconMagicEdit";
-import { IconPeopleRemove as ContactDeletedIcon } from "central-icons/IconPeopleRemove";
-import { IconListSparkle as ContactTypeChangedIcon } from "central-icons/IconListSparkle";
-import { IconLineChart3 as ContactLifecycleStageChangedIcon } from "central-icons/IconLineChart3";
+import { IconPeopleAdd as CreateClientIcon } from "central-icons/IconPeopleAdd";
+import { IconPeopleEdit as UpdateClientIcon } from "central-icons/IconPeopleEdit";
+import { IconMagicEdit as ClientFieldChangedIcon } from "central-icons/IconMagicEdit";
+import { IconPeopleRemove as ClientDeletedIcon } from "central-icons/IconPeopleRemove";
+import { IconListSparkle as ClientTypeChangedIcon } from "central-icons/IconListSparkle";
+import { IconLineChart3 as ClientLifecycleStageChangedIcon } from "central-icons/IconLineChart3";
 import { IconCoinsAdd as CreateDealIcon } from "central-icons/IconCoinsAdd";
 import { IconRewrite as DealEditIcon } from "central-icons/IconRewrite";
 import { IconBranch as IfElseIcon } from "central-icons/IconBranch";
@@ -27,7 +42,7 @@ import { IconImagineAi } from "central-icons/IconImagineAi";
 import { IconTag as TagIcon } from "central-icons/IconTag";
 import { IconArrowBoxRight as MoveDealIcon } from "central-icons/IconArrowBoxRight";
 import { IconNote2 as NoteIcon } from "central-icons/IconNote2";
-import { IconSquareGridMaginfyingGlass as FindContactsIcon } from "central-icons/IconSquareGridMaginfyingGlass";
+import { IconSquareGridMaginfyingGlass as FindClientsIcon } from "central-icons/IconSquareGridMaginfyingGlass";
 import { IconCalendarAdd4 as CalendarAddIcon } from "central-icons/IconCalendarAdd4";
 import { IconCalendarEdit as CalendarEditIcon } from "central-icons/IconCalendarEdit";
 import { IconCalendarRemove4 as CalendarCancelIcon } from "central-icons/IconCalendarRemove4";
@@ -45,7 +60,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { AppProvider, NodeType } from "@prisma/client";
+import { AppProvider, NodeType } from "@/db/enums";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useSuspenseAppProviders } from "@/features/apps/hooks/use-apps";
@@ -328,43 +343,43 @@ const telegramTriggerNodes: NodeTypeOption[] = [
 ];
 
 // CRM Triggers
-const contactTriggerNodes: NodeTypeOption[] = [
+const clientTriggerNodes: NodeTypeOption[] = [
   {
-    type: NodeType.CONTACT_CREATED_TRIGGER,
-    label: "Contact Created",
-    description: "Triggers when a new contact is created in your CRM.",
-    icon: CreateContactIcon,
+    type: NodeType.CLIENT_CREATED_TRIGGER,
+    label: "Client Created",
+    description: "Triggers when a new client is created in your CRM.",
+    icon: CreateClientIcon,
   },
   {
-    type: NodeType.CONTACT_UPDATED_TRIGGER,
-    label: "Contact Updated",
-    description: "Triggers when any contact field is updated.",
-    icon: UpdateContactIcon,
+    type: NodeType.CLIENT_UPDATED_TRIGGER,
+    label: "Client Updated",
+    description: "Triggers when any client field is updated.",
+    icon: UpdateClientIcon,
   },
   {
-    type: NodeType.CONTACT_FIELD_CHANGED_TRIGGER,
-    label: "Contact Field Changed",
-    description: "Triggers when a specific contact field changes value.",
-    icon: ContactFieldChangedIcon,
+    type: NodeType.CLIENT_FIELD_CHANGED_TRIGGER,
+    label: "Client Field Changed",
+    description: "Triggers when a specific client field changes value.",
+    icon: ClientFieldChangedIcon,
   },
   {
-    type: NodeType.CONTACT_DELETED_TRIGGER,
-    label: "Contact Deleted",
-    description: "Triggers when a contact is deleted from your CRM.",
-    icon: ContactDeletedIcon,
+    type: NodeType.CLIENT_DELETED_TRIGGER,
+    label: "Client Deleted",
+    description: "Triggers when a client is deleted from your CRM.",
+    icon: ClientDeletedIcon,
   },
   {
-    type: NodeType.CONTACT_TYPE_CHANGED_TRIGGER,
-    label: "Contact Type Changed",
-    description: "Triggers when a contact's type is changed.",
-    icon: ContactTypeChangedIcon,
+    type: NodeType.CLIENT_TYPE_CHANGED_TRIGGER,
+    label: "Client Type Changed",
+    description: "Triggers when a client's type is changed.",
+    icon: ClientTypeChangedIcon,
   },
   {
-    type: NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
-    label: "Contact Lifecycle Stage Changed",
+    type: NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
+    label: "Client Lifecycle Stage Changed",
     description:
-      "Triggers when a contact moves to a different lifecycle stage.",
-    icon: ContactLifecycleStageChangedIcon,
+      "Triggers when a client moves to a different lifecycle stage.",
+    icon: ClientLifecycleStageChangedIcon,
   },
 ];
 
@@ -757,41 +772,41 @@ const telegramExecutionNodes: NodeTypeOption[] = [
 ];
 
 // CRM Executions
-const contactExecutionNodes: NodeTypeOption[] = [
+const clientExecutionNodes: NodeTypeOption[] = [
   {
-    type: NodeType.CREATE_CONTACT,
-    label: "Create Contact",
-    description: "Create a new contact in your CRM.",
-    icon: CreateContactIcon,
+    type: NodeType.CREATE_CLIENT,
+    label: "Create Client",
+    description: "Create a new client in your CRM.",
+    icon: CreateClientIcon,
   },
   {
-    type: NodeType.UPDATE_CONTACT,
-    label: "Update Contact",
-    description: "Update an existing contact in your CRM.",
-    icon: UpdateContactIcon,
+    type: NodeType.UPDATE_CLIENT,
+    label: "Update Client",
+    description: "Update an existing client in your CRM.",
+    icon: UpdateClientIcon,
   },
   {
-    type: NodeType.DELETE_CONTACT,
-    label: "Delete Contact",
-    description: "Delete a contact from your CRM.",
-    icon: ContactDeletedIcon,
+    type: NodeType.DELETE_CLIENT,
+    label: "Delete Client",
+    description: "Delete a client from your CRM.",
+    icon: ClientDeletedIcon,
   },
   {
-    type: NodeType.FIND_CONTACTS,
-    label: "Find Contacts",
-    description: "Search and filter contacts in your CRM.",
-    icon: FindContactsIcon,
+    type: NodeType.FIND_CLIENTS,
+    label: "Find Clients",
+    description: "Search and filter clients in your CRM.",
+    icon: FindClientsIcon,
   },
   {
-    type: NodeType.ADD_TAG_TO_CONTACT,
-    label: "Add Tag to Contact",
-    description: "Add a tag to a contact.",
+    type: NodeType.ADD_TAG_TO_CLIENT,
+    label: "Add Tag to Client",
+    description: "Add a tag to a client.",
     icon: TagIcon,
   },
   {
-    type: NodeType.REMOVE_TAG_FROM_CONTACT,
-    label: "Remove Tag from Contact",
-    description: "Remove a tag from a contact.",
+    type: NodeType.REMOVE_TAG_FROM_CLIENT,
+    label: "Remove Tag from Client",
+    description: "Remove a tag from a client.",
     icon: TagIcon,
   },
 ];
@@ -799,7 +814,7 @@ const contactExecutionNodes: NodeTypeOption[] = [
 const dealExecutionNodes: NodeTypeOption[] = [
   {
     type: NodeType.CREATE_DEAL,
-    label: "Create Deal",
+    label: "Create deal",
     description: "Create a new deal in your CRM pipeline.",
     icon: CreateDealIcon,
   },
@@ -856,6 +871,132 @@ const appointmentExecutionNodes: NodeTypeOption[] = [
     label: "Cancel Appointment",
     description: "Cancel an appointment.",
     icon: CalendarCancelIcon,
+  },
+];
+
+const studioTriggerNodes: NodeTypeOption[] = [
+  {
+    type: NodeType.BIRTHDAY_TRIGGER,
+    label: "Birthday",
+    description: "Runs daily for members whose birthday is today.",
+    icon: Cake,
+  },
+  {
+    type: NodeType.CLASS_BOOKED_TRIGGER,
+    label: "Class booked",
+    description: "Runs when a member books a class.",
+    icon: CalendarCheck,
+  },
+  {
+    type: NodeType.CLASS_CANCELLED_TRIGGER,
+    label: "Class cancelled",
+    description: "Runs when a class booking is cancelled.",
+    icon: CalendarX,
+  },
+  {
+    type: NodeType.MEMBER_CHECKED_IN_TRIGGER,
+    label: "Member checked in",
+    description: "Runs when a member checks in and includes visit count.",
+    icon: UserCheck,
+  },
+  {
+    type: NodeType.MEMBER_NO_SHOW_TRIGGER,
+    label: "Member no-show",
+    description: "Runs when a member is marked as a no-show.",
+    icon: UserMinus,
+  },
+  {
+    type: NodeType.MEMBERSHIP_CREATED_TRIGGER,
+    label: "Membership created",
+    description: "Runs when a member signs up for a membership.",
+    icon: Users,
+  },
+  {
+    type: NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
+    label: "Membership expiring",
+    description: "Runs when a membership is nearing its end date.",
+    icon: Bell,
+  },
+  {
+    type: NodeType.MEMBERSHIP_CANCELLED_TRIGGER,
+    label: "Membership cancelled",
+    description: "Runs when a membership is cancelled.",
+    icon: UserMinus,
+  },
+  {
+    type: NodeType.WAITLIST_SPOT_OPENED_TRIGGER,
+    label: "Waitlist spot opened",
+    description: "Runs when a waitlist spot becomes available.",
+    icon: Bell,
+  },
+  {
+    type: NodeType.INTRO_OFFER_REDEEMED_TRIGGER,
+    label: "Intro offer redeemed",
+    description: "Runs when a member redeems an intro offer.",
+    icon: Gift,
+  },
+  {
+    type: NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
+    label: "Intro offer completed",
+    description: "Runs when a member uses the final class in an intro offer.",
+    icon: Gift,
+  },
+  {
+    type: NodeType.MEMBER_CLASS_COUNT_TRIGGER,
+    label: "Class milestone",
+    description: "Runs when a member reaches a configured visit count.",
+    icon: Trophy,
+  },
+  {
+    type: NodeType.CLIENT_TAG_ADDED_TRIGGER,
+    label: "Member tag added",
+    description: "Runs when a specific tag is added to a member.",
+    icon: TagIcon,
+  },
+  {
+    type: NodeType.CLIENT_TAG_REMOVED_TRIGGER,
+    label: "Member tag removed",
+    description: "Runs when a specific tag is removed from a member.",
+    icon: TagIcon,
+  },
+  {
+    type: NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER,
+    label: "Studio payment succeeded",
+    description: "Runs when a membership, POS, or gift card payment succeeds.",
+    icon: CreditCard,
+  },
+  {
+    type: NodeType.STUDIO_PAYMENT_FAILED_TRIGGER,
+    label: "Studio payment failed",
+    description: "Runs when a studio payment fails.",
+    icon: CreditCard,
+  },
+];
+
+const studioExecutionNodes: NodeTypeOption[] = [
+  {
+    type: NodeType.SEND_CLASS_REMINDER,
+    label: "Send class reminder",
+    description: "Queue reminders for booked class attendees.",
+    icon: Bell,
+  },
+  {
+    type: NodeType.AWARD_LOYALTY_POINTS,
+    label: "Award loyalty points",
+    description: "Add loyalty points to a member balance.",
+    icon: Trophy,
+  },
+  {
+    type: NodeType.CALCULATE_CHURN_SCORE,
+    label: "Calculate churn score",
+    description: "Refresh a member churn prediction.",
+    icon: HeartPulse,
+  },
+  {
+    type: NodeType.SEND_SMS,
+    label: "Send SMS",
+    description: "Send an SMS through your configured provider.",
+    icon: MessageSquare,
   },
 ];
 
@@ -1023,18 +1164,35 @@ const TRIGGER_NODE_TYPES: NodeType[] = [
   NodeType.TELEGRAM_NEW_MESSAGE,
   NodeType.TELEGRAM_COMMAND_RECEIVED,
   // CRM triggers
-  NodeType.CONTACT_CREATED_TRIGGER,
-  NodeType.CONTACT_UPDATED_TRIGGER,
-  NodeType.CONTACT_FIELD_CHANGED_TRIGGER,
-  NodeType.CONTACT_DELETED_TRIGGER,
-  NodeType.CONTACT_TYPE_CHANGED_TRIGGER,
-  NodeType.CONTACT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
+  NodeType.CLIENT_CREATED_TRIGGER,
+  NodeType.CLIENT_UPDATED_TRIGGER,
+  NodeType.CLIENT_FIELD_CHANGED_TRIGGER,
+  NodeType.CLIENT_DELETED_TRIGGER,
+  NodeType.CLIENT_TYPE_CHANGED_TRIGGER,
+  NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
   NodeType.DEAL_CREATED_TRIGGER,
   NodeType.DEAL_UPDATED_TRIGGER,
   NodeType.DEAL_DELETED_TRIGGER,
   NodeType.DEAL_STAGE_CHANGED_TRIGGER,
   NodeType.APPOINTMENT_CREATED_TRIGGER,
   NodeType.APPOINTMENT_CANCELLED_TRIGGER,
+  // Studio triggers
+  NodeType.BIRTHDAY_TRIGGER,
+  NodeType.CLASS_BOOKED_TRIGGER,
+  NodeType.CLASS_CANCELLED_TRIGGER,
+  NodeType.MEMBER_CHECKED_IN_TRIGGER,
+  NodeType.MEMBER_NO_SHOW_TRIGGER,
+  NodeType.MEMBERSHIP_CREATED_TRIGGER,
+  NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
+  NodeType.MEMBERSHIP_CANCELLED_TRIGGER,
+  NodeType.WAITLIST_SPOT_OPENED_TRIGGER,
+  NodeType.INTRO_OFFER_REDEEMED_TRIGGER,
+  NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
+  NodeType.MEMBER_CLASS_COUNT_TRIGGER,
+  NodeType.CLIENT_TAG_ADDED_TRIGGER,
+  NodeType.CLIENT_TAG_REMOVED_TRIGGER,
+  NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER,
+  NodeType.STUDIO_PAYMENT_FAILED_TRIGGER,
   // Stripe triggers
   NodeType.STRIPE_TRIGGER,
   NodeType.STRIPE_PAYMENT_SUCCEEDED,
@@ -1061,7 +1219,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   const { data: connectedProviders } = useSuspenseAppProviders();
   const connectedProviderSet = React.useMemo(
     () => new Set(connectedProviders || []),
-    [connectedProviders]
+    [connectedProviders],
   );
 
   const [currentView, setCurrentView] = useState<string>("main");
@@ -1080,7 +1238,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     if (open) {
       const nodes = getNodes();
       const triggerExists = nodes.some((node) =>
-        TRIGGER_NODE_TYPES.includes(node.type as NodeType)
+        TRIGGER_NODE_TYPES.includes(node.type as NodeType),
       );
       setHasTrigger(triggerExists);
     }
@@ -1092,12 +1250,12 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       if (TRIGGER_NODE_TYPES.includes(selection.type)) {
         const nodes = getNodes();
         const existingTrigger = nodes.find((node) =>
-          TRIGGER_NODE_TYPES.includes(node.type as NodeType)
+          TRIGGER_NODE_TYPES.includes(node.type as NodeType),
         );
 
         if (existingTrigger) {
           toast.error(
-            "Only one trigger is allowed per workflow. Please remove the existing trigger first."
+            "Only one trigger is allowed per workflow. Please remove the existing trigger first.",
           );
           return;
         }
@@ -1121,7 +1279,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       setNodes((nodes) => {
         // Remove INITIAL placeholder node if it exists
         const filteredNodes = nodes.filter(
-          (node) => node.type !== NodeType.INITIAL
+          (node) => node.type !== NodeType.INITIAL,
         );
         return [...filteredNodes, newNode];
       });
@@ -1131,7 +1289,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       setBreadcrumbs(["Nodes"]);
       setSearchQuery("");
     },
-    [setNodes, getNodes, onOpenChange, screenToFlowPosition]
+    [setNodes, getNodes, onOpenChange, screenToFlowPosition],
   );
 
   const getIntegrationLabel = (provider?: AppProvider) => {
@@ -1212,7 +1370,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     label: string,
     description: string,
     icon: string | React.ComponentType<{ className?: string }>,
-    onClick: () => void
+    onClick: () => void,
   ) => {
     const Icon = icon;
     return (
@@ -1278,7 +1436,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     return nodes.filter(
       (node) =>
         node.label.toLowerCase().includes(query) ||
-        node.description.toLowerCase().includes(query)
+        node.description.toLowerCase().includes(query),
     );
   };
 
@@ -1294,9 +1452,10 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       nodes.push(...slackTriggerNodes);
       nodes.push(...discordTriggerNodes);
       nodes.push(...telegramTriggerNodes);
-      nodes.push(...contactTriggerNodes);
+      nodes.push(...clientTriggerNodes);
       nodes.push(...dealTriggerNodes);
       nodes.push(...appointmentTriggerNodes);
+      nodes.push(...studioTriggerNodes);
       nodes.push(...stripeTriggerNodes);
     } else {
       // Show only executions
@@ -1305,10 +1464,11 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       nodes.push(...slackExecutionNodes);
       nodes.push(...discordExecutionNodes);
       nodes.push(...telegramExecutionNodes);
-      nodes.push(...contactExecutionNodes);
+      nodes.push(...clientExecutionNodes);
       nodes.push(...dealExecutionNodes);
       nodes.push(...pipelineExecutionNodes);
       nodes.push(...appointmentExecutionNodes);
+      nodes.push(...studioExecutionNodes);
       nodes.push(...stripeExecutionNodes);
       nodes.push(...aiNodes);
       if (!isBundle) {
@@ -1334,7 +1494,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     return bundles.filter(
       (bundle) =>
         bundle.name.toLowerCase().includes(query) ||
-        bundle.description?.toLowerCase().includes(query)
+        bundle.description?.toLowerCase().includes(query),
     );
   }, [bundles, searchQuery]);
 
@@ -1372,7 +1532,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                   ? "Gmail, Calendar, Drive, Forms"
                   : "Google services (Triggers)",
                 "/logos/google.svg",
-                () => navigateTo("google", "Google")
+                () => navigateTo("google", "Google"),
               )}
 
             {!isBundle &&
@@ -1382,7 +1542,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                   ? "Outlook, OneDrive, Calendar"
                   : "Microsoft services (Triggers)",
                 "/logos/microsoft.svg",
-                () => navigateTo("microsoft", "Microsoft")
+                () => navigateTo("microsoft", "Microsoft"),
               )}
 
             {hasTrigger &&
@@ -1390,16 +1550,25 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 "Social",
                 "Slack, Discord, Telegram",
                 "/logos/slack.svg",
-                () => navigateTo("social", "Social")
+                () => navigateTo("social", "Social"),
               )}
 
             {renderMenuButton(
               "CRM",
               hasTrigger
-                ? "Contacts, Deals, Appointments"
-                : "Contact & Deal Triggers",
-              CreateContactIcon,
-              () => navigateTo("crm", "CRM")
+                ? "Clients, Deals, Appointments"
+                : "Client & Deal Triggers",
+              CreateClientIcon,
+              () => navigateTo("crm", "CRM"),
+            )}
+
+            {renderMenuButton(
+              "Studio",
+              hasTrigger
+                ? "Membership, check-in, SMS, loyalty"
+                : "Class, membership, check-in triggers",
+              UserCheck,
+              () => navigateTo("studio", "Studio"),
             )}
 
             {hasTrigger &&
@@ -1407,7 +1576,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 "Stripe",
                 "Payments & Subscriptions",
                 "/logos/stripe.svg",
-                () => navigateTo("stripe", "Stripe")
+                () => navigateTo("stripe", "Stripe"),
               )}
 
             {hasTrigger &&
@@ -1415,7 +1584,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 "AI",
                 "Gemini, Claude, OpenAI",
                 SparkleIcon,
-                () => navigateTo("ai", "AI")
+                () => navigateTo("ai", "AI"),
               )}
 
             {!isBundle &&
@@ -1424,7 +1593,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 "Logic & Utilities",
                 "IF/ELSE, Switch, Loop, HTTP",
                 IfElseIcon,
-                () => navigateTo("logic-&-utilities", "Logic & Utilities")
+                () => navigateTo("logic-&-utilities", "Logic & Utilities"),
               )}
 
             {!isBundle &&
@@ -1433,7 +1602,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                 "Bundle Workflows",
                 "Reusable workflow bundles",
                 IconImagineAi,
-                () => navigateTo("bundle-workflows", "Bundle Workflows")
+                () => navigateTo("bundle-workflows", "Bundle Workflows"),
               )}
           </div>
         );
@@ -1446,25 +1615,25 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
               "Gmail",
               hasTrigger ? "Email actions" : "Email triggers",
               "/logos/google.svg",
-              () => navigateTo("google-gmail", "Gmail")
+              () => navigateTo("google-gmail", "Gmail"),
             )}
             {renderMenuButton(
               "Calendar",
               hasTrigger ? "Calendar actions" : "Calendar triggers",
               "/logos/googlecalendar.svg",
-              () => navigateTo("google-calendar", "Calendar")
+              () => navigateTo("google-calendar", "Calendar"),
             )}
             {renderMenuButton(
               "Drive",
               hasTrigger ? "Drive actions" : "Drive triggers",
               "/logos/googledrive.svg",
-              () => navigateTo("google-drive", "Drive")
+              () => navigateTo("google-drive", "Drive"),
             )}
             {renderMenuButton(
               "Forms",
               hasTrigger ? "Form actions" : "Form triggers",
               "/logos/googleform.svg",
-              () => navigateTo("google-forms", "Forms")
+              () => navigateTo("google-forms", "Forms"),
             )}
           </div>
         );
@@ -1473,7 +1642,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? gmailExecutionNodes : gmailTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1516,19 +1685,19 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
               "Outlook",
               hasTrigger ? "Email actions" : "Email triggers",
               "/logos/microsoft.svg",
-              () => navigateTo("microsoft-outlook", "Outlook")
+              () => navigateTo("microsoft-outlook", "Outlook"),
             )}
             {renderMenuButton(
               "OneDrive",
               hasTrigger ? "File actions" : "File triggers",
               "/logos/microsoft.svg",
-              () => navigateTo("microsoft-onedrive", "OneDrive")
+              () => navigateTo("microsoft-onedrive", "OneDrive"),
             )}
             {renderMenuButton(
               "Calendar",
               hasTrigger ? "Calendar actions" : "Calendar triggers",
               "/logos/microsoft.svg",
-              () => navigateTo("microsoft-calendar", "Calendar")
+              () => navigateTo("microsoft-calendar", "Calendar"),
             )}
           </div>
         );
@@ -1537,7 +1706,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? outlookExecutionNodes : outlookTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1546,7 +1715,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? onedriveExecutionNodes : onedriveTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1569,19 +1738,19 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
               "Slack",
               "Slack integrations",
               "/logos/slack.svg",
-              () => navigateTo("social-slack", "Slack")
+              () => navigateTo("social-slack", "Slack"),
             )}
             {renderMenuButton(
               "Discord",
               "Discord integrations",
               "/logos/discord.svg",
-              () => navigateTo("social-discord", "Discord")
+              () => navigateTo("social-discord", "Discord"),
             )}
             {renderMenuButton(
               "Telegram",
               "Telegram integrations",
               "/logos/telegram.svg",
-              () => navigateTo("social-telegram", "Telegram")
+              () => navigateTo("social-telegram", "Telegram"),
             )}
           </div>
         );
@@ -1590,7 +1759,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? slackExecutionNodes : slackTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1599,7 +1768,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? discordExecutionNodes : discordTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1608,7 +1777,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? telegramExecutionNodes : telegramTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1618,36 +1787,36 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {renderMenuButton(
-              "Contacts",
-              hasTrigger ? "Contact actions" : "Contact triggers",
-              CreateContactIcon,
-              () => navigateTo("crm-contacts", "Contacts")
+              "Clients",
+              hasTrigger ? "Client actions" : "Client triggers",
+              CreateClientIcon,
+              () => navigateTo("crm-clients", "Clients"),
             )}
             {hasTrigger &&
               renderMenuButton("Deals", "Deal actions", CreateDealIcon, () =>
-                navigateTo("crm-deals", "Deals")
+                navigateTo("crm-deals", "Deals"),
               )}
             {hasTrigger &&
               renderMenuButton(
                 "Pipeline",
                 "Pipeline actions",
                 "/logos/move-right.svg",
-                () => navigateTo("crm-pipeline", "Pipeline")
+                () => navigateTo("crm-pipeline", "Pipeline"),
               )}
             {renderMenuButton(
               "Appointments",
               hasTrigger ? "Appointment actions" : "Appointment triggers",
               CalendarAddIcon,
-              () => navigateTo("crm-appointments", "Appointments")
+              () => navigateTo("crm-appointments", "Appointments"),
             )}
           </div>
         );
 
-      case "crm-contacts":
+      case "crm-clients":
         return (
           <div className="flex flex-col gap-2">
-            {(hasTrigger ? contactExecutionNodes : contactTriggerNodes).map(
-              (node) => renderNodeButton(node)
+            {(hasTrigger ? clientExecutionNodes : clientTriggerNodes).map(
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1656,7 +1825,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? dealExecutionNodes : dealTriggerNodes).map((node) =>
-              renderNodeButton(node)
+              renderNodeButton(node),
             )}
           </div>
         );
@@ -1678,12 +1847,21 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
           </div>
         );
 
+      case "studio":
+        return (
+          <div className="flex flex-col gap-2">
+            {(hasTrigger ? studioExecutionNodes : studioTriggerNodes).map(
+              (node) => renderNodeButton(node),
+            )}
+          </div>
+        );
+
       // Stripe views
       case "stripe":
         return (
           <div className="flex flex-col gap-2">
             {(hasTrigger ? stripeExecutionNodes : stripeTriggerNodes).map(
-              (node) => renderNodeButton(node)
+              (node) => renderNodeButton(node),
             )}
           </div>
         );
@@ -1728,7 +1906,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
                       description: bundle.description || "",
                       icon: IconImagineAi,
                     },
-                    bundle.id
+                    bundle.id,
                   )
                 }
                 variant="ghost"

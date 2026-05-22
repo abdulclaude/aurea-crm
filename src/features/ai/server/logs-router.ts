@@ -1,7 +1,31 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { AILogStatus } from "@prisma/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { AILogStatus } from "@/db/enums";
+import { aiLog, user as userTable } from "@/db/schema";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  max,
+  min,
+  or,
+  type SQL,
+} from "drizzle-orm";
+
+const nullableEq = (
+  column: typeof aiLog.organizationId | typeof aiLog.locationId,
+  value: string | null | undefined
+): SQL => (value ? eq(column, value) : isNull(column));
+
+const organizationCondition = (organizationId: string | null): SQL =>
+  nullableEq(aiLog.organizationId, organizationId);
 
 export const logsRouter = createTRPCRouter({
   list: protectedProcedure
@@ -17,94 +41,97 @@ export const logsRouter = createTRPCRouter({
         createdAtEnd: z.date().optional(),
         completedAtStart: z.date().optional(),
         completedAtEnd: z.date().optional(),
-        subaccountId: z.string().optional(), // Override for "all-clients" view
+        locationId: z.string().optional(), // Override for "all-clients" view
         includeAllClients: z.boolean().optional(), // Flag to include all clients
       })
     )
     .query(async ({ ctx, input }) => {
       const { page, pageSize } = input;
 
-      const subaccountId =
-        input?.subaccountId !== undefined
-          ? input.subaccountId || null
-          : ctx.subaccountId;
+      const locationId =
+        input?.locationId !== undefined
+          ? input.locationId || null
+          : ctx.locationId;
 
-      const where: any = {
-        organizationId: ctx.orgId,
-        ...(input?.includeAllClients
-          ? {}
-          : subaccountId
-            ? { subaccountId }
-            : { subaccountId: null }),
-      };
+      const conditions: SQL[] = [organizationCondition(ctx.orgId)];
+
+      if (!input?.includeAllClients) {
+        conditions.push(nullableEq(aiLog.locationId, locationId));
+      }
 
       if (input.search) {
-        where.OR = [
-          { title: { contains: input.search, mode: "insensitive" } },
-          { description: { contains: input.search, mode: "insensitive" } },
-          { intent: { contains: input.search, mode: "insensitive" } },
-          { userMessage: { contains: input.search, mode: "insensitive" } },
-        ];
+        const searchPattern = `%${input.search}%`;
+        const searchCondition = or(
+          ilike(aiLog.title, searchPattern),
+          ilike(aiLog.description, searchPattern),
+          ilike(aiLog.intent, searchPattern),
+          ilike(aiLog.userMessage, searchPattern)
+        );
+
+        if (searchCondition) {
+          conditions.push(searchCondition);
+        }
       }
 
       if (input.statuses && input.statuses.length > 0) {
-        where.status = { in: input.statuses };
+        conditions.push(inArray(aiLog.status, input.statuses));
       }
 
       if (input.intents && input.intents.length > 0) {
-        where.intent = { in: input.intents };
+        conditions.push(inArray(aiLog.intent, input.intents));
       }
 
       if (input.userIds && input.userIds.length > 0) {
-        where.userId = { in: input.userIds };
+        conditions.push(inArray(aiLog.userId, input.userIds));
       }
 
-      if (input.createdAtStart || input.createdAtEnd) {
-        where.createdAt = {};
-        if (input.createdAtStart) {
-          where.createdAt.gte = input.createdAtStart;
-        }
-        if (input.createdAtEnd) {
-          where.createdAt.lte = input.createdAtEnd;
-        }
+      if (input.createdAtStart) {
+        conditions.push(gte(aiLog.createdAt, input.createdAtStart));
+      }
+      if (input.createdAtEnd) {
+        conditions.push(lte(aiLog.createdAt, input.createdAtEnd));
       }
 
-      if (input.completedAtStart || input.completedAtEnd) {
-        where.completedAt = {};
-        if (input.completedAtStart) {
-          where.completedAt.gte = input.completedAtStart;
-        }
-        if (input.completedAtEnd) {
-          where.completedAt.lte = input.completedAtEnd;
-        }
+      if (input.completedAtStart) {
+        conditions.push(gte(aiLog.completedAt, input.completedAtStart));
+      }
+      if (input.completedAtEnd) {
+        conditions.push(lte(aiLog.completedAt, input.completedAtEnd));
       }
 
-      // Get total count for pagination
-      const totalItems = await prisma.aILog.count({ where });
+      const where = and(...conditions);
 
-      const logs = await prisma.aILog.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
+      const [totalItems, logs] = await Promise.all([
+        db
+          .select({ totalItems: count() })
+          .from(aiLog)
+          .where(where)
+          .then(([row]) => row?.totalItems ?? 0),
+        db
+          .select({
+            log: aiLog,
+            user: {
+              id: userTable.id,
+              name: userTable.name,
+              email: userTable.email,
+              image: userTable.image,
             },
-          },
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
+          })
+          .from(aiLog)
+          .innerJoin(userTable, eq(aiLog.userId, userTable.id))
+          .where(where)
+          .orderBy(desc(aiLog.createdAt))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize),
+      ]);
 
       const totalPages = Math.ceil(totalItems / pageSize);
 
       return {
-        items: logs,
+        items: logs.map(({ log, user }) => ({
+          ...log,
+          user,
+        })),
         pagination: {
           currentPage: page,
           totalPages,
@@ -115,70 +142,66 @@ export const logsRouter = createTRPCRouter({
     }),
 
   stats: protectedProcedure.query(async ({ ctx }) => {
-    const logs = await prisma.aILog.findMany({
-      where: {
-        organizationId: ctx.orgId,
-      },
-      select: {
-        status: true,
-        createdAt: true,
-        completedAt: true,
-      },
-    });
+    const rows = await db
+      .select({
+        status: aiLog.status,
+        total: count(),
+      })
+      .from(aiLog)
+      .where(organizationCondition(ctx.orgId))
+      .groupBy(aiLog.status);
 
-    const statusCounts = logs.reduce((acc, log) => {
-      acc[log.status] = (acc[log.status] || 0) + 1;
-      return acc;
-    }, {} as Record<AILogStatus, number>);
+    const statusCounts: Record<AILogStatus, number> = {
+      PENDING: 0,
+      RUNNING: 0,
+      COMPLETED: 0,
+      FAILED: 0,
+    };
+    let total = 0;
+    for (const row of rows) {
+      statusCounts[row.status] = row.total;
+      total += row.total;
+    }
 
     return {
-      total: logs.length,
+      total,
       statusCounts,
     };
   }),
 
   dateRange: protectedProcedure.query(async ({ ctx }) => {
-    const result = await prisma.aILog.aggregate({
-      where: {
-        organizationId: ctx.orgId,
-      },
-      _min: {
-        createdAt: true,
-        completedAt: true,
-      },
-      _max: {
-        createdAt: true,
-        completedAt: true,
-      },
-    });
+    const [result] = await db
+      .select({
+        createdAtMin: min(aiLog.createdAt),
+        createdAtMax: max(aiLog.createdAt),
+        completedAtMin: min(aiLog.completedAt),
+        completedAtMax: max(aiLog.completedAt),
+      })
+      .from(aiLog)
+      .where(organizationCondition(ctx.orgId));
 
     return {
-      createdAtMin: result._min.createdAt,
-      createdAtMax: result._max.createdAt,
-      completedAtMin: result._min.completedAt,
-      completedAtMax: result._max.completedAt,
+      createdAtMin: result?.createdAtMin ?? null,
+      createdAtMax: result?.createdAtMax ?? null,
+      completedAtMin: result?.completedAtMin ?? null,
+      completedAtMax: result?.completedAtMax ?? null,
     };
   }),
 
   filterOptions: protectedProcedure.query(async ({ ctx }) => {
-    const logs = await prisma.aILog.findMany({
-      where: {
-        organizationId: ctx.orgId,
-      },
-      select: {
-        intent: true,
-        userId: true,
+    const logs = await db
+      .select({
+        intent: aiLog.intent,
         user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
-          },
+          id: userTable.id,
+          name: userTable.name,
+          email: userTable.email,
+          image: userTable.image,
         },
-      },
-      distinct: ["intent", "userId"],
-    });
+      })
+      .from(aiLog)
+      .innerJoin(userTable, eq(aiLog.userId, userTable.id))
+      .where(organizationCondition(ctx.orgId));
 
     // Get unique intents (filter out null/empty)
     const intents = Array.from(
@@ -190,12 +213,19 @@ export const logsRouter = createTRPCRouter({
     ).sort();
 
     // Get unique users
-    const usersMap = new Map();
-    logs.forEach((log) => {
+    type UserSummary = {
+      id: string;
+      name: string;
+      email: string;
+      image: string | null;
+    };
+
+    const usersMap = new Map<string, UserSummary>();
+    for (const log of logs) {
       if (log.user && !usersMap.has(log.user.id)) {
         usersMap.set(log.user.id, log.user);
       }
-    });
+    }
     const users = Array.from(usersMap.values());
 
     return {

@@ -34,7 +34,7 @@ import { useTRPC } from "@/trpc/client";
 
 const formSchema = z.object({
   name: z.string().min(2, "Name is required"),
-  contactIds: z.array(z.string()).min(1, "At least one contact is required"),
+  clientIds: z.array(z.string()).min(1, "At least one client is required"),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
   value: z.string().optional(),
@@ -51,27 +51,27 @@ export default function NewDealPage() {
   const router = useRouter();
   const trpc = useTRPC();
 
-  const { data: contactCount, isLoading: isLoadingContacts } = useQuery(
-    trpc.contacts.count.queryOptions()
+  const { data: clientCount, isLoading: isLoadingClients } = useQuery(
+    trpc.clients.count.queryOptions(),
   );
 
-  const { data: contactsData, isLoading: isLoadingContactsList } = useQuery(
-    trpc.contacts.list.queryOptions()
+  const { data: clientsData, isLoading: isLoadingClientsList } = useQuery(
+    trpc.clients.list.queryOptions(),
   );
 
   const { data: pipelinesData, isLoading: isLoadingPipelines } = useQuery(
-    trpc.pipelines.list.queryOptions()
+    trpc.pipelines.list.queryOptions(),
   );
 
   const { data: membersData, isLoading: isLoadingMembers } = useQuery(
-    trpc.organizations.listSubaccountMembers.queryOptions()
+    trpc.organizations.listLocationMembers.queryOptions(),
   );
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
-      contactIds: [],
+      clientIds: [],
       pipelineId: "",
       pipelineStageId: "",
       value: "",
@@ -85,7 +85,7 @@ export default function NewDealPage() {
 
   const selectedPipelineId = form.watch("pipelineId");
   const selectedPipeline = pipelinesData?.items.find(
-    (p) => p.id === selectedPipelineId
+    (p) => p.id === selectedPipelineId,
   );
 
   // Auto-select first stage when pipeline changes
@@ -104,13 +104,13 @@ export default function NewDealPage() {
       onError: (error) => {
         toast.error(error.message || "Failed to create deal");
       },
-    })
+    }),
   );
 
   const onSubmit = async (values: FormValues) => {
     const clean = {
       name: values.name.trim(),
-      contactIds: values.contactIds,
+      clientIds: values.clientIds,
       pipelineId: values.pipelineId?.trim() || undefined,
       pipelineStageId: values.pipelineStageId?.trim() || undefined,
       value: values.value?.trim()
@@ -132,8 +132,8 @@ export default function NewDealPage() {
   };
 
   if (
-    isLoadingContacts ||
-    isLoadingContactsList ||
+    isLoadingClients ||
+    isLoadingClientsList ||
     isLoadingPipelines ||
     isLoadingMembers
   ) {
@@ -145,13 +145,13 @@ export default function NewDealPage() {
     );
   }
 
-  if (!contactCount || contactCount === 0) {
+  if (!clientCount || clientCount === 0) {
     return (
       <div className="space-y-6">
         <div className="flex items-end justify-between gap-2 p-6 pb-0">
           <div>
             <h1 className="text-lg font-semibold text-primary dark:text-white">
-              Create Deal
+              Create deal
             </h1>
             <p className="text-xs text-primary/75 dark:text-white/50">
               Add a new deal to your client workspace.
@@ -163,7 +163,7 @@ export default function NewDealPage() {
 
         <div className="py-12 px-6 text-center space-y-4">
           <p className="text-sm text-primary/75 dark:text-white/50">
-            Cannot make any deals until a contact has been created.
+            Cannot make any deals until a member has been added.
           </p>
           <div className="flex gap-2 justify-center">
             <Button
@@ -177,7 +177,7 @@ export default function NewDealPage() {
               asChild
               className="text-xs rounded-sm border border-black/10 dark:border-white/5 bg-primary-foreground hover:bg-primary-foreground/25 hover:text-black text-primary transition duration-150"
             >
-              <Link href="/contacts/new">Create contact</Link>
+              <Link href="/clients/new">Add member</Link>
             </Button>
           </div>
         </div>
@@ -185,9 +185,9 @@ export default function NewDealPage() {
     );
   }
 
-  const selectedContactId = form.watch("contactIds")?.[0];
-  const selectedContact = contactsData?.items.find(
-    (c) => c.id === selectedContactId
+  const selectedClientId = form.watch("clientIds")?.[0];
+  const selectedClient = clientsData?.items.find(
+    (c) => c.id === selectedClientId,
   );
 
   const selectedMemberIds = form.watch("memberIds") || [];
@@ -197,7 +197,7 @@ export default function NewDealPage() {
       <div className="flex items-end justify-between gap-2 p-6 pb-0">
         <div>
           <h1 className="text-lg font-semibold text-primary dark:text-white">
-            Create Deal
+            Create deal
           </h1>
           <p className="text-xs text-primary/75 dark:text-white/50">
             Add a new deal to your client workspace.
@@ -235,11 +235,11 @@ export default function NewDealPage() {
               <div className="grid gap-4 md:grid-cols-4">
                 <FormField
                   control={form.control}
-                  name="contactIds"
+                  name="clientIds"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-xs text-primary/75 dark:text-white/50">
-                        Contact
+                        Member
                       </FormLabel>
                       <Select
                         onValueChange={(value) => {
@@ -249,14 +249,14 @@ export default function NewDealPage() {
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
-                            {selectedContact ? (
+                            {selectedClient ? (
                               <div className="flex items-center gap-2">
                                 <Avatar className="size-5">
                                   <AvatarImage
-                                    src={selectedContact.logo || undefined}
+                                    src={selectedClient.logo || undefined}
                                   />
                                   <AvatarFallback className="text-[10px] bg-[#202e32]">
-                                    {selectedContact.name
+                                    {selectedClient.name
                                       .substring(0, 2)
                                       .toUpperCase()}
                                   </AvatarFallback>
@@ -264,40 +264,40 @@ export default function NewDealPage() {
 
                                 <div className="flex flex-col items-start">
                                   <span className="text-xs text-primary">
-                                    {selectedContact.name}
+                                    {selectedClient.name}
                                   </span>
-                                  {selectedContact.email && (
+                                  {selectedClient.email && (
                                     <span className="text-[10px] text-primary/75 dark:text-white/50">
-                                      {selectedContact.email}
+                                      {selectedClient.email}
                                     </span>
                                   )}
                                 </div>
                               </div>
                             ) : (
-                              <SelectValue placeholder="Select contact" />
+                              <SelectValue placeholder="Select member" />
                             )}
                           </SelectTrigger>
                         </FormControl>
 
                         <SelectContent className="bg-background border-black/10 dark:border-white/5">
-                          {contactsData?.items.map((contact) => (
-                            <SelectItem key={contact.id} value={contact.id}>
+                          {clientsData?.items.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
                               <div className="flex items-center gap-2">
                                 <Avatar className="size-6">
                                   <AvatarImage
-                                    src={contact.logo || undefined}
+                                    src={client.logo || undefined}
                                   />
                                   <AvatarFallback className="text-[10px] bg-[#202e32] text-white">
-                                    {contact.name.substring(0, 2).toUpperCase()}
+                                    {client.name.substring(0, 2).toUpperCase()}
                                   </AvatarFallback>
                                 </Avatar>
                                 <div className="flex flex-col items-start">
                                   <span className="text-xs text-primary">
-                                    {contact.name}
+                                    {client.name}
                                   </span>
-                                  {contact.email && (
+                                  {client.email && (
                                     <span className="text-[10px] text-primary/75 dark:text-white/50">
-                                      {contact.email}
+                                      {client.email}
                                     </span>
                                   )}
                                 </div>
@@ -325,7 +325,7 @@ export default function NewDealPage() {
                           const currentIds = field.value || [];
                           if (currentIds.includes(value)) {
                             field.onChange(
-                              currentIds.filter((id) => id !== value)
+                              currentIds.filter((id) => id !== value),
                             );
                           } else {
                             field.onChange([...currentIds, value]);
@@ -342,7 +342,7 @@ export default function NewDealPage() {
                                     .slice(0, 3)
                                     .map((memberId) => {
                                       const member = membersData?.find(
-                                        (m) => m.id === memberId
+                                        (m) => m.id === memberId,
                                       );
                                       if (!member) return null;
                                       return (
@@ -366,7 +366,7 @@ export default function NewDealPage() {
                                 <span className="text-xs text-primary">
                                   {selectedMemberIds.length === 1
                                     ? membersData?.find(
-                                        (m) => m.id === selectedMemberIds[0]
+                                        (m) => m.id === selectedMemberIds[0],
                                       )?.name
                                     : `${selectedMemberIds.length} assignees`}
                                 </span>
@@ -594,7 +594,7 @@ export default function NewDealPage() {
                 disabled={createDeal.isPending}
                 className="bg-background hover:bg-primary-foreground/50 hover:text-black text-xs rounded-sm border border-black/10 dark:border-white/5 transition duration-150"
               >
-                {createDeal.isPending ? "Creating..." : "Create Deal"}
+                {createDeal.isPending ? "Creating..." : "Create deal"}
               </Button>
             </div>
           </form>

@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { FunnelDomainType } from "@prisma/client";
+import { FunnelDomainType } from "@/db/enums";
 import {
   validateSubdomain,
   validateCustomDomain,

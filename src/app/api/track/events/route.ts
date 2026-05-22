@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import db from "@/lib/db";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { db } from "@/db";
+import { funnel as funnelTable, funnelSession } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { getPrivacyCompliantIp } from "@/lib/gdpr-utils";
 
@@ -62,7 +64,7 @@ const PersistedUtmSchema = UtmSchema.extend({
 const EventSchema = z.object({
   eventId: z.string(),
   eventName: z.string(),
-  properties: z.record(z.string(), z.any()).optional(),
+  properties: z.record(z.string(), z.unknown()).optional(),
   context: z.object({
     page: z.object({
       url: z.string(),
@@ -125,7 +127,7 @@ const EventSchema = z.object({
     }).optional(),
     
     // Custom dimensions (user-defined key-value pairs)
-    customDimensions: z.record(z.string(), z.any()).optional(),
+    customDimensions: z.record(z.string(), z.unknown()).optional(),
     
     // A/B Testing
     abTests: z.array(z.object({
@@ -172,15 +174,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify funnel and API key
-    const funnel = await db.funnel.findFirst({
-      where: {
-        id: funnelId,
-        apiKey,
-        funnelType: "EXTERNAL",
-      },
-      select: {
+    const funnel = await db.query.funnel.findFirst({
+      where: and(
+        eq(funnelTable.id, funnelId),
+        eq(funnelTable.apiKey, apiKey),
+        eq(funnelTable.funnelType, "EXTERNAL")
+      ),
+      columns: {
         id: true,
-        subaccountId: true,
+        locationId: true,
         organizationId: true,
         trackingConfig: true,
       },
@@ -224,12 +226,12 @@ export async function POST(req: NextRequest) {
     const uniqueSessionIds = [...new Set(sessionIds)];
     
     // Check if we already have IP data for these sessions
-    const existingSessions = await db.funnelSession.findMany({
-      where: {
-        sessionId: { in: uniqueSessionIds },
-        ipAddress: { not: null },
-      },
-      select: {
+    const existingSessions = await db.query.funnelSession.findMany({
+      where: and(
+        inArray(funnelSession.sessionId, uniqueSessionIds),
+        isNotNull(funnelSession.ipAddress)
+      ),
+      columns: {
         sessionId: true,
         ipAddress: true,
       },
@@ -265,9 +267,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Apply privacy settings to IP (GDPR compliance)
-    const trackingConfig = (funnel.trackingConfig as any) || {};
-    const anonymizeIp = trackingConfig.anonymizeIp ?? true;
-    const hashIp = trackingConfig.hashIp ?? false;
+    const trackingConfig =
+      funnel.trackingConfig &&
+      typeof funnel.trackingConfig === "object" &&
+      !Array.isArray(funnel.trackingConfig)
+        ? (funnel.trackingConfig as Record<string, unknown>)
+        : {};
+    const anonymizeIp =
+      typeof trackingConfig.anonymizeIp === "boolean"
+        ? trackingConfig.anonymizeIp
+        : true;
+    const hashIp =
+      typeof trackingConfig.hashIp === "boolean" ? trackingConfig.hashIp : false;
     
     ip = getPrivacyCompliantIp(ip, {
       anonymizeIp,
@@ -279,7 +290,7 @@ export async function POST(req: NextRequest) {
       name: "tracking/events.batch",
       data: {
         funnelId: funnel.id,
-        subaccountId: funnel.subaccountId,
+        locationId: funnel.locationId,
         organizationId: funnel.organizationId,
         events: parsed.events,
         ipAddress: ip,

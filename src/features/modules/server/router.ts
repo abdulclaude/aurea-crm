@@ -1,16 +1,14 @@
-import { z } from "zod";
-import {
-  protectedProcedure,
-  premiumProcedure,
-  createTRPCRouter,
-} from "@/trpc/init";
+import { randomUUID } from "crypto";
 import { TRPCError } from "@trpc/server";
-import prisma from "@/lib/db";
-import { ModuleType, ActivityAction } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
-import { logAnalytics } from "@/lib/analytics-logger";
+import { and, eq, isNull, or, type SQL } from "drizzle-orm";
+import { z } from "zod";
 
-// Module configurations with premium requirements
+import { db } from "@/db";
+import { ActivityAction, ModuleType } from "@/db/enums";
+import { locationModule } from "@/db/schema";
+import { logAnalytics } from "@/lib/analytics-logger";
+import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
+
 export const MODULE_CONFIG = {
   [ModuleType.TIME_TRACKING]: {
     name: "Time Tracking",
@@ -23,7 +21,7 @@ export const MODULE_CONFIG = {
       "Timesheet management and approval workflows",
       "Billable hours tracking with rates",
       "Export to PDF for invoicing",
-      "Integration with Contacts and Deals",
+      "Integration with Clients and Deals",
     ],
   },
   [ModuleType.INVOICING]: {
@@ -89,7 +87,7 @@ export const MODULE_CONFIG = {
   [ModuleType.PILATES_STUDIO]: {
     name: "Pilates Studio",
     description:
-      "Complete studio management with class scheduling, client bookings, and Mindbody integration",
+      "Legacy studio module - use Studio Core instead for full studio management",
     icon: "Dumbbell",
     requiresPremium: true,
     features: [
@@ -101,148 +99,163 @@ export const MODULE_CONFIG = {
       "Studio-specific automation triggers",
     ],
   },
+  [ModuleType.STUDIO_CORE]: {
+    name: "Studio",
+    description:
+      "Complete fitness studio management with class scheduling, memberships, bookings, check-in, and instructor dashboards",
+    icon: "Dumbbell",
+    requiresPremium: false,
+    features: [
+      "Class types and scheduling",
+      "Membership plans and subscriptions",
+      "Member booking and waitlists",
+      "QR code and kiosk check-in",
+      "Instructor management and profiles",
+      "Room and resource management",
+      "Attendance analytics and streaks",
+      "Mindbody data import",
+    ],
+  },
 } as const;
 
+const moduleTypes = Object.values(ModuleType);
+const moduleConfigSchema = z.record(z.string(), z.unknown());
+
+function moduleList(enabledModuleTypes: Set<ModuleType>) {
+  return moduleTypes.map((type) => ({
+    type,
+    ...MODULE_CONFIG[type],
+    enabled: enabledModuleTypes.has(type),
+  }));
+}
+
+async function upsertModule(params: {
+  organizationId: string | null;
+  locationId: string | null;
+  moduleType: ModuleType;
+  enabled: boolean;
+  config?: Record<string, unknown>;
+}) {
+  const existing = await db.query.locationModule.findFirst({
+    where: params.locationId
+      ? and(
+          eq(locationModule.locationId, params.locationId),
+          eq(locationModule.moduleType, params.moduleType)
+        )
+      : and(
+          eq(locationModule.organizationId, params.organizationId ?? ""),
+          eq(locationModule.moduleType, params.moduleType),
+          isNull(locationModule.locationId)
+        ),
+  });
+
+  if (existing) {
+    const [updated] = await db
+      .update(locationModule)
+      .set({
+        enabled: params.enabled,
+        config: params.config ?? existing.config,
+        updatedAt: new Date(),
+      })
+      .where(eq(locationModule.id, existing.id))
+      .returning();
+    return updated;
+  }
+
+  const [created] = await db
+    .insert(locationModule)
+    .values({
+      id: randomUUID(),
+      organizationId: params.locationId ? null : params.organizationId,
+      locationId: params.locationId,
+      moduleType: params.moduleType,
+      enabled: params.enabled,
+      config: params.config,
+      updatedAt: new Date(),
+    })
+    .returning();
+  return created;
+}
+
 export const modulesRouter = createTRPCRouter({
-  // List all available modules with enabled status
   listAvailable: protectedProcedure.query(async ({ ctx }) => {
-    // If no auth, return all modules as disabled
     if (!ctx.auth?.user) {
-      return Object.entries(MODULE_CONFIG).map(([type, config]) => ({
-        type: type as ModuleType,
-        ...config,
-        enabled: false,
-      }));
+      return moduleList(new Set());
     }
 
-    // Check for modules at organization or subaccount level
-    const whereConditions: any[] = [];
-
-    // Add organization filter if org exists (organization-level modules)
+    const scopeConditions: SQL[] = [];
     if (ctx.orgId) {
-      whereConditions.push({
-        organizationId: ctx.orgId,
-        subaccountId: null,
-        enabled: true,
-      });
+      const condition = and(
+        eq(locationModule.organizationId, ctx.orgId),
+        isNull(locationModule.locationId),
+        eq(locationModule.enabled, true)
+      );
+      if (condition) scopeConditions.push(condition);
+    }
+    if (ctx.locationId) {
+      const condition = and(
+        eq(locationModule.locationId, ctx.locationId),
+        eq(locationModule.enabled, true)
+      );
+      if (condition) scopeConditions.push(condition);
     }
 
-    // Add subaccount filter if subaccount exists (subaccount overrides)
-    if (ctx.subaccountId) {
-      whereConditions.push({
-        subaccountId: ctx.subaccountId,
-        enabled: true,
-      });
+    if (scopeConditions.length === 0) {
+      return moduleList(new Set());
     }
 
-    // If no context at all, return all disabled
-    if (whereConditions.length === 0) {
-      return Object.entries(MODULE_CONFIG).map(([type, config]) => ({
-        type: type as ModuleType,
-        ...config,
-        enabled: false,
-      }));
-    }
+    const where = scopeConditions.length === 1 ? scopeConditions[0] : or(...scopeConditions);
+    if (!where) return moduleList(new Set());
 
-    // Get enabled modules
-    const enabledModules = await prisma.subaccountModule.findMany({
-      where: {
-        OR: whereConditions,
-      },
-    });
-
-    const enabledModuleTypes = new Set(enabledModules.map((m) => m.moduleType));
-
-    // Return all modules with their enabled status
-    return Object.entries(MODULE_CONFIG).map(([type, config]) => ({
-      type: type as ModuleType,
-      ...config,
-      enabled: enabledModuleTypes.has(type as ModuleType),
-    }));
+    const enabledModules = await db.query.locationModule.findMany({ where });
+    return moduleList(new Set(enabledModules.map((module) => module.moduleType)));
   }),
 
-  // Check if a specific module is enabled
   isEnabled: protectedProcedure
     .input(z.object({ moduleType: z.nativeEnum(ModuleType) }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.locationId) {
         return false;
       }
 
-      const module = await prisma.subaccountModule.findUnique({
-        where: {
-          subaccountId_moduleType: {
-            subaccountId: ctx.subaccountId,
-            moduleType: input.moduleType,
-          },
-        },
+      const module = await db.query.locationModule.findFirst({
+        where: and(
+          eq(locationModule.locationId, ctx.locationId),
+          eq(locationModule.moduleType, input.moduleType)
+        ),
       });
 
       return module?.enabled ?? false;
     }),
 
-  // Enable a module (premium check for premium modules)
   enable: protectedProcedure
     .input(
       z.object({
         moduleType: z.nativeEnum(ModuleType),
-        config: z.record(z.string(), z.any()).optional(),
+        config: moduleConfigSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Require either org or subaccount context
-      if (!ctx.orgId && !ctx.subaccountId) {
+      if (!ctx.orgId && !ctx.locationId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in an organization or subaccount context",
+          message: "You must be in an organization or location context",
         });
       }
 
       const moduleConfig = MODULE_CONFIG[input.moduleType];
-
-      // Check if module requires premium
-      if (moduleConfig.requiresPremium) {
-        // TODO: Add actual premium subscription check here
-        // For now, we'll allow it
-      }
-
-      // Prefer subaccount over organization
-      const isSubaccountLevel = !!ctx.subaccountId;
-
-      const module = await prisma.subaccountModule.upsert({
-        where: isSubaccountLevel
-          ? {
-              subaccountId_moduleType: {
-                subaccountId: ctx.subaccountId ?? "",
-                moduleType: input.moduleType,
-              },
-            }
-          : {
-              organizationId_moduleType: {
-                organizationId: ctx.orgId ?? "",
-                moduleType: input.moduleType,
-              },
-            },
-        create: {
-          id: crypto.randomUUID(),
-          organizationId: isSubaccountLevel ? undefined : ctx.orgId,
-          subaccountId: isSubaccountLevel ? ctx.subaccountId : undefined,
-          moduleType: input.moduleType,
-          enabled: true,
-          config: input.config as Prisma.InputJsonValue,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        update: {
-          enabled: true,
-          config: input.config as Prisma.InputJsonValue,
-        },
+      const isLocationLevel = !!ctx.locationId;
+      const module = await upsertModule({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        moduleType: input.moduleType,
+        enabled: true,
+        config: input.config,
       });
 
-      // Log analytics
       await logAnalytics({
         organizationId: ctx.orgId ?? "",
-        subaccountId: ctx.subaccountId ?? null,
+        locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "module",
@@ -256,61 +269,35 @@ export const modulesRouter = createTRPCRouter({
           module_type: input.moduleType,
           enabled: true,
           is_premium: moduleConfig.requiresPremium,
-          is_subaccount_level: isSubaccountLevel,
+          is_location_level: isLocationLevel,
         },
       });
 
       return module;
     }),
 
-  // Disable a module
   disable: protectedProcedure
     .input(z.object({ moduleType: z.nativeEnum(ModuleType) }))
     .mutation(async ({ ctx, input }) => {
-      // Require either org or subaccount context
-      if (!ctx.orgId && !ctx.subaccountId) {
+      if (!ctx.orgId && !ctx.locationId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in an organization or subaccount context",
+          message: "You must be in an organization or location context",
         });
       }
 
-      // Prefer subaccount over organization
-      const isSubaccountLevel = !!ctx.subaccountId;
-
+      const isLocationLevel = !!ctx.locationId;
       const moduleConfig = MODULE_CONFIG[input.moduleType];
-      const module = await prisma.subaccountModule.upsert({
-        where: isSubaccountLevel
-          ? {
-              subaccountId_moduleType: {
-                subaccountId: ctx.subaccountId ?? "",
-                moduleType: input.moduleType,
-              },
-            }
-          : {
-              organizationId_moduleType: {
-                organizationId: ctx.orgId ?? "",
-                moduleType: input.moduleType,
-              },
-            },
-        create: {
-          id: crypto.randomUUID(),
-          organizationId: isSubaccountLevel ? undefined : ctx.orgId,
-          subaccountId: isSubaccountLevel ? ctx.subaccountId : undefined,
-          moduleType: input.moduleType,
-          enabled: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        update: {
-          enabled: false,
-        },
+      const module = await upsertModule({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        moduleType: input.moduleType,
+        enabled: false,
       });
 
-      // Log analytics
       await logAnalytics({
         organizationId: ctx.orgId ?? "",
-        subaccountId: ctx.subaccountId ?? null,
+        locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "module",
@@ -323,40 +310,42 @@ export const modulesRouter = createTRPCRouter({
         posthogProperties: {
           module_type: input.moduleType,
           enabled: false,
-          is_subaccount_level: isSubaccountLevel,
+          is_location_level: isLocationLevel,
         },
       });
 
       return module;
     }),
 
-  // Update module configuration
   updateConfig: protectedProcedure
     .input(
       z.object({
         moduleType: z.nativeEnum(ModuleType),
-        config: z.record(z.string(), z.any()),
+        config: moduleConfigSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.subaccountId) {
+      if (!ctx.locationId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "You must be in a subaccount context",
+          message: "You must be in a location context",
         });
       }
 
-      const module = await prisma.subaccountModule.update({
-        where: {
-          subaccountId_moduleType: {
-            subaccountId: ctx.subaccountId,
-            moduleType: input.moduleType,
-          },
-        },
-        data: {
-          config: input.config as Prisma.InputJsonValue,
-        },
-      });
+      const [module] = await db
+        .update(locationModule)
+        .set({ config: input.config, updatedAt: new Date() })
+        .where(
+          and(
+            eq(locationModule.locationId, ctx.locationId),
+            eq(locationModule.moduleType, input.moduleType)
+          )
+        )
+        .returning();
+
+      if (!module) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Module not found" });
+      }
 
       return module;
     }),

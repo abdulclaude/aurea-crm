@@ -1,15 +1,27 @@
 import toposort from "toposort";
 
-import type { Connection, Node } from "@prisma/client";
+import type { NodeType } from "@/db/enums";
 import { NonRetriableError } from "inngest";
 import { inngest } from "./client";
 
 import { createId } from "@paralleldrive/cuid2";
 
-export const topologicalSort = (
-  nodes: Node[],
-  connections: Connection[]
-): Node[] => {
+type WorkflowNode = {
+  id: string;
+  name: string;
+  type: NodeType;
+  data: unknown;
+};
+
+type WorkflowConnection = {
+  fromNodeId: string;
+  toNodeId: string;
+};
+
+export const topologicalSort = <TNode extends WorkflowNode>(
+  nodes: TNode[],
+  connections: WorkflowConnection[]
+): TNode[] => {
   // if no connections, return node as-is (they are all independent)
 
   if (connections.length === 0) {
@@ -63,8 +75,7 @@ export const topologicalSort = (
 
 export const sendWorkflowExecution = async (data: {
   workflowId: string;
-  [key: string]: any;
-}) => {
+} & Record<string, unknown>) => {
   return inngest.send({
     name: "workflows/execute.workflow",
     data,

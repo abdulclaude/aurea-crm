@@ -49,7 +49,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import DateRangeFilter from "@/components/ui/date-range-filter";
 import { cn } from "@/lib/utils";
-import { AILogStatus } from "@prisma/client";
+import { AILogStatus } from "@/db/enums";
 
 export interface LogsToolbarProps {
   search: string;
@@ -81,8 +81,8 @@ export interface LogsToolbarProps {
     statusCounts: Record<AILogStatus, number>;
   };
   scope?: "agency" | "all-clients";
-  selectedSubaccountId?: string;
-  onSubaccountChange?: (subaccountId: string) => void;
+  selectedLocationId?: string;
+  onLocationChange?: (locationId: string) => void;
 }
 
 const sortOptions = [
@@ -126,8 +126,8 @@ export function LogsToolbar({
   onCompletedAtChange,
   stats,
   scope,
-  selectedSubaccountId,
-  onSubaccountChange,
+  selectedLocationId,
+  onLocationChange,
 }: LogsToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
@@ -143,22 +143,22 @@ export function LogsToolbar({
 
   // Fetch ALL logs (unfiltered) for preview calculation
   const { data: allLogsData } = useSuspenseQuery(
-    trpc.logs.list.queryOptions({})
+    trpc.logs.list.queryOptions({}),
   );
 
   const allLogsUnfiltered = React.useMemo(
     () => allLogsData?.items || [],
-    [allLogsData]
+    [allLogsData],
   );
 
   // Fetch date range for filters
   const { data: dateRange } = useSuspenseQuery(
-    trpc.logs.dateRange.queryOptions()
+    trpc.logs.dateRange.queryOptions(),
   );
 
   // Fetch filter options (unique intents and users)
   const { data: filterOptions } = useSuspenseQuery(
-    trpc.logs.filterOptions.queryOptions()
+    trpc.logs.filterOptions.queryOptions(),
   );
 
   const availableIntents = filterOptions?.intents || [];
@@ -166,13 +166,13 @@ export function LogsToolbar({
 
   // Fetch clients for all-clients view
   const { data: clientsData } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+    trpc.organizations.getClients.queryOptions(),
   );
 
   const clients = React.useMemo(() => {
     if (!clientsData) return [];
     return clientsData.map((client: any) => ({
-      subaccountId: client.id,
+      locationId: client.id,
       name: client.companyName,
     }));
   }, [clientsData]);
@@ -202,7 +202,7 @@ export function LogsToolbar({
     setStagedStatuses((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -210,7 +210,7 @@ export function LogsToolbar({
     setStagedIntents((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -218,7 +218,7 @@ export function LogsToolbar({
     setStagedUserIds((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
@@ -288,7 +288,7 @@ export function LogsToolbar({
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
 
           <Input
-            placeholder="Search contacts by name, email, company..."
+            placeholder="Search clients by name, email, company..."
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-128 pl-8"
@@ -299,7 +299,7 @@ export function LogsToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -542,13 +542,13 @@ export function LogsToolbar({
         </DropdownMenu>
 
         {/* Client filter for all-clients view */}
-        {scope === "all-clients" && onSubaccountChange && (
+        {scope === "all-clients" && onLocationChange && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="h-8.5! min-w-32">
-                {selectedSubaccountId
+                {selectedLocationId
                   ? clients.find(
-                      (c: any) => c.subaccountId === selectedSubaccountId
+                      (c: any) => c.locationId === selectedLocationId,
                     )?.name || "Select client"
                   : "All clients"}
                 <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
@@ -560,17 +560,17 @@ export function LogsToolbar({
               className="rounded-lg bg-background border border-black/10 dark:border-white/5 w-[220px] p-1"
             >
               <DropdownMenuCheckboxItem
-                checked={selectedSubaccountId === ""}
-                onSelect={() => onSubaccountChange("")}
+                checked={selectedLocationId === ""}
+                onSelect={() => onLocationChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black rounded-lg cursor-pointer"
               >
                 All clients
               </DropdownMenuCheckboxItem>
               {clients.map((client: any) => (
                 <DropdownMenuCheckboxItem
-                  key={client.subaccountId}
-                  checked={selectedSubaccountId === client.subaccountId}
-                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  key={client.locationId}
+                  checked={selectedLocationId === client.locationId}
+                  onSelect={() => onLocationChange(client.locationId)}
                   className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black rounded-lg cursor-pointer"
                 >
                   {client.name}
@@ -614,7 +614,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -624,16 +624,16 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
@@ -641,7 +641,7 @@ function ColumnControls({
       activationConstraint: {
         distance: 5,
       },
-    })
+    }),
   );
 
   function handleDragEnd(event: DragEndEvent) {
@@ -649,10 +649,10 @@ function ColumnControls({
     if (!over || active.id === over.id) return;
 
     const oldIndex = draggableColumns.findIndex(
-      (column) => column.id === active.id
+      (column) => column.id === active.id,
     );
     const newIndex = draggableColumns.findIndex(
-      (column) => column.id === over.id
+      (column) => column.id === over.id,
     );
 
     if (oldIndex !== -1 && newIndex !== -1) {

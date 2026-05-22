@@ -7,10 +7,12 @@ import {
   ErrorView,
   LoadingView,
 } from "@/components/react-flow/entity-components";
+import { PageTabs } from "@/components/ui/page-tabs";
+import { useQueryState } from "nuqs";
 import { useSuspenseAllExecutions } from "../hooks/use-executions";
 import { ExecutionsTimeline } from "./executions-timeline";
-import type { Execution } from "@prisma/client";
-import { Separator } from "@/components/ui/separator";
+import type { Execution } from "@/db/types";
+import { AutomationInsights } from "./automation-insights";
 type ExecutionWithWorkflow = Execution & {
   workflow: { id: string; name: string };
 };
@@ -46,8 +48,24 @@ export const ExecutionsContainer = ({
 }: {
   children: React.ReactNode;
 }) => {
+  const [view, setView] = useQueryState("view", {
+    defaultValue: "timeline",
+    clearOnDefault: true,
+  });
+
   return (
-    <EntityContainer header={<ExecutionsHeader />}>{children}</EntityContainer>
+    <EntityContainer header={<ExecutionsHeader />}>
+      <PageTabs
+        tabs={[
+          { id: "timeline", label: "Timeline" },
+          { id: "automation-insights", label: "Automation insights" },
+        ]}
+        activeTab={view}
+        onTabChange={setView}
+        className="px-6"
+      />
+      {view === "automation-insights" ? <AutomationInsights /> : children}
+    </EntityContainer>
   );
 };
 

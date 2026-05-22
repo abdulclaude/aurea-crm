@@ -73,7 +73,7 @@ function Map({ children, styles, ...props }: MapProps) {
       dark: styles?.dark ?? defaultStyles.dark,
       light: styles?.light ?? defaultStyles.light,
     }),
-    [styles]
+    [styles],
   );
 
   useEffect(() => {
@@ -116,7 +116,7 @@ function Map({ children, styles, ...props }: MapProps) {
       setIsStyleLoaded(false);
       mapRef.current.setStyle(
         resolvedTheme === "dark" ? mapStyles.dark : mapStyles.light,
-        { diff: true }
+        { diff: true },
       );
     }
   }, [resolvedTheme, mapStyles]);
@@ -274,7 +274,7 @@ function MapMarker({
       const scale = minScale + (maxScale - minScale) * t;
       markerElementRef.current?.style.setProperty(
         "--marker-scale",
-        scale.toFixed(3)
+        scale.toFixed(3),
       );
     };
 
@@ -307,12 +307,12 @@ function MapMarker({
     }
     if (prev.rotationAlignment !== markerOptions.rotationAlignment) {
       markerRef.current.setRotationAlignment(
-        markerOptions.rotationAlignment ?? "auto"
+        markerOptions.rotationAlignment ?? "auto",
       );
     }
     if (prev.pitchAlignment !== markerOptions.pitchAlignment) {
       markerRef.current.setPitchAlignment(
-        markerOptions.pitchAlignment ?? "auto"
+        markerOptions.pitchAlignment ?? "auto",
       );
     }
 
@@ -345,7 +345,7 @@ function MarkerContent({ children, className }: MarkerContentProps) {
     >
       {children || <DefaultMarkerIcon />}
     </div>,
-    markerElementRef.current
+    markerElementRef.current,
   );
 }
 
@@ -421,7 +421,7 @@ function MarkerPopup({
     <div
       className={cn(
         "relative rounded-md border bg-popover p-3 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95",
-        className
+        className,
       )}
     >
       {closeButton && (
@@ -437,7 +437,7 @@ function MarkerPopup({
       )}
       {children}
     </div>,
-    containerRef.current
+    containerRef.current,
   );
 }
 
@@ -517,12 +517,12 @@ function MarkerTooltip({
     <div
       className={cn(
         "rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-md animate-in fade-in-0 zoom-in-95",
-        className
+        className,
       )}
     >
       {children}
     </div>,
-    containerRef.current
+    containerRef.current,
   );
 }
 
@@ -546,9 +546,9 @@ function MarkerLabel({
     <div
       className={cn(
         "absolute left-1/2 -translate-x-1/2 whitespace-nowrap",
-        "text-[10px] font-medium text-foreground",
+        "text-[10px] font-medium text-black",
         positionClasses[position],
-        className
+        className,
       )}
     >
       {children}
@@ -599,7 +599,7 @@ function ControlButton({
       type="button"
       className={cn(
         "flex items-center justify-center size-8 hover:bg-accent dark:hover:bg-accent/40 transition-colors",
-        disabled && "opacity-50 pointer-events-none cursor-not-allowed"
+        disabled && "opacity-50 pointer-events-none cursor-not-allowed",
       )}
       disabled={disabled}
     >
@@ -652,7 +652,7 @@ function MapControls({
         (error) => {
           console.error("Error getting location:", error);
           setWaitingForLocation(false);
-        }
+        },
       );
     }
   }, [map, onLocate]);
@@ -674,7 +674,7 @@ function MapControls({
       className={cn(
         "absolute z-10 flex flex-col gap-1.5",
         positionClasses[position],
-        className
+        className,
       )}
     >
       {showZoom && (
@@ -839,7 +839,7 @@ function MapPopup({
     <div
       className={cn(
         "relative rounded-md border bg-popover p-3 text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95",
-        className
+        className,
       )}
     >
       {closeButton && (
@@ -855,7 +855,7 @@ function MapPopup({
       )}
       {children}
     </div>,
-    container
+    container,
   );
 }
 
@@ -943,6 +943,388 @@ function MapRoute({
   return null;
 }
 
+type MapClusterLayerProps<
+  P extends GeoJSON.GeoJsonProperties = GeoJSON.GeoJsonProperties,
+> = {
+  /** GeoJSON FeatureCollection data or URL to fetch GeoJSON from */
+  data: string | GeoJSON.FeatureCollection<GeoJSON.Point, P>;
+  /** Maximum zoom level to cluster points on (default: 14) */
+  clusterMaxZoom?: number;
+  /** Radius of each cluster when clustering points in pixels (default: 50) */
+  clusterRadius?: number;
+  /** Colors for cluster circles: [small, medium, large] based on point count (default: ["#51bbd6", "#f1f075", "#f28cb1"]) */
+  clusterColors?: [string, string, string];
+  /** Point count thresholds for color/size steps: [medium, large] (default: [100, 750]) */
+  clusterThresholds?: [number, number];
+  /** Sizes for cluster circles: [small, medium, large] in pixels (default: [18, 24, 32]) */
+  clusterSizes?: [number, number, number];
+  /** Color for unclustered individual points (default: "#3b82f6") */
+  pointColor?: string;
+  /** Radius for unclustered individual points (default: 6) */
+  pointRadius?: number;
+  /** Show ping animation on unclustered points (default: false) */
+  showPingAnimation?: boolean;
+  /** Callback when an unclustered point is clicked */
+  onPointClick?: (
+    feature: GeoJSON.Feature<GeoJSON.Point, P>,
+    coordinates: [number, number],
+  ) => void;
+  /** Callback when a cluster is clicked. If not provided, zooms into the cluster */
+  onClusterClick?: (
+    clusterId: number,
+    coordinates: [number, number],
+    pointCount: number,
+  ) => void;
+};
+
+function MapClusterLayer<
+  P extends GeoJSON.GeoJsonProperties = GeoJSON.GeoJsonProperties,
+>({
+  data,
+  clusterMaxZoom = 14,
+  clusterRadius = 50,
+  clusterColors = ["#51bbd6", "#f1f075", "#f28cb1"],
+  clusterThresholds = [100, 750],
+  clusterSizes = [18, 24, 32],
+  pointColor = "#3b82f6",
+  pointRadius = 6,
+  showPingAnimation = false,
+  onPointClick,
+  onClusterClick,
+}: MapClusterLayerProps<P>) {
+  const { map, isLoaded } = useMap();
+  const id = useId();
+  const sourceId = `cluster-source-${id}`;
+  const clusterLayerId = `clusters-${id}`;
+  const clusterCountLayerId = `cluster-count-${id}`;
+  const unclusteredLayerId = `unclustered-point-${id}`;
+  const pingLayerId = `ping-${id}`;
+  const animationRef = useRef<number | null>(null);
+
+  const stylePropsRef = useRef({
+    clusterColors,
+    clusterThresholds,
+    clusterSizes,
+    pointColor,
+    pointRadius,
+  });
+
+  // Add source and layers on mount
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    // Add clustered GeoJSON source
+    map.addSource(sourceId, {
+      type: "geojson",
+      data,
+      cluster: true,
+      clusterMaxZoom,
+      clusterRadius,
+    });
+
+    // Add cluster circles layer
+    map.addLayer({
+      id: clusterLayerId,
+      type: "circle",
+      source: sourceId,
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-color": [
+          "step",
+          ["get", "point_count"],
+          clusterColors[0],
+          clusterThresholds[0],
+          clusterColors[1],
+          clusterThresholds[1],
+          clusterColors[2],
+        ],
+        "circle-radius": [
+          "step",
+          ["get", "point_count"],
+          clusterSizes[0],
+          clusterThresholds[0],
+          clusterSizes[1],
+          clusterThresholds[1],
+          clusterSizes[2],
+        ],
+      },
+    });
+
+    // Add cluster count text layer
+    map.addLayer({
+      id: clusterCountLayerId,
+      type: "symbol",
+      source: sourceId,
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": "{point_count_abbreviated}",
+        "text-size": 11,
+      },
+      paint: {
+        "text-color": "#fff",
+      },
+    });
+
+    // Add ping animation layer for unclustered points (behind the main point)
+    if (showPingAnimation) {
+      map.addLayer({
+        id: pingLayerId,
+        type: "circle",
+        source: sourceId,
+        filter: ["!", ["has", "point_count"]],
+        paint: {
+          "circle-color": pointColor,
+          "circle-radius": pointRadius,
+          "circle-opacity": 0.3,
+        },
+      });
+    }
+
+    // Add unclustered point layer
+    map.addLayer({
+      id: unclusteredLayerId,
+      type: "circle",
+      source: sourceId,
+      filter: ["!", ["has", "point_count"]],
+      paint: {
+        "circle-color": pointColor,
+        "circle-radius": pointRadius,
+        "circle-stroke-width": 1,
+        "circle-stroke-color": "#fff",
+      },
+    });
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+      try {
+        if (map.getLayer(clusterCountLayerId))
+          map.removeLayer(clusterCountLayerId);
+        if (map.getLayer(unclusteredLayerId))
+          map.removeLayer(unclusteredLayerId);
+        if (map.getLayer(pingLayerId)) map.removeLayer(pingLayerId);
+        if (map.getLayer(clusterLayerId)) map.removeLayer(clusterLayerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      } catch {
+        // ignore
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, map, sourceId]);
+
+  // Ping animation effect
+  useEffect(() => {
+    if (!isLoaded || !map || !showPingAnimation) return;
+
+    let startTime: number | null = null;
+    const duration = 2000; // 2 seconds per cycle
+    const maxRadius = pointRadius * 2.5;
+
+    const animate = (timestamp: number) => {
+      if (!startTime) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      const progress = (elapsed % duration) / duration;
+
+      // Easing function for smooth animation
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      const currentRadius = pointRadius + (maxRadius - pointRadius) * easeOut;
+      const currentOpacity = 0.4 * (1 - easeOut);
+
+      if (map.getLayer(pingLayerId)) {
+        map.setPaintProperty(pingLayerId, "circle-radius", currentRadius);
+        map.setPaintProperty(pingLayerId, "circle-opacity", currentOpacity);
+      }
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = null;
+      }
+    };
+  }, [isLoaded, map, showPingAnimation, pointRadius, pingLayerId]);
+
+  // Update source data when data prop changes (only for non-URL data)
+  useEffect(() => {
+    if (!isLoaded || !map || typeof data === "string") return;
+
+    const source = map.getSource(sourceId) as MapLibreGL.GeoJSONSource;
+    if (source) {
+      source.setData(data);
+    }
+  }, [isLoaded, map, data, sourceId]);
+
+  // Update layer styles when props change
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    const prev = stylePropsRef.current;
+    const clusterStyleChanged =
+      prev.clusterColors !== clusterColors ||
+      prev.clusterThresholds !== clusterThresholds ||
+      prev.clusterSizes !== clusterSizes;
+
+    // Update cluster layer colors and sizes
+    if (map.getLayer(clusterLayerId) && clusterStyleChanged) {
+      map.setPaintProperty(clusterLayerId, "circle-color", [
+        "step",
+        ["get", "point_count"],
+        clusterColors[0],
+        clusterThresholds[0],
+        clusterColors[1],
+        clusterThresholds[1],
+        clusterColors[2],
+      ]);
+      map.setPaintProperty(clusterLayerId, "circle-radius", [
+        "step",
+        ["get", "point_count"],
+        clusterSizes[0],
+        clusterThresholds[0],
+        clusterSizes[1],
+        clusterThresholds[1],
+        clusterSizes[2],
+      ]);
+    }
+
+    // Update unclustered point layer color and radius
+    if (map.getLayer(unclusteredLayerId)) {
+      if (prev.pointColor !== pointColor) {
+        map.setPaintProperty(unclusteredLayerId, "circle-color", pointColor);
+      }
+      if (prev.pointRadius !== pointRadius) {
+        map.setPaintProperty(unclusteredLayerId, "circle-radius", pointRadius);
+      }
+    }
+
+    stylePropsRef.current = {
+      clusterColors,
+      clusterThresholds,
+      clusterSizes,
+      pointColor,
+      pointRadius,
+    };
+  }, [
+    isLoaded,
+    map,
+    clusterLayerId,
+    unclusteredLayerId,
+    clusterColors,
+    clusterThresholds,
+    clusterSizes,
+    pointColor,
+    pointRadius,
+  ]);
+
+  // Handle click events
+  useEffect(() => {
+    if (!isLoaded || !map) return;
+
+    // Cluster click handler - zoom into cluster
+    const handleClusterClick = async (
+      e: MapLibreGL.MapMouseEvent & {
+        features?: MapLibreGL.MapGeoJSONFeature[];
+      },
+    ) => {
+      const features = map.queryRenderedFeatures(e.point, {
+        layers: [clusterLayerId],
+      });
+      if (!features.length) return;
+
+      const feature = features[0];
+      const clusterId = feature.properties?.cluster_id as number;
+      const pointCount = feature.properties?.point_count as number;
+      const coordinates = (feature.geometry as GeoJSON.Point).coordinates as [
+        number,
+        number,
+      ];
+
+      if (onClusterClick) {
+        onClusterClick(clusterId, coordinates, pointCount);
+      } else {
+        // Default behavior: zoom to cluster expansion zoom
+        const source = map.getSource(sourceId) as MapLibreGL.GeoJSONSource;
+        const zoom = await source.getClusterExpansionZoom(clusterId);
+        map.easeTo({
+          center: coordinates,
+          zoom,
+        });
+      }
+    };
+
+    // Unclustered point click handler
+    const handlePointClick = (
+      e: MapLibreGL.MapMouseEvent & {
+        features?: MapLibreGL.MapGeoJSONFeature[];
+      },
+    ) => {
+      if (!onPointClick || !e.features?.length) return;
+
+      const feature = e.features[0];
+      const coordinates = (
+        feature.geometry as GeoJSON.Point
+      ).coordinates.slice() as [number, number];
+
+      // Handle world copies
+      while (Math.abs(e.lngLat.lng - coordinates[0]) > 180) {
+        coordinates[0] += e.lngLat.lng > coordinates[0] ? 360 : -360;
+      }
+
+      onPointClick(
+        feature as unknown as GeoJSON.Feature<GeoJSON.Point, P>,
+        coordinates,
+      );
+    };
+
+    // Cursor style handlers
+    const handleMouseEnterCluster = () => {
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const handleMouseLeaveCluster = () => {
+      map.getCanvas().style.cursor = "";
+    };
+    const handleMouseEnterPoint = () => {
+      if (onPointClick) {
+        map.getCanvas().style.cursor = "pointer";
+      }
+    };
+    const handleMouseLeavePoint = () => {
+      map.getCanvas().style.cursor = "";
+    };
+
+    map.on("click", clusterLayerId, handleClusterClick);
+    map.on("click", unclusteredLayerId, handlePointClick);
+    map.on("mouseenter", clusterLayerId, handleMouseEnterCluster);
+    map.on("mouseleave", clusterLayerId, handleMouseLeaveCluster);
+    map.on("mouseenter", unclusteredLayerId, handleMouseEnterPoint);
+    map.on("mouseleave", unclusteredLayerId, handleMouseLeavePoint);
+
+    return () => {
+      map.off("click", clusterLayerId, handleClusterClick);
+      map.off("click", unclusteredLayerId, handlePointClick);
+      map.off("mouseenter", clusterLayerId, handleMouseEnterCluster);
+      map.off("mouseleave", clusterLayerId, handleMouseLeaveCluster);
+      map.off("mouseenter", unclusteredLayerId, handleMouseEnterPoint);
+      map.off("mouseleave", unclusteredLayerId, handleMouseLeavePoint);
+    };
+  }, [
+    isLoaded,
+    map,
+    clusterLayerId,
+    unclusteredLayerId,
+    sourceId,
+    onClusterClick,
+    onPointClick,
+  ]);
+
+  return null;
+}
+
 export {
   Map,
   useMap,
@@ -954,4 +1336,5 @@ export {
   MapPopup,
   MapControls,
   MapRoute,
+  MapClusterLayer,
 };

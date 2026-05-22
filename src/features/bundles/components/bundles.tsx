@@ -35,8 +35,8 @@ import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useBundlesParams } from "../hooks/use-bundles-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
-import type { Workflows } from "@prisma/client";
-import { NodeType } from "@prisma/client";
+import type { Workflows } from "@/db/types";
+import { NodeType } from "@/db/enums";
 
 type BundleNodePreview = {
   id?: string;

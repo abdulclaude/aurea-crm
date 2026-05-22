@@ -94,36 +94,36 @@ const columns: ColumnDef<DealRow>[] = [
     },
   },
   {
-    id: "contacts",
-    header: "Contacts",
-    meta: { label: "Contacts" },
+    id: "clients",
+    header: "Clients",
+    meta: { label: "Clients" },
     cell: ({ row }) => {
-      const contacts = row.original.contacts;
-      if (contacts.length === 0) {
-        return <span className="text-xs text-white/40">No contacts</span>;
+      const clients = row.original.clients;
+      if (clients.length === 0) {
+        return <span className="text-xs text-white/40">No clients</span>;
       }
       return (
         <div className="flex flex-col gap-1">
-          {contacts.slice(0, 2).map((contact: (typeof contacts)[number]) => (
-            <div key={contact.id} className="flex items-center gap-2">
+          {clients.slice(0, 2).map((client: (typeof clients)[number]) => (
+            <div key={client.id} className="flex items-center gap-2">
               <Avatar className="size-6 border border-white/5">
                 <AvatarFallback className="bg-[#1f2a2f] text-[10px]">
-                  {(contact.name?.[0] ?? "C").toUpperCase()}
+                  {(client.name?.[0] ?? "C").toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0">
                 <p className="truncate text-xs text-white">
-                  {contact.name ?? "Unknown"}
+                  {client.name ?? "Unknown"}
                 </p>
                 <p className="truncate text-[10px] text-white/50">
-                  {contact.email ?? "No email"}
+                  {client.email ?? "No email"}
                 </p>
               </div>
             </div>
           ))}
-          {contacts.length > 2 && (
+          {clients.length > 2 && (
             <span className="text-[11px] text-white/50">
-              +{contacts.length - 2} more contact(s)
+              +{clients.length - 2} more client(s)
             </span>
           )}
         </div>
@@ -132,8 +132,8 @@ const columns: ColumnDef<DealRow>[] = [
   },
   {
     id: "members",
-    header: "Members assigned",
-    meta: { label: "Members assigned" },
+    header: "Clients assigned",
+    meta: { label: "Clients assigned" },
     cell: ({ row }) => {
       const members = row.original.members;
       if (members.length === 0) {
@@ -227,7 +227,7 @@ const columns: ColumnDef<DealRow>[] = [
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              className="size-8 p-0 hover:bg-[#202e32] hover:brightness-130 hover:text-white"
+              className="size-8 p-0 hover:bg-accent hover:text-black"
               onClick={(e) => e.stopPropagation()}
             >
               <span className="sr-only">Open menu</span>
@@ -286,7 +286,7 @@ export function PipelineListView({ pipelineId }: PipelineListViewProps) {
   const [rowSelection, setRowSelection] = React.useState({});
 
   const { data } = useSuspenseQuery(
-    trpc.deals.list.queryOptions({ pipelineId })
+    trpc.deals.list.queryOptions({ pipelineId }),
   );
 
   return (

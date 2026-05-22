@@ -4,7 +4,7 @@ import { useQueryStates, parseAsString, parseAsArrayOf, parseAsInteger } from "n
 
 export type TimesheetParams = {
   search?: string;
-  workers?: string[];
+  instructors?: string[];
   deals?: string[];
   statuses?: string[];
   startDate?: string;
@@ -21,7 +21,7 @@ export function useTimesheetParams() {
   return useQueryStates(
     {
       search: parseAsString.withDefault(""),
-      workers: parseAsArrayOf(parseAsString).withDefault([]),
+      instructors: parseAsArrayOf(parseAsString).withDefault([]),
       deals: parseAsArrayOf(parseAsString).withDefault([]),
       statuses: parseAsArrayOf(parseAsString).withDefault([]),
       startDate: parseAsString.withDefault(""),

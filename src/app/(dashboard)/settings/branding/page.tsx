@@ -33,7 +33,7 @@ export default function BrandingSettingsPage() {
   const [country, setCountry] = useState("");
 
   const isOrganization = workspace?.type === "organization";
-  const isSubaccount = workspace?.type === "subaccount";
+  const isLocation = workspace?.type === "location";
 
   // Update local state when workspace data is loaded
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function BrandingSettingsPage() {
         setState(address?.state || "");
         setZip(address?.zip || "");
         setCountry(address?.country || "");
-      } else if (workspace.type === "subaccount") {
+      } else if (workspace.type === "location") {
         const sub = workspace.data;
         setBusinessEmail(sub?.businessEmail || "");
         setBusinessPhone(sub?.businessPhone || "");
@@ -85,8 +85,8 @@ export default function BrandingSettingsPage() {
     trpc.organizations.updateOrganization.mutationOptions()
   );
 
-  const updateSubaccount = useMutation(
-    trpc.organizations.updateSubaccount.mutationOptions()
+  const updateLocation = useMutation(
+    trpc.organizations.updateLocation.mutationOptions()
   );
 
   const handleSave = async () => {
@@ -110,9 +110,9 @@ export default function BrandingSettingsPage() {
         });
         toast.success("Branding settings updated successfully");
         refetch();
-      } else if (workspace?.type === "subaccount") {
-        await updateSubaccount.mutateAsync({
-          subaccountId: workspace.data?.id || "",
+      } else if (workspace?.type === "location") {
+        await updateLocation.mutateAsync({
+          locationId: workspace.data?.id || "",
           businessEmail: businessEmail || null,
           businessPhone: businessPhone || null,
           website: website || null,
@@ -153,7 +153,7 @@ export default function BrandingSettingsPage() {
     );
   }
 
-  const isPending = updateOrganization.isPending || updateSubaccount.isPending;
+  const isPending = updateOrganization.isPending || updateLocation.isPending;
   const workspaceName =
     workspace.type === "organization"
       ? workspace.data?.name
@@ -167,7 +167,7 @@ export default function BrandingSettingsPage() {
             variant={isOrganization ? "gradient" : "secondary"}
             className="w-max rounded-full p-1 px-2.5"
           >
-            {isOrganization ? "Agency" : "Client"}
+            {isOrganization ? "Studio" : "Location"}
           </Badge>
 
           <h1 className="text-lg font-bold">Branding Settings</h1>
@@ -175,8 +175,8 @@ export default function BrandingSettingsPage() {
 
         <p className="text-muted-foreground text-xs">
           {isOrganization
-            ? "Customize your organization's branding for invoices and emails"
-            : "Customize your client workspace branding for invoices sent to your customers"}
+            ? "Customize your studio's branding for invoices and emails"
+            : "Customize your location workspace branding for invoices sent to your customers"}
         </p>
       </div>
 
@@ -239,14 +239,14 @@ export default function BrandingSettingsPage() {
 
         <Separator className="bg-black/10 dark:bg-white/5" />
 
-        {/* Business Contact Information */}
+        {/* Business Client Information */}
         <div className="p-6">
           <h2 className="text-sm font-medium mb-4">
-            Business Contact Information
+            Business Client Information
           </h2>
           <p className="text-xs text-muted-foreground mb-4">
             This information appears on invoices you send to{" "}
-            {isOrganization ? "clients" : "your customers"}
+            {isOrganization ? "locations" : "your customers"}
           </p>
           <div className="grid grid-cols-2 gap-4 max-w-2xl">
             <div className="space-y-2">
@@ -468,12 +468,12 @@ export default function BrandingSettingsPage() {
             </div>
           </div>
 
-          {isSubaccount && (
+          {isLocation && (
             <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
               <p className="text-xs text-blue-700 dark:text-blue-300">
-                <strong>Note:</strong> As a client workspace, your invoices
+                <strong>Note:</strong> As a location workspace, your invoices
                 will use these settings. If a field is not set here, it will
-                fall back to your agency's organization-level branding.
+                fall back to your studio's organization-level branding.
               </p>
             </div>
           )}

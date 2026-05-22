@@ -1,2 +1,0 @@
--- AlterEnum
-ALTER TYPE "ModuleType" ADD VALUE 'PILATES_STUDIO';

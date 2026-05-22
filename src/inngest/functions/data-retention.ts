@@ -4,7 +4,14 @@
  */
 
 import { inngest } from "../client";
-import db from "@/lib/db";
+import { and, eq, isNotNull, lt, notExists } from "drizzle-orm";
+import { db } from "@/db";
+import {
+  anonymousUserProfiles,
+  funnelEvent,
+  funnelSession,
+  funnelWebVital,
+} from "@/db/schema";
 
 export const dataRetentionCleanup = inngest.createFunction(
   {
@@ -20,16 +27,13 @@ export const dataRetentionCleanup = inngest.createFunction(
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 days default retention
 
-      const result = await db.funnelSession.deleteMany({
-        where: {
-          createdAt: {
-            lt: cutoffDate,
-          },
-        },
-      });
+      const result = await db
+        .delete(funnelSession)
+        .where(lt(funnelSession.createdAt, cutoffDate))
+        .returning({ id: funnelSession.id });
 
-      console.log(`[Data Retention] Deleted ${result.count} old sessions`);
-      return result.count;
+      console.log(`[Data Retention] Deleted ${result.length} old sessions`);
+      return result.length;
     });
 
     // Step 2: Delete old funnel events (orphaned or expired)
@@ -37,16 +41,13 @@ export const dataRetentionCleanup = inngest.createFunction(
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 days default retention
 
-      const result = await db.funnelEvent.deleteMany({
-        where: {
-          createdAt: {
-            lt: cutoffDate,
-          },
-        },
-      });
+      const result = await db
+        .delete(funnelEvent)
+        .where(lt(funnelEvent.createdAt, cutoffDate))
+        .returning({ id: funnelEvent.id });
 
-      console.log(`[Data Retention] Deleted ${result.count} old events`);
-      return result.count;
+      console.log(`[Data Retention] Deleted ${result.length} old events`);
+      return result.length;
     });
 
     // Step 3: Delete old web vitals data
@@ -54,27 +55,20 @@ export const dataRetentionCleanup = inngest.createFunction(
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 days default retention
 
-      const result = await db.funnelWebVital.deleteMany({
-        where: {
-          timestamp: {
-            lt: cutoffDate,
-          },
-        },
-      });
+      const result = await db
+        .delete(funnelWebVital)
+        .where(lt(funnelWebVital.timestamp, cutoffDate))
+        .returning({ id: funnelWebVital.id });
 
-      console.log(`[Data Retention] Deleted ${result.count} old web vitals`);
-      return result.count;
+      console.log(`[Data Retention] Deleted ${result.length} old web vitals`);
+      return result.length;
     });
 
     // Step 4: Process user deletion requests
     const processedDeletions = await step.run("process-deletion-requests", async () => {
       // Find all anonymous user profiles with pending deletion requests
-      const profiles = await db.anonymousUserProfile.findMany({
-        where: {
-          deletionRequestedAt: {
-            not: null,
-          },
-        },
+      const profiles = await db.query.anonymousUserProfiles.findMany({
+        where: isNotNull(anonymousUserProfiles.deletionRequestedAt),
       });
 
       console.log(`[Data Retention] Found ${profiles.length} deletion requests to process`);
@@ -84,26 +78,11 @@ export const dataRetentionCleanup = inngest.createFunction(
       for (const profile of profiles) {
         try {
           // Delete all associated data in a transaction
-          await db.$transaction(async (tx) => {
-            // Delete funnel events
-            await tx.funnelEvent.deleteMany({
-              where: { anonymousId: profile.id },
-            });
-
-            // Delete web vitals
-            await tx.funnelWebVital.deleteMany({
-              where: { anonymousId: profile.id },
-            });
-
-            // Delete sessions
-            await tx.funnelSession.deleteMany({
-              where: { anonymousId: profile.id },
-            });
-
-            // Delete the profile
-            await tx.anonymousUserProfile.delete({
-              where: { id: profile.id },
-            });
+          await db.transaction(async (tx) => {
+            await tx.delete(funnelEvent).where(eq(funnelEvent.anonymousId, profile.id));
+            await tx.delete(funnelWebVital).where(eq(funnelWebVital.anonymousId, profile.id));
+            await tx.delete(funnelSession).where(eq(funnelSession.anonymousId, profile.id));
+            await tx.delete(anonymousUserProfiles).where(eq(anonymousUserProfiles.id, profile.id));
           });
 
           deletedCount++;
@@ -123,16 +102,23 @@ export const dataRetentionCleanup = inngest.createFunction(
       cutoffDate.setDate(cutoffDate.getDate() - 180); // 180 days for profiles without activity
 
       // Find profiles with no recent events or sessions
-      const orphanedProfiles = await db.anonymousUserProfile.findMany({
-        where: {
-          lastSeen: {
-            lt: cutoffDate,
-          },
-          deletionRequestedAt: null, // Don't double-process deletion requests
-        },
-        select: {
-          id: true,
-        },
+      const orphanedProfiles = await db.query.anonymousUserProfiles.findMany({
+        where: and(
+          lt(anonymousUserProfiles.lastSeen, cutoffDate),
+          notExists(
+            db
+              .select({ id: funnelEvent.id })
+              .from(funnelEvent)
+              .where(eq(funnelEvent.anonymousId, anonymousUserProfiles.id))
+          ),
+          notExists(
+            db
+              .select({ id: funnelSession.id })
+              .from(funnelSession)
+              .where(eq(funnelSession.anonymousId, anonymousUserProfiles.id))
+          )
+        ),
+        columns: { id: true },
       });
 
       console.log(`[Data Retention] Found ${orphanedProfiles.length} orphaned profiles`);
@@ -141,22 +127,10 @@ export const dataRetentionCleanup = inngest.createFunction(
 
       for (const profile of orphanedProfiles) {
         try {
-          // Check if profile has any events or sessions
-          const eventCount = await db.funnelEvent.count({
-            where: { anonymousId: profile.id },
-          });
-
-          const sessionCount = await db.funnelSession.count({
-            where: { anonymousId: profile.id },
-          });
-
-          // Only delete if truly orphaned
-          if (eventCount === 0 && sessionCount === 0) {
-            await db.anonymousUserProfile.delete({
-              where: { id: profile.id },
-            });
-            deletedCount++;
-          }
+          await db
+            .delete(anonymousUserProfiles)
+            .where(eq(anonymousUserProfiles.id, profile.id));
+          deletedCount++;
         } catch (error) {
           console.error(`[Data Retention] Error deleting orphaned profile ${profile.id}:`, error);
         }

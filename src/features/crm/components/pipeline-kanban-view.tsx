@@ -74,7 +74,7 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
     value: Deal["value"];
     currency: Deal["currency"];
     deadline: Deal["deadline"];
-    contacts: Deal["contacts"];
+    clients: Deal["clients"];
     members: Deal["members"];
   };
 
@@ -87,7 +87,7 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
         value: deal.value,
         currency: deal.currency,
         deadline: deal.deadline,
-        contacts: deal.contacts,
+        clients: deal.clients,
         members: deal.members,
       })),
     [deals.items]
@@ -147,7 +147,7 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
 
                     <Badge
                       variant="secondary"
-                      className="text-[10px] bg-[#202e32] brightness-140 rounded-full p-0 px-1 text-white/50"
+                      className="text-[10px] bg-muted text-muted-foreground rounded-full p-0 px-1"
                     >
                       {kanbanData.filter((d) => d.column === column.id).length}
                     </Badge>
@@ -162,7 +162,7 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
                 {(item: any) => (
                   <KanbanCard
                     {...item}
-                    className="bg-[#202e32] brightness-140 rounded-sm border-white/5"
+                    className="bg-muted rounded-sm border-border"
                   >
                     <div className="space-y-2">
                       {/* Deal Name and Value */}
@@ -181,34 +181,34 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
                         )}
                       </div>
 
-                      {/* Contacts */}
-                      {item.contacts && item.contacts.length > 0 && (
+                      {/* Clients */}
+                      {item.clients && item.clients.length > 0 && (
                         <div className="flex items-center gap-2">
-                          {item.contacts.length > 1 ? (
+                          {item.clients.length > 1 ? (
                             <div className="flex -space-x-2">
-                              {item.contacts.slice(0, 2).map((contact: any) => (
-                                <Avatar key={contact.id} className="size7">
-                                  <AvatarFallback className="bg-[#202e32] brightness-120 text-[10px] text-white">
-                                    {(contact.name?.[0] ?? "C").toUpperCase()}
+                              {item.clients.slice(0, 2).map((client: any) => (
+                                <Avatar key={client.id} className="size7">
+                                  <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
+                                    {(client.name?.[0] ?? "C").toUpperCase()}
                                   </AvatarFallback>
                                 </Avatar>
                               ))}
                             </div>
                           ) : (
                             <div className="flex space-x-2">
-                              {item.contacts.slice(0, 2).map((contact: any) => (
-                                <div key={contact.id} className="flex items-center gap-2">
+                              {item.clients.slice(0, 2).map((client: any) => (
+                                <div key={client.id} className="flex items-center gap-2">
                                   <Avatar className="size-7.5">
-                                    <AvatarFallback className="bg-[#202e32] brightness-120 text-white text-[10px]">
-                                      {(contact.name?.[0] ?? "C").toUpperCase()}
+                                    <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
+                                      {(client.name?.[0] ?? "C").toUpperCase()}
                                     </AvatarFallback>
                                   </Avatar>
 
                                   <div className="flex flex-col text-[10px] text-white">
-                                    <p className="text-xs"> {contact.name} </p>
+                                    <p className="text-xs"> {client.name} </p>
                                     <p className="text-white/40">
                                       {" "}
-                                      {contact.email}{" "}
+                                      {client.email}{" "}
                                     </p>
                                   </div>
                                 </div>
@@ -216,9 +216,9 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
                             </div>
                           )}
 
-                          {item.contacts.length > 2 && (
+                          {item.clients.length > 2 && (
                             <span className="text-[10px] text-white/50">
-                              +{item.contacts.length - 2} more
+                              +{item.clients.length - 2} more
                             </span>
                           )}
                         </div>
@@ -248,7 +248,7 @@ export function PipelineKanbanView({ pipelineId }: PipelineKanbanViewProps) {
                                         alt={member.name}
                                       />
                                     ) : (
-                                      <AvatarFallback className="bg-[#202e32] brightness-120 text-white text-[10px]">
+                                      <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
                                         {(
                                           member.name?.[0] ?? "U"
                                         ).toUpperCase()}

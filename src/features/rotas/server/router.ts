@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
-import prisma from "@/lib/db";
-import { RotaStatus } from "@prisma/client";
+import { db } from "@/db";
+import { rota, instructor, client, deal, pipeline, pipelineStage, dealClient } from "@/db/schema";
+import { eq, and, or, not, notInArray, gte, lte, gt, lt } from "drizzle-orm";
+import { RotaStatus } from "@/db/enums";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addHours } from "date-fns";
 import crypto from "crypto";
 import { generateShiftOccurrences } from "../lib/recurrence-utils";
@@ -12,8 +14,8 @@ import { generateShiftOccurrences } from "../lib/recurrence-utils";
 // ============================================================================
 
 const createRotaSchema = z.object({
-  workerId: z.string(),
-  contactId: z.string().optional(),
+  instructorId: z.string(),
+  clientId: z.string().optional(),
   companyName: z.string().optional(),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
@@ -31,8 +33,8 @@ const createRotaSchema = z.object({
 
 const updateRotaSchema = z.object({
   id: z.string(),
-  workerId: z.string().optional(),
-  contactId: z.string().optional(),
+  instructorId: z.string().optional(),
+  clientId: z.string().optional(),
   companyName: z.string().optional(),
   pipelineId: z.string().optional(),
   pipelineStageId: z.string().optional(),
@@ -57,8 +59,8 @@ const deleteRotaSchema = z.object({
 const listRotasSchema = z.object({
   startDate: z.date().optional(),
   endDate: z.date().optional(),
-  workerId: z.string().optional(),
-  contactId: z.string().optional(),
+  instructorId: z.string().optional(),
+  clientId: z.string().optional(),
   dealId: z.string().optional(),
   status: z.nativeEnum(RotaStatus).optional(),
   view: z.enum(["day", "week", "month"]).default("week"),
@@ -74,6 +76,37 @@ const updateRotaStatusSchema = z.object({
 });
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Build the overlap-conflict WHERE clause for a given instructor/time range.
+ * Excludes cancelled rotas and optionally excludes a specific rota ID.
+ */
+function buildConflictWhere(
+  instructorId: string,
+  orgId: string,
+  startTime: Date,
+  endTime: Date,
+  excludeRotaId?: string,
+) {
+  return and(
+    ...(excludeRotaId ? [not(eq(rota.id, excludeRotaId))] : []),
+    eq(rota.instructorId, instructorId),
+    eq(rota.organizationId, orgId),
+    notInArray(rota.status, [RotaStatus.CANCELLED]),
+    or(
+      // New shift starts during existing shift
+      and(lte(rota.startTime, startTime), gt(rota.endTime, startTime)),
+      // New shift ends during existing shift
+      and(lt(rota.startTime, endTime), gte(rota.endTime, endTime)),
+      // New shift completely contains existing shift
+      and(gte(rota.startTime, startTime), lte(rota.endTime, endTime)),
+    ),
+  );
+}
+
+// ============================================================================
 // Router
 // ============================================================================
 
@@ -85,7 +118,7 @@ export const rotasRouter = createTRPCRouter({
     .input(createRotaSchema)
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -94,55 +127,32 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      // Verify worker exists and belongs to organization
-      const worker = await prisma.worker.findFirst({
-        where: {
-          id: input.workerId,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        include: {
-          subaccount: true,
+      // Verify instructor exists and belongs to organization
+      const foundInstructor = await db.query.instructor.findFirst({
+        where: and(
+          eq(instructor.id, input.instructorId),
+          eq(instructor.organizationId, orgId),
+          ...(locationId ? [eq(instructor.locationId, locationId)] : []),
+        ),
+        with: {
+          location: true,
           organization: true,
         },
       });
 
-      if (!worker) {
+      if (!foundInstructor) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Worker not found",
+          message: "Instructor not found",
         });
       }
 
-      // Check for scheduling conflicts - overlapping shifts for the same worker
-      const conflictingRota = await prisma.rota.findFirst({
-        where: {
-          workerId: input.workerId,
-          organizationId: orgId,
-          status: {
-            notIn: [RotaStatus.CANCELLED],
-          },
-          OR: [
-            // New shift starts during existing shift
-            {
-              startTime: { lte: input.startTime },
-              endTime: { gt: input.startTime },
-            },
-            // New shift ends during existing shift
-            {
-              startTime: { lt: input.endTime },
-              endTime: { gte: input.endTime },
-            },
-            // New shift completely contains existing shift
-            {
-              startTime: { gte: input.startTime },
-              endTime: { lte: input.endTime },
-            },
-          ],
-        },
-        include: {
-          contact: {
-            select: { name: true },
+      // Check for scheduling conflicts - overlapping shifts for the same instructor
+      const conflictingRota = await db.query.rota.findFirst({
+        where: buildConflictWhere(input.instructorId, orgId, input.startTime, input.endTime),
+        with: {
+          client: {
+            columns: { name: true },
           },
         },
       });
@@ -150,122 +160,123 @@ export const rotasRouter = createTRPCRouter({
       if (conflictingRota) {
         const conflictStart = conflictingRota.startTime.toLocaleString();
         const conflictEnd = conflictingRota.endTime.toLocaleString();
-        const clientInfo = conflictingRota.contact?.name || conflictingRota.companyName || "another client";
+        const clientInfo = conflictingRota.client?.name || conflictingRota.companyName || "another client";
         throw new TRPCError({
           code: "CONFLICT",
-          message: `Worker already scheduled for ${clientInfo} from ${conflictStart} to ${conflictEnd}`,
+          message: `Instructor already scheduled for ${clientInfo} from ${conflictStart} to ${conflictEnd}`,
         });
       }
 
-      // If contactId provided, auto-fill company name from contact if not manually set
+      // If clientId provided, auto-fill company name from client if not manually set
       let companyName = input.companyName;
-      if (input.contactId && !companyName) {
-        const contact = await prisma.contact.findUnique({
-          where: { id: input.contactId },
-          select: { companyName: true },
+      if (input.clientId && !companyName) {
+        const foundClient = await db.query.client.findFirst({
+          where: eq(client.id, input.clientId),
+          columns: { companyName: true },
         });
-        companyName = contact?.companyName || undefined;
+        companyName = foundClient?.companyName || undefined;
       }
 
       // Handle deal creation if dealName provided but no dealId
       let dealId = input.dealId;
-      if (!dealId && input.dealName && subaccountId && input.contactId && input.pipelineId && input.pipelineStageId) {
-        // Verify pipeline exists and belongs to this subaccount
-        const pipeline = await prisma.pipeline.findFirst({
-          where: {
-            id: input.pipelineId,
-            organizationId: orgId,
-            subaccountId,
-          },
-          include: {
-            pipelineStage: {
-              where: {
-                id: input.pipelineStageId,
-              },
+      if (!dealId && input.dealName && locationId && input.clientId && input.pipelineId && input.pipelineStageId) {
+        // Verify pipeline exists and belongs to this location
+        const foundPipeline = await db.query.pipeline.findFirst({
+          where: and(
+            eq(pipeline.id, input.pipelineId),
+            eq(pipeline.organizationId, orgId),
+            eq(pipeline.locationId, locationId),
+          ),
+          with: {
+            pipelineStages: {
+              where: eq(pipelineStage.id, input.pipelineStageId),
             },
           },
         });
 
-        if (!pipeline) {
+        if (!foundPipeline) {
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "Selected pipeline not found.",
           });
         }
 
-        if (pipeline.pipelineStage.length === 0) {
+        if (foundPipeline.pipelineStages.length === 0) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Selected pipeline stage not found.",
           });
         }
 
-        // Calculate deal value based on worker's hourly rate and duration
+        // Calculate deal value based on instructor's hourly rate and duration
         const durationMs = input.endTime.getTime() - input.startTime.getTime();
         const durationHours = durationMs / (1000 * 60 * 60); // Convert milliseconds to hours
-        const hourlyRate = worker.hourlyRate ? Number(worker.hourlyRate) : null;
+        const hourlyRate = foundInstructor.hourlyRate ? Number(foundInstructor.hourlyRate) : null;
         const dealValue = hourlyRate ? durationHours * hourlyRate : null;
 
-        const deal = await prisma.deal.create({
-          data: {
-            id: crypto.randomUUID(),
-            name: input.dealName,
+        const newDealId = crypto.randomUUID();
+        await db.transaction(async (tx) => {
+          await tx.insert(deal).values({
+            id: newDealId,
+            name: input.dealName!,
             organizationId: orgId,
-            subaccountId,
-            pipelineId: input.pipelineId,
-            pipelineStageId: input.pipelineStageId,
+            locationId,
+            pipelineId: input.pipelineId!,
+            pipelineStageId: input.pipelineStageId!,
             deadline: input.endTime,
-            value: dealValue,
-            currency: worker.currency || "GBP",
+            value: dealValue !== null ? String(dealValue) : null,
+            currency: foundInstructor.currency || "GBP",
             createdAt: new Date(),
             updatedAt: new Date(),
-            dealContact: {
-              create: {
-                id: crypto.randomUUID(),
-                contactId: input.contactId,
-              },
-            },
-          },
+          });
+          await tx.insert(dealClient).values({
+            id: crypto.randomUUID(),
+            dealId: newDealId,
+            clientId: input.clientId!,
+          });
         });
 
-        dealId = deal.id;
+        dealId = newDealId;
       }
 
       // Calculate scheduled hours and value
       const scheduledMs = input.endTime.getTime() - input.startTime.getTime();
       const scheduledHours = scheduledMs / (1000 * 60 * 60); // Convert to hours
-      const hourlyRate = worker.hourlyRate ? Number(worker.hourlyRate) : null;
+      const hourlyRate = foundInstructor.hourlyRate ? Number(foundInstructor.hourlyRate) : null;
       const scheduledValue = hourlyRate ? scheduledHours * hourlyRate : null;
 
-      const rota = await prisma.rota.create({
-        data: {
-          id: crypto.randomUUID(),
-          organizationId: orgId,
-          subaccountId: subaccountId || null,
-          workerId: input.workerId,
-          contactId: input.contactId || null,
-          companyName,
-          dealId: dealId || null,
-          startTime: input.startTime,
-          endTime: input.endTime,
-          status: RotaStatus.SCHEDULED,
-          color: input.color,
-          hourlyRate: worker.hourlyRate,
-          scheduledHours,
-          scheduledValue,
-          isRecurring: input.isRecurring || false,
-          recurrenceRule: input.recurrenceRule || null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        include: {
-          worker: {
-            include: {
+      const newRotaId = crypto.randomUUID();
+      await db.insert(rota).values({
+        id: newRotaId,
+        organizationId: orgId,
+        locationId: locationId || null,
+        instructorId: input.instructorId,
+        clientId: input.clientId || null,
+        companyName,
+        dealId: dealId || null,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        status: RotaStatus.SCHEDULED,
+        color: input.color,
+        hourlyRate: foundInstructor.hourlyRate,
+        scheduledHours: scheduledHours !== null ? String(scheduledHours) : null,
+        scheduledValue: scheduledValue !== null ? String(scheduledValue) : null,
+        isRecurring: input.isRecurring || false,
+        recurrenceRule: input.recurrenceRule || null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const createdRota = await db.query.rota.findFirst({
+        where: eq(rota.id, newRotaId),
+        with: {
+          instructor: {
+            with: {
               organization: true,
-              subaccount: true,
+              location: true,
             },
           },
-          contact: true,
+          client: true,
         },
       });
 
@@ -273,33 +284,32 @@ export const rotasRouter = createTRPCRouter({
       // This prevents database bloat and allows editing the recurrence rule
 
       // Send magic link if requested
-      if (input.sendMagicLink && worker.email) {
+      if (input.sendMagicLink && foundInstructor.email) {
         const MAGIC_LINK_EXPIRY_HOURS = 72;
 
         // Generate a secure token
         const token = crypto.randomBytes(32).toString("hex");
 
-        // Update worker with portal token
-        await prisma.worker.update({
-          where: { id: worker.id },
-          data: {
+        // Update instructor with portal token
+        await db.update(instructor)
+          .set({
             portalToken: token,
             portalTokenExpiry: addHours(new Date(), MAGIC_LINK_EXPIRY_HOURS),
-          },
-        });
+          })
+          .where(eq(instructor.id, foundInstructor.id));
 
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const magicLink = `${baseUrl}/portal/${worker.id}/auth?token=${token}`;
+        const magicLink = `${baseUrl}/instructor-signup?token=${token}&id=${foundInstructor.id}`;
 
         // Send email (lazy import to avoid build issues if Resend is not configured)
         try {
-          const { sendMagicLinkEmail } = await import("@/features/workers/lib/send-magic-link");
+          const { sendMagicLinkEmail } = await import("@/features/instructors/lib/send-magic-link");
           const result = await sendMagicLinkEmail({
-            to: worker.email,
-            workerName: worker.name,
+            to: foundInstructor.email,
+            instructorName: foundInstructor.name,
             magicLink,
             expiresAt: addHours(new Date(), MAGIC_LINK_EXPIRY_HOURS),
-            organizationName: worker.subaccount?.companyName || worker.organization.name,
+            organizationName: foundInstructor.location?.companyName || foundInstructor.organization.name,
           });
 
           if (!result.success) {
@@ -309,11 +319,11 @@ export const rotasRouter = createTRPCRouter({
         } catch (error) {
           console.error("Error sending magic link:", error);
         }
-      } else if (input.sendMagicLink && !worker.email) {
-        console.warn("Cannot send magic link: Worker does not have an email address");
+      } else if (input.sendMagicLink && !foundInstructor.email) {
+        console.warn("Cannot send magic link: Instructor does not have an email address");
       }
 
-      return rota;
+      return createdRota;
     }),
 
   /**
@@ -332,11 +342,11 @@ export const rotasRouter = createTRPCRouter({
       }
 
       // Check rota exists and belongs to organization
-      const existingRota = await prisma.rota.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-        },
+      const existingRota = await db.query.rota.findFirst({
+        where: and(
+          eq(rota.id, input.id),
+          eq(rota.organizationId, orgId),
+        ),
       });
 
       if (!existingRota) {
@@ -346,58 +356,34 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
-      // Fetch worker to get hourly rate for deal value calculation
-      const workerId = input.workerId || existingRota.workerId;
-      const worker = await prisma.worker.findFirst({
-        where: {
-          id: workerId,
-          organizationId: orgId,
-        },
+      // Fetch instructor to get hourly rate for deal value calculation
+      const instructorId = input.instructorId || existingRota.instructorId;
+      const foundInstructor = await db.query.instructor.findFirst({
+        where: and(
+          eq(instructor.id, instructorId),
+          eq(instructor.organizationId, orgId),
+        ),
       });
 
-      if (!worker) {
+      if (!foundInstructor) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Worker not found",
+          message: "Instructor not found",
         });
       }
 
-      // Check for scheduling conflicts when time or worker is being changed
+      // Check for scheduling conflicts when time or instructor is being changed
       const newStartTime = input.startTime || existingRota.startTime;
       const newEndTime = input.endTime || existingRota.endTime;
-      const newWorkerId = input.workerId || existingRota.workerId;
+      const newInstructorId = input.instructorId || existingRota.instructorId;
 
-      const conflictingRota = await prisma.rota.findFirst({
-        where: {
-          id: { not: input.id }, // Exclude current rota
-          workerId: newWorkerId,
-          organizationId: orgId,
-          status: {
-            notIn: [RotaStatus.CANCELLED],
-          },
-          OR: [
-            // Updated shift starts during existing shift
-            {
-              startTime: { lte: newStartTime },
-              endTime: { gt: newStartTime },
-            },
-            // Updated shift ends during existing shift
-            {
-              startTime: { lt: newEndTime },
-              endTime: { gte: newEndTime },
-            },
-            // Updated shift completely contains existing shift
-            {
-              startTime: { gte: newStartTime },
-              endTime: { lte: newEndTime },
-            },
-          ],
-        },
-        include: {
-          contact: {
-            select: { name: true },
+      const conflictingRota = await db.query.rota.findFirst({
+        where: buildConflictWhere(newInstructorId, orgId, newStartTime, newEndTime, input.id),
+        with: {
+          client: {
+            columns: { name: true },
           },
         },
       });
@@ -405,106 +391,111 @@ export const rotasRouter = createTRPCRouter({
       if (conflictingRota) {
         const conflictStart = conflictingRota.startTime.toLocaleString();
         const conflictEnd = conflictingRota.endTime.toLocaleString();
-        const clientInfo = conflictingRota.contact?.name || conflictingRota.companyName || "another client";
+        const clientInfo = conflictingRota.client?.name || conflictingRota.companyName || "another client";
         throw new TRPCError({
           code: "CONFLICT",
-          message: `Worker already scheduled for ${clientInfo} from ${conflictStart} to ${conflictEnd}`,
+          message: `Instructor already scheduled for ${clientInfo} from ${conflictStart} to ${conflictEnd}`,
         });
       }
 
-      // If contactId is being updated and companyName is not provided, auto-fill from contact
+      // If clientId is being updated and companyName is not provided, auto-fill from client
       let companyName = input.companyName;
-      if (input.contactId && companyName === undefined) {
-        const contact = await prisma.contact.findUnique({
-          where: { id: input.contactId },
-          select: { companyName: true },
+      if (input.clientId && companyName === undefined) {
+        const foundClient = await db.query.client.findFirst({
+          where: eq(client.id, input.clientId),
+          columns: { companyName: true },
         });
-        companyName = contact?.companyName || undefined;
+        companyName = foundClient?.companyName || undefined;
       }
 
       // Handle deal creation if dealName provided but no dealId
       let dealId = input.dealId;
-      if (!dealId && input.dealName && subaccountId && input.contactId && input.pipelineId && input.pipelineStageId) {
-        // Verify pipeline exists and belongs to this subaccount
-        const pipeline = await prisma.pipeline.findFirst({
-          where: {
-            id: input.pipelineId,
-            organizationId: orgId,
-            subaccountId,
-          },
-          include: {
-            pipelineStage: {
-              where: {
-                id: input.pipelineStageId,
-              },
+      if (!dealId && input.dealName && locationId && input.clientId && input.pipelineId && input.pipelineStageId) {
+        // Verify pipeline exists and belongs to this location
+        const foundPipeline = await db.query.pipeline.findFirst({
+          where: and(
+            eq(pipeline.id, input.pipelineId),
+            eq(pipeline.organizationId, orgId),
+            eq(pipeline.locationId, locationId),
+          ),
+          with: {
+            pipelineStages: {
+              where: eq(pipelineStage.id, input.pipelineStageId),
             },
           },
         });
 
-        if (!pipeline) {
+        if (!foundPipeline) {
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "Selected pipeline not found.",
           });
         }
 
-        if (pipeline.pipelineStage.length === 0) {
+        if (foundPipeline.pipelineStages.length === 0) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Selected pipeline stage not found.",
           });
         }
 
-        // Calculate deal value based on worker's hourly rate and duration
+        // Calculate deal value based on instructor's hourly rate and duration
         const startTime = input.startTime || existingRota.startTime;
         const endTime = input.endTime || existingRota.endTime;
         const durationMs = endTime.getTime() - startTime.getTime();
         const durationHours = durationMs / (1000 * 60 * 60); // Convert milliseconds to hours
-        const hourlyRate = worker.hourlyRate ? Number(worker.hourlyRate) : null;
+        const hourlyRate = foundInstructor.hourlyRate ? Number(foundInstructor.hourlyRate) : null;
         const dealValue = hourlyRate ? durationHours * hourlyRate : null;
 
-        const deal = await prisma.deal.create({
-          data: {
-            id: crypto.randomUUID(),
-            name: input.dealName,
+        const newDealId = crypto.randomUUID();
+        await db.transaction(async (tx) => {
+          await tx.insert(deal).values({
+            id: newDealId,
+            name: input.dealName!,
             organizationId: orgId,
-            subaccountId,
-            pipelineId: input.pipelineId,
-            pipelineStageId: input.pipelineStageId,
+            locationId,
+            pipelineId: input.pipelineId!,
+            pipelineStageId: input.pipelineStageId!,
             deadline: endTime,
-            value: dealValue,
-            currency: worker.currency || "GBP",
+            value: dealValue !== null ? String(dealValue) : null,
+            currency: foundInstructor.currency || "GBP",
             createdAt: new Date(),
             updatedAt: new Date(),
-            dealContact: {
-              create: {
-                id: crypto.randomUUID(),
-                contactId: input.contactId,
-              },
-            },
-          },
+          });
+          await tx.insert(dealClient).values({
+            id: crypto.randomUUID(),
+            dealId: newDealId,
+            clientId: input.clientId!,
+          });
         });
 
-        dealId = deal.id;
+        dealId = newDealId;
       }
 
-      const { id, dealName, pipelineId, pipelineStageId, ...updateData } = input;
+      const { id, dealName, pipelineId: _pipelineId, pipelineStageId: _pipelineStageId, ...updateData } = input;
 
-      const rota = await prisma.rota.update({
-        where: { id },
-        data: {
-          ...updateData,
-          ...(companyName !== undefined && { companyName }),
-          ...(dealId !== undefined && { dealId }),
-        },
-        include: {
-          worker: true,
-          contact: true,
+      const setData: Record<string, unknown> = { ...updateData };
+      if (companyName !== undefined) {
+        setData.companyName = companyName;
+      }
+      if (dealId !== undefined) {
+        setData.dealId = dealId;
+      }
+
+      await db.update(rota)
+        .set(setData)
+        .where(eq(rota.id, id));
+
+      const updatedRota = await db.query.rota.findFirst({
+        where: eq(rota.id, id),
+        with: {
+          instructor: true,
+          client: true,
           deal: true,
         },
       });
 
-      return rota;
+      return updatedRota;
     }),
 
   /**
@@ -522,23 +513,21 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      const rota = await prisma.rota.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-        },
+      const existingRota = await db.query.rota.findFirst({
+        where: and(
+          eq(rota.id, input.id),
+          eq(rota.organizationId, orgId),
+        ),
       });
 
-      if (!rota) {
+      if (!existingRota) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Rota not found",
         });
       }
 
-      await prisma.rota.delete({
-        where: { id: input.id },
-      });
+      await db.delete(rota).where(eq(rota.id, input.id));
 
       return { success: true };
     }),
@@ -558,26 +547,26 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      const rota = await prisma.rota.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-        },
-        include: {
-          worker: true,
-          contact: true,
+      const foundRota = await db.query.rota.findFirst({
+        where: and(
+          eq(rota.id, input.id),
+          eq(rota.organizationId, orgId),
+        ),
+        with: {
+          instructor: true,
+          client: true,
           deal: true,
         },
       });
 
-      if (!rota) {
+      if (!foundRota) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Rota not found",
         });
       }
 
-      return rota;
+      return foundRota;
     }),
 
   /**
@@ -587,7 +576,7 @@ export const rotasRouter = createTRPCRouter({
     .input(listRotasSchema)
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -615,51 +604,52 @@ export const rotasRouter = createTRPCRouter({
         }
       }
 
-      const rotas = await prisma.rota.findMany({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-          ...(input.workerId && { workerId: input.workerId }),
-          ...(input.contactId && { contactId: input.contactId }),
-          ...(input.dealId && { dealId: input.dealId }),
-          ...(input.status && { status: input.status }),
-          ...(startDate && endDate && {
-            OR: [
-              // Non-recurring rotas: starts within range
-              {
-                isRecurring: false,
-                startTime: {
-                  gte: startDate,
-                  lte: endDate,
-                },
-              },
-              // Non-recurring rotas: ends within range
-              {
-                isRecurring: false,
-                endTime: {
-                  gte: startDate,
-                  lte: endDate,
-                },
-              },
-              // Non-recurring rotas: spans the entire range
-              {
-                isRecurring: false,
-                AND: [
-                  { startTime: { lte: startDate } },
-                  { endTime: { gte: endDate } },
-                ],
-              },
-              // Recurring rotas: include if start is before or during range
-              {
-                isRecurring: true,
-                startTime: { lte: endDate },
-              },
-            ],
-          }),
-        },
-        include: {
-          worker: {
-            select: {
+      // Build filter conditions
+      const conditions = [
+        eq(rota.organizationId, orgId),
+        ...(locationId ? [eq(rota.locationId, locationId)] : []),
+        ...(input.instructorId ? [eq(rota.instructorId, input.instructorId)] : []),
+        ...(input.clientId ? [eq(rota.clientId, input.clientId)] : []),
+        ...(input.dealId ? [eq(rota.dealId, input.dealId)] : []),
+        ...(input.status ? [eq(rota.status, input.status)] : []),
+      ];
+
+      // Add date range filter
+      if (startDate && endDate) {
+        conditions.push(
+          or(
+            // Non-recurring rotas: starts within range
+            and(
+              eq(rota.isRecurring, false),
+              gte(rota.startTime, startDate),
+              lte(rota.startTime, endDate),
+            ),
+            // Non-recurring rotas: ends within range
+            and(
+              eq(rota.isRecurring, false),
+              gte(rota.endTime, startDate),
+              lte(rota.endTime, endDate),
+            ),
+            // Non-recurring rotas: spans the entire range
+            and(
+              eq(rota.isRecurring, false),
+              lte(rota.startTime, startDate),
+              gte(rota.endTime, endDate),
+            ),
+            // Recurring rotas: include if start is before or during range
+            and(
+              eq(rota.isRecurring, true),
+              lte(rota.startTime, endDate),
+            ),
+          )!,
+        );
+      }
+
+      const rotas = await db.query.rota.findMany({
+        where: and(...conditions),
+        with: {
+          instructor: {
+            columns: {
               id: true,
               name: true,
               email: true,
@@ -667,8 +657,8 @@ export const rotasRouter = createTRPCRouter({
               role: true,
             },
           },
-          contact: {
-            select: {
+          client: {
+            columns: {
               id: true,
               name: true,
               email: true,
@@ -676,35 +666,37 @@ export const rotasRouter = createTRPCRouter({
             },
           },
           deal: {
-            select: {
+            columns: {
               id: true,
               name: true,
             },
           },
         },
-        orderBy: {
-          startTime: "asc",
-        },
+        orderBy: (t, { asc }) => asc(t.startTime),
       });
 
       // Expand recurring rotas into virtual occurrences
-      const expandedRotas: any[] = [];
+      type RotaListItem = (typeof rotas)[number] & {
+        isVirtual?: boolean;
+        parentRotaId?: string;
+      };
+      const expandedRotas: RotaListItem[] = [];
 
       console.log(`[Rotas] Found ${rotas.length} rotas, expanding recurring ones for ${startDate} to ${endDate}`);
 
-      for (const rota of rotas) {
-        if (rota.isRecurring && rota.recurrenceRule && startDate && endDate) {
-          console.log(`[Rotas] Expanding recurring rota ${rota.id} with rule: ${rota.recurrenceRule}`);
+      for (const rotaItem of rotas) {
+        if (rotaItem.isRecurring && rotaItem.recurrenceRule && startDate && endDate) {
+          console.log(`[Rotas] Expanding recurring rota ${rotaItem.id} with rule: ${rotaItem.recurrenceRule}`);
           // Generate occurrences for this recurring rota within the view range
           try {
             const occurrences = generateShiftOccurrences(
-              rota.startTime,
-              rota.endTime,
-              rota.recurrenceRule,
+              rotaItem.startTime,
+              rotaItem.endTime,
+              rotaItem.recurrenceRule,
               365 // Max 1 year of occurrences
             );
 
-            console.log(`[Rotas] Generated ${occurrences.length} total occurrences for rota ${rota.id}`);
+            console.log(`[Rotas] Generated ${occurrences.length} total occurrences for rota ${rotaItem.id}`);
             if (occurrences.length > 0) {
               console.log(`[Rotas] First 3 occurrences:`, occurrences.slice(0, 3).map(o => o.startTime.toISOString()));
             }
@@ -719,23 +711,23 @@ export const rotasRouter = createTRPCRouter({
             // Create virtual rota objects for each occurrence
             for (const occurrence of visibleOccurrences) {
               expandedRotas.push({
-                ...rota,
-                id: `${rota.id}-${occurrence.startTime.getTime()}`, // Virtual ID
+                ...rotaItem,
+                id: `${rotaItem.id}-${occurrence.startTime.getTime()}`, // Virtual ID
                 startTime: occurrence.startTime,
                 endTime: occurrence.endTime,
                 // Mark as virtual so frontend can distinguish
                 isVirtual: true,
-                parentRotaId: rota.id,
-              } as any);
+                parentRotaId: rotaItem.id,
+              });
             }
           } catch (error) {
-            console.error("Failed to expand recurring rota:", rota.id, error);
+            console.error("Failed to expand recurring rota:", rotaItem.id, error);
             // Still include the base rota if expansion fails
-            expandedRotas.push(rota as any);
+            expandedRotas.push(rotaItem);
           }
         } else {
           // Non-recurring rota - include as-is
-          expandedRotas.push(rota as any);
+          expandedRotas.push(rotaItem);
         }
       }
 
@@ -759,26 +751,29 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      const rota = await prisma.rota.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-        },
+      const existingRota = await db.query.rota.findFirst({
+        where: and(
+          eq(rota.id, input.id),
+          eq(rota.organizationId, orgId),
+        ),
       });
 
-      if (!rota) {
+      if (!existingRota) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Rota not found",
         });
       }
 
-      const updated = await prisma.rota.update({
-        where: { id: input.id },
-        data: { status: input.status },
-        include: {
-          worker: true,
-          contact: true,
+      await db.update(rota)
+        .set({ status: input.status })
+        .where(eq(rota.id, input.id));
+
+      const updated = await db.query.rota.findFirst({
+        where: eq(rota.id, input.id),
+        with: {
+          instructor: true,
+          client: true,
           deal: true,
         },
       });
@@ -793,7 +788,7 @@ export const rotasRouter = createTRPCRouter({
   checkConflicts: protectedProcedure
     .input(
       z.object({
-        workerId: z.string(),
+        instructorId: z.string(),
         startTime: z.date(),
         endTime: z.date(),
         excludeRotaId: z.string().optional(), // Exclude current rota when updating
@@ -809,52 +804,34 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
-      const conflicts = await prisma.rota.findMany({
-        where: {
-          ...(input.excludeRotaId && { id: { not: input.excludeRotaId } }),
-          workerId: input.workerId,
-          organizationId: orgId,
-          status: {
-            notIn: [RotaStatus.CANCELLED],
+      const conflicts = await db.query.rota.findMany({
+        where: buildConflictWhere(
+          input.instructorId,
+          orgId,
+          input.startTime,
+          input.endTime,
+          input.excludeRotaId,
+        ),
+        with: {
+          instructor: {
+            columns: { name: true },
           },
-          OR: [
-            // Shift starts during existing shift
-            {
-              startTime: { lte: input.startTime },
-              endTime: { gt: input.startTime },
-            },
-            // Shift ends during existing shift
-            {
-              startTime: { lt: input.endTime },
-              endTime: { gte: input.endTime },
-            },
-            // Shift completely contains existing shift
-            {
-              startTime: { gte: input.startTime },
-              endTime: { lte: input.endTime },
-            },
-          ],
-        },
-        include: {
-          worker: {
-            select: { name: true },
-          },
-          contact: {
-            select: { name: true },
+          client: {
+            columns: { name: true },
           },
         },
-        orderBy: { startTime: "asc" },
+        orderBy: (t, { asc }) => asc(t.startTime),
       });
 
       return {
         hasConflicts: conflicts.length > 0,
-        conflicts: conflicts.map((rota) => ({
-          id: rota.id,
-          workerName: rota.worker.name,
-          clientName: rota.contact?.name || rota.companyName || "Unknown",
-          startTime: rota.startTime,
-          endTime: rota.endTime,
-          status: rota.status,
+        conflicts: conflicts.map((rotaItem) => ({
+          id: rotaItem.id,
+          instructorName: rotaItem.instructor.name,
+          clientName: rotaItem.client?.name || rotaItem.companyName || "Unknown",
+          startTime: rotaItem.startTime,
+          endTime: rotaItem.endTime,
+          status: rotaItem.status,
         })),
       };
     }),

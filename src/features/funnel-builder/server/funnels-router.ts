@@ -1,22 +1,118 @@
-import { z } from "zod";
-import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import db from "@/lib/db";
-import { FunnelStatus, FunnelBlockType, DeviceType, FunnelDomainType } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
-import { Prisma } from "@prisma/client";
+import { and, asc, count, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import { z } from "zod";
 
-type InputJsonValue = Prisma.InputJsonValue;
+import { db } from "@/db";
+import { ActivityAction, DeviceType, FunnelBlockType, FunnelDomainType, FunnelStatus } from "@/db/enums";
+import {
+  funnel,
+  funnelBlock,
+  funnelBreakpoint,
+  funnelPage,
+  smartSection,
+} from "@/db/schema";
+import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import { createNotification } from "@/lib/notifications";
+import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 
 const FUNNEL_PAGE_SIZE = 20;
+const jsonObjectSchema = z.record(z.string(), z.unknown());
+
+type FunnelRow = typeof funnel.$inferSelect;
+type FunnelPageRow = typeof funnelPage.$inferSelect;
+type FunnelBlockRow = typeof funnelBlock.$inferSelect;
+type FunnelBreakpointRow = typeof funnelBreakpoint.$inferSelect;
+
+type FunnelScope = {
+  orgId: string;
+  locationId: string | null;
+};
+
+type BlockWithRelations = FunnelBlockRow & {
+  funnelPage?: (FunnelPageRow & { funnel?: FunnelRow | null }) | null;
+  smartSection?: (typeof smartSection.$inferSelect) | null;
+  funnelBreakpoints?: FunnelBreakpointRow[];
+  funnelBlocks?: Array<FunnelBlockRow & { funnelBreakpoints?: FunnelBreakpointRow[] }>;
+};
+
+const locationScope = (
+  column: typeof funnel.locationId | typeof smartSection.locationId,
+  locationId: string | null
+): SQL => (locationId === null ? isNull(column) : eq(column, locationId));
+
+const funnelScope = (id: string, scope: FunnelScope): SQL =>
+  and(eq(funnel.id, id), eq(funnel.organizationId, scope.orgId), locationScope(funnel.locationId, scope.locationId))!;
+
+const smartSectionScope = (id: string, scope: FunnelScope): SQL =>
+  and(eq(smartSection.id, id), eq(smartSection.organizationId, scope.orgId), locationScope(smartSection.locationId, scope.locationId))!;
+
+const ensureFunnel = async (id: string, scope: FunnelScope): Promise<FunnelRow> => {
+  const found = await db.query.funnel.findFirst({
+    where: funnelScope(id, scope),
+  });
+
+  if (!found) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Funnel not found",
+    });
+  }
+
+  return found;
+};
+
+const pageBelongsToScope = <T extends FunnelPageRow & { funnel?: FunnelRow | null }>(
+  page: T | null | undefined,
+  scope: FunnelScope
+): page is T & { funnel: FunnelRow } =>
+  !!page?.funnel &&
+  page.funnel.organizationId === scope.orgId &&
+  page.funnel.locationId === scope.locationId;
+
+const blockBelongsToScope = (block: BlockWithRelations | null | undefined, scope: FunnelScope): block is BlockWithRelations => {
+  if (!block) return false;
+  if (pageBelongsToScope(block.funnelPage, scope)) return true;
+  if (block.smartSection?.organizationId === scope.orgId && block.smartSection.locationId === scope.locationId) return true;
+  return false;
+};
+
+const ensureBlock = async (blockId: string, scope: FunnelScope): Promise<BlockWithRelations> => {
+  const block = await db.query.funnelBlock.findFirst({
+    where: eq(funnelBlock.id, blockId),
+    with: {
+      funnelPage: {
+        with: {
+          funnel: true,
+        },
+      },
+      smartSection: true,
+    },
+  });
+
+  if (!blockBelongsToScope(block, scope)) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Block not found",
+    });
+  }
+
+  return block;
+};
+
+const mapPageForClient = <T extends FunnelPageRow & { funnelBlocks?: unknown[] }>(page: T) => ({
+  ...page,
+  funnelBlock: page.funnelBlocks ?? [],
+  _count: {
+    funnelBlock: page.funnelBlocks?.length ?? 0,
+  },
+});
+
+const mapBlockForClient = <T extends FunnelBlockRow & { funnelBreakpoints?: FunnelBreakpointRow[] }>(block: T) => ({
+  ...block,
+  funnelBreakpoint: block.funnelBreakpoints ?? [],
+});
 
 export const funnelsRouter = createTRPCRouter({
-  // ========================================
-  // FUNNEL OPERATIONS
-  // ========================================
-
-  /**
-   * List all funnels for current organization/subaccount
-   */
   list: protectedProcedure
     .input(
       z.object({
@@ -33,18 +129,32 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const where = {
-        organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? null,
-        ...(input.status && { status: input.status }),
-      };
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const filters: SQL[] = [eq(funnel.organizationId, scope.orgId), locationScope(funnel.locationId, scope.locationId)];
 
-      const funnels = await db.funnel.findMany({
-        where,
-        take: input.limit + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
-        orderBy: { updatedAt: "desc" },
-        select: {
+      if (input.status) filters.push(eq(funnel.status, input.status));
+
+      if (input.cursor) {
+        const cursorRow = await db.query.funnel.findFirst({
+          where: eq(funnel.id, input.cursor),
+          columns: { id: true, updatedAt: true },
+        });
+
+        if (cursorRow) {
+          filters.push(
+            or(
+              lt(funnel.updatedAt, cursorRow.updatedAt),
+              and(eq(funnel.updatedAt, cursorRow.updatedAt), lt(funnel.id, cursorRow.id))
+            )!
+          );
+        }
+      }
+
+      const rows = await db.query.funnel.findMany({
+        where: and(...filters),
+        limit: input.limit + 1,
+        orderBy: [desc(funnel.updatedAt), desc(funnel.id)],
+        columns: {
           id: true,
           name: true,
           description: true,
@@ -54,28 +164,30 @@ export const funnelsRouter = createTRPCRouter({
           createdAt: true,
           updatedAt: true,
           organizationId: true,
-          subaccountId: true,
-          _count: {
-            select: { funnelPage: true },
+          locationId: true,
+        },
+        with: {
+          funnelPages: {
+            columns: { id: true },
           },
         },
       });
 
       let nextCursor: string | undefined;
-      if (funnels.length > input.limit) {
-        const nextItem = funnels.pop();
+      if (rows.length > input.limit) {
+        const nextItem = rows.pop();
         nextCursor = nextItem?.id;
       }
 
       return {
-        funnels,
+        funnels: rows.map((row) => ({
+          ...row,
+          _count: { funnelPage: row.funnelPages.length },
+        })),
         nextCursor,
       };
     }),
 
-  /**
-   * Get a single funnel by ID
-   */
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -86,32 +198,25 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-        include: {
-          funnelPage: {
-            orderBy: { order: "asc" },
+      const row = await db.query.funnel.findFirst({
+        where: funnelScope(input.id, { orgId: ctx.orgId, locationId: ctx.locationId ?? null }),
+        with: {
+          funnelPages: {
+            orderBy: asc(funnelPage.order),
           },
         },
       });
 
-      if (!funnel) {
+      if (!row) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Funnel not found",
         });
       }
 
-      return funnel;
+      return { ...row, funnelPage: row.funnelPages };
     }),
 
-  /**
-   * Create a new funnel
-   */
   create: protectedProcedure
     .input(
       z.object({
@@ -127,25 +232,49 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const funnel = await db.funnel.create({
-        data: {
+      const [created] = await db
+        .insert(funnel)
+        .values({
           id: crypto.randomUUID(),
           name: input.name,
           description: input.description,
           organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId,
+          locationId: ctx.locationId,
           status: FunnelStatus.DRAFT,
           createdAt: new Date(),
           updatedAt: new Date(),
+        })
+        .returning();
+
+      await createNotification({
+        type: "FUNNEL_CREATED",
+        title: "Funnel created",
+        message: `${ctx.auth.user.name} created funnel ${created.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "funnel",
+        entityId: created.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? undefined,
+      });
+
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "funnel",
+        entityId: created.id,
+        entityName: created.name,
+        metadata: { status: created.status },
+        posthogProperties: {
+          status: created.status,
+          has_description: !!created.description,
         },
       });
 
-      return funnel;
+      return created;
     }),
 
-  /**
-   * Update funnel metadata
-   */
   update: protectedProcedure
     .input(
       z.object({
@@ -166,28 +295,13 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const existing = await ensureFunnel(input.id, scope);
 
-      if (!funnel) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
-        });
-      }
-
-      // Check subdomain uniqueness if changing subdomain
-      if (input.subdomain && input.subdomain !== funnel.subdomain) {
-        const existingSubdomain = await db.funnel.findFirst({
-          where: {
-            subdomain: input.subdomain,
-            id: { not: input.id },
-          },
+      if (input.subdomain && input.subdomain !== existing.subdomain) {
+        const existingSubdomain = await db.query.funnel.findFirst({
+          where: and(eq(funnel.subdomain, input.subdomain), ne(funnel.id, input.id)),
+          columns: { id: true },
         });
 
         if (existingSubdomain) {
@@ -198,13 +312,10 @@ export const funnelsRouter = createTRPCRouter({
         }
       }
 
-      // Check custom domain uniqueness if changing custom domain
-      if (input.customDomain && input.customDomain !== funnel.customDomain) {
-        const existingCustomDomain = await db.funnel.findFirst({
-          where: {
-            customDomain: input.customDomain,
-            id: { not: input.id },
-          },
+      if (input.customDomain && input.customDomain !== existing.customDomain) {
+        const existingCustomDomain = await db.query.funnel.findFirst({
+          where: and(eq(funnel.customDomain, input.customDomain), ne(funnel.id, input.id)),
+          columns: { id: true },
         });
 
         if (existingCustomDomain) {
@@ -215,37 +326,91 @@ export const funnelsRouter = createTRPCRouter({
         }
       }
 
-      const updated = await db.funnel.update({
-        where: { id: input.id },
-        data: {
+      const changes = getChangedFields(
+        {
+          name: existing.name,
+          description: existing.description,
+          status: existing.status,
+          domainType: existing.domainType,
+          subdomain: existing.subdomain,
+          customDomain: existing.customDomain,
+        },
+        {
+          name: input.name,
+          description: input.description,
+          status: input.status,
+          domainType: input.domainType,
+          subdomain: input.subdomain,
+          customDomain: input.customDomain,
+        }
+      );
+
+      const [updated] = await db
+        .update(funnel)
+        .set({
           ...(input.name && { name: input.name }),
-          ...(input.description !== undefined && {
-            description: input.description,
-          }),
+          ...(input.description !== undefined && { description: input.description }),
           ...(input.status && {
             status: input.status,
-            ...(input.status === FunnelStatus.PUBLISHED && {
-              publishedAt: new Date(),
-            }),
+            ...(input.status === FunnelStatus.PUBLISHED && { publishedAt: new Date() }),
           }),
           ...(input.domainType && { domainType: input.domainType }),
           ...(input.subdomain !== undefined && { subdomain: input.subdomain }),
           ...(input.customDomain !== undefined && {
             customDomain: input.customDomain,
-            // Reset verification when custom domain changes
-            ...(input.customDomain !== funnel.customDomain && {
-              domainVerified: false,
-            }),
+            ...(input.customDomain !== existing.customDomain && { domainVerified: false }),
           }),
+          updatedAt: new Date(),
+        })
+        .where(eq(funnel.id, input.id))
+        .returning();
+
+      const isStatusChange = input.status !== undefined && input.status !== existing.status;
+
+      if (isStatusChange && input.status === FunnelStatus.PUBLISHED) {
+        await createNotification({
+          type: "FUNNEL_PUBLISHED",
+          title: "Funnel published",
+          message: `${ctx.auth.user.name} published funnel ${updated.name}`,
+          actorId: ctx.auth.user.id,
+          entityType: "funnel",
+          entityId: updated.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? undefined,
+        });
+      } else if (changes) {
+        await createNotification({
+          type: "FUNNEL_UPDATED",
+          title: "Funnel updated",
+          message: `${ctx.auth.user.name} updated funnel ${updated.name}`,
+          actorId: ctx.auth.user.id,
+          entityType: "funnel",
+          entityId: updated.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? undefined,
+        });
+      }
+
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: isStatusChange ? ActivityAction.STATUS_CHANGED : ActivityAction.UPDATED,
+        entityType: "funnel",
+        entityId: updated.id,
+        entityName: updated.name,
+        changes,
+        metadata: { status: updated.status },
+        posthogProperties: {
+          status: updated.status,
+          fields_changed: changes ? Object.keys(changes) : [],
+          is_status_change: isStatusChange,
         },
       });
 
       return updated;
     }),
 
-  /**
-   * Delete a funnel (cascade deletes pages and blocks)
-   */
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -256,35 +421,39 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const existing = await ensureFunnel(input.id, scope);
+
+      await db.delete(funnel).where(eq(funnel.id, input.id));
+
+      await createNotification({
+        type: "FUNNEL_DELETED",
+        title: "Funnel deleted",
+        message: `${ctx.auth.user.name} deleted funnel ${existing.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "funnel",
+        entityId: existing.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? undefined,
+        data: {
+          funnelId: existing.id,
+          funnelName: existing.name,
         },
       });
 
-      if (!funnel) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
-        });
-      }
-
-      await db.funnel.delete({
-        where: { id: input.id },
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "funnel",
+        entityId: existing.id,
+        entityName: existing.name,
       });
 
       return { success: true };
     }),
 
-  // ========================================
-  // PAGE OPERATIONS
-  // ========================================
-
-  /**
-   * List pages for a funnel
-   */
   listPages: protectedProcedure
     .input(z.object({ funnelId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -295,38 +464,21 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Verify funnel access
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      await ensureFunnel(input.funnelId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
 
-      if (!funnel) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
-        });
-      }
-
-      const pages = await db.funnelPage.findMany({
-        where: { funnelId: input.funnelId },
-        orderBy: { order: "asc" },
-        include: {
-          _count: {
-            select: { funnelBlock: true },
+      const pages = await db.query.funnelPage.findMany({
+        where: eq(funnelPage.funnelId, input.funnelId),
+        orderBy: asc(funnelPage.order),
+        with: {
+          funnelBlocks: {
+            columns: { id: true },
           },
         },
       });
 
-      return pages;
+      return pages.map(mapPageForClient);
     }),
 
-  /**
-   * Get a single page with all blocks
-   */
   getPage: protectedProcedure
     .input(z.object({ pageId: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -337,43 +489,36 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const page = await db.funnelPage.findFirst({
-        where: {
-          id: input.pageId,
-          funnel: {
-            organizationId: ctx.orgId,
-            subaccountId: ctx.subaccountId ?? null,
-          },
-        },
-        include: {
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const page = await db.query.funnelPage.findFirst({
+        where: eq(funnelPage.id, input.pageId),
+        with: {
           funnel: true,
-          funnelBlock: {
-            orderBy: { order: "asc" },
-            include: {
-              funnelBreakpoint: true,
+          funnelBlocks: {
+            orderBy: asc(funnelBlock.order),
+            with: {
+              funnelBreakpoints: true,
               smartSectionInstance: {
-                include: {
-                  smartSection: true,
-                },
+                with: { smartSection: true },
               },
             },
           },
         },
       });
 
-      if (!page) {
+      if (!pageBelongsToScope(page, scope)) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Page not found",
         });
       }
 
-      return page;
+      return {
+        ...page,
+        funnelBlock: page.funnelBlocks.map(mapBlockForClient),
+      };
     }),
 
-  /**
-   * Create a new page
-   */
   createPage: protectedProcedure
     .input(
       z.object({
@@ -391,28 +536,12 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Verify funnel access
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
-      });
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const existingFunnel = await ensureFunnel(input.funnelId, scope);
 
-      if (!funnel) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
-        });
-      }
-
-      // Check for slug uniqueness within funnel
-      const existingPage = await db.funnelPage.findFirst({
-        where: {
-          funnelId: input.funnelId,
-          slug: input.slug,
-        },
+      const existingPage = await db.query.funnelPage.findFirst({
+        where: and(eq(funnelPage.funnelId, input.funnelId), eq(funnelPage.slug, input.slug)),
+        columns: { id: true },
       });
 
       if (existingPage) {
@@ -422,26 +551,20 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Get the highest order number
-      const highestOrder = await db.funnelPage.findFirst({
-        where: { funnelId: input.funnelId },
-        orderBy: { order: "desc" },
-        select: { order: true },
+      const highestOrder = await db.query.funnelPage.findFirst({
+        where: eq(funnelPage.funnelId, input.funnelId),
+        orderBy: desc(funnelPage.order),
+        columns: { order: true },
       });
-
       const newOrder = (highestOrder?.order ?? -1) + 1;
 
-      // If duplicating, copy blocks from source page
       if (input.duplicateFromPageId) {
-        const sourcePage = await db.funnelPage.findFirst({
-          where: {
-            id: input.duplicateFromPageId,
-            funnelId: input.funnelId,
-          },
-          include: {
-            funnelBlock: {
-              include: {
-                funnelBreakpoint: true,
+        const sourcePage = await db.query.funnelPage.findFirst({
+          where: and(eq(funnelPage.id, input.duplicateFromPageId), eq(funnelPage.funnelId, input.funnelId)),
+          with: {
+            funnelBlocks: {
+              with: {
+                funnelBreakpoints: true,
               },
             },
           },
@@ -454,10 +577,10 @@ export const funnelsRouter = createTRPCRouter({
           });
         }
 
-        // Create page with blocks in a transaction
-        const page = await db.$transaction(async (tx) => {
-          const newPage = await tx.funnelPage.create({
-            data: {
+        return await db.transaction(async (tx) => {
+          const [newPage] = await tx
+            .insert(funnelPage)
+            .values({
               id: crypto.randomUUID(),
               funnelId: input.funnelId,
               name: input.name,
@@ -470,71 +593,62 @@ export const funnelsRouter = createTRPCRouter({
               customJs: sourcePage.customJs,
               createdAt: new Date(),
               updatedAt: new Date(),
-            },
-          });
+            })
+            .returning();
 
-          // Map old block IDs to new block IDs for maintaining parent relationships
           const blockIdMap = new Map<string, string>();
 
-          // First pass: Create all blocks
-          for (const block of sourcePage.funnelBlock) {
-            const newBlock = await tx.funnelBlock.create({
-              data: {
+          for (const block of sourcePage.funnelBlocks) {
+            const [newBlock] = await tx
+              .insert(funnelBlock)
+              .values({
                 id: crypto.randomUUID(),
                 pageId: newPage.id,
                 type: block.type,
-                props: block.props as InputJsonValue,
-                styles: block.styles as InputJsonValue,
+                props: block.props,
+                styles: block.styles,
                 order: block.order,
                 visible: block.visible,
                 locked: block.locked,
                 targetWorkflowId: block.targetWorkflowId,
                 createdAt: new Date(),
                 updatedAt: new Date(),
-              },
-            });
+              })
+              .returning();
 
             blockIdMap.set(block.id, newBlock.id);
 
-            // Copy breakpoints
-            for (const breakpoint of block.funnelBreakpoint) {
-              await tx.funnelBreakpoint.create({
-                data: {
+            if (block.funnelBreakpoints.length > 0) {
+              await tx.insert(funnelBreakpoint).values(
+                block.funnelBreakpoints.map((breakpoint) => ({
                   id: crypto.randomUUID(),
                   blockId: newBlock.id,
                   device: breakpoint.device,
-                  styles: breakpoint.styles as InputJsonValue,
+                  styles: breakpoint.styles,
                   createdAt: new Date(),
                   updatedAt: new Date(),
-                },
-              });
+                }))
+              );
             }
           }
 
-          // Second pass: Update parent relationships
-          for (const block of sourcePage.funnelBlock) {
-            if (block.parentBlockId) {
-              const newBlockId = blockIdMap.get(block.id);
-              const newParentId = blockIdMap.get(block.parentBlockId);
+          for (const block of sourcePage.funnelBlocks) {
+            if (!block.parentBlockId) continue;
+            const newBlockId = blockIdMap.get(block.id);
+            const newParentId = blockIdMap.get(block.parentBlockId);
 
-              if (newBlockId && newParentId) {
-                await tx.funnelBlock.update({
-                  where: { id: newBlockId },
-                  data: { parentBlockId: newParentId },
-                });
-              }
+            if (newBlockId && newParentId) {
+              await tx.update(funnelBlock).set({ parentBlockId: newParentId, updatedAt: new Date() }).where(eq(funnelBlock.id, newBlockId));
             }
           }
 
           return newPage;
         });
-
-        return page;
       }
 
-      // Create empty page
-      const page = await db.funnelPage.create({
-        data: {
+      const [createdPage] = await db
+        .insert(funnelPage)
+        .values({
           id: crypto.randomUUID(),
           funnelId: input.funnelId,
           name: input.name,
@@ -542,15 +656,48 @@ export const funnelsRouter = createTRPCRouter({
           order: newOrder,
           createdAt: new Date(),
           updatedAt: new Date(),
+        })
+        .returning();
+
+      await createNotification({
+        type: "FUNNEL_UPDATED",
+        title: "Funnel page created",
+        message: `${ctx.auth.user.name} added page ${createdPage.name} to ${existingFunnel.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "funnel",
+        entityId: existingFunnel.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? undefined,
+        data: {
+          pageId: createdPage.id,
+          pageName: createdPage.name,
+          pageSlug: createdPage.slug,
         },
       });
 
-      return page;
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        entityType: "funnel",
+        entityId: existingFunnel.id,
+        entityName: existingFunnel.name,
+        metadata: {
+          pageId: createdPage.id,
+          pageName: createdPage.name,
+          pageSlug: createdPage.slug,
+        },
+        posthogProperties: {
+          page_id: createdPage.id,
+          page_name: createdPage.name,
+          page_slug: createdPage.slug,
+        },
+      });
+
+      return createdPage;
     }),
 
-  /**
-   * Update page metadata
-   */
   updatePage: protectedProcedure
     .input(
       z.object({
@@ -573,31 +720,23 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const page = await db.funnelPage.findFirst({
-        where: {
-          id: input.pageId,
-          funnel: {
-            organizationId: ctx.orgId,
-            subaccountId: ctx.subaccountId ?? null,
-          },
-        },
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const page = await db.query.funnelPage.findFirst({
+        where: eq(funnelPage.id, input.pageId),
+        with: { funnel: true },
       });
 
-      if (!page) {
+      if (!pageBelongsToScope(page, scope)) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Page not found",
         });
       }
 
-      // Check slug uniqueness if changing
       if (input.slug && input.slug !== page.slug) {
-        const existingPage = await db.funnelPage.findFirst({
-          where: {
-            funnelId: page.funnelId,
-            slug: input.slug,
-            id: { not: input.pageId },
-          },
+        const existingPage = await db.query.funnelPage.findFirst({
+          where: and(eq(funnelPage.funnelId, page.funnelId), eq(funnelPage.slug, input.slug), ne(funnelPage.id, input.pageId)),
+          columns: { id: true },
         });
 
         if (existingPage) {
@@ -608,30 +747,89 @@ export const funnelsRouter = createTRPCRouter({
         }
       }
 
-      const updated = await db.funnelPage.update({
-        where: { id: input.pageId },
-        data: {
+      const [updated] = await db
+        .update(funnelPage)
+        .set({
           ...(input.name && { name: input.name }),
           ...(input.slug && { slug: input.slug }),
-          ...(input.isPublished !== undefined && {
-            isPublished: input.isPublished,
-          }),
+          ...(input.isPublished !== undefined && { isPublished: input.isPublished }),
           ...(input.metaTitle !== undefined && { metaTitle: input.metaTitle }),
-          ...(input.metaDescription !== undefined && {
-            metaDescription: input.metaDescription,
-          }),
+          ...(input.metaDescription !== undefined && { metaDescription: input.metaDescription }),
           ...(input.metaImage !== undefined && { metaImage: input.metaImage }),
           ...(input.customCss !== undefined && { customCss: input.customCss }),
           ...(input.customJs !== undefined && { customJs: input.customJs }),
+          updatedAt: new Date(),
+        })
+        .where(eq(funnelPage.id, input.pageId))
+        .returning();
+
+      const changes = getChangedFields(
+        {
+          name: page.name,
+          slug: page.slug,
+          isPublished: page.isPublished,
+          metaTitle: page.metaTitle,
+          metaDescription: page.metaDescription,
+          metaImage: page.metaImage,
+          customCss: page.customCss,
+          customJs: page.customJs,
+        },
+        {
+          name: input.name,
+          slug: input.slug,
+          isPublished: input.isPublished,
+          metaTitle: input.metaTitle,
+          metaDescription: input.metaDescription,
+          metaImage: input.metaImage,
+          customCss: input.customCss,
+          customJs: input.customJs,
+        }
+      );
+
+      if (changes) {
+        await createNotification({
+          type: "FUNNEL_UPDATED",
+          title: "Funnel page updated",
+          message: `${ctx.auth.user.name} updated page ${updated.name} in ${page.funnel.name}`,
+          actorId: ctx.auth.user.id,
+          entityType: "funnel",
+          entityId: page.funnel.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? undefined,
+          data: {
+            pageId: updated.id,
+            pageName: updated.name,
+            pageSlug: updated.slug,
+            fieldsChanged: Object.keys(changes),
+          },
+        });
+      }
+
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        entityType: "funnel",
+        entityId: page.funnel.id,
+        entityName: page.funnel.name,
+        changes,
+        metadata: {
+          pageId: updated.id,
+          pageName: updated.name,
+          pageSlug: updated.slug,
+        },
+        posthogProperties: {
+          page_id: updated.id,
+          page_name: updated.name,
+          page_slug: updated.slug,
+          fields_changed: changes ? Object.keys(changes) : [],
         },
       });
 
       return updated;
     }),
 
-  /**
-   * Reorder pages
-   */
   reorderPages: protectedProcedure
     .input(
       z.object({
@@ -647,36 +845,17 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? null,
-        },
+      await ensureFunnel(input.funnelId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
+
+      await db.transaction(async (tx) => {
+        for (const [index, pageId] of input.pageIds.entries()) {
+          await tx.update(funnelPage).set({ order: index, updatedAt: new Date() }).where(eq(funnelPage.id, pageId));
+        }
       });
-
-      if (!funnel) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
-        });
-      }
-
-      await db.$transaction(
-        input.pageIds.map((pageId, index) =>
-          db.funnelPage.update({
-            where: { id: pageId },
-            data: { order: index },
-          })
-        )
-      );
 
       return { success: true };
     }),
 
-  /**
-   * Delete a page
-   */
   deletePage: protectedProcedure
     .input(z.object({ pageId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -687,37 +866,60 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      const page = await db.funnelPage.findFirst({
-        where: {
-          id: input.pageId,
-          funnel: {
-            organizationId: ctx.orgId,
-            subaccountId: ctx.subaccountId ?? null,
-          },
-        },
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const page = await db.query.funnelPage.findFirst({
+        where: eq(funnelPage.id, input.pageId),
+        with: { funnel: true },
       });
 
-      if (!page) {
+      if (!pageBelongsToScope(page, scope)) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Page not found",
         });
       }
 
-      await db.funnelPage.delete({
-        where: { id: input.pageId },
+      await db.delete(funnelPage).where(eq(funnelPage.id, input.pageId));
+
+      await createNotification({
+        type: "FUNNEL_UPDATED",
+        title: "Funnel page deleted",
+        message: `${ctx.auth.user.name} removed page ${page.name} from ${page.funnel.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "funnel",
+        entityId: page.funnel.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? undefined,
+        data: {
+          pageId: page.id,
+          pageName: page.name,
+          pageSlug: page.slug,
+        },
+      });
+
+      await logAnalytics({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? null,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        entityType: "funnel",
+        entityId: page.funnel.id,
+        entityName: page.funnel.name,
+        metadata: {
+          pageId: page.id,
+          pageName: page.name,
+          pageSlug: page.slug,
+        },
+        posthogProperties: {
+          page_id: page.id,
+          page_name: page.name,
+          page_slug: page.slug,
+        },
       });
 
       return { success: true };
     }),
 
-  // ========================================
-  // BLOCK OPERATIONS
-  // ========================================
-
-  /**
-   * Create a new block (supports both funnel pages and smart sections)
-   */
   createBlock: protectedProcedure
     .input(
       z.object({
@@ -725,8 +927,8 @@ export const funnelsRouter = createTRPCRouter({
         smartSectionId: z.string().optional(),
         type: z.nativeEnum(FunnelBlockType),
         parentBlockId: z.string().optional(),
-        props: z.record(z.any(), z.any()).optional(),
-        styles: z.record(z.any(), z.any()).optional(),
+        props: jsonObjectSchema.optional(),
+        styles: jsonObjectSchema.optional(),
         order: z.number().optional(),
       })
     )
@@ -738,7 +940,6 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Must have either pageId or smartSectionId
       if (!input.pageId && !input.smartSectionId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -746,30 +947,23 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
       if (input.pageId) {
-        const page = await db.funnelPage.findFirst({
-          where: {
-            id: input.pageId,
-            funnel: {
-              organizationId: ctx.orgId,
-              subaccountId: ctx.subaccountId ?? null,
-            },
-          },
+        const page = await db.query.funnelPage.findFirst({
+          where: eq(funnelPage.id, input.pageId),
+          with: { funnel: true },
         });
 
-        if (!page) {
+        if (!pageBelongsToScope(page, scope)) {
           throw new TRPCError({
             code: "NOT_FOUND",
             message: "Page not found",
           });
         }
       } else if (input.smartSectionId) {
-        const section = await db.smartSection.findFirst({
-          where: {
-            id: input.smartSectionId,
-            organizationId: ctx.orgId,
-          },
+        const section = await db.query.smartSection.findFirst({
+          where: smartSectionScope(input.smartSectionId, scope),
+          columns: { id: true },
         });
 
         if (!section) {
@@ -780,50 +974,44 @@ export const funnelsRouter = createTRPCRouter({
         }
       }
 
-      // If no order specified, append to end
       let order = input.order;
       if (order === undefined) {
-        const highestOrder = await db.funnelBlock.findFirst({
-          where: {
-            ...(input.pageId ? { pageId: input.pageId } : { smartSectionId: input.smartSectionId }),
-            parentBlockId: input.parentBlockId ?? null,
-          },
-          orderBy: { order: "desc" },
-          select: { order: true },
+        const highestOrder = await db.query.funnelBlock.findFirst({
+          where: and(
+            input.pageId ? eq(funnelBlock.pageId, input.pageId) : eq(funnelBlock.smartSectionId, input.smartSectionId!),
+            input.parentBlockId ? eq(funnelBlock.parentBlockId, input.parentBlockId) : isNull(funnelBlock.parentBlockId)
+          ),
+          orderBy: desc(funnelBlock.order),
+          columns: { order: true },
         });
         order = (highestOrder?.order ?? -1) + 1;
       }
 
-      const block = await db.funnelBlock.create({
-        data: {
+      const [created] = await db
+        .insert(funnelBlock)
+        .values({
           id: crypto.randomUUID(),
-          pageId: input.pageId || null,
-          smartSectionId: input.smartSectionId || null,
+          pageId: input.pageId ?? null,
+          smartSectionId: input.smartSectionId ?? null,
           type: input.type,
-          parentBlockId: input.parentBlockId,
+          parentBlockId: input.parentBlockId ?? null,
           props: input.props ?? {},
           styles: input.styles ?? {},
           order,
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        include: {
-          funnelBreakpoint: true,
-        },
-      });
+        })
+        .returning();
 
-      return block;
+      return mapBlockForClient(created);
     }),
 
-  /**
-   * Update a block
-   */
   updateBlock: protectedProcedure
     .input(
       z.object({
         blockId: z.string(),
-        props: z.record(z.any(), z.any()).optional(),
-        styles: z.record(z.any(), z.any()).optional(),
+        props: jsonObjectSchema.optional(),
+        styles: jsonObjectSchema.optional(),
         visible: z.boolean().optional(),
         locked: z.boolean().optional(),
         targetWorkflowId: z.string().optional(),
@@ -837,60 +1025,28 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Find block - could be in a funnel page OR a smart section
-      const block = await db.funnelBlock.findFirst({
-        where: {
-          id: input.blockId,
-          OR: [
-            // Block in funnel page
-            {
-              funnelPage: {
-                funnel: {
-                  organizationId: ctx.orgId,
-                  subaccountId: ctx.subaccountId ?? null,
-                },
-              },
-            },
-            // Block in smart section
-            {
-              smartSection: {
-                organizationId: ctx.orgId,
-                subaccountId: ctx.subaccountId ?? null,
-              },
-            },
-          ],
-        },
-      });
+      await ensureBlock(input.blockId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
 
-      if (!block) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      const updated = await db.funnelBlock.update({
-        where: { id: input.blockId },
-        data: {
+      const [updated] = await db
+        .update(funnelBlock)
+        .set({
           ...(input.props && { props: input.props }),
           ...(input.styles && { styles: input.styles }),
           ...(input.visible !== undefined && { visible: input.visible }),
           ...(input.locked !== undefined && { locked: input.locked }),
-          ...(input.targetWorkflowId !== undefined && {
-            targetWorkflowId: input.targetWorkflowId,
-          }),
-        },
-        include: {
-          funnelBreakpoint: true,
-        },
+          ...(input.targetWorkflowId !== undefined && { targetWorkflowId: input.targetWorkflowId }),
+          updatedAt: new Date(),
+        })
+        .where(eq(funnelBlock.id, input.blockId))
+        .returning();
+
+      const breakpoints = await db.query.funnelBreakpoint.findMany({
+        where: eq(funnelBreakpoint.blockId, updated.id),
       });
 
-      return updated;
+      return mapBlockForClient({ ...updated, funnelBreakpoints: breakpoints });
     }),
 
-  /**
-   * Move block (change parent or reorder)
-   */
   moveBlock: protectedProcedure
     .input(
       z.object({
@@ -907,55 +1063,25 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Find block - could be in a funnel page OR a smart section
-      const block = await db.funnelBlock.findFirst({
-        where: {
-          id: input.blockId,
-          OR: [
-            // Block in funnel page
-            {
-              funnelPage: {
-                funnel: {
-                  organizationId: ctx.orgId,
-                  subaccountId: ctx.subaccountId ?? null,
-                },
-              },
-            },
-            // Block in smart section
-            {
-              smartSection: {
-                organizationId: ctx.orgId,
-                subaccountId: ctx.subaccountId ?? null,
-              },
-            },
-          ],
-        },
-      });
+      await ensureBlock(input.blockId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
 
-      if (!block) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      const updated = await db.funnelBlock.update({
-        where: { id: input.blockId },
-        data: {
+      const [updated] = await db
+        .update(funnelBlock)
+        .set({
           parentBlockId: input.newParentBlockId,
           order: input.newOrder,
-        },
-        include: {
-          funnelBreakpoint: true,
-        },
+          updatedAt: new Date(),
+        })
+        .where(eq(funnelBlock.id, input.blockId))
+        .returning();
+
+      const breakpoints = await db.query.funnelBreakpoint.findMany({
+        where: eq(funnelBreakpoint.blockId, updated.id),
       });
 
-      return updated;
+      return mapBlockForClient({ ...updated, funnelBreakpoints: breakpoints });
     }),
 
-  /**
-   * Delete a block
-   */
   deleteBlock: protectedProcedure
     .input(z.object({ blockId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -966,54 +1092,14 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Find block - could be in a funnel page OR a smart section
-      const block = await db.funnelBlock.findFirst({
-        where: {
-          id: input.blockId,
-          OR: [
-            // Block in funnel page
-            {
-              funnelPage: {
-                funnel: {
-                  organizationId: ctx.orgId,
-                  subaccountId: ctx.subaccountId ?? null,
-                },
-              },
-            },
-            // Block in smart section
-            {
-              smartSection: {
-                organizationId: ctx.orgId,
-                subaccountId: ctx.subaccountId ?? null,
-              },
-            },
-          ],
-        },
-      });
-
-      if (!block) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      await db.funnelBlock.delete({
-        where: { id: input.blockId },
-      });
+      await ensureBlock(input.blockId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
+      await db.delete(funnelBlock).where(eq(funnelBlock.id, input.blockId));
 
       return { success: true };
     }),
 
-  /**
-   * Duplicate a block (with all children and breakpoints)
-   */
   duplicateBlock: protectedProcedure
-    .input(
-      z.object({
-        blockId: z.string(),
-      })
-    )
+    .input(z.object({ blockId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
         throw new TRPCError({
@@ -1022,120 +1108,81 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Find block - could be in a funnel page OR a smart section
-      const originalBlock = await db.funnelBlock.findFirst({
-        where: {
-          id: input.blockId,
-          OR: [
-            // Block in funnel page
-            {
-              funnelPage: {
-                funnel: {
-                  organizationId: ctx.orgId,
-                  subaccountId: ctx.subaccountId ?? null,
-                },
-              },
-            },
-            // Block in smart section
-            {
-              smartSection: {
-                organizationId: ctx.orgId,
-                subaccountId: ctx.subaccountId ?? null,
-              },
-            },
-          ],
-        },
-        include: {
-          funnelBreakpoint: true,
-          funnelBlock: {
-            include: {
-              funnelBreakpoint: true,
-            },
+      const scope = { orgId: ctx.orgId, locationId: ctx.locationId ?? null };
+      const originalBlock = await db.query.funnelBlock.findFirst({
+        where: eq(funnelBlock.id, input.blockId),
+        with: {
+          funnelPage: { with: { funnel: true } },
+          smartSection: true,
+          funnelBreakpoints: true,
+          funnelBlocks: {
+            with: { funnelBreakpoints: true },
           },
         },
       });
 
-      if (!originalBlock) {
+      if (!blockBelongsToScope(originalBlock, scope)) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Block not found",
         });
       }
 
-      // Helper function to recursively duplicate a block and its children
       const duplicateBlockRecursive = async (
-        block: typeof originalBlock,
+        block: NonNullable<typeof originalBlock>,
         newParentId: string | null,
-        orderOffset: number = 0
+        orderOffset = 0
       ): Promise<string> => {
-        // Create the duplicated block
-        const newBlock = await db.funnelBlock.create({
-          data: {
+        const [newBlock] = await db
+          .insert(funnelBlock)
+          .values({
             id: crypto.randomUUID(),
             pageId: block.pageId,
             smartSectionId: block.smartSectionId,
             parentBlockId: newParentId,
             type: block.type,
-            props: block.props as InputJsonValue,
-            styles: block.styles as InputJsonValue,
+            props: block.props,
+            styles: block.styles,
             order: block.order + orderOffset,
             visible: block.visible,
-            locked: false, // Unlock duplicated blocks
+            locked: false,
             targetWorkflowId: block.targetWorkflowId,
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
 
-        // Duplicate breakpoints
-        const breakpoints = (block as any).funnelBreakpoint || [];
-        if (breakpoints.length > 0) {
-          await db.funnelBreakpoint.createMany({
-            data: breakpoints.map((bp: any) => ({
+        if (block.funnelBreakpoints.length > 0) {
+          await db.insert(funnelBreakpoint).values(
+            block.funnelBreakpoints.map((breakpoint) => ({
               id: crypto.randomUUID(),
               blockId: newBlock.id,
-              device: bp.device,
-              styles: bp.styles,
+              device: breakpoint.device,
+              styles: breakpoint.styles,
               createdAt: new Date(),
               updatedAt: new Date(),
-            })),
-          });
+            }))
+          );
         }
 
-        // Recursively duplicate child blocks
-        const childBlocks = (block as any).funnelBlock || [];
-        if (childBlocks.length > 0) {
-          for (const child of childBlocks) {
-            await duplicateBlockRecursive(child, newBlock.id, 0);
-          }
+        for (const child of block.funnelBlocks) {
+          await duplicateBlockRecursive({ ...child, funnelPage: block.funnelPage, smartSection: block.smartSection, funnelBlocks: [] }, newBlock.id);
         }
 
         return newBlock.id;
       };
 
-      // Duplicate the block (placed right after the original)
-      const newBlockId = await duplicateBlockRecursive(
-        originalBlock,
-        originalBlock.parentBlockId,
-        1 // Place right after the original
-      );
+      const newBlockId = await duplicateBlockRecursive(originalBlock, originalBlock.parentBlockId, 1);
 
       return { id: newBlockId };
     }),
 
-  // ========================================
-  // BREAKPOINT OPERATIONS
-  // ========================================
-
-  /**
-   * Update or create breakpoint styles
-   */
   updateBreakpoint: protectedProcedure
     .input(
       z.object({
         blockId: z.string(),
         device: z.nativeEnum(DeviceType),
-        styles: z.record(z.any(), z.any()).optional(),
+        styles: jsonObjectSchema.optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1146,57 +1193,26 @@ export const funnelsRouter = createTRPCRouter({
         });
       }
 
-      // Find block - could be in a funnel page OR a smart section
-      const block = await db.funnelBlock.findFirst({
-        where: {
-          id: input.blockId,
-          OR: [
-            // Block in funnel page
-            {
-              funnelPage: {
-                funnel: {
-                  organizationId: ctx.orgId,
-                  subaccountId: ctx.subaccountId ?? null,
-                },
-              },
-            },
-            // Block in smart section
-            {
-              smartSection: {
-                organizationId: ctx.orgId,
-                subaccountId: ctx.subaccountId ?? null,
-              },
-            },
-          ],
-        },
-      });
+      await ensureBlock(input.blockId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
 
-      if (!block) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      const breakpoint = await db.funnelBreakpoint.upsert({
-        where: {
-          blockId_device: {
-            blockId: input.blockId,
-            device: input.device,
-          },
-        },
-        create: {
+      const [breakpoint] = await db
+        .insert(funnelBreakpoint)
+        .values({
           id: crypto.randomUUID(),
           blockId: input.blockId,
           device: input.device,
           styles: input.styles ?? {},
           createdAt: new Date(),
           updatedAt: new Date(),
-        },
-        update: {
-          styles: input.styles,
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [funnelBreakpoint.blockId, funnelBreakpoint.device],
+          set: {
+            styles: input.styles ?? {},
+            updatedAt: new Date(),
+          },
+        })
+        .returning();
 
       return breakpoint;
     }),

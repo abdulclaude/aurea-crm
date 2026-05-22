@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import db from "@/lib/db";
+import { and, desc, eq, gte } from "drizzle-orm";
+import { db } from "@/db";
+import { funnel as funnelTable, funnelEvent } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { consumeRealtimeEvents } from "@/lib/realtime-cache";
 
@@ -26,12 +28,15 @@ export async function GET(
   }
 
   // Verify funnel access
-  const funnel = await db.funnel.findFirst({
-    where: {
-      id: funnelId,
-      organizationId: session.session.activeOrganizationId || undefined,
-    },
-  });
+  const funnel = session.session.activeOrganizationId
+    ? await db.query.funnel.findFirst({
+        where: and(
+          eq(funnelTable.id, funnelId),
+          eq(funnelTable.organizationId, session.session.activeOrganizationId)
+        ),
+        columns: { id: true },
+      })
+    : null;
 
   if (!funnel) {
     return new Response("Funnel not found", { status: 404 });
@@ -70,34 +75,34 @@ export async function GET(
             // This handles cases where cache was cleared or server restarted
             const tenSecondsAgo = new Date(Date.now() - 10000);
 
-            const recentEvents = await db.funnelEvent.findMany({
-              where: {
-                funnelId,
-                timestamp: { gte: tenSecondsAgo },
-              },
-              orderBy: {
-                timestamp: "desc",
-              },
-              take: 20,
-              select: {
-                id: true,
-                eventName: true,
-                pagePath: true,
-                pageTitle: true,
-                userId: true,
-                anonymousId: true,
-                deviceType: true,
-                browserName: true,
-                countryCode: true,
-                city: true,
-                isConversion: true,
-                revenue: true,
-                timestamp: true,
-                utmSource: true,
-                utmMedium: true,
-                utmCampaign: true,
-              },
-            });
+            const recentEvents = await db
+              .select({
+                id: funnelEvent.id,
+                eventName: funnelEvent.eventName,
+                pagePath: funnelEvent.pagePath,
+                pageTitle: funnelEvent.pageTitle,
+                userId: funnelEvent.userId,
+                anonymousId: funnelEvent.anonymousId,
+                deviceType: funnelEvent.deviceType,
+                browserName: funnelEvent.browserName,
+                countryCode: funnelEvent.countryCode,
+                city: funnelEvent.city,
+                isConversion: funnelEvent.isConversion,
+                revenue: funnelEvent.revenue,
+                timestamp: funnelEvent.timestamp,
+                utmSource: funnelEvent.utmSource,
+                utmMedium: funnelEvent.utmMedium,
+                utmCampaign: funnelEvent.utmCampaign,
+              })
+              .from(funnelEvent)
+              .where(
+                and(
+                  eq(funnelEvent.funnelId, funnelId),
+                  gte(funnelEvent.timestamp, tenSecondsAgo)
+                )
+              )
+              .orderBy(desc(funnelEvent.timestamp))
+              .limit(20);
 
             if (recentEvents.length > 0) {
               // Send database events

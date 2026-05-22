@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addHours,
+  addMinutes,
   areIntervalsOverlapping,
   differenceInMinutes,
   eachHourOfInterval,
@@ -18,6 +19,7 @@ import {
   DroppableCell,
   EventItem,
   isMultiDayEvent,
+  useCalendarDnd,
   useCurrentTimeIndicator,
   WeekCellsHeight,
   type CalendarEvent,
@@ -29,7 +31,7 @@ interface DayViewProps {
   currentDate: Date;
   events: CalendarEvent[];
   onEventSelect: (event: CalendarEvent) => void;
-  onEventCreate: (startTime: Date) => void;
+  onEventCreate?: (startTime: Date, endTime?: Date) => void;
   timeBounds?: { startHour: number; endHour: number };
 }
 
@@ -49,6 +51,9 @@ export function DayView({
   onEventCreate,
   timeBounds = { startHour: StartHour, endHour: EndHour },
 }: DayViewProps) {
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<Date | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<Date | null>(null);
   const hours = useMemo(() => {
     const dayStart = startOfDay(currentDate);
     return eachHourOfInterval({
@@ -217,6 +222,106 @@ export function DayView({
     "day",
   );
 
+  useEffect(() => {
+    if (!isSelecting) {
+      return;
+    }
+
+    const handleMouseUp = () => {
+      if (!selectionStart || !selectionEnd) {
+        setIsSelecting(false);
+        return;
+      }
+
+      const [start, end] =
+        selectionStart <= selectionEnd
+          ? [selectionStart, selectionEnd]
+          : [selectionEnd, selectionStart];
+      const isSingleSlot = selectionStart.getTime() === selectionEnd.getTime();
+      const endWithBuffer = addMinutes(end, isSingleSlot ? 60 : 15);
+
+      onEventCreate?.(start, endWithBuffer);
+      setIsSelecting(false);
+      setSelectionStart(null);
+      setSelectionEnd(null);
+    };
+
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, [isSelecting, selectionStart, selectionEnd, onEventCreate]);
+
+  const columnRef = useRef<HTMLDivElement>(null);
+  const { activeEvent } = useCalendarDnd();
+  const isDragging = activeEvent !== null;
+
+  const getTimeFromMouseY = useCallback(
+    (clientY: number) => {
+      if (!columnRef.current) return null;
+      const rect = columnRef.current.getBoundingClientRect();
+      const y = clientY - rect.top;
+      const totalHeight = rect.height;
+      const totalHours = timeBounds.endHour - timeBounds.startHour;
+      const hourFraction = (y / totalHeight) * totalHours;
+      const quarter = Math.floor(hourFraction * 4) / 4;
+      return Math.max(0, Math.min(totalHours - 0.25, quarter)) + timeBounds.startHour;
+    },
+    [timeBounds],
+  );
+
+  const getCellDate = useCallback(
+    (time: number) => {
+      const startTime = new Date(currentDate);
+      startTime.setHours(Math.floor(time));
+      startTime.setMinutes(Math.round((time % 1) * 60));
+      startTime.setSeconds(0);
+      startTime.setMilliseconds(0);
+      return startTime;
+    },
+    [currentDate],
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onEventCreate) return;
+      if (e.button !== 0) return;
+      const time = getTimeFromMouseY(e.clientY);
+      if (time === null) return;
+      const cellStart = getCellDate(time);
+      setIsSelecting(true);
+      setSelectionStart(cellStart);
+      setSelectionEnd(cellStart);
+    },
+    [getTimeFromMouseY, getCellDate, onEventCreate],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isSelecting) return;
+      const time = getTimeFromMouseY(e.clientY);
+      if (time === null) return;
+      setSelectionEnd(getCellDate(time));
+    },
+    [isSelecting, getTimeFromMouseY, getCellDate],
+  );
+
+  const selectionStyle = useMemo(() => {
+    if (!isSelecting || !selectionStart || !selectionEnd) return null;
+
+    const [start, end] =
+      selectionStart <= selectionEnd
+        ? [selectionStart, selectionEnd]
+        : [selectionEnd, selectionStart];
+
+    const startHour = getHours(start) + getMinutes(start) / 60;
+    const endHour = getHours(end) + getMinutes(end) / 60 + 0.25;
+    const totalHours = timeBounds.endHour - timeBounds.startHour;
+
+    const top = ((startHour - timeBounds.startHour) / totalHours) * 100;
+    const height = ((endHour - startHour) / totalHours) * 100;
+
+    return { top: `${top}%`, height: `${height}%` };
+  }, [isSelecting, selectionStart, selectionEnd, timeBounds]);
+
   return (
     <div data-slot="day-view" className="contents">
       {showAllDaySection && (
@@ -269,7 +374,20 @@ export function DayView({
           ))}
         </div>
 
-        <div className="relative">
+        <div
+          ref={columnRef}
+          className="relative"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+        >
+          {/* Selection highlight */}
+          {selectionStyle && (
+            <div
+              className="absolute inset-x-0 z-5 bg-primary/10 pointer-events-none"
+              style={selectionStyle}
+            />
+          )}
+
           {/* Positioned events */}
           {positionedEvents.map((positionedEvent) => (
             <div
@@ -282,6 +400,7 @@ export function DayView({
                 width: `${positionedEvent.width * 100}%`,
                 zIndex: positionedEvent.zIndex,
               }}
+              onClick={(e) => e.stopPropagation()}
             >
               <div className="h-full w-full">
                 <DraggableEvent
@@ -308,45 +427,34 @@ export function DayView({
             </div>
           )}
 
-          {/* Time grid */}
-          {hours.map((hour) => {
-            const hourValue = getHours(hour);
-            return (
-              <div
-                key={hour.toString()}
-                className="border-border/70 relative h-[var(--week-cells-height)] border-b last:border-b-0"
-              >
-                {/* Quarter-hour intervals */}
-                {[0, 1, 2, 3].map((quarter) => {
-                  const quarterHourTime = hourValue + quarter * 0.25;
-                  return (
-                    <DroppableCell
-                      key={`${hour.toString()}-${quarter}`}
-                      id={`day-cell-${currentDate.toISOString()}-${quarterHourTime}`}
-                      date={currentDate}
-                      time={quarterHourTime}
-                      className={cn(
-                        "absolute h-[calc(var(--week-cells-height)/4)] w-full",
-                        quarter === 0 && "top-0",
-                        quarter === 1 &&
-                          "top-[calc(var(--week-cells-height)/4)]",
-                        quarter === 2 &&
-                          "top-[calc(var(--week-cells-height)/4*2)]",
-                        quarter === 3 &&
-                          "top-[calc(var(--week-cells-height)/4*3)]",
-                      )}
-                      onClick={() => {
-                        const startTime = new Date(currentDate);
-                        startTime.setHours(hourValue);
-                        startTime.setMinutes(quarter * 15);
-                        onEventCreate(startTime);
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
+          {/* Hour grid lines */}
+          {hours.map((hour) => (
+            <div
+              key={hour.toString()}
+              className="border-border/70 h-[var(--week-cells-height)] border-b last:border-b-0"
+            />
+          ))}
+
+          {/* Droppable cells - only mount during drag */}
+          {isDragging &&
+            hours.map((hour) => {
+              const hourValue = getHours(hour);
+              return [0, 1, 2, 3].map((quarter) => {
+                const quarterHourTime = hourValue + quarter * 0.25;
+                return (
+                  <DroppableCell
+                    key={`${hour.toString()}-${quarter}`}
+                    id={`day-cell-${currentDate.toISOString()}-${quarterHourTime}`}
+                    date={currentDate}
+                    time={quarterHourTime}
+                    className="absolute w-full h-[calc(var(--week-cells-height)/4)] pointer-events-auto"
+                    style={{
+                      top: `${((hourValue - timeBounds.startHour) * 4 + quarter) * (100 / ((timeBounds.endHour - timeBounds.startHour) * 4))}%`,
+                    }}
+                  />
+                );
+              });
+            })}
         </div>
       </div>
     </div>

@@ -7,10 +7,13 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 
 import { discordChannel } from "@/inngest/channels/discord";
-import prisma from "@/lib/db";
 
 import { decode } from "html-entities";
 import ky from "ky";
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { webhook as webhookTable } from "@/db/schema";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -89,8 +92,8 @@ const resolveWebhookUrl = async (
   userId: string
 ): Promise<string> => {
   if (data.webhookId) {
-    const webhook = await prisma.webhook.findFirst({
-      where: { id: data.webhookId, userId },
+    const webhook = await db.query.webhook.findFirst({
+      where: and(eq(webhookTable.id, data.webhookId), eq(webhookTable.userId, userId)),
     });
     if (!webhook) {
       throw new NonRetriableError(

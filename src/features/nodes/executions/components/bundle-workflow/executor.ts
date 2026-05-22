@@ -1,10 +1,12 @@
 import { NonRetriableError } from "inngest";
 import { getExecutor } from "@/features/executions/lib/executor-registry";
 import type { NodeExecutor } from "@/features/executions/types";
-import { NodeType } from "@prisma/client";
+import { NodeType } from "@/db/enums";
+import { db } from "@/db";
+import { workflows as workflowsTable } from "@/db/schema";
 import { bundleWorkflowChannel } from "@/inngest/channels/bundle-workflow";
 import { topologicalSort } from "@/inngest/utils";
-import prisma from "@/lib/db";
+import { eq } from "drizzle-orm";
 import type { BundleWorkflowFormValues } from "./dialog";
 
 // Helper function to get nested values from object using dot notation
@@ -93,11 +95,11 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
   try {
     // Load the bundle workflow
     const bundleWorkflow = await step.run("load-bundle-workflow", async () => {
-      const workflow = await prisma.workflows.findUnique({
-        where: { id: config.bundleWorkflowId },
-        include: {
-          Node: true,
-          Connection: true,
+      const workflow = await db.query.workflows.findFirst({
+        where: eq(workflowsTable.id, config.bundleWorkflowId),
+        with: {
+          nodes: true,
+          connections: true,
         },
       });
 
@@ -170,17 +172,14 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
     };
 
     // Execute bundle workflow nodes in topological order
-    const sortedNodes = topologicalSort(
-      bundleWorkflow.Node as any,
-      bundleWorkflow.Connection as any
-    );
+    const sortedNodes = topologicalSort(bundleWorkflow.nodes, bundleWorkflow.connections);
 
     // Build adjacency map for conditional branching
     const adjacencyMap = new Map<
       string,
       Array<{ toNodeId: string; fromOutput: string }>
     >();
-    for (const conn of bundleWorkflow.Connection) {
+    for (const conn of bundleWorkflow.connections) {
       if (!adjacencyMap.has(conn.fromNodeId)) {
         adjacencyMap.set(conn.fromNodeId, []);
       }
@@ -195,7 +194,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
     // Find trigger node (MANUAL_TRIGGER or INITIAL in bundle workflows)
     const targetNodeIds = new Set(
-      bundleWorkflow.Connection.map((c: any) => c.toNodeId)
+      bundleWorkflow.connections.map((connection) => connection.toNodeId)
     );
     const triggerNode = sortedNodes.find((node) => !targetNodeIds.has(node.id));
 
@@ -255,9 +254,16 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
           // Fallback: use variable-based branch
           const nodeConfig = node.data as Record<string, unknown>;
           const variableName = nodeConfig.variableName as string;
-          const branchResult = (
-            bundleContext.variables as Record<string, any>
-          )?.[variableName]?.branchToFollow;
+          const variables =
+            typeof bundleContext.variables === "object" &&
+            bundleContext.variables !== null
+              ? (bundleContext.variables as Record<string, unknown>)
+              : {};
+          const variableValue = variables[variableName];
+          const branchResult =
+            typeof variableValue === "object" && variableValue !== null
+              ? (variableValue as Record<string, unknown>).branchToFollow
+              : undefined;
 
           if (branchResult) {
             for (const conn of nextConnections) {

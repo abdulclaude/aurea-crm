@@ -6,7 +6,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { WebhookProvider } from "@prisma/client";
+import { WebhookProvider } from "@/db/enums";
 import { useWebhooksParams } from "./use-webhooks-params";
 
 export const useSuspenseWebhooks = () => {

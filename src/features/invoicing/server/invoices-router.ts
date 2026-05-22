@@ -1,54 +1,54 @@
 import { TRPCError } from "@trpc/server";
 import z from "zod";
-import type { Prisma } from "@prisma/client";
-import {
-  InvoiceStatus,
-  InvoiceType,
-  BillingModel,
-  PaymentMethod,
-  ActivityAction,
-  BankTransferStatus,
-} from "@prisma/client";
+import { InvoiceStatus, InvoiceType, BillingModel, PaymentMethod, ActivityAction, BankTransferStatus } from "@/db/enums";
 import { format } from "date-fns";
+import { eq, and, or, ilike, isNull, inArray, desc, asc, gt, sql } from "drizzle-orm";
 
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import {
+  invoice,
+  invoiceLineItem,
+  invoicePayment,
+  invoiceReminder,
+  invoiceTemplate,
+  stripeConnection,
+  bankTransferSettings,
+  location,
+  timeLog,
+} from "@/db/schema";
 import { createTRPCRouter, protectedProcedure, baseProcedure } from "@/trpc/init";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { generateInvoiceNumber } from "@/features/invoicing/lib/invoice-number-generator";
+import { createNotification } from "@/lib/notifications";
 
 const INVOICE_PAGE_SIZE = 20;
 
-const invoiceInclude = {
-  invoiceLineItem: {
-    orderBy: { order: "asc" as const },
-  },
-  invoicePayment: {
-    orderBy: { paidAt: "desc" as const },
-  },
-  invoiceReminder: {
-    orderBy: { sentAt: "desc" as const },
-  },
+const invoiceWith = {
+  invoiceLineItems: true,
+  invoicePayments: true,
+  invoiceReminders: true,
   invoiceTemplate: true,
-} satisfies Prisma.InvoiceInclude;
+} as const;
 
 /**
  * Determine available payment methods for an invoice based on configured integrations
  */
 async function getAvailablePaymentMethods(params: {
   organizationId: string;
-  subaccountId?: string;
+  locationId?: string;
 }): Promise<PaymentMethod[]> {
-  const { organizationId, subaccountId } = params;
+  const { organizationId, locationId } = params;
   const methods: PaymentMethod[] = [];
 
   // Check if Stripe Connect is enabled
-  const stripeConnect = await prisma.stripeConnection.findFirst({
-    where: {
-      organizationId,
-      subaccountId: subaccountId || null,
-      isActive: true,
-      chargesEnabled: true,
-    },
+  const stripeConnect = await db.query.stripeConnection.findFirst({
+    where: (t, { eq, and, isNull }) =>
+      and(
+        eq(t.organizationId, organizationId),
+        locationId ? eq(t.locationId, locationId) : isNull(t.locationId),
+        eq(t.isActive, true),
+        eq(t.chargesEnabled, true),
+      ),
   });
 
   if (stripeConnect) {
@@ -56,12 +56,13 @@ async function getAvailablePaymentMethods(params: {
   }
 
   // Check if Bank Transfer is enabled
-  const bankTransfer = await prisma.bankTransferSettings.findFirst({
-    where: {
-      organizationId,
-      subaccountId: subaccountId || null,
-      enabled: true,
-    },
+  const bankTransfer = await db.query.bankTransferSettings.findFirst({
+    where: (t, { eq, and, isNull }) =>
+      and(
+        eq(t.organizationId, organizationId),
+        locationId ? eq(t.locationId, locationId) : isNull(t.locationId),
+        eq(t.enabled, true),
+      ),
   });
 
   if (bankTransfer) {
@@ -74,65 +75,65 @@ async function getAvailablePaymentMethods(params: {
   return methods;
 }
 
-type InvoiceResult = Prisma.InvoiceGetPayload<{
-  include: typeof invoiceInclude;
-}>;
+type InvoiceQueryResult = Awaited<ReturnType<typeof db.query.invoice.findFirst<{
+  with: typeof invoiceWith;
+}>>>;
 
-const mapInvoice = (invoice: InvoiceResult) => {
+const mapInvoice = (inv: NonNullable<InvoiceQueryResult>) => {
   return {
-    id: invoice.id,
-    organizationId: invoice.organizationId,
-    subaccountId: invoice.subaccountId,
-    invoiceNumber: invoice.invoiceNumber,
-    contactId: invoice.contactId,
-    contactName: invoice.contactName,
-    contactEmail: invoice.contactEmail,
-    contactAddress: invoice.contactAddress,
-    title: invoice.title,
-    type: invoice.type,
-    status: invoice.status,
-    billingModel: invoice.billingModel,
-    issueDate: invoice.issueDate,
-    dueDate: invoice.dueDate,
-    paidAt: invoice.paidAt,
-    subtotal: invoice.subtotal.toString(),
-    taxRate: invoice.taxRate?.toString() ?? null,
-    taxAmount: invoice.taxAmount.toString(),
-    discountAmount: invoice.discountAmount.toString(),
-    total: invoice.total.toString(),
-    amountPaid: invoice.amountPaid.toString(),
-    amountDue: invoice.amountDue.toString(),
-    currency: invoice.currency,
-    notes: invoice.notes,
-    internalNotes: invoice.internalNotes,
-    termsConditions: invoice.termsConditions,
-    documentUrl: invoice.documentUrl,
-    documentName: invoice.documentName,
-    stripeInvoiceId: invoice.stripeInvoiceId,
-    stripePaymentIntentId: invoice.stripePaymentIntentId,
-    xeroInvoiceId: invoice.xeroInvoiceId,
-    lastReminderSentAt: invoice.lastReminderSentAt,
-    reminderCount: invoice.reminderCount,
-    metadata: invoice.metadata,
-    createdAt: invoice.createdAt,
-    updatedAt: invoice.updatedAt,
-    lineItems: invoice.invoiceLineItem.map((item) => ({
+    id: inv.id,
+    organizationId: inv.organizationId,
+    locationId: inv.locationId,
+    invoiceNumber: inv.invoiceNumber,
+    clientId: inv.clientId,
+    clientName: inv.clientName,
+    clientEmail: inv.clientEmail,
+    clientAddress: inv.clientAddress,
+    title: inv.title,
+    type: inv.type,
+    status: inv.status,
+    billingModel: inv.billingModel,
+    issueDate: inv.issueDate,
+    dueDate: inv.dueDate,
+    paidAt: inv.paidAt,
+    subtotal: inv.subtotal,
+    taxRate: inv.taxRate ?? null,
+    taxAmount: inv.taxAmount,
+    discountAmount: inv.discountAmount,
+    total: inv.total,
+    amountPaid: inv.amountPaid,
+    amountDue: inv.amountDue,
+    currency: inv.currency,
+    notes: inv.notes,
+    internalNotes: inv.internalNotes,
+    termsConditions: inv.termsConditions,
+    documentUrl: inv.documentUrl,
+    documentName: inv.documentName,
+    stripeInvoiceId: inv.stripeInvoiceId,
+    stripePaymentIntentId: inv.stripePaymentIntentId,
+    xeroInvoiceId: inv.xeroInvoiceId,
+    lastReminderSentAt: inv.lastReminderSentAt,
+    reminderCount: inv.reminderCount,
+    metadata: inv.metadata,
+    createdAt: inv.createdAt,
+    updatedAt: inv.updatedAt,
+    lineItems: inv.invoiceLineItems.map((item) => ({
       id: item.id,
       invoiceId: item.invoiceId,
       description: item.description,
-      quantity: item.quantity.toString(),
-      unitPrice: item.unitPrice.toString(),
-      amount: item.amount.toString(),
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      amount: item.amount,
       timeLogId: item.timeLogId,
       order: item.order,
       metadata: item.metadata,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     })),
-    payments: invoice.invoicePayment.map((payment) => ({
+    payments: inv.invoicePayments.map((payment) => ({
       id: payment.id,
       invoiceId: payment.invoiceId,
-      amount: payment.amount.toString(),
+      amount: payment.amount,
       currency: payment.currency,
       method: payment.method,
       paidAt: payment.paidAt,
@@ -144,7 +145,7 @@ const mapInvoice = (invoice: InvoiceResult) => {
       createdAt: payment.createdAt,
       updatedAt: payment.updatedAt,
     })),
-    reminders: invoice.invoiceReminder.map((reminder) => ({
+    reminders: inv.invoiceReminders.map((reminder) => ({
       id: reminder.id,
       invoiceId: reminder.invoiceId,
       sentAt: reminder.sentAt,
@@ -167,46 +168,57 @@ export const invoicesRouter = createTRPCRouter({
         limit: z.number().min(1).max(100).default(INVOICE_PAGE_SIZE),
         status: z.nativeEnum(InvoiceStatus).optional(),
         type: z.nativeEnum(InvoiceType).optional(),
-        contactId: z.string().optional(),
+        clientId: z.string().optional(),
         search: z.string().optional(),
         sortBy: z.enum(["issueDate", "dueDate", "total"]).default("issueDate"),
         sortOrder: z.enum(["asc", "desc"]).default("desc"),
       })
     )
     .query(async ({ ctx, input }) => {
-      const { cursor, limit, status, type, contactId, search, sortBy, sortOrder } =
+      const { cursor, limit, status, type, clientId, search, sortBy, sortOrder } =
         input;
 
-      // Require either organizationId or subaccountId
-      if (!ctx.orgId && !ctx.subaccountId) {
+      // Require either organizationId or locationId
+      if (!ctx.orgId && !ctx.locationId) {
         throw new TRPCError({
           code: "FORBIDDEN",
-          message: "Organization or subaccount context required",
+          message: "Organization or location context required",
         });
       }
 
-      // Build where clause
-      const where: Prisma.InvoiceWhereInput = {
-        organizationId: ctx.orgId ?? undefined,
-        subaccountId: ctx.subaccountId ?? undefined,
-        ...(status && { status }),
-        ...(type && { type }),
-        ...(contactId && { contactId }),
-        ...(search && {
-          OR: [
-            { invoiceNumber: { contains: search, mode: "insensitive" } },
-            { contactName: { contains: search, mode: "insensitive" } },
-            { contactEmail: { contains: search, mode: "insensitive" } },
-          ],
-        }),
-      };
+      const sortColumn = sortBy === "issueDate"
+        ? invoice.issueDate
+        : sortBy === "dueDate"
+          ? invoice.dueDate
+          : invoice.total;
+      const orderFn = sortOrder === "asc" ? asc : desc;
 
-      const invoices = await prisma.invoice.findMany({
-        where,
-        include: invoiceInclude,
-        orderBy: { [sortBy]: sortOrder },
-        take: limit + 1,
-        cursor: cursor ? { id: cursor } : undefined,
+      const invoices = await db.query.invoice.findMany({
+        where: (t, ops) => {
+          const conditions = [];
+
+          if (ctx.orgId) conditions.push(ops.eq(t.organizationId, ctx.orgId));
+          if (ctx.locationId) conditions.push(ops.eq(t.locationId, ctx.locationId));
+          if (status) conditions.push(ops.eq(t.status, status));
+          if (type) conditions.push(ops.eq(t.type, type));
+          if (clientId) conditions.push(ops.eq(t.clientId, clientId));
+          if (cursor) conditions.push(ops.gt(t.id, cursor));
+
+          if (search) {
+            conditions.push(
+              ops.or(
+                ops.ilike(t.invoiceNumber, `%${search}%`),
+                ops.ilike(t.clientName, `%${search}%`),
+                ops.ilike(t.clientEmail, `%${search}%`),
+              )!,
+            );
+          }
+
+          return conditions.length > 0 ? ops.and(...conditions) : undefined;
+        },
+        with: invoiceWith,
+        orderBy: orderFn(sortColumn),
+        limit: limit + 1,
       });
 
       let nextCursor: string | undefined = undefined;
@@ -227,12 +239,12 @@ export const invoicesRouter = createTRPCRouter({
   getById: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.id },
-        include: invoiceInclude,
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.id),
+        with: invoiceWith,
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -241,8 +253,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -250,16 +262,16 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      return mapInvoice(invoice);
+      return mapInvoice(inv);
     }),
 
   create: protectedProcedure
     .input(
       z.object({
-        contactId: z.string().optional(),
-        contactName: z.string().min(1),
-        contactEmail: z.string().email().optional(),
-        contactAddress: z
+        clientId: z.string().optional(),
+        clientName: z.string().min(1),
+        clientEmail: z.string().email().optional(),
+        clientAddress: z
           .object({
             line1: z.string().optional(),
             line2: z.string().optional(),
@@ -313,84 +325,99 @@ export const invoicesRouter = createTRPCRouter({
       // Generate invoice number
       const invoiceNumber = await generateInvoiceNumber(
         ctx.orgId,
-        ctx.subaccountId ?? undefined
+        ctx.locationId ?? undefined
       );
 
       // Get available payment methods
       const paymentMethods = await getAvailablePaymentMethods({
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
       });
 
-      // Create invoice with line items
-      const invoice = await prisma.invoice.create({
-        data: {
-          id: crypto.randomUUID(),
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? undefined,
+      // Create invoice with line items in a transaction
+      const createdInvoice = await db.transaction(async (tx) => {
+        const invoiceId = crypto.randomUUID();
+        const now = new Date();
+
+        const [inv] = await tx.insert(invoice).values({
+          id: invoiceId,
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId ?? undefined,
           invoiceNumber,
-          contactId: input.contactId,
-          contactName: input.contactName,
-          contactEmail: input.contactEmail,
-          contactAddress: input.contactAddress,
+          clientId: input.clientId,
+          clientName: input.clientName,
+          clientEmail: input.clientEmail,
+          clientAddress: input.clientAddress,
           title: input.title,
           type: input.type,
           billingModel: input.billingModel,
           templateId: input.templateId && input.templateId !== "__default__" ? input.templateId : undefined,
           dueDate: input.dueDate,
-          subtotal,
-          taxRate: input.taxRate,
-          taxAmount,
-          discountAmount,
-          total,
-          amountDue: total,
+          subtotal: String(subtotal),
+          taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
+          taxAmount: String(taxAmount),
+          discountAmount: String(discountAmount),
+          total: String(total),
+          amountDue: String(total),
+          amountPaid: "0",
           notes: input.notes,
           internalNotes: input.internalNotes,
           termsConditions: input.termsConditions,
           documentUrl: input.documentUrl,
-          paymentMethods, // Add available payment methods
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          invoiceLineItem: {
-            create: input.lineItems.map((item, index) => ({
+          paymentMethods,
+          createdAt: now,
+          updatedAt: now,
+        }).returning();
+
+        if (input.lineItems.length > 0) {
+          await tx.insert(invoiceLineItem).values(
+            input.lineItems.map((item, index) => ({
               id: crypto.randomUUID(),
+              invoiceId,
               description: item.description,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              amount: item.quantity * item.unitPrice,
+              quantity: String(item.quantity),
+              unitPrice: String(item.unitPrice),
+              amount: String(item.quantity * item.unitPrice),
               timeLogId: item.timeLogId,
               order: index,
-              createdAt: new Date(),
-              updatedAt: new Date(),
+              createdAt: now,
+              updatedAt: now,
             })),
-          },
-        },
-        include: invoiceInclude,
+          );
+        }
+
+        return inv!;
+      });
+
+      // Fetch the full invoice with relations
+      const fullInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, createdInvoice.id),
+        with: invoiceWith,
       });
 
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.CREATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - ${invoice.contactName}`,
+        entityId: createdInvoice.id,
+        entityName: `${createdInvoice.invoiceNumber} - ${createdInvoice.clientName}`,
       });
 
-      return mapInvoice(invoice);
+      return mapInvoice(fullInvoice!);
     }),
 
   update: protectedProcedure
     .input(
       z.object({
         id: z.string(),
-        contactId: z.string().optional(),
-        contactName: z.string().min(1).optional(),
-        contactEmail: z.string().email().optional(),
-        contactAddress: z
+        clientId: z.string().optional(),
+        clientName: z.string().min(1).optional(),
+        clientEmail: z.string().email().optional(),
+        clientAddress: z
           .object({
             line1: z.string().optional(),
             line2: z.string().optional(),
@@ -432,9 +459,9 @@ export const invoicesRouter = createTRPCRouter({
         : {};
 
       // Fetch existing invoice
-      const existingInvoice = await prisma.invoice.findUnique({
-        where: { id },
-        include: { invoiceLineItem: true },
+      const existingInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, id),
+        with: { invoiceLineItems: true },
       });
 
       if (!existingInvoice) {
@@ -447,7 +474,7 @@ export const invoicesRouter = createTRPCRouter({
       // Verify access
       if (
         existingInvoice.organizationId !== ctx.orgId &&
-        existingInvoice.subaccountId !== ctx.subaccountId
+        existingInvoice.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -456,7 +483,7 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Calculate totals if line items are updated
-      let financialUpdate: Partial<Prisma.InvoiceUpdateInput> = {};
+      let financialUpdate: Record<string, unknown> = {};
 
       if (lineItems) {
         const subtotal = lineItems.reduce(
@@ -464,57 +491,77 @@ export const invoicesRouter = createTRPCRouter({
           0
         );
 
-        const taxRate = updateData.taxRate ?? existingInvoice.taxRate?.toNumber();
+        const taxRate = updateData.taxRate ?? (existingInvoice.taxRate ? parseFloat(existingInvoice.taxRate) : undefined);
         const taxAmount = taxRate ? (subtotal * taxRate) / 100 : 0;
         const discountAmount =
           updateData.discountAmount ??
-          existingInvoice.discountAmount.toNumber();
+          parseFloat(existingInvoice.discountAmount);
         const total = subtotal + taxAmount - discountAmount;
-        const amountPaid = existingInvoice.amountPaid.toNumber();
+        const amountPaid = parseFloat(existingInvoice.amountPaid);
 
         financialUpdate = {
-          subtotal,
-          taxAmount,
-          discountAmount,
-          total,
-          amountDue: total - amountPaid,
+          subtotal: String(subtotal),
+          taxAmount: String(taxAmount),
+          discountAmount: String(discountAmount),
+          total: String(total),
+          amountDue: String(total - amountPaid),
         };
       }
 
-      // Update invoice
-      const invoice = await prisma.$transaction(async (tx) => {
+      // Build the update set
+      const updateSet: Record<string, unknown> = {
+        updatedAt: new Date(),
+        ...templateUpdate,
+        ...financialUpdate,
+      };
+      if (updateData.clientId !== undefined) updateSet.clientId = updateData.clientId;
+      if (updateData.clientName !== undefined) updateSet.clientName = updateData.clientName;
+      if (updateData.clientEmail !== undefined) updateSet.clientEmail = updateData.clientEmail;
+      if (updateData.clientAddress !== undefined) updateSet.clientAddress = updateData.clientAddress;
+      if (updateData.title !== undefined) updateSet.title = updateData.title;
+      if (updateData.status !== undefined) updateSet.status = updateData.status;
+      if (updateData.dueDate !== undefined) updateSet.dueDate = updateData.dueDate;
+      if (updateData.taxRate !== undefined) updateSet.taxRate = String(updateData.taxRate);
+      if (updateData.discountAmount !== undefined) updateSet.discountAmount = String(updateData.discountAmount);
+      if (updateData.notes !== undefined) updateSet.notes = updateData.notes;
+      if (updateData.internalNotes !== undefined) updateSet.internalNotes = updateData.internalNotes;
+      if (updateData.termsConditions !== undefined) updateSet.termsConditions = updateData.termsConditions;
+      if (updateData.documentUrl !== undefined) updateSet.documentUrl = updateData.documentUrl;
+
+      // Update invoice in a transaction
+      await db.transaction(async (tx) => {
         // Delete old line items if updating
         if (lineItems) {
-          await tx.invoiceLineItem.deleteMany({
-            where: { invoiceId: id },
-          });
+          await tx.delete(invoiceLineItem).where(eq(invoiceLineItem.invoiceId, id));
+
+          // Insert new line items
+          if (lineItems.length > 0) {
+            const now = new Date();
+            await tx.insert(invoiceLineItem).values(
+              lineItems.map((item, index) => ({
+                id: crypto.randomUUID(),
+                invoiceId: id,
+                description: item.description,
+                quantity: String(item.quantity),
+                unitPrice: String(item.unitPrice),
+                amount: String(item.quantity * item.unitPrice),
+                timeLogId: item.timeLogId,
+                order: index,
+                createdAt: now,
+                updatedAt: now,
+              })),
+            );
+          }
         }
 
         // Update invoice
-        return await tx.invoice.update({
-          where: { id },
-          data: {
-            ...(updateData as any),
-            ...(templateUpdate as any),
-            ...(financialUpdate as any),
-            ...(lineItems && {
-              invoiceLineItem: {
-                create: lineItems.map((item, index) => ({
-                  id: crypto.randomUUID(),
-                  description: item.description,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  amount: item.quantity * item.unitPrice,
-                  timeLogId: item.timeLogId,
-                  order: index,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                })),
-              },
-            }),
-          },
-          include: invoiceInclude,
-        });
+        await tx.update(invoice).set(updateSet).where(eq(invoice.id, id));
+      });
+
+      // Re-fetch the full invoice
+      const updatedInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, id),
+        with: invoiceWith,
       });
 
       // Log activity
@@ -526,18 +573,18 @@ export const invoicesRouter = createTRPCRouter({
       if (changes && Object.keys(changes).length > 0) {
         await logAnalytics({
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? undefined,
+          locationId: ctx.locationId ?? undefined,
           userId: ctx.auth.user.id,
           type: "INVOICE" as any,
           action: ActivityAction.UPDATED,
           entityType: "invoice",
-          entityId: invoice.id,
-          entityName: `${invoice.invoiceNumber} - ${invoice.contactName}`,
+          entityId: updatedInvoice!.id,
+          entityName: `${updatedInvoice!.invoiceNumber} - ${updatedInvoice!.clientName}`,
           changes: changes as any,
         });
       }
 
-      return mapInvoice(invoice);
+      return mapInvoice(updatedInvoice!);
     }),
 
   updateDocument: protectedProcedure
@@ -552,8 +599,8 @@ export const invoicesRouter = createTRPCRouter({
       const { id, documentUrl, documentName } = input;
 
       // Fetch existing invoice
-      const existingInvoice = await prisma.invoice.findUnique({
-        where: { id },
+      const existingInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, id),
       });
 
       if (!existingInvoice) {
@@ -566,7 +613,7 @@ export const invoicesRouter = createTRPCRouter({
       // Verify access
       if (
         existingInvoice.organizationId !== ctx.orgId &&
-        existingInvoice.subaccountId !== ctx.subaccountId
+        existingInvoice.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -575,25 +622,27 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Update invoice document
-      const invoice = await prisma.invoice.update({
-        where: { id },
-        data: {
-          documentUrl,
-          documentName,
-        },
-        include: invoiceInclude,
+      await db.update(invoice).set({
+        documentUrl,
+        documentName,
+      }).where(eq(invoice.id, id));
+
+      // Re-fetch the full invoice
+      const updatedInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, id),
+        with: invoiceWith,
       });
 
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE" as any,
         action: ActivityAction.UPDATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - ${invoice.contactName}`,
+        entityId: updatedInvoice!.id,
+        entityName: `${updatedInvoice!.invoiceNumber} - ${updatedInvoice!.clientName}`,
         changes: {
           documentUrl: {
             old: existingInvoice.documentUrl,
@@ -602,17 +651,17 @@ export const invoicesRouter = createTRPCRouter({
         } as any,
       });
 
-      return mapInvoice(invoice);
+      return mapInvoice(updatedInvoice!);
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.id },
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.id),
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -621,8 +670,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -630,20 +679,29 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      await prisma.invoice.delete({
-        where: { id: input.id },
+      await db.delete(invoice).where(eq(invoice.id, input.id));
+
+      await createNotification({
+        type: "INVOICE_DELETED",
+        title: "Invoice deleted",
+        message: `${ctx.auth.user.name} deleted invoice ${inv.invoiceNumber}`,
+        actorId: ctx.auth.user.id,
+        entityType: "invoice",
+        entityId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId ?? undefined,
       });
 
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.DELETED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - ${invoice.contactName}`,
+        entityId: inv.id,
+        entityName: `${inv.invoiceNumber} - ${inv.clientName}`,
       });
 
       return { success: true };
@@ -665,11 +723,11 @@ export const invoicesRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { invoiceId, ...paymentData } = input;
 
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: invoiceId },
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, invoiceId),
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -678,8 +736,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -688,63 +746,80 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Create payment and update invoice
-      const payment = await prisma.$transaction(async (tx) => {
-        const payment = await tx.invoicePayment.create({
-          data: {
-            id: crypto.randomUUID(),
-            invoiceId,
-            ...paymentData,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
-        });
+      const payment = await db.transaction(async (tx) => {
+        const now = new Date();
+        const [payment] = await tx.insert(invoicePayment).values({
+          id: crypto.randomUUID(),
+          invoiceId,
+          amount: String(paymentData.amount),
+          method: paymentData.method,
+          paidAt: paymentData.paidAt,
+          stripePaymentId: paymentData.stripePaymentId,
+          xeroPaymentId: paymentData.xeroPaymentId,
+          referenceNumber: paymentData.referenceNumber,
+          notes: paymentData.notes,
+          createdAt: now,
+          updatedAt: now,
+        }).returning();
 
         const newAmountPaid =
-          invoice.amountPaid.toNumber() + paymentData.amount;
-        const newAmountDue = invoice.total.toNumber() - newAmountPaid;
+          parseFloat(inv.amountPaid) + paymentData.amount;
+        const newAmountDue = parseFloat(inv.total) - newAmountPaid;
 
         // Determine new status
-        let newStatus = invoice.status;
+        let newStatus = inv.status;
         if (newAmountDue <= 0) {
           newStatus = InvoiceStatus.PAID;
         } else if (newAmountPaid > 0) {
           newStatus = InvoiceStatus.PARTIALLY_PAID;
         }
 
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: {
-            amountPaid: newAmountPaid,
-            amountDue: newAmountDue,
-            status: newStatus,
-            paidAt: newAmountDue <= 0 ? new Date() : invoice.paidAt,
-          },
-        });
+        await tx.update(invoice).set({
+          amountPaid: String(newAmountPaid),
+          amountDue: String(newAmountDue),
+          status: newStatus,
+          paidAt: newAmountDue <= 0 ? new Date() : inv.paidAt,
+        }).where(eq(invoice.id, invoiceId));
 
-        return payment;
+        return payment!;
       });
 
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.UPDATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - Payment Recorded`,
+        entityId: inv.id,
+        entityName: `${inv.invoiceNumber} - Payment Recorded`,
         changes: {
           payment: {
-            old: invoice.amountPaid.toString(),
-            new: (invoice.amountPaid.toNumber() + paymentData.amount).toString(),
+            old: inv.amountPaid,
+            new: String(parseFloat(inv.amountPaid) + paymentData.amount),
           },
+        },
+      });
+
+      await createNotification({
+        type: "INVOICE_PAYMENT_RECORDED",
+        title: "Invoice payment recorded",
+        message: `${ctx.auth.user.name} recorded a payment for invoice ${inv.invoiceNumber}`,
+        actorId: ctx.auth.user.id,
+        entityType: "invoice",
+        entityId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId ?? undefined,
+        data: {
+          amount: paymentData.amount,
+          method: paymentData.method,
         },
       });
 
       return {
         id: payment.id,
-        amount: payment.amount.toString(),
+        amount: payment.amount,
         method: payment.method,
         paidAt: payment.paidAt,
       };
@@ -760,12 +835,12 @@ export const invoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        include: invoiceInclude,
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        with: invoiceWith,
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -774,8 +849,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -783,7 +858,7 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      const sendTo = input.sendTo ?? invoice.contactEmail;
+      const sendTo = input.sendTo ?? inv.clientEmail;
       if (!sendTo) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -792,31 +867,27 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Generate payment link to include in email
-      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${invoice.id}`;
+      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${inv.id}`;
 
       // Create reminder record
-      const reminder = await prisma.$transaction(async (tx) => {
-        const reminder = await tx.invoiceReminder.create({
-          data: {
-            id: crypto.randomUUID(),
-            invoiceId: input.invoiceId,
-            sentTo: sendTo,
-            subject: input.subject,
-            message: input.message,
-            sentAt: new Date(),
-            createdAt: new Date(),
-          },
-        });
+      const reminder = await db.transaction(async (tx) => {
+        const now = new Date();
+        const [reminder] = await tx.insert(invoiceReminder).values({
+          id: crypto.randomUUID(),
+          invoiceId: input.invoiceId,
+          sentTo: sendTo,
+          subject: input.subject,
+          message: input.message,
+          sentAt: now,
+          createdAt: now,
+        }).returning();
 
-        await tx.invoice.update({
-          where: { id: input.invoiceId },
-          data: {
-            lastReminderSentAt: new Date(),
-            reminderCount: { increment: 1 },
-          },
-        });
+        await tx.update(invoice).set({
+          lastReminderSentAt: now,
+          reminderCount: sql`${invoice.reminderCount} + 1`,
+        }).where(eq(invoice.id, input.invoiceId));
 
-        return reminder;
+        return reminder!;
       });
 
       // Generate PDF attachment
@@ -826,40 +897,40 @@ export const invoicesRouter = createTRPCRouter({
         const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
 
         // Get template
-        const template = invoice.invoiceTemplate
+        const template = inv.invoiceTemplate
           ? {
-              name: invoice.invoiceTemplate.name,
-              description: invoice.invoiceTemplate.description || "",
-              layout: invoice.invoiceTemplate.layout as any,
-              styles: invoice.invoiceTemplate.styles as any,
+              name: inv.invoiceTemplate.name,
+              description: inv.invoiceTemplate.description || "",
+              layout: inv.invoiceTemplate.layout as any,
+              styles: inv.invoiceTemplate.styles as any,
             }
           : PRESET_TEMPLATES.minimal;
 
         // Prepare invoice data
         const invoiceData = {
-          invoiceNumber: invoice.invoiceNumber,
-          issueDate: invoice.issueDate,
-          dueDate: invoice.dueDate,
-          contactName: invoice.contactName,
-          contactEmail: invoice.contactEmail,
-          contactAddress: invoice.contactAddress as Record<string, unknown> | null,
-          lineItems: invoice.invoiceLineItem.map((item) => ({
+          invoiceNumber: inv.invoiceNumber,
+          issueDate: inv.issueDate,
+          dueDate: inv.dueDate,
+          clientName: inv.clientName,
+          clientEmail: inv.clientEmail,
+          clientAddress: inv.clientAddress as Record<string, unknown> | null,
+          lineItems: inv.invoiceLineItems.map((item) => ({
             description: item.description,
-            quantity: item.quantity.toString(),
-            unitPrice: item.unitPrice.toString(),
-            amount: item.amount.toString(),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            amount: item.amount,
           })),
-          subtotal: invoice.subtotal.toString(),
-          taxRate: invoice.taxRate?.toString(),
-          taxAmount: invoice.taxAmount.toString(),
-          discountAmount: invoice.discountAmount.toString(),
-          total: invoice.total.toString(),
-          currency: invoice.currency,
-          notes: invoice.notes,
-          termsConditions: invoice.termsConditions,
+          subtotal: inv.subtotal,
+          taxRate: inv.taxRate ?? undefined,
+          taxAmount: inv.taxAmount,
+          discountAmount: inv.discountAmount,
+          total: inv.total,
+          currency: inv.currency,
+          notes: inv.notes,
+          termsConditions: inv.termsConditions,
           // TODO: Get from organization
           businessName: "Your Business",
-          businessEmail: "contact@yourbusiness.com",
+          businessEmail: "client@yourbusiness.com",
         };
 
         // Generate PDF
@@ -877,7 +948,7 @@ export const invoicesRouter = createTRPCRouter({
           to: sendTo,
           subject: input.subject,
           message: input.message,
-          invoiceNumber: invoice.invoiceNumber,
+          invoiceNumber: inv.invoiceNumber,
           pdfBuffer: pdfBuffer || undefined,
           paymentLink,
         });
@@ -894,13 +965,27 @@ export const invoicesRouter = createTRPCRouter({
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.UPDATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - Reminder sent to ${sendTo}`,
+        entityId: inv.id,
+        entityName: `${inv.invoiceNumber} - Reminder sent to ${sendTo}`,
+      });
+
+      await createNotification({
+        type: "INVOICE_REMINDER_SENT",
+        title: "Invoice reminder sent",
+        message: `${ctx.auth.user.name} sent a reminder for invoice ${inv.invoiceNumber}`,
+        actorId: ctx.auth.user.id,
+        entityType: "invoice",
+        entityId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId ?? undefined,
+        data: {
+          sentTo: sendTo,
+        },
       });
 
       return {
@@ -914,12 +999,12 @@ export const invoicesRouter = createTRPCRouter({
   sendInvoice: protectedProcedure
     .input(z.object({ invoiceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        include: invoiceInclude,
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        with: invoiceWith,
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -928,8 +1013,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -938,25 +1023,25 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Require email
-      if (!invoice.contactEmail) {
+      if (!inv.clientEmail) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Invoice contact must have an email address",
+          message: "Invoice client must have an email address",
         });
       }
 
       // Generate payment link
-      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${invoice.id}`;
+      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${inv.id}`;
 
-      // Fetch subaccount if available for business name
+      // Fetch location if available for business name
       let businessName = "Your Business";
-      if (invoice.subaccountId) {
-        const subaccount = await prisma.subaccount.findUnique({
-          where: { id: invoice.subaccountId },
-          select: { companyName: true },
+      if (inv.locationId) {
+        const loc = await db.query.location.findFirst({
+          where: (t, { eq }) => eq(t.id, inv.locationId!),
+          columns: { companyName: true },
         });
-        if (subaccount) {
-          businessName = subaccount.companyName;
+        if (loc) {
+          businessName = loc.companyName;
         }
       }
 
@@ -966,38 +1051,38 @@ export const invoicesRouter = createTRPCRouter({
         const { generatePDF } = await import("@/features/invoicing/lib/pdf-generator");
         const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
 
-        const template = invoice.invoiceTemplate
+        const template = inv.invoiceTemplate
           ? {
-              name: invoice.invoiceTemplate.name,
-              description: invoice.invoiceTemplate.description || "",
-              layout: invoice.invoiceTemplate.layout as any,
-              styles: invoice.invoiceTemplate.styles as any,
+              name: inv.invoiceTemplate.name,
+              description: inv.invoiceTemplate.description || "",
+              layout: inv.invoiceTemplate.layout as any,
+              styles: inv.invoiceTemplate.styles as any,
             }
           : PRESET_TEMPLATES.minimal;
 
         const invoiceData = {
-          invoiceNumber: invoice.invoiceNumber,
-          issueDate: invoice.issueDate,
-          dueDate: invoice.dueDate,
-          contactName: invoice.contactName,
-          contactEmail: invoice.contactEmail,
-          contactAddress: invoice.contactAddress as Record<string, unknown> | null,
-          lineItems: invoice.invoiceLineItem.map((item) => ({
+          invoiceNumber: inv.invoiceNumber,
+          issueDate: inv.issueDate,
+          dueDate: inv.dueDate,
+          clientName: inv.clientName,
+          clientEmail: inv.clientEmail,
+          clientAddress: inv.clientAddress as Record<string, unknown> | null,
+          lineItems: inv.invoiceLineItems.map((item) => ({
             description: item.description,
-            quantity: item.quantity.toString(),
-            unitPrice: item.unitPrice.toString(),
-            amount: item.amount.toString(),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            amount: item.amount,
           })),
-          subtotal: invoice.subtotal.toString(),
-          taxRate: invoice.taxRate?.toString(),
-          taxAmount: invoice.taxAmount.toString(),
-          discountAmount: invoice.discountAmount.toString(),
-          total: invoice.total.toString(),
-          currency: invoice.currency,
-          notes: invoice.notes,
-          termsConditions: invoice.termsConditions,
+          subtotal: inv.subtotal,
+          taxRate: inv.taxRate ?? undefined,
+          taxAmount: inv.taxAmount,
+          discountAmount: inv.discountAmount,
+          total: inv.total,
+          currency: inv.currency,
+          notes: inv.notes,
+          termsConditions: inv.termsConditions,
           businessName,
-          businessEmail: "contact@yourbusiness.com",
+          businessEmail: "client@yourbusiness.com",
         };
 
         pdfBuffer = await generatePDF(invoiceData, template);
@@ -1014,12 +1099,12 @@ export const invoicesRouter = createTRPCRouter({
         const { sendInvoiceEmail } = await import("@/lib/email");
 
         const result = await sendInvoiceEmail({
-          to: invoice.contactEmail,
-          invoiceNumber: invoice.invoiceNumber,
-          contactName: invoice.contactName,
-          total: invoice.total.toString(),
-          currency: invoice.currency,
-          dueDate: invoice.dueDate,
+          to: inv.clientEmail,
+          invoiceNumber: inv.invoiceNumber,
+          clientName: inv.clientName,
+          total: inv.total,
+          currency: inv.currency,
+          dueDate: inv.dueDate,
           pdfBuffer,
           paymentLink,
           businessName,
@@ -1040,10 +1125,23 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Update invoice status to SENT
-      await prisma.invoice.update({
-        where: { id: input.invoiceId },
+      await db.update(invoice).set({
+        status: InvoiceStatus.SENT,
+      }).where(eq(invoice.id, input.invoiceId));
+
+      await createNotification({
+        type: "INVOICE_SENT",
+        title: "Invoice sent",
+        message: `${ctx.auth.user.name} sent invoice ${inv.invoiceNumber}`,
+        actorId: ctx.auth.user.id,
+        entityType: "invoice",
+        entityId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId ?? undefined,
         data: {
-          status: InvoiceStatus.SENT,
+          sentTo: inv.clientEmail,
+          total: inv.total,
+          currency: inv.currency,
         },
       });
 
@@ -1051,13 +1149,13 @@ export const invoicesRouter = createTRPCRouter({
       try {
         await logAnalytics({
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? undefined,
+          locationId: ctx.locationId ?? undefined,
           userId: ctx.auth.user.id,
           type: "INVOICE",
           action: ActivityAction.UPDATED,
           entityType: "invoice",
-          entityId: invoice.id,
-          entityName: `${invoice.invoiceNumber} - Sent to ${invoice.contactEmail}`,
+          entityId: inv.id,
+          entityName: `${inv.invoiceNumber} - Sent to ${inv.clientEmail}`,
         });
       } catch (error) {
         console.error("Failed to log analytics:", error);
@@ -1066,7 +1164,7 @@ export const invoicesRouter = createTRPCRouter({
 
       return {
         success: true,
-        sentTo: invoice.contactEmail,
+        sentTo: inv.clientEmail,
       };
     }),
 
@@ -1074,16 +1172,16 @@ export const invoicesRouter = createTRPCRouter({
     .input(
       z.object({
         timeLogIds: z.array(z.string()).min(1, "At least one time log is required"),
-        contactId: z.string().optional(),
-        contactName: z.string().min(1).optional(),
-        contactEmail: z.string().email().optional().or(z.literal("")),
+        clientId: z.string().optional(),
+        clientName: z.string().min(1).optional(),
+        clientEmail: z.string().email().optional().or(z.literal("")),
         title: z.string().optional(),
         dueDate: z.date(),
         taxRate: z.number().min(0).max(100).optional(),
         discountAmount: z.number().min(0).optional(),
         notes: z.string().optional(),
         termsConditions: z.string().optional(),
-        groupBy: z.enum(["worker", "date", "all"]).default("worker"),
+        groupBy: z.enum(["instructor", "date", "all"]).default("instructor"),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -1095,15 +1193,16 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Fetch time logs
-      const timeLogs = await prisma.timeLog.findMany({
-        where: {
-          id: { in: input.timeLogIds },
-          organizationId: ctx.orgId,
-          status: "APPROVED", // Only approved time logs can be invoiced
-        },
-        include: {
-          worker: true,
-          contact: true,
+      const timeLogs = await db.query.timeLog.findMany({
+        where: (t, { and, eq, inArray }) =>
+          and(
+            inArray(t.id, input.timeLogIds),
+            eq(t.organizationId, ctx.orgId!),
+            eq(t.status, "APPROVED"),
+          ),
+        with: {
+          instructor: true,
+          client: true,
         },
       });
 
@@ -1123,26 +1222,26 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // IMPORTANT: Check if all time logs have an associated contact (client)
-      const timeLogsWithoutContact = timeLogs.filter((log) => !log.contactId);
-      if (timeLogsWithoutContact.length > 0) {
-        const workerNames = timeLogsWithoutContact
-          .map((log) => log.worker?.name || "Unknown worker")
+      // IMPORTANT: Check if all time logs have an associated client (client)
+      const timeLogsWithoutClient = timeLogs.filter((log) => !log.clientId);
+      if (timeLogsWithoutClient.length > 0) {
+        const instructorNames = timeLogsWithoutClient
+          .map((log) => log.instructor?.name || "Unknown instructor")
           .filter((name, index, self) => self.indexOf(name) === index) // unique names
           .join(", ");
 
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `Cannot generate invoice: ${timeLogsWithoutContact.length} time log(s) do not have a contact (client) assigned. Workers without contact: ${workerNames}. Please assign a contact to these workers before generating an invoice.`,
+          message: `Cannot generate invoice: ${timeLogsWithoutClient.length} time log(s) do not have a client (client) assigned. Instructors without client: ${instructorNames}. Please assign a client to these instructors before generating an invoice.`,
         });
       }
 
-      // Ensure all time logs are for the same contact (client)
-      const contactIds = new Set(timeLogs.map((log) => log.contactId));
-      if (contactIds.size > 1) {
+      // Ensure all time logs are for the same client (client)
+      const clientIds = new Set(timeLogs.map((log) => log.clientId));
+      if (clientIds.size > 1) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Cannot generate invoice: Selected time logs belong to different contacts (clients). Please select time logs for only one contact at a time.",
+          message: "Cannot generate invoice: Selected time logs belong to different clients (clients). Please select time logs for only one client at a time.",
         });
       }
 
@@ -1154,29 +1253,29 @@ export const invoicesRouter = createTRPCRouter({
         timeLogId: string;
       }> = [];
 
-      if (input.groupBy === "worker") {
-        // Group by worker
-        const workerGroups = timeLogs.reduce((acc, log) => {
-          const workerId = log.workerId || "no-worker";
-          if (!acc[workerId]) acc[workerId] = [];
-          acc[workerId].push(log);
+      if (input.groupBy === "instructor") {
+        // Group by instructor
+        const instructorGroups = timeLogs.reduce((acc, log) => {
+          const instructorId = log.instructorId || "no-instructor";
+          if (!acc[instructorId]) acc[instructorId] = [];
+          acc[instructorId].push(log);
           return acc;
         }, {} as Record<string, typeof timeLogs>);
 
-        Object.entries(workerGroups).forEach(([workerId, logs]) => {
-          const worker = logs[0]?.worker;
+        Object.entries(instructorGroups).forEach(([_instructorId, logs]) => {
+          const instructor = logs[0]?.instructor;
           const totalHours = logs.reduce(
             (sum, log) => sum + (log.duration || 0) / 60,
             0
           );
           const avgRate =
             logs.reduce(
-              (sum, log) => sum + (log.hourlyRate?.toNumber() || 0),
+              (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
               0
             ) / logs.length;
 
           lineItems.push({
-            description: `${worker?.name || "Worker"} - ${logs.length} shift(s), ${totalHours.toFixed(2)} hours`,
+            description: `${instructor?.name || "Instructor"} - ${logs.length} shift(s), ${totalHours.toFixed(2)} hours`,
             quantity: totalHours,
             unitPrice: avgRate,
             timeLogId: logs[0]!.id, // Store first time log ID
@@ -1198,7 +1297,7 @@ export const invoicesRouter = createTRPCRouter({
           );
           const avgRate =
             logs.reduce(
-              (sum, log) => sum + (log.hourlyRate?.toNumber() || 0),
+              (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
               0
             ) / logs.length;
 
@@ -1217,7 +1316,7 @@ export const invoicesRouter = createTRPCRouter({
         );
         const avgRate =
           timeLogs.reduce(
-            (sum, log) => sum + (log.hourlyRate?.toNumber() || 0),
+            (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
             0
           ) / timeLogs.length;
 
@@ -1238,120 +1337,128 @@ export const invoicesRouter = createTRPCRouter({
       const discountAmount = input.discountAmount ?? 0;
       const total = subtotal + taxAmount - discountAmount;
 
-      // Get contact info from time logs (we've already validated all time logs have the same contact)
-      const timeLogContact = timeLogs[0]?.contact;
-      if (!timeLogContact) {
+      // Get client info from time logs (we've already validated all time logs have the same client)
+      const timeLogClient = timeLogs[0]?.client;
+      if (!timeLogClient) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Contact information not found. Please ensure all time logs have a contact assigned.",
+          message: "Client information not found. Please ensure all time logs have a client assigned.",
         });
       }
 
-      // Use contact from time log, but allow override from input if provided
-      const contactId = input.contactId || timeLogContact.id;
-      const contactName = input.contactName || timeLogContact.name;
-      const contactEmail = input.contactEmail || timeLogContact.email || undefined;
+      // Use client from time log, but allow override from input if provided
+      const clientId = input.clientId || timeLogClient.id;
+      const clientName = input.clientName || timeLogClient.name;
+      const clientEmail = input.clientEmail || timeLogClient.email || undefined;
 
       // Determine name for invoice numbering
-      // Use the contact's (client's) name for invoice numbering to group by client
+      // Use the client's (client's) name for invoice numbering to group by client
       // This ensures all invoices for the same client are sequentially numbered together
       let nameForInvoice: string | undefined;
 
-      // Check if all time logs are from the same worker
-      const allSameWorker = timeLogs.every(
-        (log) => log.workerId === timeLogs[0]?.workerId
+      // Check if all time logs are from the same instructor
+      const allSameInstructor = timeLogs.every(
+        (log) => log.instructorId === timeLogs[0]?.instructorId
       );
 
-      if (allSameWorker) {
-        // If all time logs are from one worker, use worker's name
-        const firstWorker = timeLogs[0]?.worker;
-        nameForInvoice = firstWorker?.name;
+      if (allSameInstructor) {
+        // If all time logs are from one instructor, use instructor's name
+        const firstInstructor = timeLogs[0]?.instructor;
+        nameForInvoice = firstInstructor?.name;
       } else {
-        // If multiple workers, use the client's (contact's) name
-        // This groups invoices by client when multiple workers are involved
-        nameForInvoice = contactName;
+        // If multiple instructors, use the client's (client's) name
+        // This groups invoices by client when multiple instructors are involved
+        nameForInvoice = clientName;
       }
 
       // Generate invoice number with name if available
       const invoiceNumber = await generateInvoiceNumber(
         ctx.orgId,
-        ctx.subaccountId ?? undefined,
+        ctx.locationId ?? undefined,
         nameForInvoice
       );
 
       // Get available payment methods
       const paymentMethods = await getAvailablePaymentMethods({
         organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
       });
 
       // Create invoice
-      const invoice = await prisma.$transaction(async (tx) => {
-        const invoice = await tx.invoice.create({
-          data: {
-            id: crypto.randomUUID(),
-            organizationId: ctx.orgId!,
-            subaccountId: ctx.subaccountId ?? undefined,
-            invoiceNumber,
-            contactId,
-            contactName,
-            contactEmail,
-            title: input.title ?? `Time Tracking Invoice - ${format(new Date(), "MMM yyyy")}`,
-            billingModel: "HOURLY",
-            dueDate: input.dueDate,
-            subtotal,
-            taxRate: input.taxRate,
-            taxAmount,
-            discountAmount,
-            total,
-            amountDue: total,
-            notes: input.notes,
-            termsConditions: input.termsConditions,
-            paymentMethods, // Add available payment methods
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            invoiceLineItem: {
-              create: lineItems.map((item, index) => ({
-                id: crypto.randomUUID(),
-                description: item.description,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                amount: item.quantity * item.unitPrice,
-                timeLogId: item.timeLogId,
-                order: index,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              })),
-            },
-          },
-          include: invoiceInclude,
-        });
+      const createdInvoice = await db.transaction(async (tx) => {
+        const invoiceId = crypto.randomUUID();
+        const now = new Date();
+
+        const [inv] = await tx.insert(invoice).values({
+          id: invoiceId,
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId ?? undefined,
+          invoiceNumber,
+          clientId,
+          clientName,
+          clientEmail,
+          title: input.title ?? `Time Tracking Invoice - ${format(new Date(), "MMM yyyy")}`,
+          billingModel: "HOURLY",
+          dueDate: input.dueDate,
+          subtotal: String(subtotal),
+          taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
+          taxAmount: String(taxAmount),
+          discountAmount: String(discountAmount),
+          total: String(total),
+          amountDue: String(total),
+          amountPaid: "0",
+          notes: input.notes,
+          termsConditions: input.termsConditions,
+          paymentMethods,
+          createdAt: now,
+          updatedAt: now,
+        }).returning();
+
+        if (lineItems.length > 0) {
+          await tx.insert(invoiceLineItem).values(
+            lineItems.map((item, index) => ({
+              id: crypto.randomUUID(),
+              invoiceId,
+              description: item.description,
+              quantity: String(item.quantity),
+              unitPrice: String(item.unitPrice),
+              amount: String(item.quantity * item.unitPrice),
+              timeLogId: item.timeLogId,
+              order: index,
+              createdAt: now,
+              updatedAt: now,
+            })),
+          );
+        }
 
         // Update all time logs to mark them as invoiced
-        await tx.timeLog.updateMany({
-          where: { id: { in: input.timeLogIds } },
-          data: {
-            invoiceId: invoice.id,
-            status: "INVOICED",
-          },
-        });
+        await tx.update(timeLog).set({
+          invoiceId,
+          status: "INVOICED",
+        }).where(inArray(timeLog.id, input.timeLogIds));
 
-        return invoice;
+        return inv!;
+      });
+
+      // Fetch full invoice with relations
+      const fullInvoice = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, createdInvoice.id),
+        with: invoiceWith,
       });
 
       // Log activity
       await logAnalytics({
         organizationId: ctx.orgId,
-        subaccountId: ctx.subaccountId ?? undefined,
+        locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.CREATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: `${invoice.invoiceNumber} - Generated from ${timeLogs.length} time log(s)`,
+        entityId: createdInvoice.id,
+        entityName: `${createdInvoice.invoiceNumber} - Generated from ${timeLogs.length} time log(s)`,
       });
 
-      return mapInvoice(invoice);
+      return mapInvoice(fullInvoice!);
     }),
 
   // Generate payment link for invoice (Stripe or hosted page)
@@ -1363,14 +1470,12 @@ export const invoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        include: {
-          invoiceLineItem: true,
-        },
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        with: { invoiceLineItems: true },
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -1383,24 +1488,25 @@ export const invoicesRouter = createTRPCRouter({
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
       if (input.provider === "STRIPE") {
-        // Fetch Stripe Connect account for this subaccount/organization
-        const stripeConnection = await prisma.stripeConnection.findFirst({
-          where: {
-            isActive: true,
-            ...(invoice.subaccountId
-              ? { subaccountId: invoice.subaccountId }
-              : { organizationId: invoice.organizationId, subaccountId: null }),
-          },
+        // Fetch Stripe Connect account for this location/organization
+        const stripeConn = await db.query.stripeConnection.findFirst({
+          where: (t, { and, eq, isNull }) =>
+            and(
+              eq(t.isActive, true),
+              inv.locationId
+                ? eq(t.locationId, inv.locationId)
+                : and(eq(t.organizationId, inv.organizationId), isNull(t.locationId)),
+            ),
         });
 
-        if (!stripeConnection) {
+        if (!stripeConn) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
             message: "Stripe Connect is not set up for this account. Please connect your Stripe account in payment settings.",
           });
         }
 
-        if (!stripeConnection.chargesEnabled) {
+        if (!stripeConn.chargesEnabled) {
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
             message: "This Stripe account cannot accept charges yet. Please complete your Stripe account setup.",
@@ -1412,7 +1518,7 @@ export const invoicesRouter = createTRPCRouter({
           const { createStripeCheckoutSessionForConnect } = await import("@/lib/stripe");
 
           // Convert amount to cents
-          const amountInCents = Math.round(parseFloat(invoice.amountDue.toString()) * 100);
+          const amountInCents = Math.round(parseFloat(inv.amountDue) * 100);
 
           // Validate amount
           if (amountInCents < 1) {
@@ -1424,36 +1530,36 @@ export const invoicesRouter = createTRPCRouter({
 
           // Calculate application fee if configured
           let applicationFeeAmount: number | undefined;
-          if (stripeConnection.applicationFeePercent || stripeConnection.applicationFeeFixed) {
-            const feePercent = stripeConnection.applicationFeePercent
-              ? parseFloat(stripeConnection.applicationFeePercent.toString())
+          if (stripeConn.applicationFeePercent || stripeConn.applicationFeeFixed) {
+            const feePercent = stripeConn.applicationFeePercent
+              ? parseFloat(stripeConn.applicationFeePercent)
               : 0;
-            const feeFixed = stripeConnection.applicationFeeFixed
-              ? Math.round(parseFloat(stripeConnection.applicationFeeFixed.toString()) * 100) // Convert to cents and ensure integer
+            const feeFixed = stripeConn.applicationFeeFixed
+              ? Math.round(parseFloat(stripeConn.applicationFeeFixed) * 100) // Convert to cents and ensure integer
               : 0;
 
             applicationFeeAmount = Math.round((amountInCents * feePercent) / 100 + feeFixed);
           }
 
           const result = await createStripeCheckoutSessionForConnect({
-            invoiceId: invoice.id,
-            invoiceNumber: invoice.invoiceNumber,
+            invoiceId: inv.id,
+            invoiceNumber: inv.invoiceNumber,
             amount: amountInCents,
-            currency: invoice.currency,
-            contactEmail: invoice.contactEmail || "",
-            contactName: invoice.contactName,
-            lineItems: invoice.invoiceLineItem.map((item) => {
-              const quantity = Math.max(1, Math.round(item.quantity.toNumber())); // Ensure at least 1
-              const amount = Math.max(1, Math.round(parseFloat(item.unitPrice.toString()) * 100)); // Ensure at least 1 cent
+            currency: inv.currency,
+            clientEmail: inv.clientEmail || "",
+            clientName: inv.clientName,
+            lineItems: inv.invoiceLineItems.map((item) => {
+              const quantity = Math.max(1, Math.round(parseFloat(item.quantity))); // Ensure at least 1
+              const amount = Math.max(1, Math.round(parseFloat(item.unitPrice) * 100)); // Ensure at least 1 cent
               return {
                 name: item.description,
                 quantity,
                 amount,
               };
             }),
-            successUrl: `${baseUrl}/invoices/pay/${invoice.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
-            cancelUrl: `${baseUrl}/invoices/pay/${invoice.id}?canceled=true`,
-            stripeAccountId: stripeConnection.stripeAccountId,
+            successUrl: `${baseUrl}/invoices/pay/${inv.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: `${baseUrl}/invoices/pay/${inv.id}?canceled=true`,
+            stripeAccountId: stripeConn.stripeAccountId,
             applicationFeeAmount,
           });
 
@@ -1479,7 +1585,7 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Generate hosted payment page link
-      const paymentLink = `${baseUrl}/invoices/pay/${invoice.id}`;
+      const paymentLink = `${baseUrl}/invoices/pay/${inv.id}`;
 
       return {
         paymentLink,
@@ -1491,12 +1597,12 @@ export const invoicesRouter = createTRPCRouter({
   generatePDF: protectedProcedure
     .input(z.object({ invoiceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        include: invoiceInclude,
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        with: invoiceWith,
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -1505,8 +1611,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -1520,40 +1626,40 @@ export const invoicesRouter = createTRPCRouter({
         const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
 
         // Get template
-        const template = invoice.invoiceTemplate
+        const template = inv.invoiceTemplate
           ? {
-              name: invoice.invoiceTemplate.name,
-              description: invoice.invoiceTemplate.description || "",
-              layout: invoice.invoiceTemplate.layout as any,
-              styles: invoice.invoiceTemplate.styles as any,
+              name: inv.invoiceTemplate.name,
+              description: inv.invoiceTemplate.description || "",
+              layout: inv.invoiceTemplate.layout as any,
+              styles: inv.invoiceTemplate.styles as any,
             }
           : PRESET_TEMPLATES.minimal;
 
         // Prepare invoice data
         const invoiceData = {
-          invoiceNumber: invoice.invoiceNumber,
-          issueDate: invoice.issueDate,
-          dueDate: invoice.dueDate,
-          contactName: invoice.contactName,
-          contactEmail: invoice.contactEmail,
-          contactAddress: invoice.contactAddress as Record<string, unknown> | null,
-          lineItems: invoice.invoiceLineItem.map((item) => ({
+          invoiceNumber: inv.invoiceNumber,
+          issueDate: inv.issueDate,
+          dueDate: inv.dueDate,
+          clientName: inv.clientName,
+          clientEmail: inv.clientEmail,
+          clientAddress: inv.clientAddress as Record<string, unknown> | null,
+          lineItems: inv.invoiceLineItems.map((item) => ({
             description: item.description,
-            quantity: item.quantity.toString(),
-            unitPrice: item.unitPrice.toString(),
-            amount: item.amount.toString(),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            amount: item.amount,
           })),
-          subtotal: invoice.subtotal.toString(),
-          taxRate: invoice.taxRate?.toString(),
-          taxAmount: invoice.taxAmount.toString(),
-          discountAmount: invoice.discountAmount.toString(),
-          total: invoice.total.toString(),
-          currency: invoice.currency,
-          notes: invoice.notes,
-          termsConditions: invoice.termsConditions,
+          subtotal: inv.subtotal,
+          taxRate: inv.taxRate ?? undefined,
+          taxAmount: inv.taxAmount,
+          discountAmount: inv.discountAmount,
+          total: inv.total,
+          currency: inv.currency,
+          notes: inv.notes,
+          termsConditions: inv.termsConditions,
           // TODO: Get from organization
           businessName: "Your Business",
-          businessEmail: "contact@yourbusiness.com",
+          businessEmail: "client@yourbusiness.com",
         };
 
         // Generate PDF using React-PDF
@@ -1563,7 +1669,7 @@ export const invoicesRouter = createTRPCRouter({
         const pdfBase64 = pdfBuffer.toString("base64");
 
         return {
-          filename: `invoice-${invoice.invoiceNumber}.pdf`,
+          filename: `invoice-${inv.invoiceNumber}.pdf`,
           data: pdfBase64,
           mimeType: "application/pdf",
         };
@@ -1592,16 +1698,14 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      const templates = await prisma.invoiceTemplate.findMany({
-        where: {
-          OR: [
-            { organizationId: ctx.orgId },
-            { isSystem: true }, // Include system templates
-          ],
-        },
-        take: input.limit + 1,
-        cursor: input.cursor ? { id: input.cursor } : undefined,
-        orderBy: { createdAt: "desc" },
+      const templates = await db.query.invoiceTemplate.findMany({
+        where: (t, { or, eq }) =>
+          or(
+            eq(t.organizationId, ctx.orgId!),
+            eq(t.isSystem, true),
+          ),
+        limit: input.limit + 1,
+        orderBy: (t, { desc }) => desc(t.createdAt),
       });
 
       let nextCursor: string | undefined = undefined;
@@ -1620,8 +1724,8 @@ export const invoicesRouter = createTRPCRouter({
   deleteTemplate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const template = await prisma.invoiceTemplate.findUnique({
-        where: { id: input.id },
+      const template = await db.query.invoiceTemplate.findFirst({
+        where: (t, { eq }) => eq(t.id, input.id),
       });
 
       if (!template) {
@@ -1647,9 +1751,7 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      await prisma.invoiceTemplate.delete({
-        where: { id: input.id },
-      });
+      await db.delete(invoiceTemplate).where(eq(invoiceTemplate.id, input.id));
 
       return { success: true };
     }),
@@ -1665,8 +1767,8 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      const template = await prisma.invoiceTemplate.findUnique({
-        where: { id: input.id },
+      const template = await db.query.invoiceTemplate.findFirst({
+        where: (t, { eq }) => eq(t.id, input.id),
       });
 
       if (!template) {
@@ -1685,24 +1787,23 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Create duplicate
-      const duplicate = await prisma.invoiceTemplate.create({
-        data: {
-          id: crypto.randomUUID(),
-          organizationId: ctx.orgId,
-          subaccountId: ctx.subaccountId ?? undefined,
-          name: `${template.name} (Copy)`,
-          description: template.description,
-          isDefault: false,
-          isSystem: false,
-          layout: template.layout as any,
-          styles: template.styles as any,
-          variables: template.variables as any,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      });
+      const now = new Date();
+      const [duplicate] = await db.insert(invoiceTemplate).values({
+        id: crypto.randomUUID(),
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId ?? undefined,
+        name: `${template.name} (Copy)`,
+        description: template.description,
+        isDefault: false,
+        isSystem: false,
+        layout: template.layout as any,
+        styles: template.styles as any,
+        variables: template.variables as any,
+        createdAt: now,
+        updatedAt: now,
+      }).returning();
 
-      return duplicate;
+      return duplicate!;
     }),
 
   // Upload bank transfer proof of payment
@@ -1715,11 +1816,11 @@ export const invoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -1727,36 +1828,33 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Update invoice with bank transfer proof
-      const updated = await prisma.invoice.update({
-        where: { id: input.invoiceId },
-        data: {
-          bankTransferStatus: BankTransferStatus.PROOF_UPLOADED,
-          bankTransferProof: input.proofUrl,
-          bankTransferNotes: input.notes,
-        },
-      });
+      const [updated] = await db.update(invoice).set({
+        bankTransferStatus: BankTransferStatus.PROOF_UPLOADED,
+        bankTransferProof: input.proofUrl,
+        bankTransferNotes: input.notes,
+      }).where(eq(invoice.id, input.invoiceId)).returning();
 
       // Log activity
       await logAnalytics({
-        organizationId: invoice.organizationId,
-        subaccountId: invoice.subaccountId,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
         userId: ctx.auth.user.id,
         type: "INVOICE",
         action: ActivityAction.UPDATED,
         entityType: "invoice",
-        entityId: invoice.id,
-        entityName: invoice.invoiceNumber,
+        entityId: inv.id,
+        entityName: inv.invoiceNumber,
         changes: {
           bankTransferStatus: {
-            old: invoice.bankTransferStatus,
+            old: inv.bankTransferStatus,
             new: BankTransferStatus.PROOF_UPLOADED,
           },
         },
       });
 
       return {
-        id: updated.id,
-        bankTransferStatus: updated.bankTransferStatus,
+        id: updated!.id,
+        bankTransferStatus: updated!.bankTransferStatus,
       };
     }),
 
@@ -1771,12 +1869,12 @@ export const invoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        include: { invoiceLineItem: true },
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        with: { invoiceLineItems: true },
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -1785,8 +1883,8 @@ export const invoicesRouter = createTRPCRouter({
 
       // Verify access
       if (
-        invoice.organizationId !== ctx.orgId &&
-        invoice.subaccountId !== ctx.subaccountId
+        inv.organizationId !== ctx.orgId &&
+        inv.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -1798,71 +1896,67 @@ export const invoicesRouter = createTRPCRouter({
         // Calculate payment amount (default to full amount due)
         const paymentAmount = input.amount
           ? parseFloat(input.amount)
-          : invoice.amountDue.toNumber();
+          : parseFloat(inv.amountDue);
 
         // Create payment record and update invoice
-        const result = await prisma.$transaction(async (tx) => {
+        const result = await db.transaction(async (tx) => {
+          const now = new Date();
           // Create payment record
-          const payment = await tx.invoicePayment.create({
-            data: {
-              id: crypto.randomUUID(),
-              invoiceId: input.invoiceId,
-              amount: paymentAmount,
-              currency: invoice.currency,
-              method: PaymentMethod.BANK_TRANSFER,
-              referenceNumber: invoice.invoiceNumber,
-              notes: input.notes,
-              paidAt: new Date(),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
+          await tx.insert(invoicePayment).values({
+            id: crypto.randomUUID(),
+            invoiceId: input.invoiceId,
+            amount: String(paymentAmount),
+            currency: inv.currency,
+            method: PaymentMethod.BANK_TRANSFER,
+            referenceNumber: inv.invoiceNumber,
+            notes: input.notes,
+            paidAt: now,
+            createdAt: now,
+            updatedAt: now,
           });
 
           // Calculate new amounts
-          const newAmountPaid = invoice.amountPaid.toNumber() + paymentAmount;
-          const newAmountDue = invoice.total.toNumber() - newAmountPaid;
+          const newAmountPaid = parseFloat(inv.amountPaid) + paymentAmount;
+          const newAmountDue = parseFloat(inv.total) - newAmountPaid;
           const isPaid = newAmountDue <= 0;
 
           // Update invoice
-          const updated = await tx.invoice.update({
-            where: { id: input.invoiceId },
-            data: {
-              bankTransferStatus: BankTransferStatus.VERIFIED,
-              bankTransferVerifiedAt: new Date(),
-              bankTransferVerifiedBy: ctx.auth.user.id,
-              bankTransferNotes: input.notes,
-              amountPaid: newAmountPaid,
-              amountDue: newAmountDue,
-              status: isPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID,
-              paidAt: isPaid ? new Date() : invoice.paidAt,
-            },
-          });
+          const [updated] = await tx.update(invoice).set({
+            bankTransferStatus: BankTransferStatus.VERIFIED,
+            bankTransferVerifiedAt: now,
+            bankTransferVerifiedBy: ctx.auth.user.id,
+            bankTransferNotes: input.notes,
+            amountPaid: String(newAmountPaid),
+            amountDue: String(newAmountDue),
+            status: isPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID,
+            paidAt: isPaid ? now : inv.paidAt,
+          }).where(eq(invoice.id, input.invoiceId)).returning();
 
-          return { payment, invoice: updated };
+          return { invoice: updated! };
         });
 
         // Log activity
         await logAnalytics({
-          organizationId: invoice.organizationId,
-          subaccountId: invoice.subaccountId,
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
           userId: ctx.auth.user.id,
           type: "INVOICE",
           action: ActivityAction.UPDATED,
           entityType: "invoice",
-          entityId: invoice.id,
-          entityName: invoice.invoiceNumber,
+          entityId: inv.id,
+          entityName: inv.invoiceNumber,
           changes: {
             bankTransferStatus: {
-              old: invoice.bankTransferStatus,
+              old: inv.bankTransferStatus,
               new: BankTransferStatus.VERIFIED,
             },
             status: {
-              old: invoice.status,
+              old: inv.status,
               new: result.invoice.status,
             },
             amountPaid: {
-              old: invoice.amountPaid.toString(),
-              new: result.invoice.amountPaid.toString(),
+              old: inv.amountPaid,
+              new: result.invoice.amountPaid,
             },
           },
         });
@@ -1871,40 +1965,37 @@ export const invoicesRouter = createTRPCRouter({
           id: result.invoice.id,
           bankTransferStatus: result.invoice.bankTransferStatus,
           status: result.invoice.status,
-          amountPaid: result.invoice.amountPaid.toString(),
-          amountDue: result.invoice.amountDue.toString(),
+          amountPaid: result.invoice.amountPaid,
+          amountDue: result.invoice.amountDue,
         };
       } else {
         // Reject the proof
-        const updated = await prisma.invoice.update({
-          where: { id: input.invoiceId },
-          data: {
-            bankTransferStatus: BankTransferStatus.REJECTED,
-            bankTransferNotes: input.notes,
-          },
-        });
+        const [updated] = await db.update(invoice).set({
+          bankTransferStatus: BankTransferStatus.REJECTED,
+          bankTransferNotes: input.notes,
+        }).where(eq(invoice.id, input.invoiceId)).returning();
 
         // Log activity
         await logAnalytics({
-          organizationId: invoice.organizationId,
-          subaccountId: invoice.subaccountId,
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
           userId: ctx.auth.user.id,
           type: "INVOICE",
           action: ActivityAction.UPDATED,
           entityType: "invoice",
-          entityId: invoice.id,
-          entityName: invoice.invoiceNumber,
+          entityId: inv.id,
+          entityName: inv.invoiceNumber,
           changes: {
             bankTransferStatus: {
-              old: invoice.bankTransferStatus,
+              old: inv.bankTransferStatus,
               new: BankTransferStatus.REJECTED,
             },
           },
         });
 
         return {
-          id: updated.id,
-          bankTransferStatus: updated.bankTransferStatus,
+          id: updated!.id,
+          bankTransferStatus: updated!.bankTransferStatus,
         };
       }
     }),
@@ -1913,16 +2004,16 @@ export const invoicesRouter = createTRPCRouter({
   getBankTransferDetails: baseProcedure
     .input(z.object({ invoiceId: z.string() }))
     .query(async ({ input }) => {
-      const invoice = await prisma.invoice.findUnique({
-        where: { id: input.invoiceId },
-        select: {
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+        columns: {
           organizationId: true,
-          subaccountId: true,
+          locationId: true,
           paymentMethods: true,
         },
       });
 
-      if (!invoice) {
+      if (!inv) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Invoice not found",
@@ -1930,17 +2021,18 @@ export const invoicesRouter = createTRPCRouter({
       }
 
       // Check if bank transfer is enabled for this invoice
-      if (!invoice.paymentMethods.includes(PaymentMethod.BANK_TRANSFER)) {
+      if (!inv.paymentMethods?.includes(PaymentMethod.BANK_TRANSFER)) {
         return null;
       }
 
       // Get bank transfer settings
-      const settings = await prisma.bankTransferSettings.findFirst({
-        where: {
-          organizationId: invoice.organizationId,
-          subaccountId: invoice.subaccountId || null,
-          enabled: true,
-        },
+      const settings = await db.query.bankTransferSettings.findFirst({
+        where: (t, { and, eq, isNull }) =>
+          and(
+            eq(t.organizationId, inv.organizationId),
+            inv.locationId ? eq(t.locationId, inv.locationId) : isNull(t.locationId),
+            eq(t.enabled, true),
+          ),
       });
 
       if (!settings) {

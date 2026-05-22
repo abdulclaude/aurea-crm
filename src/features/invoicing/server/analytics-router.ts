@@ -1,9 +1,9 @@
 import { z } from "zod";
+import { and, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
-
-import { Prisma, InvoiceStatus } from "@prisma/client";
-const Decimal = Prisma.Decimal;
+import { db } from "@/db";
+import { invoice, invoicePayment } from "@/db/schema";
+import { InvoiceStatus } from "@/db/enums";
 
 /**
  * Invoice Analytics Router
@@ -24,7 +24,7 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         return {
@@ -43,134 +43,41 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
 
       const dateFilter =
         input?.dateFrom || input?.dateTo
-          ? {
-              issueDate: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+          ? [
+              input?.dateFrom ? gte(invoice.issueDate, input.dateFrom) : undefined,
+              input?.dateTo ? lte(invoice.issueDate, input.dateTo) : undefined,
+            ]
+          : [];
 
-      const baseWhere = {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
+      const baseWhere = and(
+        eq(invoice.organizationId, orgId),
+        locationId ? eq(invoice.locationId, locationId) : undefined,
         ...dateFilter,
-      };
+      );
 
       const now = new Date();
 
-      // Total invoices
-      const totalInvoices = await prisma.invoice.count({
+      const invoices = await db.query.invoice.findMany({
         where: baseWhere,
       });
 
-      // Aggregate revenue by status
-      const totalAggregates = await prisma.invoice.aggregate({
-        where: baseWhere,
-        _sum: {
-          total: true,
-          amountPaid: true,
-          amountDue: true,
-        },
-        _avg: {
-          total: true,
-        },
-      });
-
-      // Paid invoices
-      const paidInvoices = await prisma.invoice.count({
-        where: {
-          ...baseWhere,
-          status: InvoiceStatus.PAID,
-        },
-      });
-
-      const paidAggregates = await prisma.invoice.aggregate({
-        where: {
-          ...baseWhere,
-          status: InvoiceStatus.PAID,
-        },
-        _sum: {
-          total: true,
-        },
-      });
-
-      // Overdue invoices (unpaid past due date)
-      const overdueInvoices = await prisma.invoice.count({
-        where: {
-          ...baseWhere,
-          status: {
-            in: [
-              InvoiceStatus.SENT,
-              InvoiceStatus.VIEWED,
-              InvoiceStatus.PARTIALLY_PAID,
-              InvoiceStatus.OVERDUE,
-            ],
-          },
-          dueDate: { lt: now },
-        },
-      });
-
-      const overdueAggregates = await prisma.invoice.aggregate({
-        where: {
-          ...baseWhere,
-          status: {
-            in: [
-              InvoiceStatus.SENT,
-              InvoiceStatus.VIEWED,
-              InvoiceStatus.PARTIALLY_PAID,
-              InvoiceStatus.OVERDUE,
-            ],
-          },
-          dueDate: { lt: now },
-        },
-        _sum: {
-          amountDue: true,
-        },
-      });
-
-      // Outstanding (sent but not overdue yet)
-      const outstandingAggregates = await prisma.invoice.aggregate({
-        where: {
-          ...baseWhere,
-          status: {
-            in: [
-              InvoiceStatus.SENT,
-              InvoiceStatus.VIEWED,
-              InvoiceStatus.PARTIALLY_PAID,
-            ],
-          },
-          dueDate: { gte: now },
-        },
-        _sum: {
-          amountDue: true,
-        },
-      });
-
-      // Draft invoices
-      const draftAggregates = await prisma.invoice.aggregate({
-        where: {
-          ...baseWhere,
-          status: InvoiceStatus.DRAFT,
-        },
-        _sum: {
-          total: true,
-        },
-      });
-
-      // Calculate average payment time
-      const paidInvoicesWithDates = await prisma.invoice.findMany({
-        where: {
-          ...baseWhere,
-          status: InvoiceStatus.PAID,
-          paidAt: { not: null },
-        },
-        select: {
-          issueDate: true,
-          paidAt: true,
-        },
-        take: 1000, // Limit for performance
-      });
+      const totalInvoices = invoices.length;
+      const paidInvoices = invoices.filter((item) => item.status === InvoiceStatus.PAID).length;
+      const overdueStatuses: InvoiceStatus[] = [
+        InvoiceStatus.SENT,
+        InvoiceStatus.VIEWED,
+        InvoiceStatus.PARTIALLY_PAID,
+        InvoiceStatus.OVERDUE,
+      ];
+      const overdueInvoices = invoices.filter(
+        (item) =>
+          overdueStatuses.includes(item.status) &&
+          item.dueDate !== null &&
+          item.dueDate < now,
+      ).length;
+      const paidInvoicesWithDates = invoices
+        .filter((item) => item.status === InvoiceStatus.PAID && item.paidAt !== null)
+        .slice(0, 1000);
 
       const totalPaymentDays = paidInvoicesWithDates.reduce((sum, invoice) => {
         if (invoice.paidAt) {
@@ -189,15 +96,37 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
           : 0;
 
       return {
-        totalRevenue: Number(totalAggregates._sum.total || 0),
-        paidRevenue: Number(paidAggregates._sum.total || 0),
-        outstandingRevenue: Number(outstandingAggregates._sum.amountDue || 0),
-        overdueRevenue: Number(overdueAggregates._sum.amountDue || 0),
-        draftRevenue: Number(draftAggregates._sum.total || 0),
+        totalRevenue: invoices.reduce((sum, item) => sum + Number(item.total ?? 0), 0),
+        paidRevenue: invoices
+          .filter((item) => item.status === InvoiceStatus.PAID)
+          .reduce((sum, item) => sum + Number(item.total ?? 0), 0),
+        outstandingRevenue: invoices
+          .filter(
+            (item) =>
+              ([InvoiceStatus.SENT, InvoiceStatus.VIEWED, InvoiceStatus.PARTIALLY_PAID] as InvoiceStatus[]).includes(item.status) &&
+              item.dueDate !== null &&
+              item.dueDate >= now,
+          )
+          .reduce((sum, item) => sum + Number(item.amountDue ?? 0), 0),
+        overdueRevenue: invoices
+          .filter(
+            (item) =>
+              overdueStatuses.includes(item.status) &&
+              item.dueDate !== null &&
+              item.dueDate < now,
+          )
+          .reduce((sum, item) => sum + Number(item.amountDue ?? 0), 0),
+        draftRevenue: invoices
+          .filter((item) => item.status === InvoiceStatus.DRAFT)
+          .reduce((sum, item) => sum + Number(item.total ?? 0), 0),
         totalInvoices,
         paidInvoices,
         overdueInvoices,
-        averageInvoiceValue: Number(totalAggregates._avg.total || 0),
+        averageInvoiceValue:
+          totalInvoices > 0
+            ? invoices.reduce((sum, item) => sum + Number(item.total ?? 0), 0) /
+              totalInvoices
+            : 0,
         averagePaymentTime: Math.round(avgPaymentTime),
       };
     }),
@@ -207,7 +136,7 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
    */
   getAgingReport: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return {
@@ -220,28 +149,19 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     }
 
     const now = new Date();
-    const baseWhere = {
-      organizationId: orgId,
-      ...(subaccountId && { subaccountId }),
-      status: {
-        in: [
-          InvoiceStatus.SENT,
-          InvoiceStatus.VIEWED,
-          InvoiceStatus.PARTIALLY_PAID,
-          InvoiceStatus.OVERDUE,
-        ],
-      },
-    };
+    const baseWhere = and(
+      eq(invoice.organizationId, orgId),
+      locationId ? eq(invoice.locationId, locationId) : undefined,
+      inArray(invoice.status, [
+        InvoiceStatus.SENT,
+        InvoiceStatus.VIEWED,
+        InvoiceStatus.PARTIALLY_PAID,
+        InvoiceStatus.OVERDUE,
+      ]),
+    );
 
     // Current (not overdue)
-    const current = await prisma.invoice.aggregate({
-      where: {
-        ...baseWhere,
-        dueDate: { gte: now },
-      },
-      _sum: { amountDue: true },
-      _count: true,
-    });
+    const current = await aggregateAgingBucket(and(baseWhere, gte(invoice.dueDate, now)));
 
     // Helper to calculate date N days ago
     const daysAgo = (days: number) => {
@@ -251,76 +171,45 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     };
 
     // 1-30 days overdue
-    const days1to30 = await prisma.invoice.aggregate({
-      where: {
-        ...baseWhere,
-        dueDate: {
-          gte: daysAgo(30),
-          lt: now,
-        },
-      },
-      _sum: { amountDue: true },
-      _count: true,
-    });
+    const days1to30 = await aggregateAgingBucket(
+      and(baseWhere, gte(invoice.dueDate, daysAgo(30)), lt(invoice.dueDate, now)),
+    );
 
     // 31-60 days overdue
-    const days31to60 = await prisma.invoice.aggregate({
-      where: {
-        ...baseWhere,
-        dueDate: {
-          gte: daysAgo(60),
-          lt: daysAgo(30),
-        },
-      },
-      _sum: { amountDue: true },
-      _count: true,
-    });
+    const days31to60 = await aggregateAgingBucket(
+      and(baseWhere, gte(invoice.dueDate, daysAgo(60)), lt(invoice.dueDate, daysAgo(30))),
+    );
 
     // 61-90 days overdue
-    const days61to90 = await prisma.invoice.aggregate({
-      where: {
-        ...baseWhere,
-        dueDate: {
-          gte: daysAgo(90),
-          lt: daysAgo(60),
-        },
-      },
-      _sum: { amountDue: true },
-      _count: true,
-    });
+    const days61to90 = await aggregateAgingBucket(
+      and(baseWhere, gte(invoice.dueDate, daysAgo(90)), lt(invoice.dueDate, daysAgo(60))),
+    );
 
     // 90+ days overdue
-    const days90plus = await prisma.invoice.aggregate({
-      where: {
-        ...baseWhere,
-        dueDate: {
-          lt: daysAgo(90),
-        },
-      },
-      _sum: { amountDue: true },
-      _count: true,
-    });
+    const days90plus = await aggregateAgingBucket(
+      and(baseWhere, lt(invoice.dueDate, daysAgo(90))),
+    );
 
     return {
       current: {
-        count: current._count,
-        total: Number(current._sum.amountDue || 0),
+        count: current.count,
+        total: current.total,
       },
       days1to30: {
-        count: days1to30._count,
-        total: Number(days1to30._sum.amountDue || 0),
+        count: days1to30.count,
+        total: days1to30.total,
       },
       days31to60: {
-        count: days31to60._count,
-        total: Number(days31to60._sum.amountDue || 0),
+        count: days31to60.count,
+        total: days31to60.total,
       },
       days61to90: {
-        count: days61to90._count,
-        total: Number(days61to90._sum.amountDue || 0),
+        count: days61to90.count,
+        total: days61to90.total,
       },
       days90plus: {
-        count: days90plus._count,
-        total: Number(days90plus._sum.amountDue || 0),
+        count: days90plus.count,
+        total: days90plus.total,
       },
     };
   }),
@@ -336,7 +225,7 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         return [];
@@ -349,13 +238,13 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
         1
       );
 
-      const invoices = await prisma.invoice.findMany({
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-          issueDate: { gte: startDate },
-        },
-        select: {
+      const invoices = await db.query.invoice.findMany({
+        where: and(
+          eq(invoice.organizationId, orgId),
+          locationId ? eq(invoice.locationId, locationId) : undefined,
+          gte(invoice.issueDate, startDate),
+        ),
+        columns: {
           issueDate: true,
           total: true,
           amountPaid: true,
@@ -413,7 +302,7 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         return [];
@@ -421,41 +310,48 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
 
       const dateFilter =
         input.dateFrom || input.dateTo
-          ? {
-              issueDate: {
-                ...(input.dateFrom && { gte: input.dateFrom }),
-                ...(input.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+          ? [
+              input.dateFrom ? gte(invoice.issueDate, input.dateFrom) : undefined,
+              input.dateTo ? lte(invoice.issueDate, input.dateTo) : undefined,
+            ]
+          : [];
 
-      const clientRevenue = await prisma.invoice.groupBy({
-        by: ["contactName", "contactEmail"],
-        where: {
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
+      const invoices = await db.query.invoice.findMany({
+        where: and(
+          eq(invoice.organizationId, orgId),
+          locationId ? eq(invoice.locationId, locationId) : undefined,
           ...dateFilter,
-        },
-        _sum: {
+        ),
+        columns: {
+          clientName: true,
+          clientEmail: true,
           total: true,
           amountPaid: true,
         },
-        _count: true,
-        orderBy: {
-          _sum: {
-            total: "desc",
-          },
-        },
-        take: input.limit,
       });
 
-      return clientRevenue.map((client) => ({
-        name: client.contactName,
-        email: client.contactEmail,
-        totalRevenue: Number(client._sum.total || 0),
-        paidRevenue: Number(client._sum.amountPaid || 0),
-        invoiceCount: client._count,
-      }));
+      const clientRevenue = new Map<
+        string,
+        { name: string | null; email: string | null; totalRevenue: number; paidRevenue: number; invoiceCount: number }
+      >();
+      for (const item of invoices) {
+        const key = `${item.clientName ?? ""}\t${item.clientEmail ?? ""}`;
+        const current = clientRevenue.get(key) ?? {
+          name: item.clientName,
+          email: item.clientEmail,
+          totalRevenue: 0,
+          paidRevenue: 0,
+          invoiceCount: 0,
+        };
+        current.totalRevenue += Number(item.total ?? 0);
+        current.paidRevenue += Number(item.amountPaid ?? 0);
+        current.invoiceCount += 1;
+        clientRevenue.set(key, current);
+      }
+
+      return Array.from(clientRevenue.values())
+        .sort((a, b) => b.totalRevenue - a.totalRevenue)
+        .slice(0, input.limit);
     }),
 
   /**
@@ -472,7 +368,7 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         return [];
@@ -480,34 +376,40 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
 
       const dateFilter =
         input?.dateFrom || input?.dateTo
-          ? {
-              paidAt: {
-                ...(input?.dateFrom && { gte: input.dateFrom }),
-                ...(input?.dateTo && { lte: input.dateTo }),
-              },
-            }
-          : {};
+          ? [
+              input?.dateFrom ? gte(invoicePayment.paidAt, input.dateFrom) : undefined,
+              input?.dateTo ? lte(invoicePayment.paidAt, input.dateTo) : undefined,
+            ]
+          : [];
 
-      const paymentsByMethod = await prisma.invoicePayment.groupBy({
-        by: ["method"],
-        where: {
-          invoice: {
-            organizationId: orgId,
-            ...(subaccountId && { subaccountId }),
-          },
-          ...dateFilter,
-        },
-        _sum: {
-          amount: true,
-        },
-        _count: true,
-      });
+      const payments = await db
+        .select({
+          method: invoicePayment.method,
+          amount: invoicePayment.amount,
+        })
+        .from(invoicePayment)
+        .innerJoin(invoice, eq(invoicePayment.invoiceId, invoice.id))
+        .where(
+          and(
+            eq(invoice.organizationId, orgId),
+            locationId ? eq(invoice.locationId, locationId) : undefined,
+            ...dateFilter,
+          ),
+        );
 
-      return paymentsByMethod.map((pm) => ({
-        method: pm.method,
-        total: Number(pm._sum.amount || 0),
-        count: pm._count,
-      }));
+      const byMethod = new Map<string, { method: string; total: number; count: number }>();
+      for (const payment of payments) {
+        const current = byMethod.get(payment.method) ?? {
+          method: payment.method,
+          total: 0,
+          count: 0,
+        };
+        current.total += Number(payment.amount ?? 0);
+        current.count += 1;
+        byMethod.set(payment.method, current);
+      }
+
+      return Array.from(byMethod.values());
     }),
 
   /**
@@ -515,30 +417,59 @@ export const invoiceAnalyticsRouter = createTRPCRouter({
    */
   getStatusBreakdown: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return [];
     }
 
-    const statusBreakdown = await prisma.invoice.groupBy({
-      by: ["status"],
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-      _sum: {
+    const invoices = await db.query.invoice.findMany({
+      where: and(
+        eq(invoice.organizationId, orgId),
+        locationId ? eq(invoice.locationId, locationId) : undefined,
+      ),
+      columns: {
+        status: true,
         total: true,
         amountDue: true,
       },
-      _count: true,
     });
 
-    return statusBreakdown.map((status) => ({
-      status: status.status,
-      count: status._count,
-      totalValue: Number(status._sum.total || 0),
-      amountDue: Number(status._sum.amountDue || 0),
-    }));
+    const byStatus = new Map<
+      InvoiceStatus,
+      { status: InvoiceStatus; count: number; totalValue: number; amountDue: number }
+    >();
+    for (const item of invoices) {
+      const current = byStatus.get(item.status) ?? {
+        status: item.status,
+        count: 0,
+        totalValue: 0,
+        amountDue: 0,
+      };
+      current.count += 1;
+      current.totalValue += Number(item.total ?? 0);
+      current.amountDue += Number(item.amountDue ?? 0);
+      byStatus.set(item.status, current);
+    }
+
+    return Array.from(byStatus.values());
   }),
 });
+
+async function aggregateAgingBucket(where: ReturnType<typeof and>): Promise<{
+  count: number;
+  total: number;
+}> {
+  const [row] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      total: sql<string | null>`sum(${invoice.amountDue})`,
+    })
+    .from(invoice)
+    .where(where);
+
+  return {
+    count: row?.count ?? 0,
+    total: Number(row?.total ?? 0),
+  };
+}

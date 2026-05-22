@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import db from "@/lib/db";
+import { createId } from "@paralleldrive/cuid2";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import {
+	anonymousUserProfiles,
+	funnel as funnelTable,
+	funnelSession,
+	funnelWebVital,
+} from "@/db/schema";
 import { getPrivacyCompliantIp } from "@/lib/gdpr-utils";
+
+type GeoData = {
+	status?: string;
+	country?: string;
+	countryCode?: string;
+	regionName?: string;
+	city?: string;
+};
 
 // Web Vital validation schema
 const WebVitalSchema = z.object({
@@ -45,15 +61,15 @@ export async function POST(req: NextRequest) {
 		}
 
 		// Verify funnel and API key
-		const funnel = await db.funnel.findFirst({
-			where: {
-				id: funnelId,
-				apiKey,
-				funnelType: "EXTERNAL",
-			},
-			select: {
+		const funnel = await db.query.funnel.findFirst({
+			where: and(
+				eq(funnelTable.id, funnelId),
+				eq(funnelTable.apiKey, apiKey),
+				eq(funnelTable.funnelType, "EXTERNAL")
+			),
+			columns: {
 				id: true,
-				subaccountId: true,
+				locationId: true,
 				organizationId: true,
 				trackingConfig: true,
 			},
@@ -82,9 +98,20 @@ export async function POST(req: NextRequest) {
 			"unknown";
 
 		// Check anonymization settings
-		const trackingConfig = funnel.trackingConfig as any;
-		const anonymizeIp = trackingConfig?.anonymizeIp ?? true;
-		const hashIp = trackingConfig?.hashIp ?? false;
+		const trackingConfig =
+			funnel.trackingConfig &&
+			typeof funnel.trackingConfig === "object" &&
+			!Array.isArray(funnel.trackingConfig)
+				? (funnel.trackingConfig as Record<string, unknown>)
+				: {};
+		const anonymizeIp =
+			typeof trackingConfig.anonymizeIp === "boolean"
+				? trackingConfig.anonymizeIp
+				: true;
+		const hashIp =
+			typeof trackingConfig.hashIp === "boolean"
+				? trackingConfig.hashIp
+				: false;
 
 		// Apply privacy settings to IP
 		ip = getPrivacyCompliantIp(ip, {
@@ -93,14 +120,14 @@ export async function POST(req: NextRequest) {
 		});
 
 		// Fetch geo data for this IP (if enabled and not already cached)
-		let geoData: any = null;
+		let geoData: GeoData | null = null;
 		if (!anonymizeIp && !hashIp) {
 			try {
 				const geoResponse = await fetch(
 					`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,timezone`,
 				);
 				if (geoResponse.ok) {
-					geoData = await geoResponse.json();
+					geoData = (await geoResponse.json()) as GeoData;
 					if (geoData.status === "fail") {
 						geoData = null;
 					}
@@ -111,39 +138,41 @@ export async function POST(req: NextRequest) {
 		}
 
 		// Check if session exists, create if not
-		let session = await db.funnelSession.findUnique({
-			where: { sessionId: data.sessionId },
-			select: { id: true, sessionId: true },
+		let session = await db.query.funnelSession.findFirst({
+			where: eq(funnelSession.sessionId, data.sessionId),
+			columns: { id: true, sessionId: true },
 		});
 
 		if (!session) {
 			console.log(`[Web Vitals API] Creating session ${data.sessionId} for web vital tracking`);
 			
-			// Ensure anonymous user profile exists first (required for profileId foreign key)
-			if (data.anonymousId) {
-				await db.anonymousUserProfile.upsert({
-					where: { id: data.anonymousId },
-					create: {
-						id: data.anonymousId,
-						displayName: `Visitor #${data.anonymousId.slice(-6)}`,
-						firstSeen: new Date(data.timestamp),
-						lastSeen: new Date(data.timestamp),
-						totalEvents: 0,
-						totalSessions: 1,
-					},
-					update: {
-						lastSeen: new Date(data.timestamp),
-					},
-				});
-			}
-			
-			// Create minimal session for web vital tracking
-			// Event processing will enrich this later
-			session = await db.funnelSession.create({
-				data: {
+			session = await db.transaction(async (tx) => {
+				if (data.anonymousId) {
+					await tx
+						.insert(anonymousUserProfiles)
+						.values({
+							id: data.anonymousId,
+							displayName: `Visitor #${data.anonymousId.slice(-6)}`,
+							firstSeen: new Date(data.timestamp),
+							lastSeen: new Date(data.timestamp),
+							totalEvents: 0,
+							totalSessions: 1,
+						})
+						.onConflictDoUpdate({
+							target: anonymousUserProfiles.id,
+							set: {
+								lastSeen: new Date(data.timestamp),
+							},
+						});
+				}
+
+				const [createdSession] = await tx
+					.insert(funnelSession)
+					.values({
+					id: createId(),
 					sessionId: data.sessionId,
 					funnelId: funnel.id,
-					subaccountId: funnel.subaccountId,
+					locationId: funnel.locationId,
 					anonymousId: data.anonymousId,
 					profileId: data.anonymousId,
 					startedAt: new Date(data.timestamp),
@@ -164,16 +193,19 @@ export async function POST(req: NextRequest) {
 					region: geoData?.regionName,
 					city: geoData?.city,
 					ipAddress: ip,
-				},
-				select: { id: true, sessionId: true },
+					updatedAt: new Date(),
+				})
+					.returning({ id: funnelSession.id, sessionId: funnelSession.sessionId });
+
+				return createdSession ?? null;
 			});
 		}
 
 		// Store web vital
-		await db.funnelWebVital.create({
-			data: {
+		await db.insert(funnelWebVital).values({
+				id: createId(),
 				funnelId: funnel.id,
-				subaccountId: funnel.subaccountId,
+				locationId: funnel.locationId,
 				sessionId: data.sessionId,
 				anonymousId: data.anonymousId,
 				pageUrl: data.pageUrl,
@@ -183,7 +215,7 @@ export async function POST(req: NextRequest) {
 				value: data.value,
 				rating: data.rating,
 				delta: data.delta,
-				id_metric: data.id_metric,
+				idMetric: data.id_metric,
 				deviceType: data.deviceType,
 				browserName: data.browserName,
 				browserVersion: data.browserVersion,
@@ -196,15 +228,14 @@ export async function POST(req: NextRequest) {
 				region: geoData?.regionName,
 				city: geoData?.city,
 				timestamp: new Date(data.timestamp),
-			},
 		});
 
 		// Update session aggregates (calculate average web vitals)
 		if (session) {
 			// Calculate new averages
-			const webVitals = await db.funnelWebVital.findMany({
-				where: { sessionId: data.sessionId },
-				select: {
+			const webVitals = await db.query.funnelWebVital.findMany({
+				where: eq(funnelWebVital.sessionId, data.sessionId),
+				columns: {
 					metric: true,
 					value: true,
 				},
@@ -271,17 +302,18 @@ export async function POST(req: NextRequest) {
 				return Math.max(0, score);
 			};
 
-			await db.funnelSession.update({
-				where: { sessionId: data.sessionId },
-				data: {
+			await db
+				.update(funnelSession)
+				.set({
 					avgLcp: avg(lcpValues),
 					avgInp: avg(inpValues),
 					avgCls: avg(clsValues),
 					avgFcp: avg(fcpValues),
 					avgTtfb: avg(ttfbValues),
 					experienceScore: calculateExperienceScore(),
-				},
-			});
+					updatedAt: new Date(),
+				})
+				.where(eq(funnelSession.sessionId, data.sessionId));
 		}
 
 		return NextResponse.json(

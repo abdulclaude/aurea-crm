@@ -85,9 +85,9 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
           },
           renderText: ({ node }) => `@${node.attrs.label}`,
           renderHTML: ({ node }) => {
-            const entityType = node.attrs.type || "contact";
+            const entityType = node.attrs.type || "client";
             const colorClasses: Record<string, string> = {
-              contact:
+              client:
                 "bg-teal-500/20 text-teal-700 dark:text-teal-300 text-xs!",
               deal: "bg-amber-500/20 text-amber-700 dark:text-amber-300 text-xs!",
               pipeline:
@@ -95,7 +95,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
               workflow:
                 "bg-blue-500/20 text-blue-700 dark:text-blue-300 text-xs!",
             };
-            const colorClass = colorClasses[entityType] || colorClasses.contact;
+            const colorClass = colorClasses[entityType] || colorClasses.client;
             return [
               "span",
               {
@@ -167,7 +167,7 @@ export const ChatEditor = forwardRef<ChatEditorHandle, ChatEditorProps>(
       const traverse = (node: any) => {
         if (node.type === "mention" || node.type === "slashCommand") {
           entities.push({
-            type: node.attrs.type || "contact",
+            type: node.attrs.type || "client",
             id: node.attrs.id,
             name: node.attrs.label,
           });

@@ -83,7 +83,7 @@ export const exampleContexts = {
   googleForm: {
     googleForm: {
       formId: "example-id",
-      formTitle: "Contact Form",
+      formTitle: "Client Form",
       respondentEmail: "respondent@example.com",
       responses: {},
       timestamp: "2025-01-01T00:00:00.000Z",
@@ -139,9 +139,9 @@ export const exampleContexts = {
       },
     },
   },
-  contact: {
-    contact: {
-      id: "contact-id",
+  client: {
+    client: {
+      id: "client-id",
       name: "Jane Smith",
       email: "jane@example.com",
       phone: "9876543210",

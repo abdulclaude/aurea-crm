@@ -4,8 +4,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { createId } from "@paralleldrive/cuid2";
 import Stripe from "stripe";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { stripeConnection } from "@/db/schema";
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
   try {
     // Decode state parameter
     const state = JSON.parse(Buffer.from(stateParam, "base64").toString());
-    const { subaccountId, organizationId, userId } = state;
+    const { locationId, organizationId, userId } = state;
 
     if (!organizationId) {
       throw new Error("Invalid state parameter - missing organizationId");
@@ -71,15 +73,22 @@ export async function GET(req: NextRequest) {
     }
 
     // Fetch account details from Stripe
-    const account = await stripe.accounts.retrieve(stripeAccountId) as any;
+    const account = await stripe.accounts.retrieve(stripeAccountId);
+
+    if ("deleted" in account && account.deleted) {
+      return NextResponse.json(
+        { error: "Connected Stripe account is deleted" },
+        { status: 400 }
+      );
+    }
 
     // Save connection to database
-    await prisma.stripeConnection.upsert({
-      where: { stripeAccountId },
-      create: {
-        id: crypto.randomUUID(),
+    await db
+      .insert(stripeConnection)
+      .values({
+        id: createId(),
         organizationId,
-        subaccountId: subaccountId || null,
+        locationId: locationId || null,
         stripeAccountId,
         accountType: account.type || "standard",
         accessToken,
@@ -93,8 +102,10 @@ export async function GET(req: NextRequest) {
         currency: account.default_currency?.toUpperCase() || null,
         createdAt: new Date(),
         updatedAt: new Date(),
-      },
-      update: {
+      })
+      .onConflictDoUpdate({
+        target: stripeConnection.stripeAccountId,
+        set: {
         accountType: account.type || "standard",
         accessToken,
         refreshToken: refreshToken || null,
@@ -107,11 +118,12 @@ export async function GET(req: NextRequest) {
         currency: account.default_currency?.toUpperCase() || null,
         isActive: true,
         lastSyncedAt: new Date(),
-      },
-    });
+        updatedAt: new Date(),
+        },
+      });
 
     // Redirect back to settings with success
-    const redirectPath = subaccountId
+    const redirectPath = locationId
       ? `/settings/payments?stripe_success=true`
       : `/settings/payments?stripe_success=true`;
 

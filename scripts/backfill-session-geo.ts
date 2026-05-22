@@ -1,5 +1,7 @@
 import "dotenv/config";
-import prisma from "../src/lib/db";
+import { and, eq, inArray, isNotNull, isNull, type SQL } from "drizzle-orm";
+import { db, dbPool } from "../src/db";
+import { funnelSession } from "../src/db/schema";
 
 type GeoCoordinates = { latitude: number; longitude: number } | null;
 
@@ -149,14 +151,16 @@ const getCityKey = (city: string, countryKey: string, region?: string | null) =>
 async function main() {
   const cityGeoCache = new Map<string, GeoCoordinates>();
 
-  const sessions = await prisma.funnelSession.findMany({
-    where: {
-      city: { not: null },
-      latitude: null,
-      longitude: null,
-      ...(funnelIdFilter ? { funnelId: funnelIdFilter } : {}),
-    },
-    select: {
+  const sessionConditions: SQL[] = [
+    isNotNull(funnelSession.city),
+    isNull(funnelSession.latitude),
+    isNull(funnelSession.longitude),
+  ];
+  if (funnelIdFilter) sessionConditions.push(eq(funnelSession.funnelId, funnelIdFilter));
+
+  const sessions = await db.query.funnelSession.findMany({
+    where: and(...sessionConditions),
+    columns: {
       id: true,
       city: true,
       region: true,
@@ -191,24 +195,23 @@ async function main() {
     const key = getCityKey(normalizedCity, countryKey, session.region);
 
     if (!cityGeoCache.has(key)) {
-      const existing = await prisma.funnelSession.findFirst({
-        where: {
-          ...(funnelIdFilter ? { funnelId: funnelIdFilter } : {}),
-          city: normalizedCity,
-          ...(normalizedCountryName ? { countryName: normalizedCountryName } : {}),
-          ...(normalizedCountryCode || originalCountryCode
-            ? {
-                countryCode:
-                  normalizedCountryCode && originalCountryCode
-                    ? { in: [normalizedCountryCode, originalCountryCode] }
-                    : normalizedCountryCode || originalCountryCode,
-              }
-            : {}),
-          ...(session.region ? { region: session.region } : {}),
-          latitude: { not: null },
-          longitude: { not: null },
-        },
-        select: {
+      const existingConditions: SQL[] = [
+        eq(funnelSession.city, normalizedCity),
+        isNotNull(funnelSession.latitude),
+        isNotNull(funnelSession.longitude),
+      ];
+      if (funnelIdFilter) existingConditions.push(eq(funnelSession.funnelId, funnelIdFilter));
+      if (normalizedCountryName) existingConditions.push(eq(funnelSession.countryName, normalizedCountryName));
+      if (normalizedCountryCode && originalCountryCode) {
+        existingConditions.push(inArray(funnelSession.countryCode, [normalizedCountryCode, originalCountryCode]));
+      } else if (normalizedCountryCode || originalCountryCode) {
+        existingConditions.push(eq(funnelSession.countryCode, normalizedCountryCode || originalCountryCode || ""));
+      }
+      if (session.region) existingConditions.push(eq(funnelSession.region, session.region));
+
+      const existing = await db.query.funnelSession.findFirst({
+        where: and(...existingConditions),
+        columns: {
           latitude: true,
           longitude: true,
         },
@@ -238,13 +241,14 @@ async function main() {
     const coords = cityGeoCache.get(key);
     if (!coords) continue;
 
-    await prisma.funnelSession.update({
-      where: { id: session.id },
-      data: {
+    await db
+      .update(funnelSession)
+      .set({
         latitude: coords.latitude,
         longitude: coords.longitude,
-      },
-    });
+        updatedAt: new Date(),
+      })
+      .where(eq(funnelSession.id, session.id));
     updatedCount += 1;
 
     if (updateLimit && updatedCount >= updateLimit) {
@@ -261,5 +265,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await dbPool.end();
   });

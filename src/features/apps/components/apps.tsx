@@ -27,7 +27,7 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
-import { AppProvider } from "@prisma/client";
+import { AppProvider } from "@/db/enums";
 import {
   GMAIL_SCOPES,
   GOOGLE_CALENDAR_SCOPES,

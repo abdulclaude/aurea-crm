@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { client, unsubscribeToken as unsubscribeTokenTable } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -13,20 +15,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Find the unsubscribe token
-    const unsubscribeToken = await prisma.unsubscribeToken.findUnique({
-      where: { token },
-      include: {
-        contact: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            emailUnsubscribed: true,
-          },
+    const [unsubscribeToken] = await db
+      .select({
+        token: unsubscribeTokenTable,
+        client: {
+          id: client.id,
+          name: client.name,
+          email: client.email,
+          emailUnsubscribed: client.emailUnsubscribed,
         },
-      },
-    });
+      })
+      .from(unsubscribeTokenTable)
+      .innerJoin(client, eq(unsubscribeTokenTable.clientId, client.id))
+      .where(eq(unsubscribeTokenTable.token, token))
+      .limit(1);
 
     if (!unsubscribeToken) {
       return NextResponse.json(
@@ -36,7 +38,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if token is expired
-    if (unsubscribeToken.expiresAt < new Date()) {
+    if (unsubscribeToken.token.expiresAt < new Date()) {
       return NextResponse.json(
         { valid: false, error: "This unsubscribe link has expired" },
         { status: 410 }
@@ -44,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if already used
-    if (unsubscribeToken.usedAt) {
+    if (unsubscribeToken.token.usedAt) {
       return NextResponse.json(
         { valid: false, error: "This link has already been used" },
         { status: 410 }
@@ -52,19 +54,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if already unsubscribed
-    if (unsubscribeToken.contact.emailUnsubscribed) {
+    if (unsubscribeToken.client.emailUnsubscribed) {
       return NextResponse.json({
         valid: true,
         alreadyUnsubscribed: true,
-        email: unsubscribeToken.contact.email,
-        contactName: unsubscribeToken.contact.name,
+        email: unsubscribeToken.client.email,
+        clientName: unsubscribeToken.client.name,
       });
     }
 
     return NextResponse.json({
       valid: true,
-      email: unsubscribeToken.contact.email,
-      contactName: unsubscribeToken.contact.name,
+      email: unsubscribeToken.client.email,
+      clientName: unsubscribeToken.client.name,
     });
   } catch (error) {
     console.error("Error validating unsubscribe token:", error);

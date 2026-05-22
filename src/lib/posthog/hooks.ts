@@ -38,14 +38,14 @@ export function useAnalytics() {
     [trackEvent]
   );
 
-  const trackContactEvent = useCallback(
+  const trackClientEvent = useCallback(
     (
       action: "created" | "updated" | "deleted" | "scored" | "lifecycle_changed",
-      contactId: string,
+      clientId: string,
       metadata?: Record<string, unknown>
     ) => {
-      trackEvent(`contact_${action}`, {
-        contact_id: contactId,
+      trackEvent(`client_${action}`, {
+        client_id: clientId,
         ...metadata,
       });
     },
@@ -104,7 +104,7 @@ export function useAnalytics() {
   );
 
   const setGroupProperties = useCallback(
-    (groupType: "organization" | "subaccount", groupKey: string, properties: Record<string, unknown>) => {
+    (groupType: "organization" | "location", groupKey: string, properties: Record<string, unknown>) => {
       if (posthog) {
         posthog.group(groupType, groupKey, properties);
       }
@@ -116,7 +116,7 @@ export function useAnalytics() {
     trackEvent,
     trackPageView,
     trackWorkflowEvent,
-    trackContactEvent,
+    trackClientEvent,
     trackDealEvent,
     trackFormEvent,
     trackIntegrationEvent,

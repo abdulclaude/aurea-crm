@@ -5,9 +5,9 @@ interface InvoiceData {
   invoiceNumber: string;
   issueDate: Date | string;
   dueDate: Date | string;
-  contactName: string;
-  contactEmail?: string | null;
-  contactAddress?: Record<string, unknown> | null;
+  clientName: string;
+  clientEmail?: string | null;
+  clientAddress?: Record<string, unknown> | null;
   lineItems: Array<{
     description: string;
     quantity: string | number;
@@ -157,8 +157,8 @@ function renderClientInfo(
   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">
     <div>
       <div class="text-sm secondary" style="margin-bottom: 8px;">Bill To</div>
-      <div class="font-semibold text-lg">${invoice.contactName}</div>
-      ${config.showEmail && invoice.contactEmail ? `<div class="text-sm secondary">${invoice.contactEmail}</div>` : ""}
+      <div class="font-semibold text-lg">${invoice.clientName}</div>
+      ${config.showEmail && invoice.clientEmail ? `<div class="text-sm secondary">${invoice.clientEmail}</div>` : ""}
     </div>
     <div class="text-right">
       <div class="text-sm secondary" style="margin-bottom: 8px;">Invoice Details</div>
@@ -284,7 +284,7 @@ function renderFooter(
 <div class="section ${border ? "border-t" : ""}" style="${border ? "padding-top: 24px;" : ""}">
   <div class="text-center text-sm secondary">
     ${config.showThankYou ? `<div style="margin-bottom: 8px;">Thank you for your business!</div>` : ""}
-    ${invoice.businessEmail ? `<div>Questions? Contact us at ${invoice.businessEmail}</div>` : ""}
+    ${invoice.businessEmail ? `<div>Questions? Client us at ${invoice.businessEmail}</div>` : ""}
   </div>
 </div>
   `;

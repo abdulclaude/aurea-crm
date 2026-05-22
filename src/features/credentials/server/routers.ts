@@ -1,6 +1,7 @@
 import { PAGINATION } from "@/config/constants";
-import { CredentialType } from "@prisma/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { CredentialType } from "@/db/enums";
+import { credential as credentialTable } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import {
   createTRPCRouter,
@@ -12,14 +13,85 @@ import {
   configureTelegramWebhook,
   removeTelegramWebhook,
 } from "@/features/telegram/server/webhook-manager";
+import { TRPCError } from "@trpc/server";
+import { and, count, desc, eq, ilike, isNull, type SQL } from "drizzle-orm";
 
-const credentialScopeWhere = (ctx: {
+type CredentialScopeContext = {
   auth: { user: { id: string } };
-  subaccountId?: string | null;
-}) => ({
-  userId: ctx.auth.user.id,
-  subaccountId: ctx.subaccountId ?? null,
+  locationId?: string | null;
+};
+
+type CredentialRow = typeof credentialTable.$inferSelect;
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+type SerializedCredential = Omit<CredentialRow, "metadata"> & {
+  metadata: JsonValue;
+};
+
+const toJsonValue = (value: unknown): JsonValue => {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toJsonValue(item));
+  }
+
+  if (typeof value === "object") {
+    const result: { [key: string]: JsonValue } = {};
+    const record = value as Record<string, unknown>;
+    for (const [key, item] of Object.entries(record)) {
+      result[key] = toJsonValue(item);
+    }
+    return result;
+  }
+
+  return null;
+};
+
+const serializeCredential = (
+  credential: CredentialRow
+): SerializedCredential => ({
+  ...credential,
+  metadata: toJsonValue(credential.metadata),
 });
+
+const credentialScopeConditions = (ctx: CredentialScopeContext): SQL[] => [
+  eq(credentialTable.userId, ctx.auth.user.id),
+  ctx.locationId
+    ? eq(credentialTable.locationId, ctx.locationId)
+    : isNull(credentialTable.locationId),
+];
+
+const getScopedCredentialOrThrow = async (
+  ctx: CredentialScopeContext,
+  id: string
+) => {
+  const [credential] = await db
+    .select()
+    .from(credentialTable)
+    .where(and(eq(credentialTable.id, id), ...credentialScopeConditions(ctx)))
+    .limit(1);
+
+  if (!credential) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "Credential not found",
+    });
+  }
+
+  return serializeCredential(credential);
+};
 
 export const credentialsRouter = createTRPCRouter({
   create: premiumProcedure
@@ -33,53 +105,57 @@ export const credentialsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { name, value, type } = input;
 
-      return prisma.$transaction(async (tx) => {
-        const credential = await tx.credential.create({
-          data: {
+      const [credential] = await db
+        .insert(credentialTable)
+        .values({
             id: crypto.randomUUID(),
             name,
             type,
             userId: ctx.auth.user.id,
-            subaccountId: ctx.subaccountId ?? null,
+            locationId: ctx.locationId ?? null,
             value: encrypt(value),
             createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+        })
+        .returning();
 
-        if (type === CredentialType.TELEGRAM_BOT) {
+      if (type === CredentialType.TELEGRAM_BOT) {
+        try {
           await configureTelegramWebhook({
             credential,
             token: value,
-            tx,
+          });
+        } catch (error) {
+          await removeTelegramWebhook({ token: value });
+          await db
+            .delete(credentialTable)
+            .where(eq(credentialTable.id, credential.id));
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to configure Telegram webhook",
+            cause: error,
           });
         }
+      }
 
-        return credential;
-      });
+      return serializeCredential(credential);
     }),
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      return prisma.$transaction(async (tx) => {
-        const credential = await tx.credential.findFirstOrThrow({
-          where: {
-            id: input.id,
-            ...credentialScopeWhere(ctx),
-          },
-        });
+      const credential = await getScopedCredentialOrThrow(ctx, input.id);
 
-        if (credential.type === CredentialType.TELEGRAM_BOT) {
-          const token = decrypt(credential.value);
-          await removeTelegramWebhook({ token });
-        }
+      if (credential.type === CredentialType.TELEGRAM_BOT) {
+        const token = decrypt(credential.value);
+        await removeTelegramWebhook({ token });
+      }
 
-        return tx.credential.delete({
-          where: {
-            id: credential.id,
-          },
-        });
-      });
+      const [deletedCredential] = await db
+        .delete(credentialTable)
+        .where(eq(credentialTable.id, credential.id))
+        .returning();
+
+      return serializeCredential(deletedCredential);
     }),
   update: protectedProcedure
     .input(
@@ -93,49 +169,51 @@ export const credentialsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, name, type, value } = input;
 
-      return prisma.$transaction(async (tx) => {
-        const existing = await tx.credential.findFirstOrThrow({
-          where: {
-            id,
-            ...credentialScopeWhere(ctx),
-          },
-        });
+      const existing = await getScopedCredentialOrThrow(ctx, id);
 
-        const updated = await tx.credential.update({
-          where: {
-            id,
-          },
-          data: {
+      const [updated] = await db
+        .update(credentialTable)
+        .set({
             name,
             type,
             value: encrypt(value),
-          },
-        });
+            updatedAt: new Date(),
+        })
+        .where(eq(credentialTable.id, id))
+        .returning();
 
-        if (type === CredentialType.TELEGRAM_BOT) {
+      if (!updated) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Credential not found",
+        });
+      }
+
+      if (type === CredentialType.TELEGRAM_BOT) {
+        try {
           await configureTelegramWebhook({
             credential: updated,
             token: value,
-            tx,
           });
-        } else if (existing.type === CredentialType.TELEGRAM_BOT) {
-          const token = decrypt(existing.value);
-          await removeTelegramWebhook({ token });
+        } catch (error) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to configure Telegram webhook",
+            cause: error,
+          });
         }
+      } else if (existing.type === CredentialType.TELEGRAM_BOT) {
+        const token = decrypt(existing.value);
+        await removeTelegramWebhook({ token });
+      }
 
-        return updated;
-      });
+      return serializeCredential(updated);
     }),
 
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      return prisma.credential.findFirstOrThrow({
-        where: {
-          id: input.id,
-          ...credentialScopeWhere(ctx),
-        },
-      });
+      return getScopedCredentialOrThrow(ctx, input.id);
     }),
   getMany: protectedProcedure
     .input(
@@ -151,32 +229,25 @@ export const credentialsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const { page, pageSize, search } = input;
-      const scope = credentialScopeWhere(ctx);
+      const conditions = credentialScopeConditions(ctx);
+      if (search) {
+        conditions.push(ilike(credentialTable.name, `%${search}%`));
+      }
+      const where = and(...conditions);
 
       const [items, totalCount] = await Promise.all([
-        prisma.credential.findMany({
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-          where: {
-            ...scope,
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-          orderBy: {
-            updatedAt: "desc",
-          },
-        }),
-        prisma.credential.count({
-          where: {
-            ...scope,
-            name: {
-              contains: search,
-              mode: "insensitive",
-            },
-          },
-        }),
+        db
+          .select()
+          .from(credentialTable)
+          .where(where)
+          .orderBy(desc(credentialTable.updatedAt))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize),
+        db
+          .select({ totalCount: count() })
+          .from(credentialTable)
+          .where(where)
+          .then(([row]) => row?.totalCount ?? 0),
       ]);
 
       const totalPages = Math.ceil(totalCount / pageSize);
@@ -184,7 +255,7 @@ export const credentialsRouter = createTRPCRouter({
       const hasPreviousPage = page > 1;
 
       return {
-        items,
+        items: items.map(serializeCredential),
         page,
         pageSize,
         totalCount,
@@ -198,12 +269,12 @@ export const credentialsRouter = createTRPCRouter({
     .query(async ({ input, ctx }) => {
       const { type } = input;
 
-      return prisma.credential.findMany({
-        where: {
-          type,
-          ...credentialScopeWhere(ctx),
-        },
-        orderBy: { updatedAt: "desc" },
-      });
+      const credentials = await db
+        .select()
+        .from(credentialTable)
+        .where(and(eq(credentialTable.type, type), ...credentialScopeConditions(ctx)))
+        .orderBy(desc(credentialTable.updatedAt));
+
+      return credentials.map(serializeCredential);
     }),
 });

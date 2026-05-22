@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+---
+
+## ⚠️ MANDATORY — READ BEFORE WRITING A SINGLE LINE OF CODE
+
+**Every feature, every file, every PR must comply with [`docs/BEST_PRACTICES.md`](docs/BEST_PRACTICES.md).**
+
+This is not optional and applies to ALL work in this repository — new features, bug fixes, refactors, and one-liners alike.
+
+**Checklist before implementing anything:**
+1. Read the relevant section(s) of `docs/BEST_PRACTICES.md` for the domain you are touching (TypeScript, tRPC, Drizzle, Stripe, React/Next.js).
+2. Confirm you have a clear server/client split — no Drizzle or DB calls in client components, no UI logic in routers.
+3. Confirm all new tRPC procedures have Zod input validators and use `TRPCError` (not `throw new Error`).
+4. Confirm any multi-step DB write uses `db.transaction`.
+5. Confirm any money value uses Postgres `numeric` or integer pence/cents (not `doublePrecision`, not JavaScript floats).
+6. Confirm any new Stripe webhook uses raw body + signature verify + idempotency in one transaction.
+
+**Hard rules (zero exceptions):**
+- No `any`. Use `unknown` + Zod at boundaries.
+- No Drizzle or direct DB calls inside `"use client"` files.
+- No N+1 queries — use Drizzle joins, relation queries, and explicit `select` projections in a single query.
+- `TRPCError` with the right code every time. The correct codes are in `docs/BEST_PRACTICES.md` §3.
+- Stripe Connect: Express accounts, destination charges, `application_fee_amount`. Never manual transfers.
+- All money: Postgres `numeric` / integer pence. Never floating point.
+- Webhooks: `req.text()` → verify → idempotency + business logic in `db.transaction` → 200. Heavy work → Inngest.
+- No `TODO`/`FIXME` in committed code.
+- **Always use ShadCN components** where one exists (`Button`, `Separator`, `Badge`, `Input`, `Select`, etc.). Never create raw `<button>`, `<input>`, or `<select>` elements when a ShadCN equivalent is available in `src/components/ui/`.
+- **Keep files small and focused.** Never dump an entire page's worth of components, helpers, constants, and types into a single file. Extract into `src/features/<feature>/components/`, `src/features/<feature>/constants.ts`, `src/features/<feature>/helpers.ts`, etc. Each component should be its own file. Use barrel `index.ts` exports. Target ≤ 200 lines per file for components, ≤ 300 for pages.
+
+---
+
 ## Project Overview
 
 Aurea CRM is a Next.js 16-based workflow automation and CRM platform with a visual node-based editor. It features multi-tenant agency/client architecture, real-time workflow execution via Inngest, and integrations with services like WhatsApp, Google Calendar, Gmail, Telegram, and AI providers (Anthropic, OpenAI, Gemini).
@@ -10,13 +40,13 @@ Aurea CRM is a Next.js 16-based workflow automation and CRM platform with a visu
 
 - Next.js 16 (App Router) with React 19
 - TypeScript with strict mode
-- Prisma (PostgreSQL) with custom output to `src/generated/prisma`
+- Drizzle ORM (PostgreSQL) with schema in `src/db/schema.ts`
 - tRPC for type-safe API routes
 - Better Auth with Polar.sh for subscriptions
 - Inngest for background jobs and workflow orchestration
 - React Flow for visual workflow editor
 - Tanstack Table for data tables
-- Biome for linting/formatting
+- TypeScript checks through `npm run typecheck`
 - Jotai for state management
 
 ## Development Commands
@@ -28,13 +58,13 @@ npm inngest:dev           # Start Inngest dev server
 npm dev:all               # Run both with mprocs
 
 # Database
-npx prisma migrate dev    # Create and apply migrations
-npx prisma generate       # Generate Prisma client
-npx prisma studio         # Open Prisma Studio
+npm run db:generate       # Generate Drizzle migrations
+npm run db:migrate        # Apply Drizzle migrations
+npm run db:push           # Push schema in local/dev only
+npm run db:studio         # Open Drizzle Studio
 
 # Code Quality
-npm lint                  # Run Biome linter
-npm format                # Format with Biome
+npm run typecheck         # Run TypeScript without emitting files
 
 # Build & Deploy
 npm build                 # Production build
@@ -51,14 +81,14 @@ npm ngrok:dev            # Expose local server via ngrok
 The app uses a **three-tier organization model**:
 
 1. **Organization** - Top-level agency/workspace (e.g., "Acme Agency")
-2. **Subaccount** - Client workspace under an organization (e.g., "Client XYZ")
-3. **User** - Can be members of multiple orgs and subaccounts
+2. **Location** - Studio/client workspace under an organization (e.g., "Wembley Studio")
+3. **User** - Can be members of multiple orgs and locations
 
 **Context Switching:**
 
-- Session stores `activeOrganizationId` and `activeSubaccountId`
-- Most resources (workflows, credentials, webhooks, contacts, deals) are scoped to a subaccount
-- CRM features (contacts, deals) are **only accessible within a subaccount context**
+- Session stores `activeOrganizationId` and `activeLocationId`
+- Most resources (workflows, credentials, webhooks, clients, deals) are scoped to a location
+- CRM features (clients, deals) are **only accessible within a location context**
 - The `protectedProcedure` in tRPC automatically loads context from session (see `src/trpc/init.ts:33-103`)
 
 ### Workflow System
@@ -87,19 +117,19 @@ The app uses a **three-tier organization model**:
 
 ### CRM Features (New)
 
-**Contacts & Deals:**
+**Clients & Deals:**
 
-- **Contacts** - Lead/customer profiles with assignees, scoring, lifecycle stages (src/features/crm/server/contacts-router.ts)
+- **Clients** - Lead/member/customer profiles with assignees, scoring, lifecycle stages (src/features/crm/server/clients-router.ts)
 - **Deals** - Sales pipeline with stages (LEAD_IN, QUALIFIED, PROPOSAL, NEGOTIATION, WON, LOST)
-- Both are **subaccount-scoped** - require active subaccount context
+- Both are **location-scoped** - require active location context
 - Use reusable `DataTable` component (src/components/data-table/data-table.tsx)
 - Pagination via cursor-based infinite scroll with `CRM_PAGE_SIZE` constant
 
 **Assignment Model:**
 
-- Contacts have `ContactAssignee` (via `SubaccountMember`)
-- Deals have `DealMember` (via `SubaccountMember`)
-- Deals can link to multiple contacts via `DealContact`
+- Clients have `ClientAssignee` (via `LocationMember`)
+- Deals have `DealMember` (via `LocationMember`)
+- Deals can link to multiple clients via `DealClient`
 
 ### tRPC Patterns
 
@@ -113,7 +143,7 @@ src/features/*/server/routers.ts # Feature routers
 **Procedures:**
 
 - `baseProcedure` - No auth required
-- `protectedProcedure` - Requires auth, loads org/subaccount context
+- `protectedProcedure` - Requires auth, loads org/location context
 - `premiumProcedure` - Requires active Polar subscription
 
 **Context Available:**
@@ -122,8 +152,8 @@ src/features/*/server/routers.ts # Feature routers
 {
   auth: Session,           // Better Auth session
   orgId: string | null,    // Active organization
-  subaccountId: string | null,  // Active subaccount
-  subaccount: Subaccount | null // Full subaccount object
+  locationId: string | null,  // Active location
+  location: Location | null   // Full location object
 }
 ```
 
@@ -146,8 +176,8 @@ src/features/<feature>/
 - `credentials/` - API keys (encrypted with Cryptr)
 - `integrations/` - OAuth integrations (Google, Facebook/WhatsApp)
 - `webhooks/` - Reusable webhook configurations
-- `organizations/` - Org/subaccount management
-- `crm/` - Contacts and deals (NEW)
+- `organizations/` - Org/location management
+- `crm/` - Clients and deals
 
 ### Database Patterns
 
@@ -155,19 +185,19 @@ src/features/<feature>/
 
 - `Workflow` → `Node` → `Connection` (cascade delete)
 - `Workflow` → `Execution` (execution history)
-- `Organization` → `Subaccount` → scoped resources
-- `Subaccount` → `Contact`, `Deal` (CRM)
+- `Organization` → `Location` → scoped resources
+- `Location` → `Client`, `Deal` (CRM)
 - `Integration` - OAuth tokens per user+provider (unique constraint)
-- `Credential` - Encrypted API keys with optional subaccount scoping
+- `Credential` - Encrypted API keys with optional location scoping
 
-**Prisma Client Location:**
-Custom output: `src/generated/prisma` (not node_modules)
+**Drizzle Client Location:**
+Schema lives in `src/db/schema.ts`; the shared client lives in `src/db/client.ts` and is re-exported from `src/db/index.ts`.
 
 **Schema Conventions:**
 
 - Use `cuid()` for IDs (except Organization/Session from better-auth)
 - JSON fields for flexible node configuration
-- Enums generated to `src/generated/prisma/enums`
+- Enums are declared in `src/db/schema.ts` with `pgEnum` and exported from the schema module.
 
 ### Authentication & Authorization
 
@@ -176,12 +206,12 @@ Custom output: `src/generated/prisma` (not node_modules)
 - Email/password + Google/Facebook OAuth
 - Organization plugin for multi-tenancy
 - Polar.sh plugin for subscription management
-- Session stores active organization/subaccount context
+- Session stores active organization/location context
 
 **Permission Model:**
 
 - Organization members have roles: "owner", member roles
-- Subaccount members have roles: AGENCY, ADMIN, MEMBER
+- Location members have roles: AGENCY, ADMIN, MANAGER, STANDARD, LIMITED, VIEWER
 - AGENCY role = agency team member working on client's behalf
 - Resource access checked via `workflowScopeWhere()` pattern
 
@@ -217,10 +247,9 @@ Each node type has an Inngest channel in `src/inngest/channels/` that handles ex
 
 **Type Safety:**
 
-- Prisma types imported from `@/generated/prisma`
-- Enums imported from `@/generated/prisma/enums`
+- Drizzle tables and enums imported from `@/db/schema`
 - tRPC provides end-to-end type safety
-- Use `Prisma.validator` for complex type composition
+- Use `typeof table.$inferSelect`, `typeof table.$inferInsert`, and Zod inference for type composition
 
 ### Testing Workflows
 
@@ -232,13 +261,13 @@ Each node type has an Inngest channel in `src/inngest/channels/` that handles ex
 4. Test executions via the timeline view at `/executions/[executionId]`
 
 **Database Inspection:**
-Use `npx prisma studio` to view/edit data directly.
+Use `npm run db:studio` or SQL to inspect data directly.
 
 ### Common Patterns
 
 **Adding a New Node Type:**
 
-1. Add enum to `prisma/schema.prisma` NodeType
+1. Add enum value to `nodeType` in `src/db/schema.ts`
 2. Create folder: `src/features/nodes/{triggers|executions}/components/<node-name>/`
 3. Create files: `node.tsx`, `dialog.tsx`, `executor.ts`, `realtime.ts` (optional)
 4. Register executor in `src/features/executions/lib/executor-registry.ts`
@@ -251,27 +280,28 @@ Use `npx prisma studio` to view/edit data directly.
 2. Export router from `src/trpc/routers/_app.ts`
 3. Router is automatically available via `trpc.<feature>.*`
 
-**Subaccount-Scoped Resources:**
-Always include in Prisma schema:
+**Location-Scoped Resources:**
+Always include in the Drizzle table:
 
-```prisma
-subaccountId String?
-subaccount   Subaccount? @relation(fields: [subaccountId], references: [id], onDelete: SetNull)
+```typescript
+locationId: text(),
+foreignKey({
+  columns: [table.locationId],
+  foreignColumns: [location.id],
+  name: "Resource_locationId_fkey",
+}).onUpdate("cascade").onDelete("set null")
 ```
 
 And filter queries:
 
 ```typescript
-where: {
-  userId: ctx.auth.user.id,
-  subaccountId: ctx.subaccountId ?? null
-}
+where(and(eq(resource.userId, ctx.auth.user.id), eq(resource.locationId, ctx.locationId ?? "")))
 ```
 
 **Pagination:**
 
 - Lists: Use cursor-based with `cursor` + `limit` inputs
-- CRM: `CRM_PAGE_SIZE = 20` (contacts/deals)
+- CRM: `CRM_PAGE_SIZE = 20` (clients/deals)
 - Standard: `PAGINATION.DEFAULT_PAGE_SIZE = 10`
 
 ### Environment Variables
@@ -290,7 +320,7 @@ Key variables (see `.env.local`):
 
 When modifying schema:
 
-1. Edit `prisma/schema.prisma`
-2. Run `npx prisma migrate dev --name <description>`
-3. Prisma client auto-regenerates
-4. Restart dev server if types don't update
+1. Edit `src/db/schema.ts`
+2. Run `npm run db:generate -- --name <description>`
+3. Run `npm run db:migrate`
+4. Restart dev server if types do not update

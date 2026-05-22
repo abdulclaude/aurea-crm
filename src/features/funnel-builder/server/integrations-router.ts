@@ -7,10 +7,13 @@
 
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import prisma from "@/lib/db";
-import { PixelProvider, Prisma } from "@prisma/client";
+import { createId } from "@paralleldrive/cuid2";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { funnel, funnelBlock, funnelBlockEvent, funnelPixelIntegration } from "@/db/schema";
+import { PixelProvider } from "@/db/enums";
 import { TRPCError } from "@trpc/server";
-type InputJsonValue = Prisma.InputJsonValue;
+import type { JsonObject } from "@/db/json";
 
 export const integrationsRouter = createTRPCRouter({
   /**
@@ -24,28 +27,20 @@ export const integrationsRouter = createTRPCRouter({
     )
     .query(async ({ input, ctx }) => {
       // Verify funnel access
-      const funnel = await prisma.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId ?? undefined,
-          subaccountId: ctx.subaccountId ?? undefined,
-        },
+      const selectedFunnel = await db.query.funnel.findFirst({
+        where: funnelAccessWhere(input.funnelId, ctx.orgId, ctx.locationId),
       });
 
-      if (!funnel) {
+      if (!selectedFunnel) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Funnel not found",
         });
       }
 
-      return prisma.funnelPixelIntegration.findMany({
-        where: {
-          funnelId: input.funnelId,
-        },
-        orderBy: {
-          createdAt: "asc",
-        },
+      return db.query.funnelPixelIntegration.findMany({
+        where: eq(funnelPixelIntegration.funnelId, input.funnelId),
+        orderBy: [asc(funnelPixelIntegration.createdAt)],
       });
     }),
 
@@ -64,45 +59,40 @@ export const integrationsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify funnel access
-      const funnel = await prisma.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId ?? undefined,
-          subaccountId: ctx.subaccountId ?? undefined,
-        },
+      const selectedFunnel = await db.query.funnel.findFirst({
+        where: funnelAccessWhere(input.funnelId, ctx.orgId, ctx.locationId),
       });
 
-      if (!funnel) {
+      if (!selectedFunnel) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Funnel not found",
         });
       }
 
-      // Upsert integration
-      return prisma.funnelPixelIntegration.upsert({
-        where: {
-          funnelId_provider: {
-            funnelId: input.funnelId,
-            provider: input.provider,
-          },
-        },
-        create: {
-          id: crypto.randomUUID(),
+      const [integration] = await db
+        .insert(funnelPixelIntegration)
+        .values({
+          id: createId(),
           funnelId: input.funnelId,
           provider: input.provider,
           pixelId: input.pixelId,
           enabled: input.enabled,
-          metadata: (input.metadata || {}) as InputJsonValue,
-          createdAt: new Date(),
+          metadata: (input.metadata || {}) as JsonObject,
           updatedAt: new Date(),
-        },
-        update: {
+        })
+        .onConflictDoUpdate({
+          target: [funnelPixelIntegration.funnelId, funnelPixelIntegration.provider],
+          set: {
           pixelId: input.pixelId,
           enabled: input.enabled,
-          metadata: input.metadata as InputJsonValue | undefined,
-        },
-      });
+          metadata: input.metadata,
+          updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return integration;
     }),
 
   /**
@@ -117,9 +107,9 @@ export const integrationsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify access via funnel
-      const integration = await prisma.funnelPixelIntegration.findUnique({
-        where: { id: input.id },
-        include: { funnel: true },
+      const integration = await db.query.funnelPixelIntegration.findFirst({
+        where: eq(funnelPixelIntegration.id, input.id),
+        with: { funnel: true },
       });
 
       if (!integration) {
@@ -131,7 +121,7 @@ export const integrationsRouter = createTRPCRouter({
 
       if (
         integration.funnel.organizationId !== ctx.orgId ||
-        integration.funnel.subaccountId !== ctx.subaccountId
+        integration.funnel.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -139,10 +129,12 @@ export const integrationsRouter = createTRPCRouter({
         });
       }
 
-      return prisma.funnelPixelIntegration.update({
-        where: { id: input.id },
-        data: { enabled: input.enabled },
-      });
+      const [updated] = await db
+        .update(funnelPixelIntegration)
+        .set({ enabled: input.enabled, updatedAt: new Date() })
+        .where(eq(funnelPixelIntegration.id, input.id))
+        .returning();
+      return updated;
     }),
 
   /**
@@ -156,9 +148,9 @@ export const integrationsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify access via funnel
-      const integration = await prisma.funnelPixelIntegration.findUnique({
-        where: { id: input.id },
-        include: { funnel: true },
+      const integration = await db.query.funnelPixelIntegration.findFirst({
+        where: eq(funnelPixelIntegration.id, input.id),
+        with: { funnel: true },
       });
 
       if (!integration) {
@@ -170,7 +162,7 @@ export const integrationsRouter = createTRPCRouter({
 
       if (
         integration.funnel.organizationId !== ctx.orgId ||
-        integration.funnel.subaccountId !== ctx.subaccountId
+        integration.funnel.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -178,9 +170,8 @@ export const integrationsRouter = createTRPCRouter({
         });
       }
 
-      return prisma.funnelPixelIntegration.delete({
-        where: { id: input.id },
-      });
+      const [deleted] = await db.delete(funnelPixelIntegration).where(eq(funnelPixelIntegration.id, input.id)).returning();
+      return deleted;
     }),
 
   /**
@@ -193,8 +184,8 @@ export const integrationsRouter = createTRPCRouter({
       })
     )
     .query(async ({ input }) => {
-      return prisma.funnelBlockEvent.findUnique({
-        where: { blockId: input.blockId },
+      return db.query.funnelBlockEvent.findFirst({
+        where: eq(funnelBlockEvent.blockId, input.blockId),
       });
     }),
 
@@ -212,11 +203,11 @@ export const integrationsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify block access via page -> funnel
-      const block = await prisma.funnelBlock.findUnique({
-        where: { id: input.blockId },
-        include: {
+      const block = await db.query.funnelBlock.findFirst({
+        where: eq(funnelBlock.id, input.blockId),
+        with: {
           funnelPage: {
-            include: {
+            with: {
               funnel: true,
             },
           },
@@ -232,7 +223,7 @@ export const integrationsRouter = createTRPCRouter({
 
       if (
         block.funnelPage.funnel.organizationId !== ctx.orgId ||
-        block.funnelPage.funnel.subaccountId !== ctx.subaccountId
+        block.funnelPage.funnel.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -240,23 +231,28 @@ export const integrationsRouter = createTRPCRouter({
         });
       }
 
-      return prisma.funnelBlockEvent.upsert({
-        where: { blockId: input.blockId },
-        create: {
-          id: crypto.randomUUID(),
+      const [event] = await db
+        .insert(funnelBlockEvent)
+        .values({
+          id: createId(),
           blockId: input.blockId,
           eventType: input.eventType,
           eventName: input.eventName,
-          parameters: (input.parameters || {}) as InputJsonValue,
-          createdAt: new Date(),
+          parameters: (input.parameters || {}) as JsonObject,
           updatedAt: new Date(),
-        },
-        update: {
+        })
+        .onConflictDoUpdate({
+          target: funnelBlockEvent.blockId,
+          set: {
           eventType: input.eventType,
           eventName: input.eventName,
-          parameters: input.parameters as InputJsonValue | undefined,
-        },
-      });
+          parameters: input.parameters,
+          updatedAt: new Date(),
+          },
+        })
+        .returning();
+
+      return event;
     }),
 
   /**
@@ -270,11 +266,11 @@ export const integrationsRouter = createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Verify block access via page -> funnel
-      const block = await prisma.funnelBlock.findUnique({
-        where: { id: input.blockId },
-        include: {
+      const block = await db.query.funnelBlock.findFirst({
+        where: eq(funnelBlock.id, input.blockId),
+        with: {
           funnelPage: {
-            include: {
+            with: {
               funnel: true,
             },
           },
@@ -290,7 +286,7 @@ export const integrationsRouter = createTRPCRouter({
 
       if (
         block.funnelPage.funnel.organizationId !== ctx.orgId ||
-        block.funnelPage.funnel.subaccountId !== ctx.subaccountId
+        block.funnelPage.funnel.locationId !== ctx.locationId
       ) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -299,16 +295,23 @@ export const integrationsRouter = createTRPCRouter({
       }
 
       // Check if event exists
-      const event = await prisma.funnelBlockEvent.findUnique({
-        where: { blockId: input.blockId },
+      const event = await db.query.funnelBlockEvent.findFirst({
+        where: eq(funnelBlockEvent.blockId, input.blockId),
       });
 
       if (!event) {
         return null;
       }
 
-      return prisma.funnelBlockEvent.delete({
-        where: { blockId: input.blockId },
-      });
+      const [deleted] = await db.delete(funnelBlockEvent).where(eq(funnelBlockEvent.blockId, input.blockId)).returning();
+      return deleted;
     }),
 });
+
+function funnelAccessWhere(funnelId: string, organizationId: string | null, locationId: string | null) {
+  return and(
+    eq(funnel.id, funnelId),
+    eq(funnel.organizationId, organizationId ?? ""),
+    locationId ? eq(funnel.locationId, locationId) : undefined
+  );
+}

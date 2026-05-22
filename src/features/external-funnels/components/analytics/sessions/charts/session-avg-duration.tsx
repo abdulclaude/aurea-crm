@@ -105,7 +105,7 @@ export function SessionAvgDurationChart({
                           style={{ backgroundColor: entry.color }}
                         />
                         <span className="text-xs font-medium">
-                          Avg Duration
+                          Average duration
                         </span>
                       </div>
                       <span className="text-xs font-mono font-semibold">

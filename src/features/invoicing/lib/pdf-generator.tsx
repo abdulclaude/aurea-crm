@@ -20,9 +20,9 @@ interface InvoiceData {
   invoiceNumber: string;
   issueDate: Date | string;
   dueDate: Date | string;
-  contactName: string;
-  contactEmail?: string | null;
-  contactAddress?: Record<string, unknown> | null;
+  clientName: string;
+  clientEmail?: string | null;
+  clientAddress?: Record<string, unknown> | null;
   lineItems: Array<{
     description: string;
     quantity: string | number;
@@ -268,9 +268,9 @@ const InvoicePDFDocument = ({
         <View style={styles.clientInfoContainer}>
           <View style={styles.clientInfoLeft}>
             <Text style={styles.sectionLabel}>Bill To</Text>
-            <Text style={styles.clientName}>{invoice.contactName}</Text>
-            {invoice.contactEmail && (
-              <Text style={styles.clientEmail}>{invoice.contactEmail}</Text>
+            <Text style={styles.clientName}>{invoice.clientName}</Text>
+            {invoice.clientEmail && (
+              <Text style={styles.clientEmail}>{invoice.clientEmail}</Text>
             )}
           </View>
           <View style={styles.clientInfoRight}>
@@ -379,7 +379,7 @@ const InvoicePDFDocument = ({
         <View style={styles.footer}>
           <Text>Thank you for your business!</Text>
           {invoice.businessEmail && (
-            <Text>Questions? Contact us at {invoice.businessEmail}</Text>
+            <Text>Questions? Client us at {invoice.businessEmail}</Text>
           )}
         </View>
       </Page>

@@ -1,5 +1,19 @@
 import { inngest } from "../client";
-import db from "@/lib/db";
+import { db } from "@/db";
+import {
+	and,
+	eq,
+	inArray,
+	isNotNull,
+	sql,
+	type SQL,
+} from "drizzle-orm";
+import {
+	anonymousUserProfiles,
+	client,
+	funnelEvent,
+	funnelSession,
+} from "@/db/schema";
 import { sendWorkflowExecution } from "../utils";
 import { generateUserName } from "@/features/external-funnels/lib/generate-user-name";
 import {
@@ -185,9 +199,9 @@ export const processTrackingEvents = inngest.createFunction(
   },
   { event: "tracking/events.batch" },
   async ({ event, step }) => {
-    const { funnelId, subaccountId, organizationId, events, ipAddress } = event.data as {
+    const { funnelId, locationId, organizationId, events, ipAddress } = event.data as {
       funnelId: string;
-      subaccountId: string | null;
+      locationId: string | null;
       organizationId: string;
       events: TrackingEvent[];
       ipAddress: string;
@@ -266,7 +280,7 @@ export const processTrackingEvents = inngest.createFunction(
         return {
           eventId: evt.eventId,
           funnelId,
-          subaccountId,
+          locationId,
 
           eventName: evt.eventName,
           eventProperties: evt.properties || {},
@@ -410,10 +424,23 @@ export const processTrackingEvents = inngest.createFunction(
 
     // Step 2: Store events in database
     await step.run("store-events", async () => {
-      await db.funnelEvent.createMany({
-        data: enrichedEvents,
-        skipDuplicates: true, // Prevent duplicate eventIds
-      });
+      if (enrichedEvents.length === 0) return;
+      await db
+        .insert(funnelEvent)
+        .values(
+          enrichedEvents.map((event) => ({
+            ...event,
+            id: crypto.randomUUID(),
+            timestamp: new Date(event.timestamp),
+            serverTimestamp: new Date(event.serverTimestamp),
+            firstTouchTimestamp:
+              event.firstTouchTimestamp == null ? null : new Date(event.firstTouchTimestamp),
+            lastTouchTimestamp:
+              event.lastTouchTimestamp == null ? null : new Date(event.lastTouchTimestamp),
+            revenue: event.revenue == null ? event.revenue : String(event.revenue),
+          }))
+        )
+        .onConflictDoNothing({ target: funnelEvent.eventId });
     });
 
     // Step 2.5: Push events to real-time cache for instant SSE delivery
@@ -464,23 +491,23 @@ export const processTrackingEvents = inngest.createFunction(
         const userEvents = enrichedEvents.filter((e) => e.anonymousId === anonymousId);
         const eventsCount = userEvents.length;
 
-        await db.anonymousUserProfile.upsert({
-          where: { id: anonymousId },
-          create: {
+        await db
+          .insert(anonymousUserProfiles)
+          .values({
             id: anonymousId,
             displayName: generateUserName(),
             firstSeen: new Date(userEvents[0].timestamp),
             lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
             totalEvents: eventsCount,
-            totalSessions: 0, // Will be updated when we create sessions
-          },
-          update: {
-            lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
-            totalEvents: {
-              increment: eventsCount,
+            totalSessions: 0,
+          })
+          .onConflictDoUpdate({
+            target: anonymousUserProfiles.id,
+            set: {
+              lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
+              totalEvents: sql`${anonymousUserProfiles.totalEvents} + ${eventsCount}`,
             },
-          },
-        });
+          });
       }
     });
 
@@ -520,23 +547,24 @@ export const processTrackingEvents = inngest.createFunction(
         return cityGeoCache.get(cacheKey) || null;
       }
 
-      const existing = await db.funnelSession.findFirst({
-        where: {
-          city,
-          ...(normalizedCountryName ? { countryName: normalizedCountryName } : {}),
-          ...(normalizedCountryCode || originalCountryCode
-            ? {
-                countryCode:
-                  normalizedCountryCode && originalCountryCode
-                    ? { in: [normalizedCountryCode, originalCountryCode] }
-                    : normalizedCountryCode || originalCountryCode,
-              }
-            : {}),
-          ...(region ? { region } : {}),
-          latitude: { not: null },
-          longitude: { not: null },
-        },
-        select: {
+      const existingConditions: SQL[] = [
+        eq(funnelSession.city, city),
+        isNotNull(funnelSession.latitude),
+        isNotNull(funnelSession.longitude),
+      ];
+      if (normalizedCountryName) {
+        existingConditions.push(eq(funnelSession.countryName, normalizedCountryName));
+      }
+      if (normalizedCountryCode && originalCountryCode) {
+        existingConditions.push(inArray(funnelSession.countryCode, [normalizedCountryCode, originalCountryCode]));
+      } else if (normalizedCountryCode || originalCountryCode) {
+        existingConditions.push(eq(funnelSession.countryCode, normalizedCountryCode || originalCountryCode || ""));
+      }
+      if (region) existingConditions.push(eq(funnelSession.region, region));
+
+      const existing = await db.query.funnelSession.findFirst({
+        where: and(...existingConditions),
+        columns: {
           latitude: true,
           longitude: true,
         },
@@ -581,10 +609,10 @@ export const processTrackingEvents = inngest.createFunction(
         const lastCampaignValue = lastEvent.utmCampaign || lastEvent.lastTouchUtmCampaign || lastEvent.firstTouchUtmCampaign || null;
 
         // Query ALL events for this session from the database to calculate accurate duration
-        const allSessionEvents = await db.funnelEvent.findMany({
-          where: { sessionId },
-          orderBy: { timestamp: 'asc' },
-          select: {
+        const allSessionEvents = await db.query.funnelEvent.findMany({
+          where: eq(funnelEvent.sessionId, sessionId),
+          orderBy: (event, { asc }) => asc(event.timestamp),
+          columns: {
             timestamp: true,
             eventName: true,
             eventProperties: true,
@@ -648,9 +676,9 @@ export const processTrackingEvents = inngest.createFunction(
 
         const experienceScore = calculateExperienceScore();
 
-        const existingSession = await db.funnelSession.findUnique({
-          where: { sessionId },
-          select: { 
+        const existingSession = await db.query.funnelSession.findFirst({
+          where: eq(funnelSession.sessionId, sessionId),
+          columns: {
             id: true,
             firstSource: true,
             firstMedium: true,
@@ -743,17 +771,17 @@ export const processTrackingEvents = inngest.createFunction(
           lastEventWbraid: lastEvent.wbraid,
         });
         
-        await db.funnelSession.upsert({
-          where: { sessionId },
-          create: {
+        const sessionCreate = {
+            id: crypto.randomUUID(),
             sessionId,
             funnelId,
-            subaccountId,
+            locationId,
             userId: firstEvent.userId,
             anonymousId: firstEvent.anonymousId,
             profileId: firstEvent.anonymousId,
 
             startedAt: firstTimestamp,
+            updatedAt: new Date(),
             endedAt: lastTimestamp,
             durationSeconds: sessionEndProps.duration || Math.floor(durationMs / 1000),
             activeTimeSeconds: sessionEndProps.activeTime || null,
@@ -820,7 +848,7 @@ export const processTrackingEvents = inngest.createFunction(
             eventsCount: sessionEvents.length,
 
             converted: hasConversion,
-            conversionValue: conversionEvent?.revenue,
+            conversionValue: conversionEvent?.revenue == null ? conversionEvent?.revenue : String(conversionEvent.revenue),
             conversionType: conversionEvent?.conversionType,
 
             ipAddress,
@@ -842,8 +870,9 @@ export const processTrackingEvents = inngest.createFunction(
             // Attribution tracking (persisted UTM)
             firstTouchSource: firstEvent.firstTouchUtmSource,
             lastTouchSource: lastEvent.lastTouchUtmSource,
-          },
-          update: {
+        };
+        const sessionUpdates = {
+            updatedAt: new Date(),
             endedAt: lastTimestamp,
             durationSeconds: sessionEndProps.duration || Math.floor(durationMs / 1000),
             activeTimeSeconds: sessionEndProps.activeTime || null,
@@ -914,16 +943,12 @@ export const processTrackingEvents = inngest.createFunction(
             gbraid: lastEvent.gbraid,
             wbraid: lastEvent.wbraid,
 
-            pageViews: {
-              increment: sessionEvents.filter((e) => e.eventName === "page_view").length,
-            },
-            eventsCount: {
-              increment: sessionEvents.length,
-            },
+            pageViews: sql`${funnelSession.pageViews} + ${sessionEvents.filter((e) => e.eventName === "page_view").length}`,
+            eventsCount: sql`${funnelSession.eventsCount} + ${sessionEvents.length}`,
 
             ...(hasConversion && {
               converted: true,
-              conversionValue: conversionEvent?.revenue,
+              conversionValue: conversionEvent?.revenue == null ? conversionEvent?.revenue : String(conversionEvent.revenue),
               conversionType: conversionEvent?.conversionType,
             }),
 
@@ -934,19 +959,23 @@ export const processTrackingEvents = inngest.createFunction(
             ...(lastEvent.lastTouchUtmSource && {
               lastTouchSource: lastEvent.lastTouchUtmSource,
             }),
-          },
-        });
+        };
+
+        if (existingSession) {
+          await db
+            .update(funnelSession)
+            .set(sessionUpdates)
+            .where(eq(funnelSession.sessionId, sessionId));
+        } else {
+          await db.insert(funnelSession).values(sessionCreate);
+        }
 
         // Increment session count for user profile if this is a new session
         if (isNewSession && firstEvent.anonymousId) {
-          await db.anonymousUserProfile.update({
-            where: { id: firstEvent.anonymousId },
-            data: {
-              totalSessions: {
-                increment: 1,
-              },
-            },
-          });
+          await db
+            .update(anonymousUserProfiles)
+            .set({ totalSessions: sql`${anonymousUserProfiles.totalSessions} + 1` })
+            .where(eq(anonymousUserProfiles.id, firstEvent.anonymousId));
         }
       }
     });
@@ -960,9 +989,9 @@ export const processTrackingEvents = inngest.createFunction(
       for (const anonymousId of anonymousIds) {
         if (!anonymousId) continue;
 
-        const profile = await db.anonymousUserProfile.findUnique({
-          where: { id: anonymousId },
-          select: {
+        const profile = await db.query.anonymousUserProfiles.findFirst({
+          where: eq(anonymousUserProfiles.id, anonymousId),
+          columns: {
             id: true,
             totalSessions: true,
             lastSeen: true,
@@ -976,10 +1005,10 @@ export const processTrackingEvents = inngest.createFunction(
           profile.lastSeen
         );
 
-        await db.anonymousUserProfile.update({
-          where: { id: profile.id },
-          data: { lifecycleStage: nextStage },
-        });
+        await db
+          .update(anonymousUserProfiles)
+          .set({ lifecycleStage: nextStage })
+          .where(eq(anonymousUserProfiles.id, profile.id));
       }
     });
 
@@ -991,13 +1020,14 @@ export const processTrackingEvents = inngest.createFunction(
         const { stage, stageHistory } = stageEvent.eventProperties || {};
         if (!stage || !stageEvent.sessionId) continue;
         
-        await db.funnelSession.update({
-          where: { sessionId: stageEvent.sessionId },
-          data: {
+        await db
+          .update(funnelSession)
+          .set({
             currentStage: stage,
             stageHistory: stageHistory || [],
-          },
-        }).catch(() => {
+          })
+          .where(eq(funnelSession.sessionId, stageEvent.sessionId))
+          .catch(() => {
           // Session might not exist yet - will be created in next batch
         });
       }
@@ -1008,13 +1038,14 @@ export const processTrackingEvents = inngest.createFunction(
         const { sessionId } = checkoutEvent;
         if (!sessionId) continue;
         
-        await db.funnelSession.update({
-          where: { sessionId },
-          data: {
+        await db
+          .update(funnelSession)
+          .set({
             checkoutStartedAt: new Date(checkoutEvent.timestamp),
             currentStage: "checkout",
-          },
-        }).catch(() => {
+          })
+          .where(eq(funnelSession.sessionId, sessionId))
+          .catch(() => {
           // Session might not exist yet
         });
       }
@@ -1028,7 +1059,7 @@ export const processTrackingEvents = inngest.createFunction(
         if (!sessionId) continue;
         
         // Link current session to original session if available
-        const updateData: any = {
+        const updateData: Partial<typeof funnelSession.$inferInsert> = {
           checkoutCompletedAt: new Date(completionEvent.timestamp),
           currentStage: "purchase",
           converted: true,
@@ -1044,10 +1075,11 @@ export const processTrackingEvents = inngest.createFunction(
           updateData.checkoutDuration = checkoutDuration;
         }
         
-        await db.funnelSession.update({
-          where: { sessionId },
-          data: updateData,
-        }).catch(() => {
+        await db
+          .update(funnelSession)
+          .set(updateData)
+          .where(eq(funnelSession.sessionId, sessionId))
+          .catch(() => {
           // Session might not exist yet
         });
       }
@@ -1060,15 +1092,16 @@ export const processTrackingEvents = inngest.createFunction(
         
         if (!sessionId) continue;
         
-        await db.funnelSession.update({
-          where: { sessionId },
-          data: {
+        await db
+          .update(funnelSession)
+          .set({
             isAbandoned: true,
             abandonedAt: new Date(abandonEvent.timestamp),
             abandonReason: reason || "unknown",
             currentStage: "abandoned",
-          },
-        }).catch(() => {
+          })
+          .where(eq(funnelSession.sessionId, sessionId))
+          .catch(() => {
           // Session might not exist yet
         });
       }
@@ -1095,9 +1128,9 @@ export const processTrackingEvents = inngest.createFunction(
         }
 
         // Get session data with click IDs
-        const session = await db.funnelSession.findUnique({
-          where: { sessionId },
-          select: {
+        const session = await db.query.funnelSession.findFirst({
+          where: eq(funnelSession.sessionId, sessionId),
+          columns: {
             lastFbclid: true,
             lastGclid: true,
             lastTtclid: true,
@@ -1128,7 +1161,7 @@ export const processTrackingEvents = inngest.createFunction(
 
         // Get ad platform credentials from environment variables
         // TODO: This should be retrieved from a new AdPlatformCredential table
-        // For now, we use env vars which work for both subaccount and external funnels
+        // For now, we use env vars which work for both location and external funnels
         const metaPixelId = process.env.META_PIXEL_ID;
         const metaAccessToken = process.env.META_CAPI_ACCESS_TOKEN;
         const metaTestEventCode = process.env.META_TEST_EVENT_CODE;
@@ -1322,18 +1355,18 @@ export const processTrackingEvents = inngest.createFunction(
         if (!anonymousId || !userId) continue;
         
         // Update the anonymous user profile with identified user data
-        await db.anonymousUserProfile.update({
-          where: { id: anonymousId },
-          data: {
+        await db
+          .update(anonymousUserProfiles)
+          .set({
             identifiedUserId: userId,
             identifiedAt: new Date(),
             userProperties: traits || {},
             displayName: traits?.name || traits?.email || userId,
-          },
-        }).catch(() => {
+          })
+          .where(eq(anonymousUserProfiles.id, anonymousId))
+          .catch(() => {
           // Profile might not exist yet, create it
-          return db.anonymousUserProfile.create({
-            data: {
+          return db.insert(anonymousUserProfiles).values({
               id: anonymousId,
               displayName: traits?.name || traits?.email || userId,
               identifiedUserId: userId,
@@ -1341,45 +1374,41 @@ export const processTrackingEvents = inngest.createFunction(
               userProperties: traits || {},
               firstSeen: new Date(),
               lastSeen: new Date(),
-            },
           });
         });
         
         // Update all sessions for this anonymous user to link to identified user
-        await db.funnelSession.updateMany({
-          where: { anonymousId },
-          data: { userId },
-        });
+        await db
+          .update(funnelSession)
+          .set({ userId })
+          .where(eq(funnelSession.anonymousId, anonymousId));
       }
     });
 
-    // Step 5: Create or update contacts for conversions
+    // Step 5: Create or update clients for conversions
     const conversions = enrichedEvents.filter((e) => e.isConversion);
 
     for (const conversion of conversions) {
       await step.run(`process-conversion-${conversion.eventId}`, async () => {
-        // Only create contact if we have a userId (email)
+        // Only create client if we have a userId (email)
         if (!conversion.userId) return;
 
         const email = conversion.userId;
 
-        // Check if contact exists
-        const existingContact = await db.contact.findFirst({
-          where: {
-            organizationId,
-            email,
-          },
+        // Check if client exists
+        const existingClient = await db.query.client.findFirst({
+          where: and(eq(client.organizationId, organizationId), eq(client.email, email)),
         });
 
-        if (existingContact) {
-          // Update existing contact
-          await db.contact.update({
-            where: { id: existingContact.id },
-            data: {
+        if (existingClient) {
+          // Update existing client
+          await db
+            .update(client)
+            .set({
               lifecycleStage: "CUSTOMER",
-              score: { increment: 50 },
+              score: (existingClient.score ?? 0) + 50,
               metadata: {
-                ...((existingContact.metadata as any) || {}),
+                ...((existingClient.metadata as any) || {}),
                 funnelConversion: {
                   funnelId,
                   date: new Date().toISOString(),
@@ -1387,15 +1416,15 @@ export const processTrackingEvents = inngest.createFunction(
                   type: conversion.conversionType,
                 },
               },
-            },
-          });
+              updatedAt: new Date(),
+            })
+            .where(eq(client.id, existingClient.id));
         } else {
-          // Create new contact
-          await db.contact.create({
-            data: {
+          // Create new client
+          await db.insert(client).values({
               id: crypto.randomUUID(),
               organizationId,
-              subaccountId,
+              locationId,
               name: email.split('@')[0],
               email,
               source: `funnel:${funnelId}`,
@@ -1410,15 +1439,13 @@ export const processTrackingEvents = inngest.createFunction(
                   type: conversion.conversionType,
                 },
               },
-            },
           });
         }
       });
 
       // Step 6: Trigger workflows for conversion events
       await step.run(`trigger-workflows-${conversion.eventId}`, async () => {
-        // TODO: Find workflows with "Funnel Conversion" trigger
-        // For now, skip workflow triggers until we add the FUNNEL_CONVERSION_TRIGGER node type
+        // Funnel conversion workflow triggers are intentionally disabled until the node type exists.
         const workflows: any[] = [];
 
         // Trigger each workflow

@@ -32,7 +32,7 @@ export default function WorkspaceSettingsPage() {
       if (workspace.type === "organization") {
         setName(workspace.data?.name || "");
         setLogo(workspace.data?.logo || null);
-      } else if (workspace.type === "subaccount") {
+      } else if (workspace.type === "location") {
         setName(workspace.data?.companyName || "");
         setLogo(workspace.data?.logo || null);
       }
@@ -43,8 +43,8 @@ export default function WorkspaceSettingsPage() {
     trpc.organizations.updateOrganization.mutationOptions()
   );
 
-  const updateSubaccount = useMutation(
-    trpc.organizations.updateSubaccount.mutationOptions()
+  const updateLocation = useMutation(
+    trpc.organizations.updateLocation.mutationOptions()
   );
 
   const handleSave = async () => {
@@ -55,9 +55,9 @@ export default function WorkspaceSettingsPage() {
           name,
           logo,
         });
-      } else if (workspace?.type === "subaccount") {
-        await updateSubaccount.mutateAsync({
-          subaccountId: workspace.data?.id || "",
+      } else if (workspace?.type === "location") {
+        await updateLocation.mutateAsync({
+          locationId: workspace.data?.id || "",
           companyName: name,
           logo,
         });
@@ -88,8 +88,8 @@ export default function WorkspaceSettingsPage() {
   }
 
   const isOrganization = workspace.type === "organization";
-  const isSubaccount = workspace.type === "subaccount";
-  const isPending = updateOrganization.isPending || updateSubaccount.isPending;
+  const isLocation = workspace.type === "location";
+  const isPending = updateOrganization.isPending || updateLocation.isPending;
 
   return (
     <div className="">
@@ -99,14 +99,14 @@ export default function WorkspaceSettingsPage() {
             variant={isOrganization ? "gradient" : "secondary"}
             className="w-max rounded-full p-1 px-2.5"
           >
-            {isOrganization ? "Agency" : "Client"}
+            {isOrganization ? "Studio" : "Location"}
           </Badge>
 
           <h1 className="text-lg font-bold">Workspace Settings</h1>
         </div>
 
         <p className="text-muted-foreground text-xs">
-          Manage your {isOrganization ? "agency" : "client"} workspace
+          Manage your {isOrganization ? "studio" : "location"} workspace
           information
         </p>
       </div>
@@ -133,7 +133,7 @@ export default function WorkspaceSettingsPage() {
           {/* Workspace Name */}
           <div className="space-y-2 p-6 max-w-[300px]">
             <Label htmlFor="name" className="text-xs font-medium">
-              {isOrganization ? "Agency Name" : "Company Name"}
+              {isOrganization ? "Studio Name" : "Location Name"}
             </Label>
 
             <Input
@@ -142,7 +142,7 @@ export default function WorkspaceSettingsPage() {
               onChange={(e) => setName(e.target.value)}
               disabled={isPending}
               placeholder={`Enter your ${
-                isOrganization ? "agency" : "company"
+                isOrganization ? "studio" : "company"
               } name`}
               className="w-full"
             />
@@ -150,13 +150,13 @@ export default function WorkspaceSettingsPage() {
 
           <Separator className="bg-black/10 dark:bg-white/5" />
 
-          {/* Members Management Link */}
+          {/* Team Management Link */}
           <div className="space-y-2 p-6">
             <p className="text-xs text-muted-foreground">
               Manage who has access to this workspace
             </p>
             <Button variant="outline" asChild className="w-fit">
-              <Link href="/settings/members">Manage Members</Link>
+              <Link href="/settings/team">Manage Team</Link>
             </Button>
           </div>
 

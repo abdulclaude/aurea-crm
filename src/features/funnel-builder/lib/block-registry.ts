@@ -1,5 +1,5 @@
 import type { BlockDefinition } from "../types";
-import { FunnelBlockType } from "@prisma/client";
+import { FunnelBlockType } from "@/db/enums";
 
 /**
  * Block Registry - Central configuration for all funnel builder blocks
@@ -599,7 +599,7 @@ export const BlockRegistry: Record<FunnelBlockType, BlockDefinition> = {
     category: "Forms",
     label: "Form",
     defaultProps: {
-      name: "contact-form",
+      name: "client-form",
       submitText: "Submit",
     },
     defaultStyles: {
@@ -626,7 +626,7 @@ export const BlockRegistry: Record<FunnelBlockType, BlockDefinition> = {
         key: "name",
         label: "Form Name",
         type: "text",
-        defaultValue: "contact-form",
+        defaultValue: "client-form",
       },
       {
         key: "submitText",

@@ -31,7 +31,7 @@ import { Trash2, BarChart3, X } from "lucide-react";
 import { getBlockDefinition } from "../../../lib/block-registry";
 import { activePageIdAtom } from "../../../lib/editor-store";
 import { STANDARD_EVENTS } from "../../../lib/tracking-scripts";
-import type { FunnelBlock, FunnelBreakpoint } from "@prisma/client";
+import type { FunnelBlock, FunnelBreakpoint } from "@/db/types";
 import type { BlockProps } from "../../../types";
 import { toast } from "sonner";
 

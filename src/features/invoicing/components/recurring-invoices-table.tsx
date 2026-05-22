@@ -35,7 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
-import { RecurringInvoiceStatus, RecurringFrequency } from "@prisma/client";
+import { RecurringInvoiceStatus, RecurringFrequency } from "@/db/enums";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -179,16 +179,16 @@ export function RecurringInvoicesTable({
       ),
     },
     {
-      accessorKey: "contactName",
+      accessorKey: "clientName",
       header: "Client",
       cell: ({ row }) => (
         <div className="flex flex-col">
           <span className="text-sm text-primary dark:text-white">
-            {row.original.contactName}
+            {row.original.clientName}
           </span>
-          {row.original.contactEmail && (
+          {row.original.clientEmail && (
             <span className="text-xs text-muted-foreground">
-              {row.original.contactEmail}
+              {row.original.clientEmail}
             </span>
           )}
         </div>

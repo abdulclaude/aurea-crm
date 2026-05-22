@@ -5,12 +5,21 @@
  */
 
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { createId } from "@paralleldrive/cuid2";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import db from "@/lib/db";
+import { db } from "@/db";
+import { funnelBlock, smartSection, smartSectionInstance } from "@/db/schema";
+import type { JsonValue } from "@/db/json";
+
+const jsonSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonSchema), z.record(z.string(), jsonSchema)])
+);
 
 export const smartSectionsRouter = createTRPCRouter({
   /**
-   * List all smart sections for the current organization/subaccount
+   * List all smart sections for the current organization/location
    */
   list: protectedProcedure
     .input(
@@ -21,19 +30,24 @@ export const smartSectionsRouter = createTRPCRouter({
         .optional()
     )
     .query(async ({ ctx, input }) => {
-      return await db.smartSection.findMany({
-        where: {
-          organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
-          ...(input?.category && { category: input.category }),
-        },
-        include: {
-          _count: {
-            select: { smartSectionInstance: true },
+      const sections = await db.query.smartSection.findMany({
+        where: and(
+          eq(smartSection.organizationId, ctx.orgId!),
+          ctx.locationId ? eq(smartSection.locationId, ctx.locationId) : isNull(smartSection.locationId),
+          input?.category ? eq(smartSection.category, input.category) : undefined
+        ),
+        with: {
+          smartSectionInstances: {
+            columns: { id: true },
           },
         },
-        orderBy: [{ usageCount: "desc" }, { createdAt: "desc" }],
+        orderBy: [desc(smartSection.usageCount), desc(smartSection.createdAt)],
       });
+
+      return sections.map((section) => ({
+        ...section,
+        _count: { smartSectionInstance: section.smartSectionInstances.length },
+      }));
     }),
 
   /**
@@ -42,40 +56,39 @@ export const smartSectionsRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const section = await db.smartSection.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
-        include: {
-          smartSectionInstance: {
-            include: {
+      const section = await db.query.smartSection.findFirst({
+        where: and(eq(smartSection.id, input.id), eq(smartSection.organizationId, ctx.orgId!)),
+        with: {
+          smartSectionInstances: {
+            with: {
               funnelPage: {
-                select: {
+                columns: {
                   id: true,
                   name: true,
-                  funnel: { select: { id: true, name: true } },
+                },
+                with: {
+                  funnel: { columns: { id: true, name: true } },
                 },
               },
               form: {
-                select: {
+                columns: {
                   id: true,
                   name: true,
                 },
               },
             },
           },
-          _count: {
-            select: { smartSectionInstance: true },
-          },
         },
       });
 
       if (!section) {
-        throw new Error("Smart section not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Smart section not found" });
       }
 
-      return section;
+      return {
+        ...section,
+        _count: { smartSectionInstance: section.smartSectionInstances.length },
+      };
     }),
 
   /**
@@ -84,26 +97,20 @@ export const smartSectionsRouter = createTRPCRouter({
   getBlocks: protectedProcedure
     .input(z.object({ sectionId: z.string() }))
     .query(async ({ ctx, input }) => {
-      const section = await db.smartSection.findFirst({
-        where: {
-          id: input.sectionId,
-          organizationId: ctx.orgId!,
-        },
+      const section = await db.query.smartSection.findFirst({
+        where: and(eq(smartSection.id, input.sectionId), eq(smartSection.organizationId, ctx.orgId!)),
       });
 
       if (!section) {
-        throw new Error("Smart section not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Smart section not found" });
       }
 
-      // Get all blocks for this section
-      const blocks = await db.funnelBlock.findMany({
-        where: {
-          smartSectionId: input.sectionId,
+      const blocks = await db.query.funnelBlock.findMany({
+        where: eq(funnelBlock.smartSectionId, input.sectionId),
+        with: {
+          funnelBreakpoints: true,
         },
-        include: {
-          funnelBreakpoint: true,
-        },
-        orderBy: [{ order: "asc" }],
+        orderBy: [asc(funnelBlock.order)],
       });
 
       return blocks;
@@ -119,25 +126,31 @@ export const smartSectionsRouter = createTRPCRouter({
         description: z.string().optional(),
         category: z.string().optional(),
         thumbnail: z.string().optional(),
-        blockStructure: z.array(z.record(z.any(), z.any())), // Array of block objects
+        blockStructure: z.array(z.record(z.string(), jsonSchema)),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return await db.smartSection.create({
-        data: {
-          id: crypto.randomUUID(),
+      const [createdSection] = await db
+        .insert(smartSection)
+        .values({
+          id: createId(),
           name: input.name,
           description: input.description,
           category: input.category,
           thumbnail: input.thumbnail,
           blockStructure: input.blockStructure,
           organizationId: ctx.orgId!,
-          subaccountId: ctx.subaccountId ?? null,
+          locationId: ctx.locationId ?? null,
           usageCount: 0,
-          createdAt: new Date(),
           updatedAt: new Date(),
-        },
-      });
+        })
+        .returning();
+
+      if (!createdSection) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create smart section" });
+      }
+
+      return createdSection;
     }),
 
   /**
@@ -151,28 +164,32 @@ export const smartSectionsRouter = createTRPCRouter({
         description: z.string().optional(),
         category: z.string().optional(),
         thumbnail: z.string().optional(),
-        blockStructure: z.array(z.record(z.any(), z.any())).optional(),
+        blockStructure: z.array(z.record(z.string(), jsonSchema)).optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
       // Verify ownership
-      const section = await db.smartSection.findFirst({
-        where: {
-          id,
-          organizationId: ctx.orgId!,
-        },
+      const section = await db.query.smartSection.findFirst({
+        where: and(eq(smartSection.id, id), eq(smartSection.organizationId, ctx.orgId!)),
       });
 
       if (!section) {
-        throw new Error("Smart section not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Smart section not found" });
       }
 
-      return await db.smartSection.update({
-        where: { id },
-        data,
-      });
+      const [updatedSection] = await db
+        .update(smartSection)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(smartSection.id, id))
+        .returning();
+
+      if (!updatedSection) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update smart section" });
+      }
+
+      return updatedSection;
     }),
 
   /**
@@ -182,21 +199,16 @@ export const smartSectionsRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Verify ownership
-      const section = await db.smartSection.findFirst({
-        where: {
-          id: input.id,
-          organizationId: ctx.orgId!,
-        },
+      const section = await db.query.smartSection.findFirst({
+        where: and(eq(smartSection.id, input.id), eq(smartSection.organizationId, ctx.orgId!)),
       });
 
       if (!section) {
-        throw new Error("Smart section not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Smart section not found" });
       }
 
-      // Delete section - CASCADE will automatically delete all instances and container blocks
-      return await db.smartSection.delete({
-        where: { id: input.id },
-      });
+      const [deletedSection] = await db.delete(smartSection).where(eq(smartSection.id, input.id)).returning();
+      return deletedSection;
     }),
 
   /**
@@ -214,55 +226,51 @@ export const smartSectionsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       // Verify section exists and belongs to org
-      const section = await db.smartSection.findFirst({
-        where: {
-          id: input.sectionId,
-          organizationId: ctx.orgId!,
-        },
+      const section = await db.query.smartSection.findFirst({
+        where: and(eq(smartSection.id, input.sectionId), eq(smartSection.organizationId, ctx.orgId!)),
       });
 
       if (!section) {
-        throw new Error("Smart section not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Smart section not found" });
       }
 
       // Determine order if not provided
       let order = input.order;
       if (order === undefined && input.funnelPageId) {
-        const highestOrder = await db.funnelBlock.findFirst({
-          where: {
-            pageId: input.funnelPageId,
-            parentBlockId: null,
-          },
-          orderBy: { order: "desc" },
-          select: { order: true },
+        const highestOrder = await db.query.funnelBlock.findFirst({
+          where: and(eq(funnelBlock.pageId, input.funnelPageId), isNull(funnelBlock.parentBlockId)),
+          orderBy: [desc(funnelBlock.order)],
+          columns: { order: true },
         });
         order = (highestOrder?.order ?? -1) + 1;
       }
 
-      // Create instance and container block in a transaction
-      const result = await db.$transaction(async (tx) => {
-        // Create the instance
-        const instance = await tx.smartSectionInstance.create({
-          data: {
-            id: crypto.randomUUID(),
+      const result = await db.transaction(async (tx) => {
+        const [instance] = await tx
+          .insert(smartSectionInstance)
+          .values({
+            id: createId(),
             sectionId: input.sectionId,
             funnelPageId: input.funnelPageId,
             formId: input.formId,
             order: order || 0,
-            createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
 
-        // Create a container block that represents this instance
-        const containerBlock = await tx.funnelBlock.create({
-          data: {
-            id: crypto.randomUUID(),
+        if (!instance) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create smart section instance" });
+        }
+
+        const [containerBlock] = await tx
+          .insert(funnelBlock)
+          .values({
+            id: createId(),
             pageId: input.funnelPageId,
             smartSectionInstanceId: instance.id,
-            type: "CONTAINER", // Use CONTAINER as the wrapper type
+            type: "CONTAINER",
             props: {
-              smartSectionRef: true, // Mark as a smart section reference
+              smartSectionRef: true,
               sectionName: section.name,
             },
             styles: {
@@ -271,16 +279,18 @@ export const smartSectionsRouter = createTRPCRouter({
             order: order || 0,
             visible: true,
             locked: false,
-            createdAt: new Date(),
             updatedAt: new Date(),
-          },
-        });
+          })
+          .returning();
 
-        // Increment usage count
-        await tx.smartSection.update({
-          where: { id: input.sectionId },
-          data: { usageCount: { increment: 1 } },
-        });
+        if (!containerBlock) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to create smart section block" });
+        }
+
+        await tx
+          .update(smartSection)
+          .set({ usageCount: sql`${smartSection.usageCount} + 1`, updatedAt: new Date() })
+          .where(eq(smartSection.id, input.sectionId));
 
         return { instance, containerBlock };
       });
@@ -294,45 +304,47 @@ export const smartSectionsRouter = createTRPCRouter({
   removeInstance: protectedProcedure
     .input(z.object({ instanceId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const instance = await db.smartSectionInstance.findUnique({
-        where: { id: input.instanceId },
-        include: {
+      const instance = await db.query.smartSectionInstance.findFirst({
+        where: eq(smartSectionInstance.id, input.instanceId),
+        with: {
           smartSection: true,
         },
       });
 
       if (!instance) {
-        throw new Error("Instance not found");
+        throw new TRPCError({ code: "NOT_FOUND", message: "Instance not found" });
       }
 
       // Verify ownership
       if (instance.smartSection.organizationId !== ctx.orgId) {
-        throw new Error("Unauthorized");
+        throw new TRPCError({ code: "FORBIDDEN", message: "Unauthorized" });
       }
 
-      // Decrement usage count
-      await db.smartSection.update({
-        where: { id: instance.smartSection.id },
-        data: { usageCount: { decrement: 1 } },
-      });
+      await db
+        .update(smartSection)
+        .set({ usageCount: sql`GREATEST(${smartSection.usageCount} - 1, 0)`, updatedAt: new Date() })
+        .where(eq(smartSection.id, instance.smartSection.id));
 
-      return await db.smartSectionInstance.delete({
-        where: { id: input.instanceId },
-      });
+      const [deletedInstance] = await db
+        .delete(smartSectionInstance)
+        .where(eq(smartSectionInstance.id, input.instanceId))
+        .returning();
+      return deletedInstance;
     }),
 
   /**
    * Get all categories
    */
   getCategories: protectedProcedure.query(async ({ ctx }) => {
-    const sections = await db.smartSection.findMany({
-      where: {
-        organizationId: ctx.orgId!,
-        subaccountId: ctx.subaccountId ?? null,
-      },
-      select: { category: true },
-      distinct: ["category"],
-    });
+    const sections = await db
+      .selectDistinct({ category: smartSection.category })
+      .from(smartSection)
+      .where(
+        and(
+          eq(smartSection.organizationId, ctx.orgId!),
+          ctx.locationId ? eq(smartSection.locationId, ctx.locationId) : isNull(smartSection.locationId)
+        )
+      );
 
     return sections
       .map((s) => s.category)

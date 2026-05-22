@@ -29,7 +29,7 @@ import {
 } from "date-fns";
 import { Download, Calendar } from "lucide-react";
 import { toast } from "sonner";
-import { TimeLogStatus } from "@prisma/client";
+import { TimeLogStatus } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 
@@ -52,12 +52,12 @@ type DateRange = "today" | "this_week" | "last_week" | "this_month";
 
 export function TimesheetView() {
   const trpc = useTRPC();
-  const [contactId, setContactId] = useState<string | undefined>();
+  const [clientId, setClientId] = useState<string | undefined>();
   const [dateRange, setDateRange] = useState<DateRange>("this_week");
 
-  // Get contacts (workers)
-  const { data: contactsData } = useSuspenseQuery(
-    trpc.contacts.list.queryOptions({ limit: 100 })
+  // Get clients (instructors)
+  const { data: clientsData } = useSuspenseQuery(
+    trpc.clients.list.queryOptions({ limit: 100 }),
   );
 
   // Calculate date range
@@ -91,10 +91,10 @@ export function TimesheetView() {
   // Get timesheet data
   const { data: timesheetData } = useSuspenseQuery(
     trpc.timeTracking.getTimesheet.queryOptions({
-      contactId,
+      clientId,
       startDate,
       endDate,
-    })
+    }),
   );
 
   const handleExportPDF = async () => {
@@ -107,14 +107,14 @@ export function TimesheetView() {
         return;
       }
 
-      const contact = contactsData?.items.find((c) => c.id === contactId);
-      const contactName = contact?.name || "All Workers";
+      const client = clientsData?.items.find((c) => c.id === clientId);
+      const clientName = client?.name || "All Instructors";
 
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <title>Timesheet Report - ${contactName}</title>
+            <title>Timesheet report - ${clientName}</title>
             <style>
               body {
                 font-family: system-ui, -apple-system, sans-serif;
@@ -198,29 +198,29 @@ export function TimesheetView() {
             </style>
           </head>
           <body>
-            <h1>Timesheet Report</h1>
+            <h1>Timesheet report</h1>
             <p class="subtitle">
-              ${contactName} • ${format(startDate, "MMM d, yyyy")} - ${format(
-        endDate,
-        "MMM d, yyyy"
-      )}
+              ${clientName} • ${format(startDate, "MMM d, yyyy")} - ${format(
+                endDate,
+                "MMM d, yyyy",
+              )}
             </p>
 
             <div class="summary">
               <div class="summary-card">
-                <div class="summary-label">Total Hours</div>
+                <div class="summary-label">Total hours</div>
                 <div class="summary-value">${
                   timesheetData?.totalHours.toFixed(2) || 0
                 }h</div>
               </div>
               <div class="summary-card">
-                <div class="summary-label">Total Amount</div>
+                <div class="summary-label">Total amount</div>
                 <div class="summary-value">${formatCurrency(
-                  timesheetData?.totalAmount || 0
+                  timesheetData?.totalAmount || 0,
                 )}</div>
               </div>
               <div class="summary-card">
-                <div class="summary-label">Time Logs</div>
+                <div class="summary-label">Time logs</div>
                 <div class="summary-value">${
                   timesheetData?.timeLogs.length || 0
                 }</div>
@@ -231,7 +231,7 @@ export function TimesheetView() {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Worker</th>
+                  <th>Instructor</th>
                   <th>Job/Deal</th>
                   <th>Start</th>
                   <th>End</th>
@@ -247,7 +247,7 @@ export function TimesheetView() {
                       (log) => `
                   <tr>
                     <td>${format(new Date(log.startTime), "MMM d, yyyy")}</td>
-                    <td>${log.contact?.name || "—"}</td>
+                    <td>${log.client?.name || "—"}</td>
                     <td>${log.deal?.name || "—"}</td>
                     <td>${format(new Date(log.startTime), "h:mm a")}</td>
                     <td>${
@@ -262,7 +262,7 @@ export function TimesheetView() {
                       log.totalAmount
                         ? formatCurrency(
                             Number(log.totalAmount),
-                            log.currency || undefined
+                            log.currency || undefined,
                           )
                         : "—"
                     }</td>
@@ -272,7 +272,7 @@ export function TimesheetView() {
                       </span>
                     </td>
                   </tr>
-                `
+                `,
                     )
                     .join("") ||
                   '<tr><td colspan="8">No time logs found</td></tr>'
@@ -311,7 +311,7 @@ export function TimesheetView() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Total Hours</CardDescription>
+            <CardDescription>Total hours</CardDescription>
             <CardTitle className="text-3xl">
               {timesheetData?.totalHours.toFixed(2) || 0}h
             </CardTitle>
@@ -320,7 +320,7 @@ export function TimesheetView() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Total Amount</CardDescription>
+            <CardDescription>Total amount</CardDescription>
             <CardTitle className="text-3xl">
               {formatCurrency(timesheetData?.totalAmount || 0)}
             </CardTitle>
@@ -329,7 +329,7 @@ export function TimesheetView() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardDescription>Time Logs</CardDescription>
+            <CardDescription>Time logs</CardDescription>
             <CardTitle className="text-3xl">
               {timesheetData?.timeLogs.length || 0}
             </CardTitle>
@@ -348,7 +348,7 @@ export function TimesheetView() {
       {/* Time Logs Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Time Logs</CardTitle>
+          <CardTitle>Time logs</CardTitle>
           <CardDescription>
             Detailed breakdown of all time logs in this period
           </CardDescription>
@@ -362,7 +362,7 @@ export function TimesheetView() {
                     Date
                   </th>
                   <th className="pb-3 text-xs font-medium text-primary/60">
-                    Worker
+                    Instructor
                   </th>
                   <th className="pb-3 text-xs font-medium text-primary/60">
                     Job/Deal
@@ -390,7 +390,7 @@ export function TimesheetView() {
                     <td className="py-3 text-xs">
                       {format(new Date(log.startTime), "MMM d, yyyy")}
                     </td>
-                    <td className="py-3 text-xs">{log.contact?.name || "—"}</td>
+                    <td className="py-3 text-xs">{log.client?.name || "—"}</td>
                     <td className="py-3 text-xs">{log.deal?.name || "—"}</td>
                     <td className="py-3 text-xs">
                       {format(new Date(log.startTime), "h:mm a")}
@@ -407,7 +407,7 @@ export function TimesheetView() {
                       {log.totalAmount
                         ? formatCurrency(
                             Number(log.totalAmount),
-                            log.currency || undefined
+                            log.currency || undefined,
                           )
                         : "—"}
                     </td>
@@ -421,7 +421,7 @@ export function TimesheetView() {
                           log.status === TimeLogStatus.SUBMITTED &&
                             "bg-blue-500/10 text-blue-500 border-blue-500/20",
                           log.status === TimeLogStatus.DRAFT &&
-                            "bg-gray-500/10 text-gray-500 border-gray-500/20"
+                            "bg-gray-500/10 text-gray-500 border-gray-500/20",
                         )}
                       >
                         {log.status}

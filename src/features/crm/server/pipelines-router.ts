@@ -1,57 +1,94 @@
 import { TRPCError } from "@trpc/server";
 import z from "zod";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  max,
+  min,
+  ne,
+  or,
+  type SQL,
+} from "drizzle-orm";
 
 import { CRM_PAGE_SIZE } from "@/features/crm/constants";
 import { convertCurrency } from "@/features/crm/lib/currency";
-import type { Prisma } from "@prisma/client";
-import { ActivityAction } from "@prisma/client";
-import prisma from "@/lib/db";
+import { db } from "@/db";
+import { deal, dealClient, pipeline, pipelineStage } from "@/db/schema";
+import { ActivityAction } from "@/db/enums";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 
-const pipelineInclude = {
-  pipelineStage: {
-    orderBy: {
-      position: "asc",
-    },
-  },
-} satisfies Prisma.PipelineInclude;
+type PipelineResult = NonNullable<
+  Awaited<ReturnType<typeof getPipelineWithStages>>
+>;
+type PipelineListResult = Awaited<ReturnType<typeof getPipelineListItems>>[number];
 
-const pipelineListInclude = {
-  pipelineStage: {
-    orderBy: {
-      position: "asc",
+const scopedPipelineWhere = (
+  organizationId: string,
+  locationId: string | null | undefined,
+  includeAllClients = false,
+): SQL<unknown> => {
+  const filters = [eq(pipeline.organizationId, organizationId)];
+  if (!includeAllClients && locationId) {
+    filters.push(eq(pipeline.locationId, locationId));
+  }
+  return and(...filters) ?? eq(pipeline.organizationId, organizationId);
+};
+
+async function getPipelineWithStages(
+  id: string,
+  organizationId: string,
+  locationId: string | null | undefined,
+) {
+  return await db.query.pipeline.findFirst({
+    where: and(
+      eq(pipeline.id, id),
+      scopedPipelineWhere(organizationId, locationId),
+    ),
+    with: {
+      pipelineStages: {
+        orderBy: [asc(pipelineStage.position)],
+      },
     },
-  },
-  deal: {
-    select: {
-      id: true,
-      value: true,
-      currency: true, // Need currency for USD conversion
-      pipelineStageId: true,
-      dealContact: {
-        select: {
-          contact: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              logo: true,
+  });
+}
+
+async function getPipelineListItems(
+  where: SQL<unknown>,
+  offset: number,
+  limit: number,
+) {
+  return await db.query.pipeline.findMany({
+    where,
+    with: {
+      pipelineStages: {
+        orderBy: [asc(pipelineStage.position)],
+      },
+      deals: {
+        with: {
+          dealClients: {
+            with: {
+              client: true,
             },
           },
         },
       },
     },
-  },
-} satisfies Prisma.PipelineInclude;
-
-type PipelineResult = Prisma.PipelineGetPayload<{
-  include: typeof pipelineInclude;
-}>;
-type PipelineListResult = Prisma.PipelineGetPayload<{
-  include: typeof pipelineListInclude;
-}>;
+    orderBy: [desc(pipeline.isDefault), desc(pipeline.updatedAt), desc(pipeline.createdAt)],
+    offset,
+    limit,
+  });
+}
 
 const mapPipeline = (pipeline: PipelineResult) => {
   return {
@@ -62,7 +99,7 @@ const mapPipeline = (pipeline: PipelineResult) => {
     isDefault: pipeline.isDefault,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages: pipeline.pipelineStage.map((stage) => ({
+    stages: pipeline.pipelineStages.map((stage) => ({
       id: stage.id,
       name: stage.name,
       position: stage.position,
@@ -79,42 +116,47 @@ const mapPipelineWithStats = (
   pipeline: PipelineListResult,
   targetCurrency?: string
 ) => {
-  // Get unique contacts from all deals
-  const contactsMap = new Map();
+  // Get unique clients from all deals
+  const clientsMap = new Map<string, { id: string; name: string; email: string | null; logo: string | null }>();
   let totalValue = 0;
 
   // Convert all deal values to target currency and sum them
-  for (const deal of pipeline.deal) {
+  for (const dealItem of pipeline.deals) {
     // Convert and add to total value
-    if (deal.value) {
+    if (dealItem.value) {
       const convertedValue = targetCurrency
-        ? convertCurrency(Number(deal.value), deal.currency, targetCurrency)
-        : Number(deal.value);
+        ? convertCurrency(Number(dealItem.value), dealItem.currency ?? "USD", targetCurrency)
+        : Number(dealItem.value);
       totalValue += convertedValue;
     }
 
-    // Collect unique contacts
-    for (const dc of deal.dealContact) {
-      if (!contactsMap.has(dc.contact.id)) {
-        contactsMap.set(dc.contact.id, dc.contact);
+    // Collect unique clients
+    for (const dc of dealItem.dealClients) {
+      if (!clientsMap.has(dc.client.id)) {
+        clientsMap.set(dc.client.id, {
+          id: dc.client.id,
+          name: dc.client.name,
+          email: dc.client.email,
+          logo: dc.client.logo,
+        });
       }
     }
   }
 
-  const uniqueContacts = Array.from(contactsMap.values());
+  const uniqueClients = Array.from(clientsMap.values());
 
   // Calculate win rate - deals in the last stage vs total deals
-  const sortedStages = [...pipeline.pipelineStage].sort(
+  const sortedStages = [...pipeline.pipelineStages].sort(
     (a, b) => a.position - b.position
   );
   const lastStage = sortedStages[sortedStages.length - 1];
   const dealsInLastStage = lastStage
-    ? pipeline.deal.filter((deal) => deal.pipelineStageId === lastStage.id)
+    ? pipeline.deals.filter((dealItem) => dealItem.pipelineStageId === lastStage.id)
         .length
     : 0;
   const winRate =
-    pipeline.deal.length > 0
-      ? (dealsInLastStage / pipeline.deal.length) * 100
+    pipeline.deals.length > 0
+      ? (dealsInLastStage / pipeline.deals.length) * 100
       : 0;
 
   return {
@@ -125,7 +167,7 @@ const mapPipelineWithStats = (
     isDefault: pipeline.isDefault,
     createdAt: pipeline.createdAt,
     updatedAt: pipeline.updatedAt,
-    stages: pipeline.pipelineStage.map((stage) => ({
+    stages: pipeline.pipelineStages.map((stage) => ({
       id: stage.id,
       name: stage.name,
       position: stage.position,
@@ -135,9 +177,9 @@ const mapPipelineWithStats = (
       createdAt: stage.createdAt,
       updatedAt: stage.updatedAt,
     })),
-    dealsCount: pipeline.deal.length,
+    dealsCount: pipeline.deals.length,
     dealsValue: totalValue, // Total value with all deals converted to target currency
-    contacts: uniqueContacts,
+    clients: uniqueClients,
     winRate,
   };
 };
@@ -145,23 +187,22 @@ const mapPipelineWithStats = (
 export const pipelinesRouter = createTRPCRouter({
   count: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return 0;
     }
 
-    return await prisma.pipeline.count({
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-    });
+    const [result] = await db
+      .select({ count: count() })
+      .from(pipeline)
+      .where(scopedPipelineWhere(orgId, locationId));
+    return result?.count ?? 0;
   }),
 
   stats: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return {
@@ -174,35 +215,24 @@ export const pipelinesRouter = createTRPCRouter({
     }
 
     // Fetch all pipelines with their deals
-    const pipelines = await prisma.pipeline.findMany({
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-      include: {
-        _count: {
-          select: { deal: true },
-        },
-        deal: {
-          select: {
-            value: true,
-            currency: true,
-          },
-        },
+    const pipelines = await db.query.pipeline.findMany({
+      where: scopedPipelineWhere(orgId, locationId),
+      with: {
+        deals: true,
       },
     });
 
     // Calculate statistics
-    const dealsCounts = pipelines.map((p) => p._count?.deal || 0);
+    const dealsCounts = pipelines.map((p) => p.deals.length);
 
     // Get unique currencies and calculate max values per currency
     const currencyMaxValues = new Map<string, number>();
 
     for (const pipeline of pipelines) {
-      for (const deal of pipeline.deal) {
-        if (deal.value && deal.currency) {
-          const value = Number(deal.value);
-          const currency = deal.currency;
+      for (const pipelineDeal of pipeline.deals) {
+        if (pipelineDeal.value && pipelineDeal.currency) {
+          const value = Number(pipelineDeal.value);
+          const currency = pipelineDeal.currency;
           const currentMax = currencyMaxValues.get(currency) || 0;
           currencyMaxValues.set(currency, Math.max(currentMax, value));
         }
@@ -223,7 +253,7 @@ export const pipelinesRouter = createTRPCRouter({
 
   dateRange: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
-    const subaccountId = ctx.subaccountId;
+    const locationId = ctx.locationId;
 
     if (!orgId) {
       return {
@@ -232,26 +262,21 @@ export const pipelinesRouter = createTRPCRouter({
       };
     }
 
-    const result = await prisma.pipeline.aggregate({
-      where: {
-        organizationId: orgId,
-        ...(subaccountId && { subaccountId }),
-      },
-      _min: {
-        createdAt: true,
-        updatedAt: true,
-      },
-      _max: {
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const [result] = await db
+      .select({
+        minCreatedAt: min(pipeline.createdAt),
+        minUpdatedAt: min(pipeline.updatedAt),
+        maxCreatedAt: max(pipeline.createdAt),
+        maxUpdatedAt: max(pipeline.updatedAt),
+      })
+      .from(pipeline)
+      .where(scopedPipelineWhere(orgId, locationId));
 
     const allDates = [
-      result._min.createdAt,
-      result._min.updatedAt,
-      result._max.createdAt,
-      result._max.updatedAt,
+      result?.minCreatedAt,
+      result?.minUpdatedAt,
+      result?.maxCreatedAt,
+      result?.maxUpdatedAt,
     ].filter((d): d is Date => d !== null);
 
     if (allDates.length === 0) {
@@ -277,7 +302,7 @@ export const pipelinesRouter = createTRPCRouter({
           cursor: z.number().optional(),
           limit: z.number().optional(),
           stages: z.array(z.string()).optional(),
-          contacts: z.array(z.string()).optional(),
+          clients: z.array(z.string()).optional(),
           dealsCountMin: z.number().optional(),
           dealsCountMax: z.number().optional(),
           dealsValueCurrency: z.string().optional(),
@@ -289,15 +314,15 @@ export const pipelinesRouter = createTRPCRouter({
           createdAtEnd: z.date().optional(),
           updatedAtStart: z.date().optional(),
           updatedAtEnd: z.date().optional(),
-          subaccountId: z.string().optional(), // Override for "all-clients" view
+          locationId: z.string().optional(), // Override for "all-clients" view
           includeAllClients: z.boolean().optional(), // Flag to include all clients
         })
         .optional()
     )
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      // Use input subaccountId if provided, otherwise use context subaccountId
-      const subaccountId = input?.subaccountId ?? ctx.subaccountId;
+      // Use input locationId if provided, otherwise use context locationId
+      const locationId = input?.locationId ?? ctx.locationId;
 
       if (!orgId) {
         return {
@@ -318,93 +343,86 @@ export const pipelinesRouter = createTRPCRouter({
       const take = Math.min(input?.limit ?? CRM_PAGE_SIZE, CRM_PAGE_SIZE);
       const skip = input?.cursor ?? (page - 1) * pageSize;
 
-      const where: Prisma.PipelineWhereInput = {
-        organizationId: orgId,
-        // Only filter by subaccount if not viewing all clients
-        ...(input?.includeAllClients
-          ? {}
-          : subaccountId
-            ? { subaccountId }
-            : {}),
-      };
+      const whereClauses: SQL<unknown>[] = [
+        scopedPipelineWhere(orgId, locationId, input?.includeAllClients),
+      ];
 
       if (input?.isActive !== undefined) {
-        where.isActive = input.isActive;
+        whereClauses.push(eq(pipeline.isActive, input.isActive));
       }
 
       if (input?.search?.trim()) {
         const search = input.search.trim();
-        where.OR = [
-          { name: { contains: search, mode: "insensitive" } },
-          { description: { contains: search, mode: "insensitive" } },
-        ];
+        whereClauses.push(
+          or(ilike(pipeline.name, `%${search}%`), ilike(pipeline.description, `%${search}%`)) ??
+            ilike(pipeline.name, `%${search}%`),
+        );
       }
 
       // Filter by stages
       if (input?.stages && input.stages.length > 0) {
-        where.pipelineStage = {
-          some: {
-            name: { in: input.stages },
-          },
-        };
+        const matchingStages = await db
+          .select({ pipelineId: pipelineStage.pipelineId })
+          .from(pipelineStage)
+          .where(inArray(pipelineStage.name, input.stages));
+        const pipelineIds = matchingStages.map((stage) => stage.pipelineId);
+        whereClauses.push(pipelineIds.length > 0 ? inArray(pipeline.id, pipelineIds) : eq(pipeline.id, "__none__"));
       }
 
-      // Filter by contacts
-      if (input?.contacts && input.contacts.length > 0) {
-        where.deal = {
-          some: {
-            dealContact: {
-              some: {
-                contactId: { in: input.contacts },
-              },
-            },
-          },
-        };
+      // Filter by clients
+      if (input?.clients && input.clients.length > 0) {
+        const matchingDealClients = await db
+          .select({ dealId: dealClient.dealId })
+          .from(dealClient)
+          .where(inArray(dealClient.clientId, input.clients));
+        const dealIds = matchingDealClients.map((item) => item.dealId);
+        if (dealIds.length === 0) {
+          whereClauses.push(eq(pipeline.id, "__none__"));
+        } else {
+          const matchingDeals = await db
+            .select({ pipelineId: deal.pipelineId })
+            .from(deal)
+            .where(inArray(deal.id, dealIds));
+          const pipelineIds = matchingDeals
+            .map((item) => item.pipelineId)
+            .filter((id): id is string => id !== null);
+          whereClauses.push(pipelineIds.length > 0 ? inArray(pipeline.id, pipelineIds) : eq(pipeline.id, "__none__"));
+        }
       }
 
       // Filter by created date
       if (input?.createdAtStart || input?.createdAtEnd) {
-        where.createdAt = {};
         if (input.createdAtStart) {
-          where.createdAt.gte = input.createdAtStart;
+          whereClauses.push(gte(pipeline.createdAt, input.createdAtStart));
         }
         if (input.createdAtEnd) {
           const endOfDay = new Date(input.createdAtEnd);
           endOfDay.setHours(23, 59, 59, 999);
-          where.createdAt.lte = endOfDay;
+          whereClauses.push(lte(pipeline.createdAt, endOfDay));
         }
       }
 
       // Filter by updated date
       if (input?.updatedAtStart || input?.updatedAtEnd) {
-        where.updatedAt = {};
         if (input.updatedAtStart) {
-          where.updatedAt.gte = input.updatedAtStart;
+          whereClauses.push(gte(pipeline.updatedAt, input.updatedAtStart));
         }
         if (input.updatedAtEnd) {
           const endOfDay = new Date(input.updatedAtEnd);
           endOfDay.setHours(23, 59, 59, 999);
-          where.updatedAt.lte = endOfDay;
+          whereClauses.push(lte(pipeline.updatedAt, endOfDay));
         }
       }
 
+      const where = and(...whereClauses) ?? scopedPipelineWhere(orgId, locationId);
       const [items, totalItems] = await Promise.all([
-        prisma.pipeline.findMany({
-          where,
-          include: pipelineListInclude,
-          orderBy: [
-            { isDefault: "desc" },
-            { updatedAt: "desc" },
-            { createdAt: "desc" },
-          ],
-          skip,
-          take: pageSize,
-        }),
-        prisma.pipeline.count({ where }),
+        getPipelineListItems(where, skip, pageSize),
+        db.select({ count: count() }).from(pipeline).where(where),
       ]);
 
-      const nextCursor = skip + items.length < totalItems ? skip + take : null;
-      const totalPages = Math.ceil(totalItems / pageSize);
+      const totalCount = totalItems[0]?.count ?? 0;
+      const nextCursor = skip + items.length < totalCount ? skip + take : null;
+      const totalPages = Math.ceil(totalCount / pageSize);
 
       // Map pipelines with stats and then filter by numeric criteria
       // Pass target currency to mapPipelineWithStats to convert all deal values
@@ -480,7 +498,7 @@ export const pipelinesRouter = createTRPCRouter({
           currentPage: page,
           totalPages,
           pageSize,
-          totalItems,
+          totalItems: totalCount,
         },
       };
     }),
@@ -489,7 +507,7 @@ export const pipelinesRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -498,23 +516,16 @@ export const pipelinesRouter = createTRPCRouter({
         });
       }
 
-      const pipeline = await prisma.pipeline.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-        include: pipelineInclude,
-      });
+      const foundPipeline = await getPipelineWithStages(input.id, orgId, locationId);
 
-      if (!pipeline) {
+      if (!foundPipeline) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: "Pipeline not found",
         });
       }
 
-      return mapPipeline(pipeline);
+      return mapPipeline(foundPipeline);
     }),
 
   create: protectedProcedure
@@ -537,7 +548,7 @@ export const pipelinesRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -546,77 +557,88 @@ export const pipelinesRouter = createTRPCRouter({
         });
       }
 
-      // If this is set as default, unset other defaults
-      if (input.isDefault) {
-        await prisma.pipeline.updateMany({
-          where: {
+      const newPipeline = await db.transaction(async (tx) => {
+        if (input.isDefault) {
+          await tx
+            .update(pipeline)
+            .set({ isDefault: false })
+            .where(and(scopedPipelineWhere(orgId, locationId), eq(pipeline.isDefault, true)));
+        }
+
+        const pipelineId = crypto.randomUUID();
+        const now = new Date();
+        const [createdPipeline] = await tx
+          .insert(pipeline)
+          .values({
+            id: pipelineId,
             organizationId: orgId,
-            ...(subaccountId && { subaccountId }),
-            isDefault: true,
-          },
-          data: { isDefault: false },
+            locationId: locationId ?? null,
+            name: input.name,
+            description: input.description,
+            isDefault: input.isDefault ?? false,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
+
+        await tx.insert(pipelineStage).values(
+          input.stages.map((stage, index) => ({
+            id: crypto.randomUUID(),
+            pipelineId,
+            name: stage.name,
+            position: index,
+            probability: stage.probability ?? 0,
+            rottingDays: stage.rottingDays ?? null,
+            color: stage.color,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        );
+
+        return createdPipeline;
+      });
+
+      const createdPipeline = await getPipelineWithStages(newPipeline.id, orgId, locationId);
+      if (!createdPipeline) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to load created pipeline",
         });
       }
-
-      const pipeline = await prisma.pipeline.create({
-        data: {
-          id: crypto.randomUUID(),
-          organizationId: orgId,
-          subaccountId: subaccountId ?? null,
-          name: input.name,
-          description: input.description,
-          isDefault: input.isDefault ?? false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          pipelineStage: {
-            create: input.stages.map((stage, index) => ({
-              id: crypto.randomUUID(),
-              name: stage.name,
-              position: index,
-              probability: Number(stage.probability) ?? 0,
-              rottingDays: Number(stage.rottingDays) ?? 0,
-              color: stage.color,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            })),
-          },
-        },
-        include: pipelineInclude,
-      });
 
       // Send notification
       await createNotification({
         type: "PIPELINE_CREATED",
         title: "Pipeline created",
-        message: `${ctx.auth.user.name} created a new pipeline: ${pipeline.name}`,
+        message: `${ctx.auth.user.name} created a new pipeline: ${createdPipeline.name}`,
         actorId: ctx.auth.user.id,
         entityType: "pipeline",
-        entityId: pipeline.id,
+        entityId: createdPipeline.id,
         organizationId: orgId,
-        subaccountId: subaccountId ?? undefined,
+        locationId: locationId ?? undefined,
       });
 
       // Log analytics
       await logAnalytics({
         organizationId: orgId,
-        subaccountId: subaccountId ?? null,
+        locationId: locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.CREATED,
         entityType: "pipeline",
-        entityId: pipeline.id,
-        entityName: pipeline.name,
+        entityId: createdPipeline.id,
+        entityName: createdPipeline.name,
         metadata: {
-          isDefault: pipeline.isDefault,
+          isDefault: createdPipeline.isDefault,
           stagesCount: input.stages.length,
         },
         posthogProperties: {
-          is_default: pipeline.isDefault,
+          is_default: createdPipeline.isDefault,
           stages_count: input.stages.length,
-          has_description: !!pipeline.description,
+          has_description: !!createdPipeline.description,
         },
       });
 
-      return mapPipeline(pipeline as PipelineResult);
+      return mapPipeline(createdPipeline);
     }),
 
   update: protectedProcedure
@@ -642,7 +664,7 @@ export const pipelinesRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -654,13 +676,7 @@ export const pipelinesRouter = createTRPCRouter({
       const { id, stages, ...data } = input;
 
       // First verify the pipeline exists and belongs to the org
-      const existing = await prisma.pipeline.findFirst({
-        where: {
-          id,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
-      });
+      const existing = await getPipelineWithStages(id, orgId, locationId);
 
       if (!existing) {
         throw new TRPCError({
@@ -669,54 +685,84 @@ export const pipelinesRouter = createTRPCRouter({
         });
       }
 
-      // If this is set as default, unset other defaults
-      if (input.isDefault) {
-        await prisma.pipeline.updateMany({
-          where: {
-            organizationId: orgId,
-            ...(subaccountId && { subaccountId }),
-            isDefault: true,
-            id: { not: id },
-          },
-          data: { isDefault: false },
+      await db.transaction(async (tx) => {
+        if (input.isDefault) {
+          await tx
+            .update(pipeline)
+            .set({ isDefault: false })
+            .where(
+              and(
+                scopedPipelineWhere(orgId, locationId),
+                eq(pipeline.isDefault, true),
+                ne(pipeline.id, id),
+              ),
+            );
+        }
+
+        await tx
+          .update(pipeline)
+          .set({
+            name: data.name,
+            description: data.description,
+            isActive: data.isActive,
+            isDefault: data.isDefault,
+            updatedAt: new Date(),
+          })
+          .where(eq(pipeline.id, id));
+
+        if (stages) {
+          await tx.delete(pipelineStage).where(eq(pipelineStage.pipelineId, id));
+          await tx.insert(pipelineStage).values(
+            stages.map((stage, index) => ({
+              id: crypto.randomUUID(),
+              pipelineId: id,
+              name: stage.name,
+              position: index,
+              probability: stage.probability ?? 0,
+              rottingDays: stage.rottingDays ?? null,
+              color: stage.color,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })),
+          );
+        }
+      });
+
+      const updatedPipeline = await getPipelineWithStages(id, orgId, locationId);
+      if (!updatedPipeline) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to load updated pipeline",
         });
       }
 
-      // Handle stages update if provided
-      const stagesUpdate = stages
-        ? {
-            stages: {
-              deleteMany: {},
-              create: stages.map((stage, index) => ({
-                name: stage.name,
-                position: index,
-                probability: stage.probability ?? 0,
-                rottingDays: stage.rottingDays,
-                color: stage.color,
-              })),
-            },
-          }
-        : {};
-
-      const pipeline = await prisma.pipeline.update({
-        where: { id },
-        data: {
-          ...data,
-          ...stagesUpdate,
-        },
-        include: pipelineInclude,
-      });
-
       // Log analytics
       const changes = getChangedFields(existing, data);
+      const hasStageUpdates = !!stages;
+      if (changes || hasStageUpdates) {
+        await createNotification({
+          type: "PIPELINE_UPDATED",
+          title: "Pipeline updated",
+          message: `${ctx.auth.user.name} updated pipeline ${updatedPipeline.name}`,
+          actorId: ctx.auth.user.id,
+          entityType: "pipeline",
+          entityId: updatedPipeline.id,
+          organizationId: orgId,
+          locationId: locationId ?? undefined,
+          data: {
+            fieldsChanged: changes ? Object.keys(changes) : [],
+            stagesUpdated: hasStageUpdates,
+          },
+        });
+      }
       await logAnalytics({
         organizationId: orgId,
-        subaccountId: subaccountId ?? null,
+        locationId: locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.UPDATED,
         entityType: "pipeline",
-        entityId: pipeline.id,
-        entityName: pipeline.name,
+        entityId: updatedPipeline.id,
+        entityName: updatedPipeline.name,
         changes,
         metadata: {
           fieldsChanged: changes ? Object.keys(changes) : [],
@@ -725,18 +771,18 @@ export const pipelinesRouter = createTRPCRouter({
         posthogProperties: {
           fields_changed: changes ? Object.keys(changes) : [],
           stages_updated: !!stages,
-          is_default: pipeline.isDefault,
+          is_default: updatedPipeline.isDefault,
         },
       });
 
-      return mapPipeline(pipeline);
+      return mapPipeline(updatedPipeline);
     }),
 
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.orgId;
-      const subaccountId = ctx.subaccountId;
+      const locationId = ctx.locationId;
 
       if (!orgId) {
         throw new TRPCError({
@@ -746,12 +792,11 @@ export const pipelinesRouter = createTRPCRouter({
       }
 
       // First verify the pipeline exists and belongs to the org
-      const existing = await prisma.pipeline.findFirst({
-        where: {
-          id: input.id,
-          organizationId: orgId,
-          ...(subaccountId && { subaccountId }),
-        },
+      const existing = await db.query.pipeline.findFirst({
+        where: and(
+          eq(pipeline.id, input.id),
+          scopedPipelineWhere(orgId, locationId),
+        ),
       });
 
       if (!existing) {
@@ -761,14 +806,23 @@ export const pipelinesRouter = createTRPCRouter({
         });
       }
 
-      await prisma.pipeline.delete({
-        where: { id: input.id },
+      await db.delete(pipeline).where(eq(pipeline.id, input.id));
+
+      await createNotification({
+        type: "PIPELINE_DELETED",
+        title: "Pipeline deleted",
+        message: `${ctx.auth.user.name} deleted pipeline ${existing.name}`,
+        actorId: ctx.auth.user.id,
+        entityType: "pipeline",
+        entityId: existing.id,
+        organizationId: orgId,
+        locationId: locationId ?? undefined,
       });
 
       // Log analytics
       await logAnalytics({
         organizationId: orgId,
-        subaccountId: subaccountId ?? null,
+        locationId: locationId ?? null,
         userId: ctx.auth.user.id,
         action: ActivityAction.DELETED,
         entityType: "pipeline",

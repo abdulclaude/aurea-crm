@@ -160,7 +160,7 @@ export default function MindbodyConnectionPage() {
               <div>
                 <p className="text-muted-foreground">Connection Level</p>
                 <p className="font-medium">
-                  {connection.subaccountId ? "Subaccount" : "Organization"}
+                  {connection.locationId ? "Location" : "Organization"}
                 </p>
               </div>
               <div>

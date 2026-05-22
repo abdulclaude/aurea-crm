@@ -53,7 +53,7 @@ import DateRangeFilter from "@/components/ui/date-range-filter";
 
 import { IconLiveFull as StatusIcon } from "central-icons/IconLiveFull";
 import { IconStage as StageIcon } from "central-icons/IconStage";
-import { IconContacts as ContactIcon } from "central-icons/IconContacts";
+import { IconContacts as ClientIcon } from "central-icons/IconContacts";
 import { IconPound as ValueIcon } from "central-icons/IconPound";
 import { IconPercent as WinPercentIcon } from "central-icons/IconPercent";
 import { IconHashtag as DealsIcon } from "central-icons/IconHashtag";
@@ -75,8 +75,8 @@ export interface PipelinesToolbarProps {
   // Filter options and selections
   stages?: string[];
   selectedStages?: string[];
-  contacts?: Array<{ id: string; name: string }>;
-  selectedContacts?: string[];
+  clients?: Array<{ id: string; name: string }>;
+  selectedClients?: string[];
   // Range filter props (overall min/max from all data)
   dealsCountMin?: number;
   dealsCountMax?: number;
@@ -103,11 +103,11 @@ export interface PipelinesToolbarProps {
   updatedAtEnd?: Date;
   onUpdatedAtChange?: (start?: Date, end?: Date) => void;
   scope?: "agency" | "all-clients";
-  selectedSubaccountId?: string;
-  onSubaccountChange?: (subaccountId: string) => void;
+  selectedLocationId?: string;
+  onLocationChange?: (locationId: string) => void;
   onApplyAllFilters?: (filters: {
     stages: string[];
-    contacts: string[];
+    clients: string[];
     dealsCountMin?: number;
     dealsCountMax?: number;
     dealsValueMin?: number;
@@ -142,8 +142,8 @@ export function PipelinesToolbar({
   initialColumnOrder,
   stages = [],
   selectedStages = [],
-  contacts = [],
-  selectedContacts = [],
+  clients = [],
+  selectedClients = [],
   dealsCountMin,
   dealsCountMax,
   dealsValueMin,
@@ -166,37 +166,37 @@ export function PipelinesToolbar({
   updatedAtEnd,
   onUpdatedAtChange,
   scope = "agency",
-  selectedSubaccountId = "",
-  onSubaccountChange,
+  selectedLocationId = "",
+  onLocationChange,
   onApplyAllFilters,
 }: PipelinesToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 500);
   const [stagedStages, setStagedStages] =
     React.useState<string[]>(selectedStages);
-  const [stagedContacts, setStagedContacts] =
-    React.useState<string[]>(selectedContacts);
+  const [stagedClients, setStagedClients] =
+    React.useState<string[]>(selectedClients);
 
   const trpc = useTRPC();
 
-  // Fetch available clients/subaccounts for "all-clients" scope
-  const { data: clients = [] } = useSuspenseQuery(
-    trpc.organizations.getClients.queryOptions()
+  // Fetch available clients/locations for "all-clients" scope
+  const { data: orgClients = [] } = useSuspenseQuery(
+    trpc.organizations.getClients.queryOptions(),
   );
 
   // Fetch date range for filters
   const { data: dateRange } = useSuspenseQuery(
-    trpc.pipelines.dateRange.queryOptions()
+    trpc.pipelines.dateRange.queryOptions(),
   );
 
   // Fetch ALL pipelines (unfiltered) for preview calculation
   const { data: allPipelinesData } = useSuspenseQuery(
-    trpc.pipelines.list.queryOptions({})
+    trpc.pipelines.list.queryOptions({}),
   );
 
   const allPipelinesUnfiltered = React.useMemo(
     () => allPipelinesData?.items || [],
-    [allPipelinesData]
+    [allPipelinesData],
   );
   const [stagedDealsCountMin, setStagedDealsCountMin] = React.useState<
     number | undefined
@@ -227,8 +227,8 @@ export function PipelinesToolbar({
   }, [selectedStages]);
 
   React.useEffect(() => {
-    setStagedContacts(selectedContacts);
-  }, [selectedContacts]);
+    setStagedClients(selectedClients);
+  }, [selectedClients]);
 
   React.useEffect(() => {
     setStagedDealsCountMin(selectedDealsCountMin);
@@ -254,21 +254,21 @@ export function PipelinesToolbar({
     setStagedStages((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
-  const handleToggleContact = (value: string) => {
-    setStagedContacts((prev) =>
+  const handleToggleClient = (value: string) => {
+    setStagedClients((prev) =>
       prev.includes(value)
         ? prev.filter((item) => item !== value)
-        : [...prev, value]
+        : [...prev, value],
     );
   };
 
   const uniqueStages = React.useMemo(
     () => [...new Set(stages.filter(Boolean))],
-    [stages]
+    [stages],
   );
 
   // Use min/max values passed from props (calculated server-side with USD conversion)
@@ -284,20 +284,20 @@ export function PipelinesToolbar({
       if (stagedStages.length > 0) {
         const pipelineStages = pipeline.stages?.map((s: any) => s.name) || [];
         const hasMatchingStage = stagedStages.some((stage: string) =>
-          pipelineStages.includes(stage)
+          pipelineStages.includes(stage),
         );
         if (!hasMatchingStage) return false;
       }
 
-      // Check contacts filter
-      if (stagedContacts.length > 0) {
-        const pipelineContactIds = (pipeline.contacts || []).map(
-          (c: any) => c.id
+      // Check clients filter
+      if (stagedClients.length > 0) {
+        const pipelineClientIds = (pipeline.clients || []).map(
+          (c: any) => c.id,
         );
-        const hasMatchingContact = stagedContacts.some((contactId: string) =>
-          pipelineContactIds.includes(contactId)
+        const hasMatchingClient = stagedClients.some((clientId: string) =>
+          pipelineClientIds.includes(clientId),
         );
-        if (!hasMatchingContact) return false;
+        if (!hasMatchingClient) return false;
       }
 
       // Check deals count filter
@@ -355,7 +355,7 @@ export function PipelinesToolbar({
   }, [
     allPipelinesUnfiltered,
     stagedStages,
-    stagedContacts,
+    stagedClients,
     stagedDealsCountMin,
     stagedDealsCountMax,
     stagedDealsValueMin,
@@ -367,7 +367,7 @@ export function PipelinesToolbar({
   const hasFiltersApplied =
     isActive !== null ||
     selectedStages.length > 0 ||
-    selectedContacts.length > 0 ||
+    selectedClients.length > 0 ||
     typeof selectedDealsCountMin === "number" ||
     typeof selectedDealsCountMax === "number" ||
     typeof selectedDealsValueMin === "number" ||
@@ -394,7 +394,7 @@ export function PipelinesToolbar({
               <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
-                  <span className="absolute -top-1.5 -right-1.5 size-3 rounded-full bg-blue-500 border-2 border-white" />
+                  <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
                 )}
               </Button>
             </DropdownMenuTrigger>
@@ -425,7 +425,7 @@ export function PipelinesToolbar({
                     >
                       <Checkbox
                         checked={isActive === null}
-                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:brightness-120 data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
+                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:bg-accent data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
                       />
                       <span className="select-none">All pipelines</span>
                     </div>
@@ -436,7 +436,7 @@ export function PipelinesToolbar({
                     >
                       <Checkbox
                         checked={isActive === true}
-                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:brightness-120 data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
+                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:bg-accent data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
                       />
                       <span className="select-none">Active only</span>
                     </div>
@@ -446,7 +446,7 @@ export function PipelinesToolbar({
                     >
                       <Checkbox
                         checked={isActive === false}
-                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:brightness-120 data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
+                        className="rounded-sm border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 data-[state=checked]:bg-primary-foreground/50 hover:text-black data-[state=checked]:bg-accent data-[state=checked]:border-black/10 dark:data-[state=checked]:border-white/5"
                       />
                       <span className="select-none">Inactive only</span>
                     </div>
@@ -486,7 +486,7 @@ export function PipelinesToolbar({
                           <Checkbox
                             checked={stagedStages.includes(stage)}
                             onCheckedChange={() => handleToggleStage(stage)}
-                            className="rounded-sm border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                            className="rounded-sm border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
                           <span className="select-none">{stage}</span>
                         </div>
@@ -507,29 +507,29 @@ export function PipelinesToolbar({
                 </DropdownMenuSub>
               )}
 
-              {/* Contacts Filter */}
-              {contacts.length > 0 && (
+              {/* Clients Filter */}
+              {clients.length > 0 && (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    <ContactIcon className="size-4" />
-                    Contacts
+                    <ClientIcon className="size-4" />
+                    Clients
                   </DropdownMenuSubTrigger>
 
                   <DropdownMenuSubContent alignOffset={-5}>
                     <div className="max-h-64 overflow-auto pr-1">
-                      {contacts.map((contact) => (
+                      {clients.map((client) => (
                         <div
-                          key={contact.id}
+                          key={client.id}
                           className="flex items-center gap-2 py-2 text-xs cursor-pointer rounded-sm group"
                         >
                           <Checkbox
-                            checked={stagedContacts.includes(contact.id)}
+                            checked={stagedClients.includes(client.id)}
                             onCheckedChange={() =>
-                              handleToggleContact(contact.id)
+                              handleToggleClient(client.id)
                             }
-                            className="rounded-sm border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:brightness-120 data-[state=checked]:brightness-120 data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
+                            className="rounded-sm border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
                           />
-                          <span className="select-none">{contact.name}</span>
+                          <span className="select-none">{client.name}</span>
                         </div>
                       ))}
                     </div>
@@ -539,7 +539,7 @@ export function PipelinesToolbar({
                         className="flex-1 border border-black/10 dark:border-white/5 bg-background hover:bg-primary-foreground/50 hover:text-black text-xs text-black dark:text-white py-3 rounded-sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setStagedContacts([]);
+                          setStagedClients([]);
                         }}
                       >
                         Clear
@@ -559,7 +559,7 @@ export function PipelinesToolbar({
                   {(() => {
                     const spikes = Array.from(
                       { length: 24 },
-                      (_, i) => (i + 1) / 25
+                      (_, i) => (i + 1) / 25,
                     );
                     return (
                       <>
@@ -575,10 +575,10 @@ export function PipelinesToolbar({
                           onChange={([min, max]) => {
                             // Only set values if they differ from defaults
                             setStagedDealsCountMin(
-                              min === minDealsCount ? undefined : min
+                              min === minDealsCount ? undefined : min,
                             );
                             setStagedDealsCountMax(
-                              max === maxDealsCount ? undefined : max
+                              max === maxDealsCount ? undefined : max,
                             );
                           }}
                           bins={180}
@@ -617,7 +617,7 @@ export function PipelinesToolbar({
                   {(() => {
                     const spikes = Array.from(
                       { length: 24 },
-                      (_, i) => (i + 1) / 25
+                      (_, i) => (i + 1) / 25,
                     );
                     return (
                       <>
@@ -634,10 +634,10 @@ export function PipelinesToolbar({
                           onChange={([min, max]) => {
                             // Only set values if they differ from defaults
                             setStagedDealsValueMin(
-                              min === minDealsValue ? undefined : min
+                              min === minDealsValue ? undefined : min,
                             );
                             setStagedDealsValueMax(
-                              max === maxDealsValue ? undefined : max
+                              max === maxDealsValue ? undefined : max,
                             );
                           }}
                           bins={180}
@@ -676,7 +676,7 @@ export function PipelinesToolbar({
                   {(() => {
                     const spikes = Array.from(
                       { length: 24 },
-                      (_, i) => (i + 1) / 25
+                      (_, i) => (i + 1) / 25,
                     );
                     return (
                       <>
@@ -762,7 +762,7 @@ export function PipelinesToolbar({
                     e.stopPropagation();
                     onApplyAllFilters?.({
                       stages: stagedStages,
-                      contacts: stagedContacts,
+                      clients: stagedClients,
                       dealsCountMin: stagedDealsCountMin,
                       dealsCountMax: stagedDealsCountMax,
                       dealsValueMin: stagedDealsValueMin,
@@ -839,13 +839,14 @@ export function PipelinesToolbar({
         )}
 
         {/* Client Filter - Only show for "all-clients" scope */}
-        {scope === "all-clients" && onSubaccountChange && (
+        {scope === "all-clients" && onLocationChange && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="h-8.5! min-w-32">
-                {selectedSubaccountId
-                  ? clients.find((c: any) => c.subaccountId === selectedSubaccountId)
-                      ?.name || "Select client"
+                {selectedLocationId
+                  ? orgClients.find(
+                      (client) => client.locationId === selectedLocationId,
+                    )?.name || "Select client"
                   : "All clients"}
                 <ChevronDown className="size-3 text-primary/60 dark:text-white/60 mt-0.5" />
               </Button>
@@ -856,8 +857,8 @@ export function PipelinesToolbar({
               className="rounded-lg bg-background border border-black/10 dark:border-white/5 w-[220px] p-1"
             >
               <DropdownMenuCheckboxItem
-                checked={selectedSubaccountId === ""}
-                onSelect={() => onSubaccountChange("")}
+                checked={selectedLocationId === ""}
+                onSelect={() => onLocationChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
               >
                 All clients
@@ -865,11 +866,11 @@ export function PipelinesToolbar({
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
 
-              {clients.map((client: any) => (
+              {orgClients.map((client) => (
                 <DropdownMenuCheckboxItem
-                  key={client.subaccountId}
-                  checked={selectedSubaccountId === client.subaccountId}
-                  onSelect={() => onSubaccountChange(client.subaccountId)}
+                  key={client.locationId}
+                  checked={selectedLocationId === client.locationId}
+                  onSelect={() => onLocationChange(client.locationId)}
                   className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
                 >
                   {client.name}
@@ -913,7 +914,7 @@ function ColumnControls({
 
   const columns = React.useMemo(
     () => table.getAllLeafColumns().filter((column) => column.getCanHide()),
-    [table]
+    [table],
   );
 
   const orderedColumns = React.useMemo(() => {
@@ -923,22 +924,22 @@ function ColumnControls({
       .filter((column): column is (typeof columns)[number] => Boolean(column));
     if (ordered.length === columns.length) return ordered;
     const missing = columns.filter(
-      (column) => !columnOrder.includes(column.id as string)
+      (column) => !columnOrder.includes(column.id as string),
     );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
 
   const fixedColumn = orderedColumns.find(
-    (column) => column.id === PRIMARY_COLUMN_ID
+    (column) => column.id === PRIMARY_COLUMN_ID,
   );
   const draggableColumns = orderedColumns.filter(
-    (column) => column.id !== PRIMARY_COLUMN_ID
+    (column) => column.id !== PRIMARY_COLUMN_ID,
   );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
-    })
+    }),
   );
 
   const handleDragEnd = React.useCallback(
@@ -946,7 +947,7 @@ function ColumnControls({
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const reorderableIds = draggableColumns.map(
-        (column) => column.id as string
+        (column) => column.id as string,
       );
       const oldIndex = reorderableIds.indexOf(active.id as string);
       const newIndex = reorderableIds.indexOf(over.id as string);
@@ -957,7 +958,7 @@ function ColumnControls({
       ];
       onColumnOrderChange(nextOrder);
     },
-    [draggableColumns, onColumnOrderChange]
+    [draggableColumns, onColumnOrderChange],
   );
 
   return (
@@ -1067,7 +1068,7 @@ function SortableColumnRow({
         type="button"
         className={cn(
           "flex flex-1 items-center gap-2 rounded-sm px-2 py-2 text-left text-xs transition hover:bg-primary/5 hover:text-black dark:hover:text-white group",
-          !checked && "text-primary/80 dark:text-white/30"
+          !checked && "text-primary/80 dark:text-white/30",
         )}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
@@ -1078,7 +1079,7 @@ function SortableColumnRow({
         <CheckIcon
           className={cn(
             "size-3.5 shrink-0 text-primary/80 dark:text-white transition group-hover:text-black dark:group-hover:text-white",
-            checked ? "opacity-100" : "opacity-0"
+            checked ? "opacity-100" : "opacity-0",
           )}
         />
         <span className="flex-1 truncate text-primary/80 group-hover:text-black dark:text-white group-hover:dark:text-white">

@@ -301,13 +301,13 @@ export function PayrollRunsTable() {
       enableSorting: true,
     },
     {
-      id: "workers",
-      header: "Workers",
-      meta: { label: "Workers" },
+      id: "instructors",
+      header: "Instructors",
+      meta: { label: "Instructors" },
       cell: ({ row }) => (
         <div className="text-xs">
-          <p className="font-medium">{row.original._count.payrollRunWorkers} workers</p>
-          <p className="text-primary/60">{row.original._count.workerPayments} payments</p>
+          <p className="font-medium">{row.original._count.payrollRunInstructors} instructors</p>
+          <p className="text-primary/60">{row.original._count.instructorPayments} payments</p>
         </div>
       ),
       enableSorting: false,
@@ -420,7 +420,7 @@ export function PayrollRunsTable() {
             </div>
             <h3 className="text-sm font-medium text-primary mb-1">No payroll runs</h3>
             <p className="text-xs text-primary/60">
-              Create your first payroll run to track worker payments
+              Create your first payroll run to track instructor payments
             </p>
           </div>
         }

@@ -9,6 +9,12 @@ export function makeQueryClient() {
     defaultOptions: {
       queries: {
         staleTime: 30 * 1000,
+        // Disable auto-fetching during SSR. Client components that use
+        // useSuspenseQuery without server-side prefetching would otherwise
+        // make server-to-server HTTP requests without session cookies,
+        // producing 401 errors. Prefetched queries (via HydrateClient) are
+        // already in cache and resolve immediately regardless of this flag.
+        enabled: typeof window !== "undefined",
       },
       dehydrate: {
         serializeData: superjson.serialize,

@@ -28,11 +28,11 @@ export default function PipelineDetailPage() {
   const [viewMode, setViewMode] = React.useState<ViewMode>("kanban");
 
   const { data: pipeline } = useSuspenseQuery(
-    trpc.pipelines.getById.queryOptions({ id: params.pipelineId })
+    trpc.pipelines.getById.queryOptions({ id: params.pipelineId }),
   );
 
   const { data: pipelines } = useSuspenseQuery(
-    trpc.pipelines.list.queryOptions()
+    trpc.pipelines.list.queryOptions(),
   );
 
   const handlePipelineChange = (pipelineId: string) => {
@@ -89,7 +89,7 @@ export default function PipelineDetailPage() {
           <Button
             variant={viewMode === "kanban" ? "secondary" : "ghost"}
             size="sm"
-            className="h-7 px-3 text-xs rounded-md! hover:bg-[#202e32] hover:brightness-130 hover:text-white"
+            className="h-7 px-3 text-xs rounded-md! hover:bg-accent hover:text-black"
             onClick={() => setViewMode("kanban")}
           >
             <LayoutGrid className="size-3.5 mr-1.5" />
@@ -98,7 +98,7 @@ export default function PipelineDetailPage() {
           <Button
             variant={viewMode === "list" ? "secondary" : "ghost"}
             size="sm"
-            className="h-7 px-3 text-xs rounded-md! hover:bg-[#202e32] hover:brightness-130 hover:text-white"
+            className="h-7 px-3 text-xs rounded-md! hover:bg-accent hover:text-black"
             onClick={() => setViewMode("list")}
           >
             <List className="size-3.5 mr-1.5" />
@@ -107,7 +107,7 @@ export default function PipelineDetailPage() {
           <Button
             variant={viewMode === "gantt" ? "secondary" : "ghost"}
             size="sm"
-            className="h-7 px-3 text-xs rounded-md! hover:bg-[#202e32] hover:brightness-130 hover:text-white"
+            className="h-7 px-3 text-xs rounded-md! hover:bg-accent hover:text-black"
             onClick={() => setViewMode("gantt")}
           >
             <GanttChart className="size-3.5 mr-1.5" />

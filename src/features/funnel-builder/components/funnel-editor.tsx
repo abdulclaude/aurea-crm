@@ -33,7 +33,7 @@ import {
   Undo,
   Redo,
 } from "lucide-react";
-import { DeviceType } from "@prisma/client";
+import { DeviceType } from "@/db/enums";
 import {
   deviceModeAtom,
   activePageIdAtom,

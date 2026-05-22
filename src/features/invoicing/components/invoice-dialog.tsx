@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { BillingModel, InvoiceType } from "@prisma/client";
+import { BillingModel, InvoiceType } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { Separator } from "@/components/ui/separator";
@@ -55,9 +55,9 @@ const lineItemSchema = z.object({
 });
 
 const formSchema = z.object({
-  contactId: z.string().optional(),
-  contactName: z.string().min(1, "Client name is required"),
-  contactEmail: z.string().email("Invalid email").optional().or(z.literal("")),
+  clientId: z.string().optional(),
+  clientName: z.string().min(1, "Client name is required"),
+  clientEmail: z.string().email("Invalid email").optional().or(z.literal("")),
   title: z.string().optional(),
   type: z.nativeEnum(InvoiceType),
   billingModel: z.nativeEnum(BillingModel),
@@ -98,15 +98,15 @@ export function InvoiceDialog({
     enabled: isEdit && open,
   });
 
-  // Fetch contacts for dropdown
-  const { data: contactsData } = useQuery({
-    ...trpc.contacts.list.queryOptions({
+  // Fetch clients for dropdown
+  const { data: clientsData } = useQuery({
+    ...trpc.clients.list.queryOptions({
       limit: 100,
     }),
     enabled: open,
   });
 
-  const contacts = contactsData?.items ?? [];
+  const clients = clientsData?.items ?? [];
 
   // Fetch templates for dropdown
   const { data: templatesData } = useQuery({
@@ -121,8 +121,8 @@ export function InvoiceDialog({
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema) as any,
     defaultValues: {
-      contactName: "",
-      contactEmail: "",
+      clientName: "",
+      clientEmail: "",
       title: "",
       type: defaultType === "SENT" ? InvoiceType.SENT : InvoiceType.RECEIVED,
       billingModel: BillingModel.CUSTOM,
@@ -197,9 +197,9 @@ export function InvoiceDialog({
 
       // Editing existing invoice
       form.reset({
-        contactId: invoice.contactId ?? undefined,
-        contactName: invoice.contactName,
-        contactEmail: invoice.contactEmail ?? "",
+        clientId: invoice.clientId ?? undefined,
+        clientName: invoice.clientName,
+        clientEmail: invoice.clientEmail ?? "",
         title: invoice.title ?? "",
         type: (invoice as any).type ?? InvoiceType.SENT,
         billingModel: invoice.billingModel,
@@ -219,8 +219,8 @@ export function InvoiceDialog({
     } else if (!isEdit) {
       // Creating new invoice - reset to default values with correct type
       form.reset({
-        contactName: "",
-        contactEmail: "",
+        clientName: "",
+        clientEmail: "",
         title: "",
         type: defaultType === "SENT" ? InvoiceType.SENT : InvoiceType.RECEIVED,
         billingModel: BillingModel.CUSTOM,
@@ -291,17 +291,17 @@ export function InvoiceDialog({
     }
   };
 
-  // Watch contact selection to auto-fill email
-  const selectedContactId = form.watch("contactId");
+  // Watch client selection to auto-fill email
+  const selectedClientId = form.watch("clientId");
   useEffect(() => {
-    if (selectedContactId && contacts.length > 0) {
-      const contact = contacts.find((c) => c.id === selectedContactId);
-      if (contact) {
-        form.setValue("contactName", contact.name);
-        form.setValue("contactEmail", contact.email ?? "");
+    if (selectedClientId && clients.length > 0) {
+      const client = clients.find((c) => c.id === selectedClientId);
+      if (client) {
+        form.setValue("clientName", client.name);
+        form.setValue("clientEmail", client.email ?? "");
       }
     }
-  }, [selectedContactId, contacts, form]);
+  }, [selectedClientId, clients, form]);
 
   // Calculate totals
   const lineItems = form.watch("lineItems");
@@ -361,12 +361,12 @@ export function InvoiceDialog({
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control as any}
-                  name="contactId"
+                  name="clientId"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
                         {form.watch("type") === InvoiceType.SENT
-                          ? "Select contact (optional)"
+                          ? "Select client (optional)"
                           : "Select vendor (optional)"}
                       </FormLabel>
                       <Select
@@ -378,17 +378,17 @@ export function InvoiceDialog({
                             <SelectValue
                               placeholder={
                                 form.watch("type") === InvoiceType.SENT
-                                  ? "Choose existing contact"
+                                  ? "Choose existing client"
                                   : "Choose existing vendor"
                               }
                             />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {contacts.map((contact) => (
-                            <SelectItem key={contact.id} value={contact.id}>
-                              {contact.name}{" "}
-                              {contact.email && `(${contact.email})`}
+                          {clients.map((client) => (
+                            <SelectItem key={client.id} value={client.id}>
+                              {client.name}{" "}
+                              {client.email && `(${client.email})`}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -400,7 +400,7 @@ export function InvoiceDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactName"
+                  name="clientName"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
@@ -425,7 +425,7 @@ export function InvoiceDialog({
 
                 <FormField
                   control={form.control as any}
-                  name="contactEmail"
+                  name="clientEmail"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>

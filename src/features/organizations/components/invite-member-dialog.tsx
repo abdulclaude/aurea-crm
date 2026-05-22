@@ -31,9 +31,9 @@ import { Separator } from "@/components/ui/separator";
 interface InviteMemberDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mode: "organization" | "subaccount";
+  mode: "organization" | "location";
   organizationId?: string;
-  subaccountId?: string;
+  locationId?: string;
   onSuccess?: () => void;
 }
 
@@ -42,7 +42,7 @@ export function InviteMemberDialog({
   onOpenChange,
   mode,
   organizationId,
-  subaccountId,
+  locationId,
   onSuccess,
 }: InviteMemberDialogProps) {
   const trpc = useTRPC();
@@ -51,24 +51,24 @@ export function InviteMemberDialog({
     string | null
   >(null);
   const [role, setRole] = useState<string>(
-    mode === "organization" ? "viewer" : "STANDARD"
+    mode === "organization" ? "viewer" : "STANDARD",
   );
 
-  // Fetch agency team members (always fetch, but only use in subaccount mode)
+  // Fetch agency team members (always fetch, but only use in location mode)
   const { data: agencyMembers = [] } = useSuspenseQuery(
-    trpc.organizations.getAgencyTeamMembers.queryOptions()
+    trpc.organizations.getAgencyTeamMembers.queryOptions(),
   );
 
   const inviteToOrganization = useMutation(
-    trpc.organizations.inviteToOrganization.mutationOptions()
+    trpc.organizations.inviteToOrganization.mutationOptions(),
   );
 
-  const inviteToSubaccount = useMutation(
-    trpc.organizations.inviteToSubaccount.mutationOptions()
+  const inviteToLocation = useMutation(
+    trpc.organizations.inviteToLocation.mutationOptions(),
   );
 
   const isLoading =
-    inviteToOrganization.isPending || inviteToSubaccount.isPending;
+    inviteToOrganization.isPending || inviteToLocation.isPending;
 
   // When an agency member is selected, auto-fill their email and set role to AGENCY
   const handleAgencyMemberSelect = (userId: string) => {
@@ -105,7 +105,7 @@ export function InviteMemberDialog({
         });
         toast.success(`Invitation sent to ${email}`);
       } else {
-        await inviteToSubaccount.mutateAsync({
+        await inviteToLocation.mutateAsync({
           email: email.trim(),
           role: role as
             | "AGENCY"
@@ -114,7 +114,7 @@ export function InviteMemberDialog({
             | "STANDARD"
             | "LIMITED"
             | "VIEWER",
-          subaccountId,
+          locationId,
         });
         toast.success(`Invitation sent to ${email}`);
       }
@@ -136,13 +136,12 @@ export function InviteMemberDialog({
       <DialogContent className="sm:max-w-[400px] px-0 pb-4">
         <DialogHeader className="px-6">
           <DialogTitle className="flex items-center gap-2">
-            <InviteIcon className="size-5" />
-            Invite Team Member
+            Invite team member
           </DialogTitle>
           <DialogDescription>
             {mode === "organization"
-              ? "Invite someone to join your agency"
-              : "Invite someone to join this client's workspace"}
+              ? "Invite someone to join your studio"
+              : "Invite someone to join this location"}
           </DialogDescription>
         </DialogHeader>
 
@@ -150,17 +149,17 @@ export function InviteMemberDialog({
 
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4 pt-2 px-6">
-            {mode === "subaccount" && agencyMembers.length > 0 && (
+            {mode === "location" && agencyMembers.length > 0 && (
               <div className="grid gap-2">
                 <Label htmlFor="agency-member" className="text-xs">
-                  Select Agency Team Member
+                  Select studio team member
                 </Label>
                 <Select
                   value={selectedAgencyMemberId || "manual"}
                   onValueChange={handleAgencyMemberSelect}
                   disabled={isLoading}
                 >
-                  <SelectTrigger id="agency-member">
+                  <SelectTrigger id="agency-member" className="w-full">
                     <SelectValue placeholder="Choose a team member or enter email manually" />
                   </SelectTrigger>
                   <SelectContent>
@@ -193,14 +192,14 @@ export function InviteMemberDialog({
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-primary/60">
-                  Select from your agency team or enter a new email below
+                  Select from your studio team or enter a new email below
                 </p>
               </div>
             )}
 
             <div className="grid gap-2">
               <Label htmlFor="email" className="text-xs">
-                Email Address
+                Email address
               </Label>
               <Input
                 id="email"
@@ -227,26 +226,26 @@ export function InviteMemberDialog({
                 Role
               </Label>
               <Select value={role} onValueChange={setRole} disabled={isLoading}>
-                <SelectTrigger id="role">
+                <SelectTrigger id="role" className="w-full">
                   <SelectValue placeholder="Select a role" />
                 </SelectTrigger>
 
                 <SelectContent>
                   {mode === "organization" ? (
                     <>
-                      <SelectItem value="owner">Agency Owner</SelectItem>
-                      <SelectItem value="admin">Agency Admin</SelectItem>
-                      <SelectItem value="manager">Agency Manager</SelectItem>
-                      <SelectItem value="staff">Agency Staff</SelectItem>
-                      <SelectItem value="viewer">Agency Viewer</SelectItem>
+                      <SelectItem value="owner">Owner</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="manager">Manager</SelectItem>
+                      <SelectItem value="staff">Instructor</SelectItem>
+                      <SelectItem value="viewer">Viewer</SelectItem>
                     </>
                   ) : (
                     <>
-                      <SelectItem value="AGENCY">Agency Team</SelectItem>
-                      <SelectItem value="ADMIN">Subaccount Admin</SelectItem>
+                      <SelectItem value="AGENCY">Studio team</SelectItem>
+                      <SelectItem value="ADMIN">Admin</SelectItem>
                       <SelectItem value="MANAGER">Manager</SelectItem>
-                      <SelectItem value="STANDARD">Standard User</SelectItem>
-                      <SelectItem value="LIMITED">Limited User</SelectItem>
+                      <SelectItem value="STANDARD">Instructor</SelectItem>
+                      <SelectItem value="LIMITED">Front desk</SelectItem>
                       <SelectItem value="VIEWER">Viewer</SelectItem>
                     </>
                   )}
@@ -254,17 +253,17 @@ export function InviteMemberDialog({
               </Select>
               <p className="text-[11px] text-primary/60">
                 {mode === "organization" ? (
-                  <>Select role for agency team member</>
+                  <>Select role for team member</>
                 ) : role === "AGENCY" ? (
-                  "Agency team member with full access"
+                  "Studio team member with full access"
                 ) : role === "ADMIN" ? (
-                  "Full control within this subaccount"
+                  "Full control within this location"
                 ) : role === "MANAGER" ? (
                   "Can assign tasks and manage operations"
                 ) : role === "STANDARD" ? (
-                  "Day-to-day operations (default)"
+                  "Teach classes and manage own schedule"
                 ) : role === "LIMITED" ? (
-                  "Access only assigned tasks"
+                  "Check-ins, bookings, and basic tasks"
                 ) : role === "VIEWER" ? (
                   "Read-only access"
                 ) : (
