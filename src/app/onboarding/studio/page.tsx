@@ -419,6 +419,13 @@ export default function StudioOnboardingPage() {
 
   const opt = (v: string | undefined) => (v?.trim() ? v.trim() : undefined);
 
+  const normalizeUrl = (v: string | undefined): string | undefined => {
+    const trimmed = v?.trim();
+    if (!trimmed) return undefined;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+  };
+
   const resolveLogo = async (): Promise<string | undefined> => {
     if (!step1Data) return;
 
@@ -447,7 +454,7 @@ export default function StudioOnboardingPage() {
         companyName: step1Data.companyName.trim(),
         logo,
         setupMode: "scratch",
-        website: opt(step1Data.website),
+        website: normalizeUrl(step1Data.website),
         locationName: `${step1Data.companyName.trim()} — ${values.locationName.trim()}`,
         billingEmail: opt(values.billingEmail),
         phone: opt(values.phone),
@@ -507,7 +514,7 @@ export default function StudioOnboardingPage() {
         companyName: step1Data.companyName.trim(),
         logo,
         setupMode: "mindbody",
-        website: opt(step1Data.website),
+        website: normalizeUrl(step1Data.website),
       });
       studioCreated = true;
 
@@ -1007,7 +1014,7 @@ export default function StudioOnboardingPage() {
                       <div className="flex gap-3">
                         <Button
                           type="button"
-                          variant="gradient"
+                          variant="ghost"
                           onClick={goBack}
                           className="gap-1.5"
                         >
@@ -1016,6 +1023,7 @@ export default function StudioOnboardingPage() {
                         </Button>
                         <Button
                           type="submit"
+                          variant="gradient"
                           className="flex-1"
                           disabled={createAgency.isPending}
                         >
