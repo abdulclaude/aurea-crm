@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button";
 import { IconChevronLeftMedium as ChevronLeftIcon } from "central-icons/IconChevronLeftMedium";
 import { IconBell2 as BellIcon } from "central-icons/IconBell2";
 import { IconPeopleCircle as UserIcon } from "central-icons/IconPeopleCircle";
-import { IconBlock as WorkspaceIcon } from "central-icons/IconBlock";
-import { IconGroup1 as MembersIcon } from "central-icons/IconGroup1";
 import { IconKey2 as CredentialsIcon } from "central-icons/IconKey2";
 import { IconEar as WebhooksIcon } from "central-icons/IconEar";
 import { IconPlugin2 as AppsIcon } from "central-icons/IconPlugin2";
@@ -17,9 +15,10 @@ import {
   Paintbrush as BrandingIcon,
   AlertCircle as DunningIcon,
   CreditCard as PaymentsIcon,
-  Calendar as CalendarIcon,
   Code2 as DeveloperIcon,
+  History as HistoryIcon,
   LayoutPanelLeft as WidgetsIcon,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -63,21 +62,6 @@ const settingsNavSections = [
     ],
   },
   {
-    title: "Administration",
-    items: [
-      {
-        title: "Workspace",
-        href: "/settings/workspace",
-        icon: WorkspaceIcon,
-      },
-      {
-        title: "Team",
-        href: "/settings/team",
-        icon: MembersIcon,
-      },
-    ],
-  },
-  {
     title: "Design",
     items: [
       {
@@ -114,16 +98,6 @@ const settingsNavSections = [
         title: "Modules",
         href: "/settings/modules",
         icon: ModulesIcon,
-      },
-    ],
-  },
-  {
-    title: "Bookings",
-    items: [
-      {
-        title: "Cal.com",
-        href: "/settings/integrations/calcom",
-        icon: CalendarIcon,
       },
     ],
   },
@@ -169,6 +143,16 @@ const settingsNavSections = [
         title: "API Keys",
         href: "/settings/developer",
         icon: DeveloperIcon,
+      },
+      {
+        title: "Workflows",
+        href: "/workflows",
+        icon: WorkflowIcon,
+      },
+      {
+        title: "Executions",
+        href: "/executions",
+        icon: HistoryIcon,
       },
       {
         title: "Widgets",

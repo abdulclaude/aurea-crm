@@ -63,7 +63,7 @@ import {
   LOCATION_ROLES,
 } from "@/features/organizations/members/constants";
 import { useMembersParams } from "@/features/organizations/members/hooks/use-members-params";
-import { UserStatus } from "@/db/enums";
+import { UserStatus, type UserStatus as UserStatusValue } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -72,6 +72,42 @@ import { toast } from "sonner";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type MemberRow = RouterOutput["organizations"]["listMembers"]["items"][number];
+type MemberRoleFilter =
+  | "owner"
+  | "admin"
+  | "manager"
+  | "staff"
+  | "viewer"
+  | "AGENCY"
+  | "ADMIN"
+  | "MANAGER"
+  | "STANDARD"
+  | "LIMITED"
+  | "VIEWER";
+
+const MEMBER_ROLE_VALUES: readonly MemberRoleFilter[] = [
+  "owner",
+  "admin",
+  "manager",
+  "staff",
+  "viewer",
+  "AGENCY",
+  "ADMIN",
+  "MANAGER",
+  "STANDARD",
+  "LIMITED",
+  "VIEWER",
+];
+
+const USER_STATUS_VALUES = Object.values(UserStatus) as UserStatusValue[];
+
+function isMemberRoleFilter(value: string): value is MemberRoleFilter {
+  return MEMBER_ROLE_VALUES.includes(value as MemberRoleFilter);
+}
+
+function isUserStatusValue(value: string): value is UserStatusValue {
+  return USER_STATUS_VALUES.includes(value as UserStatusValue);
+}
 
 const SORTABLE_COLUMNS = new Set(["name", "email", "role", "createdAt"]);
 
@@ -128,7 +164,7 @@ const getRoleLabel = (role: string | null | undefined) => {
     owner: "Owner",
     admin: "Admin",
     manager: "Manager",
-    staff: "Instructor",
+    staff: "Staff",
     viewer: "Viewer",
     AGENCY: "Studio team",
     ADMIN: "Admin",
@@ -160,8 +196,14 @@ export function MembersTable() {
       page: params.page,
       pageSize: params.pageSize,
       search: params.search || undefined,
-      roles: params.roles.length > 0 ? (params.roles as any) : undefined,
-      status: params.status.length > 0 ? (params.status as any) : undefined,
+      roles:
+        params.roles.length > 0
+          ? params.roles.filter(isMemberRoleFilter)
+          : undefined,
+      status:
+        params.status.length > 0
+          ? params.status.filter(isUserStatusValue)
+          : undefined,
       sort: params.sort || undefined,
     }),
     [

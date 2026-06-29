@@ -46,7 +46,7 @@ export function ChartLoadingState({
     <div className="relative h-full w-full">
       <LoadingIndicator isLoading />
       <div className="h-full w-full animate-pulse opacity-70">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0}>
           {variant === "area" ? (
             <AreaChart
               data={data}

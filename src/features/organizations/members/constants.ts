@@ -42,7 +42,7 @@ export const AGENCY_ROLES = [
   },
   {
     value: "staff",
-    label: "Instructor",
+    label: "Staff",
     description: "Teach classes and access assigned locations",
     permissions: [
       "Access only assigned locations",

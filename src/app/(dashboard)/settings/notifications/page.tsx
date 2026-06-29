@@ -3,14 +3,8 @@
 import { useState, useEffect } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
@@ -22,7 +16,11 @@ import { IconGroup1 as TeamIcon } from "central-icons/IconGroup1";
 import { IconCalendar3 as ClassesIcon } from "central-icons/IconCalendar3";
 import { IconConstructionHelmet as InstructorIcon } from "central-icons/IconConstructionHelmet";
 
-import { Handshake as DealIcon, Banknote as PayoutIcon, Database as ImportIcon } from "lucide-react";
+import {
+  Handshake as DealIcon,
+  Banknote as PayoutIcon,
+  Database as ImportIcon,
+} from "lucide-react";
 
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
@@ -263,7 +261,7 @@ export default function NotificationSettingsPage() {
     : adminNotificationGroups;
 
   const { data: preferences, isLoading } = useQuery(
-    trpc.notifications.getPreferences.queryOptions()
+    trpc.notifications.getPreferences.queryOptions(),
   );
 
   const [localPreferences, setLocalPreferences] = useState<
@@ -275,7 +273,7 @@ export default function NotificationSettingsPage() {
   useEffect(() => {
     if (preferences) {
       setLocalPreferences(
-        (preferences.preferences as Record<string, boolean>) || {}
+        (preferences.preferences as Record<string, boolean>) || {},
       );
       setEmailEnabled(preferences.emailEnabled);
       setEmailDigest(preferences.emailDigest);
@@ -283,7 +281,7 @@ export default function NotificationSettingsPage() {
   }, [preferences]);
 
   const updatePreferences = useMutation(
-    trpc.notifications.updatePreferences.mutationOptions()
+    trpc.notifications.updatePreferences.mutationOptions(),
   );
 
   const handleToggleNotification = (type: string, enabled: boolean) => {
@@ -301,7 +299,7 @@ export default function NotificationSettingsPage() {
         emailDigest,
       });
       toast.success("Notification preferences saved");
-    } catch (error) {
+    } catch {
       toast.error("Failed to save preferences");
     }
   };
@@ -317,7 +315,12 @@ export default function NotificationSettingsPage() {
   return (
     <div>
       <div className="p-6">
-        <h2 className="text-lg font-semibold">Notification Preferences</h2>
+        <div className="flex flex-col justify-center gap-2">
+          <Badge variant="secondary" className="w-max rounded-full p-1 px-2.5">
+            Account
+          </Badge>
+          <h1 className="text-lg font-bold">Notification Preferences</h1>
+        </div>
         <p className="text-muted-foreground text-xs">
           Manage how you receive notifications from the platform
         </p>
@@ -325,21 +328,15 @@ export default function NotificationSettingsPage() {
 
       <Separator className="bg-black/10 dark:bg-white/5" />
 
-      {/* Email Preferences */}
-      <Card className="border-none rounded-none shadow-none">
-        <CardHeader className="gap-0">
-          <CardTitle className="text-base">Email Notifications</CardTitle>
-          <CardDescription className="text-xs text-primary/75">
-            Configure email notification settings
-          </CardDescription>
-        </CardHeader>
-
-        <Separator className="bg-black/10 dark:bg-white/5" />
-
-        <CardContent className="space-y-4">
+      <div className="p-6">
+        <h2 className="text-sm font-medium mb-4">Email Notifications</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Configure email notification settings
+        </p>
+        <div className="space-y-4 max-w-3xl">
           <div className="flex items-center justify-between">
             <div className="">
-              <Label htmlFor="email-enabled" className="text-sm">
+              <Label htmlFor="email-enabled" className="text-xs font-medium">
                 Enable Email Notifications
               </Label>
 
@@ -357,7 +354,7 @@ export default function NotificationSettingsPage() {
 
           <div className="flex items-center justify-between">
             <div className="">
-              <Label htmlFor="email-digest" className="text-sm">
+              <Label htmlFor="email-digest" className="text-xs font-medium">
                 Daily Digest
               </Label>
               <p className="text-xs text-primary/75">
@@ -371,70 +368,65 @@ export default function NotificationSettingsPage() {
               disabled={!emailEnabled}
             />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <Separator className="bg-black/10 dark:bg-white/5" />
 
-      {/* Notification Types */}
-      <Card className="border-none rounded-none shadow-none">
-        <CardContent className="space-y-6 p-0">
-          {notificationGroups.map((group, groupIndex) => (
-            <div key={group.title}>
-              {groupIndex > 0 && (
-                <Separator className="bg-black/10 dark:bg-white/5 mb-6  w-full" />
-              )}
+      <div>
+        {notificationGroups.map((group, groupIndex) => (
+          <div key={group.title}>
+            {groupIndex > 0 && (
+              <Separator className="bg-black/10 dark:bg-white/5" />
+            )}
 
-              <div className="space-y-4">
-                <div className="px-6">
-                  <div className="flex items-start gap-3">
-                    <group.icon className="size-5 text-primary mt-0.5" />
+            <div className="space-y-4 p-6">
+              <div className="flex items-start gap-3">
+                <group.icon className="size-5 text-primary mt-0.5" />
 
-                    <div className="flex flex-col">
-                      <h4 className="text-sm font-medium">{group.title}</h4>
-                      <p className="text-xs text-primary/75">
-                        {group.description}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator className="bg-black/10 dark:bg-white/5" />
-
-                <div className="space-y-4 px-6">
-                  {group.types.map((item) => (
-                    <div
-                      key={item.type}
-                      className="flex items-center justify-between"
-                    >
-                      <div className="space-y-0.5">
-                        <Label htmlFor={item.type} className="text-sm">
-                          {item.label}
-                        </Label>
-                        <p className="text-xs text-primary/75">
-                          {item.description}
-                        </p>
-                      </div>
-
-                      <Switch
-                        id={item.type}
-                        checked={localPreferences[item.type] ?? true}
-                        onCheckedChange={(checked) =>
-                          handleToggleNotification(item.type, checked)
-                        }
-                      />
-                    </div>
-                  ))}
+                <div className="flex flex-col">
+                  <h2 className="text-sm font-medium">{group.title}</h2>
+                  <p className="text-xs text-primary/75">
+                    {group.description}
+                  </p>
                 </div>
               </div>
+
+              <div className="space-y-4 max-w-3xl">
+                {group.types.map((item) => (
+                  <div
+                    key={item.type}
+                    className="flex items-center justify-between gap-4"
+                  >
+                    <div className="space-y-0.5">
+                      <Label
+                        htmlFor={item.type}
+                        className="text-xs font-medium"
+                      >
+                        {item.label}
+                      </Label>
+                      <p className="text-xs text-primary/75">
+                        {item.description}
+                      </p>
+                    </div>
+
+                    <Switch
+                      id={item.type}
+                      checked={localPreferences[item.type] ?? true}
+                      onCheckedChange={(checked) =>
+                        handleToggleNotification(item.type, checked)
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+          </div>
+        ))}
+      </div>
 
       <Separator className="bg-black/10 dark:bg-white/5" />
 
-      {/* Save Button */}
       <div className="flex justify-end p-6">
         <Button
           onClick={handleSave}

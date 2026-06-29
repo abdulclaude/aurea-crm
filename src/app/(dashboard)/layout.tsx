@@ -34,10 +34,14 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
 
   // Prefetch session-bound queries so client components (sidebar, header, pages)
   // receive cached data during hydration instead of making unauthenticated SSR requests.
-  void prefetch(trpc.organizations.getActive.queryOptions());
-  void prefetch(trpc.organizations.getMyOrganizations.queryOptions());
-  void prefetch(trpc.modules.listAvailable.queryOptions());
-  void prefetch(trpc.instructors.getMyInstructorProfile.queryOptions());
+  await Promise.all([
+    prefetch(trpc.organizations.getActive.queryOptions()),
+    prefetch(trpc.organizations.getMyOrganizations.queryOptions()),
+    prefetch(trpc.organizations.getClients.queryOptions()),
+    prefetch(trpc.modules.listAvailable.queryOptions()),
+    prefetch(trpc.instructors.getMyInstructorProfile.queryOptions()),
+    prefetch(trpc.users.getStatus.queryOptions()),
+  ]);
 
   return (
     <HydrateClient>

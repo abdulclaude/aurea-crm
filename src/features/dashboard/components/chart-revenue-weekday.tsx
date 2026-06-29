@@ -50,7 +50,7 @@ export function ChartRevenueWeekday({
       {isLoading ? (
         <ChartLoadingState variant="category-bar" />
       ) : (
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <BarChart
           data={merged}
           margin={{ top: 4, right: 0, left: 0, bottom: 4 }}

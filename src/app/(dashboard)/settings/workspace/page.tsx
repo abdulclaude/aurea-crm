@@ -62,7 +62,7 @@ export default function WorkspaceSettingsPage() {
           logo,
         });
       }
-      toast.success("Workspace updated successfully");
+      toast.success("Studio settings updated");
       refetch();
     } catch (error) {
       toast.error(
@@ -102,11 +102,11 @@ export default function WorkspaceSettingsPage() {
             {isOrganization ? "Studio" : "Location"}
           </Badge>
 
-          <h1 className="text-lg font-bold">Workspace Settings</h1>
+          <h1 className="text-lg font-bold">Studio Settings</h1>
         </div>
 
         <p className="text-muted-foreground text-xs">
-          Manage your {isOrganization ? "studio" : "location"} workspace
+          Manage your {isOrganization ? "studio" : "location"} settings and
           information
         </p>
       </div>
@@ -118,7 +118,7 @@ export default function WorkspaceSettingsPage() {
           {/* Workspace Logo */}
           <div className="p-6">
             <Label className="text-xs font-medium mb-3 block">
-              Workspace Logo
+              Studio Logo
             </Label>
 
             <WorkspaceLogoUploader
@@ -156,7 +156,7 @@ export default function WorkspaceSettingsPage() {
               Manage who has access to this workspace
             </p>
             <Button variant="outline" asChild className="w-fit">
-              <Link href="/settings/team">Manage Team</Link>
+              <Link href="/team">Manage Team</Link>
             </Button>
           </div>
 

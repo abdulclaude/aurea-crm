@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
 import { ProfilePictureUploader } from "@/features/users/components/profile-picture-uploader";
@@ -25,21 +25,20 @@ export default function ProfileSettingsPage() {
   const { theme, setTheme } = useTheme();
 
   const { data: profile, isLoading, refetch } = useQuery(
-    trpc.users.getProfile.queryOptions()
+    trpc.users.getProfile.queryOptions(),
   );
 
   const [name, setName] = useState(profile?.name || "");
   const [profilePicture, setProfilePicture] = useState<string | null>(
-    profile?.image || null
+    profile?.image || null,
   );
 
-  // Update local state when profile data is loaded
-  useState(() => {
+  useEffect(() => {
     if (profile) {
       setName(profile.name);
       setProfilePicture(profile.image);
     }
-  });
+  }, [profile]);
 
   const updateProfile = useMutation(trpc.users.updateProfile.mutationOptions());
 
@@ -53,7 +52,7 @@ export default function ProfileSettingsPage() {
       refetch();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to update profile"
+        error instanceof Error ? error.message : "Failed to update profile",
       );
     }
   };
@@ -75,67 +74,74 @@ export default function ProfileSettingsPage() {
   }
 
   return (
-    <div className="container mx-auto py-8 px-6 max-w-3xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Profile Settings</h1>
-        <p className="text-muted-foreground mt-1">
+    <div>
+      <div className="p-6">
+        <div className="flex flex-col justify-center gap-2">
+          <Badge variant="secondary" className="w-max rounded-full p-1 px-2.5">
+            Account
+          </Badge>
+          <h1 className="text-lg font-bold">Profile Settings</h1>
+        </div>
+        <p className="text-muted-foreground text-xs">
           Manage your personal information and preferences
         </p>
       </div>
 
-      <Card className="p-6">
-        <div className="space-y-6">
-          {/* Profile Picture */}
-          <div>
-            <Label className="text-sm font-medium mb-3 block">
-              Profile Picture
-            </Label>
-            <ProfilePictureUploader
-              value={profilePicture}
-              onChange={(url) => setProfilePicture(url ?? null)}
-              userName={name}
-              disabled={updateProfile.isPending}
-            />
+      <Separator className="bg-black/10 dark:bg-white/5" />
+
+      <div>
+        <div className="p-6">
+          <h2 className="text-sm font-medium mb-4">Profile Picture</h2>
+          <ProfilePictureUploader
+            value={profilePicture}
+            onChange={(url) => setProfilePicture(url ?? null)}
+            userName={name}
+            disabled={updateProfile.isPending}
+          />
+        </div>
+
+        <Separator className="bg-black/10 dark:bg-white/5" />
+
+        <div className="p-6">
+          <h2 className="text-sm font-medium mb-4">Personal Information</h2>
+          <div className="grid grid-cols-1 gap-4 max-w-2xl md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="name" className="text-xs font-medium">
+                Full Name
+              </Label>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={updateProfile.isPending}
+                placeholder="Enter your full name"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-xs font-medium">
+                Email
+              </Label>
+              <Input
+                id="email"
+                value={profile.email}
+                disabled
+                className="bg-muted cursor-not-allowed"
+              />
+              <p className="text-xs text-muted-foreground">
+                Email cannot be changed
+              </p>
+            </div>
           </div>
+        </div>
 
-          <Separator />
+        <Separator className="bg-black/10 dark:bg-white/5" />
 
-          {/* Full Name */}
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium">
-              Full Name
-            </Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={updateProfile.isPending}
-              placeholder="Enter your full name"
-            />
-          </div>
-
-          {/* Email (read-only) */}
-          <div className="space-y-2">
-            <Label htmlFor="email" className="text-sm font-medium">
-              Email
-            </Label>
-            <Input
-              id="email"
-              value={profile.email}
-              disabled
-              className="bg-muted cursor-not-allowed"
-            />
-            <p className="text-xs text-muted-foreground">
-              Email cannot be changed
-            </p>
-          </div>
-
-          <Separator />
-
-          {/* Appearance */}
-          <div className="space-y-2">
-            <Label htmlFor="theme" className="text-sm font-medium">
-              Appearance
+        <div className="p-6">
+          <h2 className="text-sm font-medium mb-4">Appearance</h2>
+          <div className="space-y-2 max-w-md">
+            <Label htmlFor="theme" className="text-xs font-medium">
+              Theme
             </Label>
             <Select value={theme} onValueChange={setTheme}>
               <SelectTrigger id="theme">
@@ -151,26 +157,28 @@ export default function ProfileSettingsPage() {
               Choose how Aurea CRM looks to you
             </p>
           </div>
-
-          {/* Save Button */}
-          <div className="flex justify-end pt-4">
-            <Button
-              onClick={handleSave}
-              disabled={updateProfile.isPending}
-              className="min-w-[120px]"
-            >
-              {updateProfile.isPending ? (
-                <>
-                  <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
-            </Button>
-          </div>
         </div>
-      </Card>
+
+        <Separator className="bg-black/10 dark:bg-white/5" />
+
+        <div className="flex justify-end p-6">
+          <Button
+            onClick={handleSave}
+            disabled={updateProfile.isPending}
+            className="min-w-[120px] w-max"
+            variant="gradient"
+          >
+            {updateProfile.isPending ? (
+              <>
+                <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              "Save Changes"
+            )}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -170,13 +170,14 @@ export default function POSPage() {
         data.promoCode.discountType === "PERCENT"
           ? (subtotal * data.promoCode.discountValue) / 100
           : data.promoCode.discountValue;
+      const cappedAmount = Math.min(amount, subtotal);
       setDiscounts((cur) => [
         ...cur.filter((d) => d.type !== "promo"),
         {
           type: "promo",
           code: data.promoCode.code,
           id: data.promoCode.id,
-          amount,
+          amount: cappedAmount,
           label: `Promo: ${data.promoCode.code}`,
         },
       ]);
@@ -209,12 +210,14 @@ export default function POSPage() {
   const handleCheckout = () => {
     if (!selectedClient || !selectedPlan) return;
     const promoCode = discounts.find((d) => d.type === "promo")?.code;
+    const giftCardCode = discounts.find((d) => d.type === "gift")?.code;
     checkoutMutation.mutate({
       planId: selectedPlan.id,
       clientId: selectedClient.id,
       successUrl: `${window.location.origin}/studio/pos?success=1`,
       cancelUrl: `${window.location.origin}/studio/pos`,
       promoCode,
+      giftCardCode,
     });
   };
 

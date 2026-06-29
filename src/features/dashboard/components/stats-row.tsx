@@ -85,7 +85,7 @@ export function StatCard({
                 />
               )}
               <div className="h-8 w-16">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <LineChart
                     data={sparkData}
                     margin={{ top: 2, right: 2, left: 2, bottom: 2 }}

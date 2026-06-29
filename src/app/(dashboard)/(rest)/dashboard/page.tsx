@@ -206,23 +206,23 @@ function AdminDashboard() {
     trpc.studioDashboard.activeDates.queryOptions(),
   );
 
-  const { data: stats, isFetching: statsFetching } = useQuery(
+  const { data: stats, isPending: statsPending } = useQuery(
     trpc.studioDashboard.summaryStats.queryOptions(rangeInput),
   );
 
-  const { data: visits, isFetching: visitsFetching } = useQuery(
+  const { data: visits, isPending: visitsPending } = useQuery(
     trpc.studioDashboard.visitsOverTime.queryOptions(rangeInput),
   );
-  const { data: membershipsOverTime, isFetching: membershipsFetching } = useQuery(
+  const { data: membershipsOverTime, isPending: membershipsPending } = useQuery(
     trpc.studioDashboard.membershipsOverTime.queryOptions(rangeInput),
   );
-  const { data: revenueOverTime, isFetching: revenueFetching } = useQuery(
+  const { data: revenueOverTime, isPending: revenuePending } = useQuery(
     trpc.studioDashboard.revenueOverTime.queryOptions(rangeInput),
   );
-  const { data: revenueByCategory, isFetching: revenueCategoryFetching } = useQuery(
+  const { data: revenueByCategory, isPending: revenueCategoryPending } = useQuery(
     trpc.studioDashboard.revenueByCategory.queryOptions(rangeInput),
   );
-  const { data: revenueByWeekday, isFetching: revenueWeekdayFetching } = useQuery(
+  const { data: revenueByWeekday, isPending: revenueWeekdayPending } = useQuery(
     trpc.studioDashboard.revenueByWeekday.queryOptions(rangeInput),
   );
 
@@ -241,15 +241,15 @@ function AdminDashboard() {
     [revenueCompareRange, rangeDays],
   );
 
-  const { data: visitsCompare, isFetching: visitsCompareFetching } = useQuery({
+  const { data: visitsCompare, isPending: visitsComparePending } = useQuery({
     ...trpc.studioDashboard.visitsOverTime.queryOptions(visitsCompareInput ?? undefined),
     enabled: !!visitsCompareInput,
   });
-  const { data: membershipsCompare, isFetching: membershipsCompareFetching } = useQuery({
+  const { data: membershipsCompare, isPending: membershipsComparePending } = useQuery({
     ...trpc.studioDashboard.membershipsOverTime.queryOptions(membershipsCompareInput ?? undefined),
     enabled: !!membershipsCompareInput,
   });
-  const { data: revenueCompare, isFetching: revenueCompareFetching } = useQuery({
+  const { data: revenueCompare, isPending: revenueComparePending } = useQuery({
     ...trpc.studioDashboard.revenueOverTime.queryOptions(revenueCompareInput ?? undefined),
     enabled: !!revenueCompareInput,
   });
@@ -267,15 +267,15 @@ function AdminDashboard() {
     [conversionCompareRange, rangeDays],
   );
 
-  const { data: revCatCompare, isFetching: revCatCompareFetching } = useQuery({
+  const { data: revCatCompare, isPending: revCatComparePending } = useQuery({
     ...trpc.studioDashboard.revenueByCategory.queryOptions(revCatCompareInput ?? undefined),
     enabled: !!revCatCompareInput,
   });
-  const { data: revWeekdayCompare, isFetching: revWeekdayCompareFetching } = useQuery({
+  const { data: revWeekdayCompare, isPending: revWeekdayComparePending } = useQuery({
     ...trpc.studioDashboard.revenueByWeekday.queryOptions(revWeekdayCompareInput ?? undefined),
     enabled: !!revWeekdayCompareInput,
   });
-  const { data: conversionCompare, isFetching: conversionCompareFetching } = useQuery({
+  const { data: conversionCompare, isPending: conversionComparePending } = useQuery({
     ...trpc.studioDashboard.conversionOverview.queryOptions(conversionCompareInput ?? undefined),
     enabled: !!conversionCompareInput,
   });
@@ -291,13 +291,13 @@ function AdminDashboard() {
   const { data: todaySchedule } = useQuery(
     trpc.studioDashboard.todaySchedule.queryOptions(),
   );
-  const { data: totalRevenue, isFetching: totalRevenueFetching } = useQuery(
+  const { data: totalRevenue, isPending: totalRevenuePending } = useQuery(
     trpc.studioDashboard.totalRevenue.queryOptions(rangeInput),
   );
-  const { data: sparklines, isFetching: sparklinesFetching } = useQuery(
+  const { data: sparklines, isPending: sparklinesPending } = useQuery(
     trpc.studioDashboard.statSparklines.queryOptions(rangeInput),
   );
-  const { data: fitnessKpis, isFetching: fitnessKpisFetching } = useQuery(
+  const { data: fitnessKpis, isPending: fitnessKpisPending } = useQuery(
     trpc.studioDashboard.fitnessKpis.queryOptions(rangeInput),
   );
   const { data: atRiskData } = useQuery(
@@ -306,19 +306,19 @@ function AdminDashboard() {
   const { data: waitlistData } = useQuery(
     trpc.studioDashboard.waitlistSummary.queryOptions(),
   );
-  const { data: newMembersData, isFetching: newMembersFetching } = useQuery(
+  const { data: newMembersData, isPending: newMembersPending } = useQuery(
     trpc.studioDashboard.newMembersCount.queryOptions(rangeInput),
   );
-  const { data: expiringData, isFetching: expiringFetching } = useQuery(
+  const { data: expiringData, isPending: expiringPending } = useQuery(
     trpc.studioDashboard.expiringMembershipsCount.queryOptions(rangeInput),
   );
-  const { data: conversionOverview, isFetching: conversionFetching } = useQuery(
+  const { data: conversionOverview, isPending: conversionPending } = useQuery(
     trpc.studioDashboard.conversionOverview.queryOptions(rangeInput),
   );
-  const { data: planGainLoss, isFetching: planGainLossFetching } = useQuery(
+  const { data: planGainLoss, isPending: planGainLossPending } = useQuery(
     trpc.studioDashboard.planGainLoss.queryOptions(rangeInput),
   );
-  const { data: classTypeUtilization, isFetching: classTypeFetching } = useQuery(
+  const { data: classTypeUtilization, isPending: classTypePending } = useQuery(
     trpc.studioDashboard.classTypeUtilization.queryOptions(rangeInput),
   );
   const { data: instructorUtilization } = useQuery(
@@ -381,21 +381,21 @@ function AdminDashboard() {
   );
 
   const chartLoading: Record<ChartWidgetId, boolean> = {
-    "chart-visits": visitsFetching || (!!visitsCompareInput && visitsCompareFetching),
+    "chart-visits": visitsPending || (!!visitsCompareInput && visitsComparePending),
     "chart-memberships":
-      membershipsFetching ||
-      (!!membershipsCompareInput && membershipsCompareFetching),
+      membershipsPending ||
+      (!!membershipsCompareInput && membershipsComparePending),
     "chart-revenue":
-      revenueFetching || (!!revenueCompareInput && revenueCompareFetching),
+      revenuePending || (!!revenueCompareInput && revenueComparePending),
     "chart-revenue-category":
-      revenueCategoryFetching || (!!revCatCompareInput && revCatCompareFetching),
+      revenueCategoryPending || (!!revCatCompareInput && revCatComparePending),
     "chart-revenue-weekday":
-      revenueWeekdayFetching ||
-      (!!revWeekdayCompareInput && revWeekdayCompareFetching),
-    "chart-plan-breakdown": classTypeFetching,
+      revenueWeekdayPending ||
+      (!!revWeekdayCompareInput && revWeekdayComparePending),
+    "chart-plan-breakdown": classTypePending,
     "chart-conversion-sankey":
-      conversionFetching ||
-      (!!conversionCompareInput && conversionCompareFetching),
+      conversionPending ||
+      (!!conversionCompareInput && conversionComparePending),
   };
 
   // ─── Double-click enters edit mode ───────────────────────────────────────────
@@ -537,22 +537,22 @@ function AdminDashboard() {
   };
 
   const statLoading: Record<StatWidgetId, boolean> = {
-    "stat-active-memberships": statsFetching || sparklinesFetching,
-    "stat-classes-today": statsFetching || sparklinesFetching,
-    "stat-checkins-today": statsFetching || sparklinesFetching,
-    "stat-visits-month": statsFetching || sparklinesFetching,
-    "stat-total-sales": totalRevenueFetching || sparklinesFetching,
-    "stat-arpm": fitnessKpisFetching || sparklinesFetching,
-    "stat-no-show-rate": fitnessKpisFetching,
-    "stat-class-utilization": fitnessKpisFetching,
-    "stat-churn-rate": fitnessKpisFetching,
-    "stat-new-members": newMembersFetching || sparklinesFetching,
-    "stat-expiring-soon": expiringFetching,
-    "stat-first-visit-rate": conversionFetching,
-    "stat-intro-conversion": conversionFetching,
-    "stat-referral-conversion": conversionFetching,
-    "stat-automation-conversions": conversionFetching,
-    "stat-plan-net-growth": planGainLossFetching,
+    "stat-active-memberships": statsPending || sparklinesPending,
+    "stat-classes-today": statsPending || sparklinesPending,
+    "stat-checkins-today": statsPending || sparklinesPending,
+    "stat-visits-month": statsPending || sparklinesPending,
+    "stat-total-sales": totalRevenuePending || sparklinesPending,
+    "stat-arpm": fitnessKpisPending || sparklinesPending,
+    "stat-no-show-rate": fitnessKpisPending,
+    "stat-class-utilization": fitnessKpisPending,
+    "stat-churn-rate": fitnessKpisPending,
+    "stat-new-members": newMembersPending || sparklinesPending,
+    "stat-expiring-soon": expiringPending,
+    "stat-first-visit-rate": conversionPending,
+    "stat-intro-conversion": conversionPending,
+    "stat-referral-conversion": conversionPending,
+    "stat-automation-conversions": conversionPending,
+    "stat-plan-net-growth": planGainLossPending,
   };
 
   // ─── Chart renderer ──────────────────────────────────────────────────────────

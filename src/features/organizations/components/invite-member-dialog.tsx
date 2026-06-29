@@ -100,7 +100,7 @@ export function InviteMemberDialog({
       if (mode === "organization") {
         await inviteToOrganization.mutateAsync({
           email: email.trim(),
-          role: role as "owner" | "admin" | "manager" | "staff" | "viewer",
+        role: role as "owner" | "admin" | "manager" | "staff" | "viewer",
           organizationId,
         });
         toast.success(`Invitation sent to ${email}`);
@@ -136,12 +136,12 @@ export function InviteMemberDialog({
       <DialogContent className="sm:max-w-[400px] px-0 pb-4">
         <DialogHeader className="px-6">
           <DialogTitle className="flex items-center gap-2">
-            Invite team member
+            Add staff
           </DialogTitle>
           <DialogDescription>
             {mode === "organization"
-              ? "Invite someone to join your studio"
-              : "Invite someone to join this location"}
+              ? "Add someone to your studio team"
+              : "Add someone to this location team"}
           </DialogDescription>
         </DialogHeader>
 
@@ -236,7 +236,7 @@ export function InviteMemberDialog({
                       <SelectItem value="owner">Owner</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="manager">Manager</SelectItem>
-                      <SelectItem value="staff">Instructor</SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
                       <SelectItem value="viewer">Viewer</SelectItem>
                     </>
                   ) : (
@@ -253,7 +253,7 @@ export function InviteMemberDialog({
               </Select>
               <p className="text-[11px] text-primary/60">
                 {mode === "organization" ? (
-                  <>Select role for team member</>
+                  <>Select role for this staff member</>
                 ) : role === "AGENCY" ? (
                   "Studio team member with full access"
                 ) : role === "ADMIN" ? (

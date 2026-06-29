@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
+import { CalendarPlus } from "lucide-react";
+import Link from "next/link";
 import {
   addDays,
   endOfDay,
@@ -24,6 +26,7 @@ import type {
 } from "@/features/rotas/components/event-calendar";
 import { EventCalendar } from "@/features/rotas/components/event-calendar";
 import { CalendarContext } from "@/features/rotas/components/event-calendar/calendar-context";
+import { ClassViewSwitcher } from "@/features/studio/components/class-view-switcher";
 
 export default function StudioSchedulePage() {
   const trpc = useTRPC();
@@ -125,12 +128,21 @@ export default function StudioSchedulePage() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-end justify-between gap-2 p-6">
+      <div className="flex flex-col gap-4 p-6 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-lg font-semibold text-primary">Schedule</h1>
           <p className="text-xs text-primary/75">
             View and manage your class schedule
           </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ClassViewSwitcher activeView="schedule" />
+          <Button asChild>
+            <Link href="/studio/classes/new">
+              <CalendarPlus className="size-4" />
+              Add class
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -162,7 +174,7 @@ export default function StudioSchedulePage() {
             events={events}
             initialView="week"
             timeBounds={timeBounds}
-            enableCellEventCreate={false}
+            enableCellEventCreate
             onViewChange={setView}
             onEventSelect={(event) => {
               router.push(`/studio/classes/${event.id}`);

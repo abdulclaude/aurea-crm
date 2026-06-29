@@ -6,6 +6,7 @@ import Stripe from "stripe";
 import { db } from "@/db";
 import {
   classCredit,
+  giftCard,
   membershipPlan,
   promoCode,
   stripeEvent,
@@ -89,6 +90,8 @@ async function handleEvent(tx: DbTransaction, event: Stripe.Event): Promise<Omit
         })
         .returning();
 
+      const payments = [payment];
+
       if (meta.promoCodeId) {
         await tx
           .update(promoCode)
@@ -97,6 +100,46 @@ async function handleEvent(tx: DbTransaction, event: Stripe.Event): Promise<Omit
             updatedAt: new Date(),
           })
           .where(eq(promoCode.id, meta.promoCodeId));
+      }
+
+      const giftCardAmount = Number(meta.giftCardAmount ?? "0");
+      if (meta.giftCardId && giftCardAmount > 0) {
+        const card = await tx.query.giftCard.findFirst({
+          where: eq(giftCard.id, meta.giftCardId),
+          columns: { id: true, code: true, remainingBalance: true, currency: true },
+        });
+
+        if (card) {
+          const nextBalance = Math.max(0, Number(card.remainingBalance) - giftCardAmount);
+          await tx
+            .update(giftCard)
+            .set({
+              remainingBalance: nextBalance.toFixed(2),
+              isActive: nextBalance > 0,
+              redeemedAt: nextBalance > 0 ? null : new Date(),
+              redeemedByClientId: meta.clientId,
+              updatedAt: new Date(),
+            })
+            .where(eq(giftCard.id, card.id));
+
+          const [giftPayment] = await tx
+            .insert(studioPayment)
+            .values({
+              id: randomUUID(),
+              organizationId: meta.organizationId,
+              locationId: meta.locationId || null,
+              clientId: meta.clientId,
+              membershipId: membership.id,
+              amount: giftCardAmount.toFixed(2),
+              currency: card.currency,
+              status: "SUCCEEDED",
+              type: "GIFT_CARD",
+              description: `Gift card redemption: ${card.code}`,
+              updatedAt: new Date(),
+            })
+            .returning();
+          payments.push(giftPayment);
+        }
       }
 
       if (plan.classCredits && plan.billingInterval === "ONE_TIME") {
@@ -110,7 +153,7 @@ async function handleEvent(tx: DbTransaction, event: Stripe.Event): Promise<Omit
         });
       }
 
-      return { newMembershipId: membership.id, payments: [payment] };
+      return { newMembershipId: membership.id, payments };
     }
 
     case "invoice.paid": {

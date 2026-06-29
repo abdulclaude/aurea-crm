@@ -2,6 +2,7 @@
 
 import { IconChevronLeftMedium as ChevronLeftIcon } from "central-icons/IconChevronLeftMedium";
 import { Button } from "../ui/button";
+import { SidebarTrigger } from "../ui/sidebar";
 import { UserStatusIndicator } from "@/components/user-status-indicator";
 import { NotificationBell } from "@/features/notifications/components/notification-bell";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,7 @@ const AppHeader = () => {
       )}
     >
       <div className="flex items-center">
+        <SidebarTrigger className="mr-2 md:hidden" />
         {showBack && (
           <Button
             variant="ghost"

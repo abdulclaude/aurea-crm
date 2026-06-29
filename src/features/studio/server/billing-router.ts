@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   client,
+  giftCard,
   membershipPlan,
   promoCode,
   stripeConnection,
@@ -25,6 +26,10 @@ const BILLING_INTERVAL_MAP = {
 
 function planToStripeAmount(price: unknown): number {
   return Math.round(Number(price) * 100);
+}
+
+function centsToMoney(amountInPence: number): string {
+  return (amountInPence / 100).toFixed(2);
 }
 
 function requireOrganization(orgId: string | null): string {
@@ -105,6 +110,7 @@ export const studioBillingRouter = createTRPCRouter({
         successUrl: z.string().url(),
         cancelUrl: z.string().url(),
         promoCode: z.string().optional(),
+        giftCardCode: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -152,6 +158,9 @@ export const studioBillingRouter = createTRPCRouter({
           .where(eq(client.id, targetClient.id));
       }
 
+      const subtotalPence = planToStripeAmount(plan.price);
+      let remainingPence = subtotalPence;
+      const checkoutDiscounts: Stripe.Checkout.SessionCreateParams.Discount[] = [];
       let promoCodeId: string | undefined;
       if (input.promoCode) {
         const promo = await db.query.promoCode.findFirst({
@@ -170,7 +179,68 @@ export const studioBillingRouter = createTRPCRouter({
         if (promo.expiresAt && promo.expiresAt < new Date()) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Promo code has expired" });
         }
+        const discountPence =
+          promo.discountType === "PERCENT"
+            ? Math.round(subtotalPence * (Number(promo.discountValue) / 100))
+            : planToStripeAmount(promo.discountValue);
+        const cappedDiscountPence = Math.min(discountPence, remainingPence);
+        if (cappedDiscountPence > 0) {
+          const coupon = await stripe.coupons.create(
+            promo.discountType === "PERCENT"
+              ? {
+                  duration: "once",
+                  name: `Promo ${promo.code}`,
+                  percent_off: Number(promo.discountValue),
+                  metadata: { promoCodeId: promo.id, organizationId: orgId },
+                }
+              : {
+                  amount_off: cappedDiscountPence,
+                  currency: (plan.currency ?? "GBP").toLowerCase(),
+                  duration: "once",
+                  name: `Promo ${promo.code}`,
+                  metadata: { promoCodeId: promo.id, organizationId: orgId },
+                },
+            { idempotencyKey: `coupon_promo_${promo.id}_${plan.id}_${subtotalPence}` }
+          );
+          checkoutDiscounts.push({ coupon: coupon.id });
+          remainingPence = Math.max(0, remainingPence - cappedDiscountPence);
+        }
         promoCodeId = promo.id;
+      }
+
+      let giftCardId: string | undefined;
+      let giftCardAmountPence = 0;
+      if (input.giftCardCode) {
+        const card = await db.query.giftCard.findFirst({
+          where: and(
+            eq(giftCard.organizationId, orgId),
+            eq(giftCard.code, input.giftCardCode.toUpperCase()),
+            eq(giftCard.isActive, true)
+          ),
+          columns: { id: true, code: true, currency: true, remainingBalance: true, expiresAt: true },
+        });
+        if (!card) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Gift card not found" });
+        }
+        if (card.expiresAt && card.expiresAt < new Date()) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Gift card has expired" });
+        }
+        giftCardAmountPence = Math.min(planToStripeAmount(card.remainingBalance), remainingPence);
+        if (giftCardAmountPence > 0) {
+          const coupon = await stripe.coupons.create(
+            {
+              amount_off: giftCardAmountPence,
+              currency: (plan.currency ?? card.currency ?? "GBP").toLowerCase(),
+              duration: "once",
+              name: `Gift card ${card.code}`,
+              metadata: { giftCardId: card.id, organizationId: orgId },
+            },
+            { idempotencyKey: `coupon_gift_${card.id}_${plan.id}_${giftCardAmountPence}` }
+          );
+          checkoutDiscounts.push({ coupon: coupon.id });
+          remainingPence = Math.max(0, remainingPence - giftCardAmountPence);
+          giftCardId = card.id;
+        }
       }
 
       const intervalConfig = BILLING_INTERVAL_MAP[plan.billingInterval];
@@ -196,7 +266,14 @@ export const studioBillingRouter = createTRPCRouter({
           organizationId: orgId,
           locationId: ctx.locationId ?? "",
           ...(promoCodeId ? { promoCodeId } : {}),
+          ...(giftCardId
+            ? {
+                giftCardId,
+                giftCardAmount: centsToMoney(giftCardAmountPence),
+              }
+            : {}),
         },
+        ...(checkoutDiscounts.length > 0 ? { discounts: checkoutDiscounts } : {}),
         ...(mode === "subscription" && {
           subscription_data: {
             metadata: {
@@ -218,7 +295,7 @@ export const studioBillingRouter = createTRPCRouter({
                   transfer_data: { destination: studioConnection.stripeAccountId },
                   application_fee_amount: studioConnection.applicationFeePercent
                     ? Math.round(
-                        planToStripeAmount(plan.price) *
+                        remainingPence *
                           (Number(studioConnection.applicationFeePercent) / 100)
                       )
                     : 0,

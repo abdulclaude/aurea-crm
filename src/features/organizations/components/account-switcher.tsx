@@ -250,7 +250,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
             <DropdownMenuItem
               className="group"
               onClick={() => {
-                router.push("/settings/team");
+                router.push("/team");
               }}
             >
               <UsersIcon className="text-primary/75 group-hover:text-black size-3.5" />
@@ -268,20 +268,6 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
               <InviteIcon className="text-primary/75 group-hover:text-black size-3.5" />
               <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
                 Invites
-              </span>
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-0.5" />
-
-            <DropdownMenuItem
-              className="group"
-              onClick={() => {
-                router.push("/settings/workspace");
-              }}
-            >
-              <WorkspaceSettingsIcon className="text-primary/75 group-hover:text-black size-3.5" />
-              <span className="text-xs group-hover:text-black text-primary/75 tracking-tight">
-                Workspace settings
               </span>
             </DropdownMenuItem>
           </>

@@ -377,8 +377,8 @@ export const processTrackingEvents = inngest.createFunction(
           city: geoInfo.city,
           timezone: sdkDeviceInfo?.timezone,
 
-          isConversion: evt.eventName === "conversion" || evt.eventName === "purchase" || evt.eventName === "checkout_completed",
-          conversionType: evt.properties?.conversionType,
+          isConversion: evt.eventName === "conversion" || evt.eventName === "purchase" || evt.eventName === "checkout_completed" || evt.eventName === "form_submitted",
+          conversionType: evt.properties?.conversionType ?? (evt.eventName === "form_submitted" ? "lead" : undefined),
           revenue: evt.properties?.revenue,
           currency: evt.properties?.currency,
           orderId: evt.properties?.orderId,

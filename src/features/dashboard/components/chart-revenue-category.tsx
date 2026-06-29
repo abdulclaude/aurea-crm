@@ -59,7 +59,7 @@ export function ChartRevenueCategory({
       {isLoading ? (
         <ChartLoadingState variant="category-bar" />
       ) : (
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <BarChart
           data={merged}
           margin={{ top: 4, right: 10, left: 10, bottom: 20 }}

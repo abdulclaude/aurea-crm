@@ -15,6 +15,7 @@ import * as React from "react";
 import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -190,6 +191,55 @@ const classColumns: ColumnDef<ClassRow>[] = [
     },
   },
   {
+    id: "pricing",
+    header: "Pricing",
+    meta: { label: "Pricing" },
+    cell: ({ row }) => (
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-primary">
+          {formatPricing(row.original)}
+        </span>
+        {row.original.pricingModel === "SLIDING_SCALE" && (
+          <span className="text-[11px] text-primary/50">
+            {formatMoney(
+              row.original.slidingScaleMinPrice,
+              row.original.currency,
+            )}{" "}
+            -{" "}
+            {formatMoney(
+              row.original.slidingScaleMaxPrice,
+              row.original.currency,
+            )}
+          </span>
+        )}
+      </div>
+    ),
+  },
+  {
+    id: "bookingOptions",
+    header: "Booking",
+    meta: { label: "Booking" },
+    cell: ({ row }) => (
+      <div className="flex flex-wrap gap-1">
+        {row.original.onlineBookingEnabled && (
+          <Badge variant="secondary" className="text-[10px]">
+            Online
+          </Badge>
+        )}
+        {row.original.waitlistEnabled && (
+          <Badge variant="outline" className="text-[10px]">
+            Waitlist
+          </Badge>
+        )}
+        {row.original.spotPickingEnabled && (
+          <Badge variant="outline" className="text-[10px]">
+            Spots
+          </Badge>
+        )}
+      </div>
+    ),
+  },
+  {
     id: "actions",
     header: "",
     cell: ({ row }) => {
@@ -236,6 +286,26 @@ const CLASS_COLUMN_IDS = classColumns.map(
   (column, index) => (column.id ?? `column-${index}`) as string
 );
 const COLUMN_ORDER_STORAGE_KEY = "studio-classes-table.column-order";
+
+function formatPricing(classItem: ClassRow): string {
+  if (classItem.pricingModel === "FREE") return "Free";
+  if (classItem.pricingModel === "DROP_IN") {
+    return formatMoney(classItem.dropInPrice, classItem.currency);
+  }
+  if (classItem.pricingModel === "SLIDING_SCALE") return "Sliding scale";
+  return "Package only";
+}
+
+function formatMoney(
+  amount: string | null | undefined,
+  currency: string | null | undefined,
+): string {
+  if (!amount) return "-";
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: currency ?? "GBP",
+  }).format(Number(amount));
+}
 
 export function ClassesTable() {
   const trpc = useTRPC();

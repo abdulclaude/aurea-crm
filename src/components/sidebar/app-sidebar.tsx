@@ -6,11 +6,8 @@ import { IconAnalytics as AnalyticsIcon } from "central-icons/IconAnalytics";
 import { IconCalendarClock as TimeLogsIcon } from "central-icons/IconCalendarClock";
 import { IconConstructionHelmet as InstructorsIcon } from "central-icons/IconConstructionHelmet";
 import { IconGroup1 as MembersGroupIcon } from "central-icons/IconGroup1";
-import { IconHistory as ExecutionsIcon } from "central-icons/IconHistory";
 import { IconHomeRoof as HomeIcon } from "central-icons/IconHomeRoof";
-import { IconPayment as WorkflowsIcon } from "central-icons/IconPayment";
 import { IconCalendar3 as ClassesIcon } from "central-icons/IconCalendar3";
-import { IconDumbell as AppsIcon } from "central-icons/IconDumbell";
 import { IconReceiptBill as Receipt } from "central-icons/IconReceiptBill";
 
 import {
@@ -18,21 +15,19 @@ import {
   FileText,
   Banknote,
   ChevronDown,
+  History,
   Send,
-  CheckSquare,
   Rocket,
-  Inbox,
   Gift,
   Star,
   Users,
   CreditCard,
-  UserPlus,
   DoorOpen,
-  MessageSquare,
-  Heart,
-  Share2,
   Sparkles,
   Package,
+  Settings,
+  Workflow,
+  ListChecks,
 } from "lucide-react";
 
 import Link from "next/link";
@@ -42,6 +37,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarHeader,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -59,16 +55,10 @@ interface SidebarItem {
   url: string;
 }
 
-interface SidebarGroup {
+type SidebarGroup = {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   items: SidebarItem[];
-}
-
-const locationsGroup: SidebarGroup = {
-  title: "Locations",
-  icon: MembersGroupIcon,
-  items: [{ title: "Locations", icon: MembersGroupIcon, url: "/clients" }],
 };
 
 function CompletionRing({ pct }: { pct: number }) {
@@ -121,14 +111,14 @@ const AppSidebar = () => {
 
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     Home: true,
+    "Schedule & booking": true,
     Members: true,
-    Classes: true,
     Earnings: true,
-    Team: false,
-    Revenue: false,
+    Team: true,
+    Revenue: true,
     Marketing: false,
-    Automations: false,
-    Reports: true,
+    Automations: true,
+    Reports: false,
   });
 
   const toggleGroup = (groupTitle: string) => {
@@ -160,16 +150,8 @@ const AppSidebar = () => {
     trpc.organizations.getActive.queryOptions(),
   );
 
-  const { data: orgs } = useSuspenseQuery(
-    trpc.organizations.getMyOrganizations.queryOptions(),
-  );
-
-  const activeOrg =
-    orgs?.find((o) => o.id === active?.activeOrganizationId) ?? orgs?.[0];
-
   const { isInstructor } = useIsInstructor();
 
-  const canSeeClients = !!activeOrg?.role;
   const activeClient = active?.activeLocation ?? null;
 
   const enabled = !!activeClient;
@@ -212,13 +194,13 @@ const AppSidebar = () => {
 
   const adminMenuItems: SidebarGroup[] = [
     {
-      title: "Home",
-      icon: HomeIcon,
+      title: "Schedule & booking",
+      icon: ClassesIcon,
       items: [
-        { title: "Dashboard", icon: HomeIcon, url: "/dashboard" },
         { title: "Schedule", icon: ClassesIcon, url: "/studio/schedule" },
+        { title: "Service types", icon: ListChecks, url: "/studio/service-types" },
+        { title: "Classes", icon: ClassesIcon, url: "/studio/classes" },
         { title: "Check-in", icon: DoorOpen, url: "/studio/check-in" },
-        { title: "Inbox", icon: Inbox, url: "/inbox" },
       ],
     },
     {
@@ -227,33 +209,7 @@ const AppSidebar = () => {
       items: [
         { title: "Clients", icon: Users, url: "/clients" },
         { title: "Households", icon: Users, url: "/households" },
-        { title: "Member acquisition", icon: UserPlus, url: "/acquisition" },
-        { title: "Tasks", icon: CheckSquare, url: "/tasks" },
         { title: "Waivers", icon: FileText, url: "/waivers" },
-      ],
-    },
-    {
-      title: "Classes",
-      icon: ClassesIcon,
-      items: [
-        { title: "Classes", icon: ClassesIcon, url: "/studio/classes" },
-        { title: "Class types", icon: AppsIcon, url: "/studio/class-types" },
-        { title: "Rooms & spots", icon: HomeIcon, url: "/studio/rooms" },
-        {
-          title: "Substitutions",
-          icon: InstructorsIcon,
-          url: "/studio/substitutions",
-        },
-        { title: "Add-ons", icon: AppsIcon, url: "/studio/add-ons" },
-      ],
-    },
-    {
-      title: "Team",
-      icon: InstructorsIcon,
-      items: [
-        { title: "Instructors", icon: InstructorsIcon, url: "/instructors" },
-        { title: "Time logs", icon: TimeLogsIcon, url: "/time-logs" },
-        { title: "Payroll", icon: Banknote, url: "/payroll" },
       ],
     },
     {
@@ -261,10 +217,20 @@ const AppSidebar = () => {
       icon: Receipt,
       items: [
         { title: "Overview", icon: CreditCard, url: "/revenue" },
+        { title: "Pricing options", icon: Receipt, url: "/studio/pricing-options" },
         { title: "Memberships", icon: Receipt, url: "/studio/memberships" },
-        { title: "Product catalog", icon: Package, url: "/studio/products" },
-        { title: "Point of sale", icon: Receipt, url: "/studio/pos" },
+        { title: "Invoices", icon: Receipt, url: "/invoices" },
+        { title: "Products & POS", icon: Package, url: "/studio/pos" },
         { title: "Gift cards", icon: Gift, url: "/studio/gift-cards" },
+      ],
+    },
+    {
+      title: "Team",
+      icon: InstructorsIcon,
+      items: [
+        { title: "Staff", icon: InstructorsIcon, url: "/team" },
+        { title: "Payroll", icon: Banknote, url: "/payroll" },
+        { title: "Time logs", icon: TimeLogsIcon, url: "/time-logs" },
       ],
     },
     {
@@ -272,49 +238,32 @@ const AppSidebar = () => {
       icon: Send,
       items: [
         { title: "Campaigns", icon: Send, url: "/campaigns" },
-        { title: "SMS", icon: MessageSquare, url: "/sms" },
         { title: "Intro offers", icon: Sparkles, url: "/intro-offers" },
-        { title: "Referrals", icon: Share2, url: "/referrals" },
-        { title: "Loyalty", icon: Heart, url: "/loyalty" },
-        { title: "Funnels", icon: Zap, url: "/funnels" },
-        { title: "Forms", icon: FileText, url: "/builder/forms" },
+        { title: "Referrals", icon: Gift, url: "/referrals" },
+        { title: "Funnels & forms", icon: Zap, url: "/funnels" },
       ],
     },
     {
       title: "Automations",
-      icon: WorkflowsIcon,
+      icon: Workflow,
       items: [
-        { title: "Workflows", icon: WorkflowsIcon, url: "/workflows" },
-        { title: "Executions", icon: ExecutionsIcon, url: "/executions" },
+        { title: "Workflows", icon: Workflow, url: "/workflows" },
+        { title: "Executions", icon: History, url: "/executions" },
+        { title: "Bundles", icon: Package, url: "/bundles" },
       ],
     },
     {
       title: "Reports",
       icon: AnalyticsIcon,
       items: [
-        { title: "Sales", icon: Receipt, url: "/reports/sales" },
-        {
-          title: "Payment processing",
-          icon: CreditCard,
-          url: "/reports/payment-processing",
-        },
-        { title: "Clients", icon: Users, url: "/reports/clients" },
-        { title: "Staff", icon: InstructorsIcon, url: "/reports/staff" },
-        { title: "Inventory", icon: Package, url: "/reports/inventory" },
+        { title: "Reports", icon: AnalyticsIcon, url: "/reports" },
       ],
     },
-    locationsGroup,
   ];
 
   const menuItems = isInstructor ? instructorMenuItems : adminMenuItems;
 
-  const visibleMenuItems = menuItems.filter((group) => {
-    if (group.title === "Locations") {
-      if (!canSeeClients) return false;
-      if (activeClient) return false;
-    }
-    return true;
-  });
+  const visibleMenuItems = menuItems;
 
   const allItems = visibleMenuItems.flatMap((group) => group.items);
   const pinnedItems = favorites
@@ -568,10 +517,6 @@ const AppSidebar = () => {
                         isGroupActive
                           ? "bg-primary-foreground"
                           : "text-primary/80",
-                        canSeeClients &&
-                          activeClient &&
-                          group.title === "Clients" &&
-                          "text-amber-200",
                       )}
                     >
                       <GroupIcon
@@ -685,6 +630,36 @@ const AppSidebar = () => {
           )}
         </AnimatePresence>
       </SidebarContent>
+
+      {!isInstructor && (
+        <SidebarFooter className="border-t border-black/5 bg-background p-2 dark:border-white/5">
+          <SidebarMenuItem className="w-full">
+            <SidebarMenuButton
+              tooltip="Studio settings"
+              isActive={pathname.startsWith("/settings/workspace")}
+              asChild
+              className={cn(
+                "h-9 justify-start rounded-sm px-2.5 text-xs hover:bg-primary-foreground",
+                "group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0",
+                pathname.startsWith("/settings/workspace") &&
+                  "bg-primary-foreground",
+              )}
+            >
+              <Link href="/settings/workspace" prefetch>
+                <Settings
+                  className={cn(
+                    "size-3.5 shrink-0 text-primary/80",
+                    pathname.startsWith("/settings/workspace") && "text-black",
+                  )}
+                />
+                <span className="font-medium tracking-tight text-primary/80 group-data-[collapsible=icon]:hidden">
+                  Studio settings
+                </span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarFooter>
+      )}
     </Sidebar>
   );
 };

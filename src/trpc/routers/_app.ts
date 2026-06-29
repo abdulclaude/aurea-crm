@@ -29,10 +29,12 @@ import { mindbodyRouter } from "@/features/modules/pilates-studio/server/mindbod
 import { studioClassesRouter } from "@/features/modules/pilates-studio/server/classes-router";
 import { classTypesRouter } from "@/features/studio/server/class-types-router";
 import { roomsRouter } from "@/features/studio/server/rooms-router";
+import { serviceCatalogRouter } from "@/features/studio/server/service-catalog-router";
 import { studioClassesEnhancedRouter } from "@/features/studio/server/classes-router";
 import { studioBookingsRouter } from "@/features/studio/server/bookings-router";
 import { waitlistRouter } from "@/features/studio/server/waitlist-router";
 import { membershipPlansRouter } from "@/features/studio/server/membership-plans-router";
+import { pricingOptionsRouter } from "@/features/studio/server/pricing-options-router";
 import { subscriptionsRouter } from "@/features/studio/server/subscriptions-router";
 import { checkinRouter } from "@/features/studio/server/checkin-router";
 import { studioDashboardRouter } from "@/features/studio/server/studio-dashboard-router";
@@ -81,6 +83,7 @@ import { householdsRouter } from "@/features/households/server/router";
 import { acquisitionRouter } from "@/features/acquisition/server/router";
 import { instructorSubstitutionsRouter } from "@/features/instructor-substitutions/server/router";
 import { studioAddOnsRouter } from "@/features/studio-add-ons/server/router";
+import { staffRouter } from "@/features/staff/server/router";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -131,11 +134,13 @@ export const appRouter = createTRPCRouter({
   calComCredentials: calComCredentialsRouter,
   // Studio (Phase 1)
   classTypes: classTypesRouter,
+  serviceCatalog: serviceCatalogRouter,
   rooms: roomsRouter,
   studioClassesEnhanced: studioClassesEnhancedRouter,
   studioBookings: studioBookingsRouter,
   waitlist: waitlistRouter,
   membershipPlans: membershipPlansRouter,
+  pricingOptions: pricingOptionsRouter,
   subscriptions: subscriptionsRouter,
   checkin: checkinRouter,
   studioDashboard: studioDashboardRouter,
@@ -173,6 +178,7 @@ export const appRouter = createTRPCRouter({
   acquisition: acquisitionRouter,
   instructorSubstitutions: instructorSubstitutionsRouter,
   studioAddOns: studioAddOnsRouter,
+  staff: staffRouter,
 });
 
 // export type definition of API

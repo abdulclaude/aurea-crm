@@ -22,6 +22,7 @@ export const checkInMethod = pgEnum("CheckInMethod", ['MANUAL', 'QR_CODE', 'GPS'
 export const churnRiskLevel = pgEnum("ChurnRiskLevel", ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
 export const classDifficulty = pgEnum("ClassDifficulty", ['BEGINNER', 'INTERMEDIATE', 'ADVANCED', 'ALL_LEVELS'])
 export const classInstanceStatus = pgEnum("ClassInstanceStatus", ['SCHEDULED', 'CANCELLED', 'COMPLETED', 'IN_PROGRESS'])
+export const classPricingModel = pgEnum("ClassPricingModel", ['FREE', 'DROP_IN', 'PACKAGE_ONLY', 'SLIDING_SCALE'])
 export const clientType = pgEnum("ClientType", ['LEAD', 'PROSPECT', 'CUSTOMER', 'CHURN', 'CLOSED'])
 export const contentAccessLevel = pgEnum("ContentAccessLevel", ['PUBLIC', 'MEMBERS_ONLY', 'PAID'])
 export const conversationChannel = pgEnum("ConversationChannel", ['SMS', 'EMAIL', 'APP'])
@@ -67,6 +68,12 @@ export const payrollRunStatus = pgEnum("PayrollRunStatus", ['DRAFT', 'PENDING_AP
 export const performanceMetricSource = pgEnum("PerformanceMetricSource", ['MANUAL', 'WEARABLE', 'IMPORT'])
 export const pixelProvider = pgEnum("PixelProvider", ['META_PIXEL', 'GOOGLE_ANALYTICS', 'TIKTOK_PIXEL', 'CUSTOM'])
 export const pricingAdjustmentType = pgEnum("PricingAdjustmentType", ['PERCENT', 'FIXED_AMOUNT'])
+export const pricingAccessTargetType = pgEnum("PricingAccessTargetType", ['ALL_SERVICES', 'SERVICE_TYPE', 'SERVICE_CATEGORY', 'CLASS_TYPE', 'VIDEO_LIBRARY', 'COMMUNITY', 'RETAIL_PRODUCT'])
+export const pricingOptionType = pgEnum("PricingOptionType", ['CLASS_PACK', 'MEMBERSHIP', 'BUNDLE', 'DROP_IN', 'INTRO_OFFER', 'ACCOUNT_CREDIT'])
+export const serviceExperienceType = pgEnum("ServiceExperienceType", ['CLASS', 'PRIVATE', 'EVENT'])
+export const serviceFormat = pgEnum("ServiceFormat", ['IN_PERSON', 'VIRTUAL', 'HYBRID'])
+export const servicePaymentType = pgEnum("ServicePaymentType", ['FREE', 'PAID', 'SLIDING_SCALE', 'PACKAGE_ONLY'])
+export const serviceVisibility = pgEnum("ServiceVisibility", ['PUBLIC', 'PRIVATE'])
 export const recurringFrequency = pgEnum("RecurringFrequency", ['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'SEMIANNUALLY', 'ANNUALLY'])
 export const recurringInvoiceStatus = pgEnum("RecurringInvoiceStatus", ['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED'])
 export const referralRewardType = pgEnum("ReferralRewardType", ['CREDIT', 'DISCOUNT', 'FREE_CLASS', 'CASH'])
@@ -153,35 +160,58 @@ export const studioClass = pgTable("StudioClass", {
 	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
 	organizationId: text().notNull(),
 	bookingWindowHours: integer().default(168),
+	cancellationPolicyId: text(),
 	cancellationWindowHours: integer().default(12),
 	classTypeId: text(),
+	serviceTypeId: text(),
 	color: text(),
+	currency: text().default('GBP').notNull(),
 	difficulty: classDifficulty(),
+	dropInPrice: numeric({ precision: 10, scale:  2 }),
 	equipmentNeeded: text().array().default([]),
+	imageUrl: text(),
 	instructorId: text(),
 	isRecurring: boolean().default(false).notNull(),
 	isVirtual: boolean().default(false).notNull(),
 	minCapacity: integer(),
+	onlineBookingEnabled: boolean().default(true).notNull(),
+	onlineCapacity: integer(),
+	pricingModel: classPricingModel().default('PACKAGE_ONLY').notNull(),
 	recurrenceRule: text(),
 	roomId: text(),
 	roomName: text(),
+	slidingScaleMaxPrice: numeric({ precision: 10, scale:  2 }),
+	slidingScaleMinPrice: numeric({ precision: 10, scale:  2 }),
+	spotPickingEnabled: boolean().default(false).notNull(),
 	status: classInstanceStatus().default('SCHEDULED').notNull(),
+	waitlistEnabled: boolean().default(false).notNull(),
+	autoPromoteWaitlist: boolean().default(false).notNull(),
+	walkInCapacity: integer(),
 }, (table) => [
-	index("StudioClass_classTypeId_idx").using("btree", table.classTypeId.asc().nullsLast().op("text_ops")),
-	index("StudioClass_externalId_idx").using("btree", table.externalId.asc().nullsLast().op("text_ops")),
+		index("StudioClass_cancellationPolicyId_idx").using("btree", table.cancellationPolicyId.asc().nullsLast().op("text_ops")),
+		index("StudioClass_classTypeId_idx").using("btree", table.classTypeId.asc().nullsLast().op("text_ops")),
+		index("StudioClass_serviceTypeId_idx").using("btree", table.serviceTypeId.asc().nullsLast().op("text_ops")),
+		index("StudioClass_externalId_idx").using("btree", table.externalId.asc().nullsLast().op("text_ops")),
 	index("StudioClass_instructorId_idx").using("btree", table.instructorId.asc().nullsLast().op("text_ops")),
+	index("StudioClass_onlineBookingEnabled_idx").using("btree", table.onlineBookingEnabled.asc().nullsLast().op("bool_ops")),
 	index("StudioClass_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	index("StudioClass_pricingModel_idx").using("btree", table.pricingModel.asc().nullsLast().op("enum_ops")),
 	index("StudioClass_startTime_idx").using("btree", table.startTime.asc().nullsLast().op("timestamp_ops")),
 	index("StudioClass_status_idx").using("btree", table.status.asc().nullsLast().op("enum_ops")),
 	index("StudioClass_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
-	foreignKey({
-			columns: [table.classTypeId],
-			foreignColumns: [classType.id],
-			name: "StudioClass_classTypeId_fkey"
-		}).onUpdate("cascade").onDelete("set null"),
-	foreignKey({
-			columns: [table.instructorId],
-			foreignColumns: [instructor.id],
+		foreignKey({
+				columns: [table.classTypeId],
+				foreignColumns: [classType.id],
+				name: "StudioClass_classTypeId_fkey"
+			}).onUpdate("cascade").onDelete("set null"),
+		foreignKey({
+				columns: [table.serviceTypeId],
+				foreignColumns: [serviceType.id],
+				name: "StudioClass_serviceTypeId_fkey"
+			}).onUpdate("cascade").onDelete("set null"),
+		foreignKey({
+				columns: [table.instructorId],
+				foreignColumns: [instructor.id],
 			name: "StudioClass_instructorId_fkey"
 		}).onUpdate("cascade").onDelete("set null"),
 	foreignKey({
@@ -531,6 +561,161 @@ export const classType = pgTable("ClassType", {
 			foreignColumns: [location.id],
 			name: "ClassType_locationId_fkey"
 		}).onUpdate("cascade").onDelete("set null"),
+	]).enableRLS();
+
+export const serviceCategory = pgTable("ServiceCategory", {
+	id: text().primaryKey().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	name: text().notNull(),
+	slug: text().notNull(),
+	description: text(),
+	color: text(),
+	sortOrder: integer().default(0).notNull(),
+	isActive: boolean().default(true).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+}, (table) => [
+	index("ServiceCategory_isActive_idx").using("btree", table.isActive.asc().nullsLast().op("bool_ops")),
+	index("ServiceCategory_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
+	index("ServiceCategory_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	uniqueIndex("ServiceCategory_organizationId_slug_key").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "ServiceCategory_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "ServiceCategory_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+]).enableRLS();
+
+export const serviceType = pgTable("ServiceType", {
+	id: text().primaryKey().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	categoryId: text(),
+	classTypeId: text(),
+	name: text().notNull(),
+	slug: text().notNull(),
+	description: text(),
+	experienceType: serviceExperienceType().default('CLASS').notNull(),
+	format: serviceFormat().default('IN_PERSON').notNull(),
+	defaultLocation: text(),
+	durationMinutes: integer().default(60).notNull(),
+	capacity: integer(),
+	bufferMinutes: integer().default(0).notNull(),
+	roomIds: text().array().default([]),
+	instructorIds: text().array().default([]),
+	paymentType: servicePaymentType().default('PACKAGE_ONLY').notNull(),
+	visibility: serviceVisibility().default('PUBLIC').notNull(),
+	price: numeric({ precision: 10, scale:  2 }),
+	slidingScaleMinPrice: numeric({ precision: 10, scale:  2 }),
+	slidingScaleMaxPrice: numeric({ precision: 10, scale:  2 }),
+	currency: text().default('GBP').notNull(),
+	revenueCategory: text(),
+	bookingRestrictionTags: text().array().default([]),
+	workoutTypes: text().array().default([]),
+	areasOfFocus: text().array().default([]),
+	intensity: text(),
+	equipment: text().array().default([]),
+	checkoutConfirmation: text(),
+	confirmationEmailBody: text(),
+	imageUrl: text(),
+	allowUnpaidBookings: boolean().default(false).notNull(),
+	delaySchedulingHours: integer(),
+	allowRecurringBookings: boolean().default(false).notNull(),
+	displayImageAtCheckout: boolean().default(true).notNull(),
+	calendarColor: text(),
+	sortOrder: integer().default(0).notNull(),
+	isActive: boolean().default(true).notNull(),
+	metadata: jsonb().default({}).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+}, (table) => [
+	index("ServiceType_categoryId_idx").using("btree", table.categoryId.asc().nullsLast().op("text_ops")),
+	index("ServiceType_classTypeId_idx").using("btree", table.classTypeId.asc().nullsLast().op("text_ops")),
+	index("ServiceType_experienceType_idx").using("btree", table.experienceType.asc().nullsLast().op("enum_ops")),
+	index("ServiceType_isActive_idx").using("btree", table.isActive.asc().nullsLast().op("bool_ops")),
+	index("ServiceType_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
+	index("ServiceType_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	uniqueIndex("ServiceType_organizationId_slug_key").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "ServiceType_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "ServiceType_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.categoryId],
+			foreignColumns: [serviceCategory.id],
+			name: "ServiceType_categoryId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.classTypeId],
+			foreignColumns: [classType.id],
+			name: "ServiceType_classTypeId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+]).enableRLS();
+
+export const classSeries = pgTable("ClassSeries", {
+	id: text().primaryKey().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	serviceTypeId: text(),
+	classTypeId: text(),
+	roomId: text(),
+	name: text().notNull(),
+	description: text(),
+	startDate: date({ mode: 'date' }).notNull(),
+	endDate: date({ mode: 'date' }),
+	startTime: text().notNull(),
+	endTime: text().notNull(),
+	recurrenceRule: text().notNull(),
+	recurrenceDays: text().array().default([]),
+	instructorIds: text().array().default([]),
+	capacity: integer(),
+	status: text().default('ACTIVE').notNull(),
+	metadata: jsonb().default({}).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+}, (table) => [
+	index("ClassSeries_classTypeId_idx").using("btree", table.classTypeId.asc().nullsLast().op("text_ops")),
+	index("ClassSeries_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
+	index("ClassSeries_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	index("ClassSeries_serviceTypeId_idx").using("btree", table.serviceTypeId.asc().nullsLast().op("text_ops")),
+	index("ClassSeries_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "ClassSeries_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "ClassSeries_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.serviceTypeId],
+			foreignColumns: [serviceType.id],
+			name: "ClassSeries_serviceTypeId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.classTypeId],
+			foreignColumns: [classType.id],
+			name: "ClassSeries_classTypeId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.roomId],
+			foreignColumns: [room.id],
+			name: "ClassSeries_roomId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
 ]).enableRLS();
 
 export const room = pgTable("Room", {
@@ -736,6 +921,68 @@ export const membershipPlan = pgTable("MembershipPlan", {
 			columns: [table.locationId],
 			foreignColumns: [location.id],
 			name: "MembershipPlan_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	]).enableRLS();
+
+export const pricingOption = pgTable("PricingOption", {
+	id: text().primaryKey().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	membershipPlanId: text(),
+	name: text().notNull(),
+	slug: text().notNull(),
+	description: text(),
+	type: pricingOptionType().default('MEMBERSHIP').notNull(),
+	price: numeric({ precision: 10, scale:  2 }).notNull(),
+	currency: text().default('GBP').notNull(),
+	billingInterval: billingInterval().default('ONE_TIME').notNull(),
+	classCredits: integer(),
+	durationDays: integer(),
+	revenueCategory: text(),
+	isIntroOffer: boolean().default(false).notNull(),
+	isBundle: boolean().default(false).notNull(),
+	isPublic: boolean().default(true).notNull(),
+	isHidden: boolean().default(false).notNull(),
+	showInPos: boolean().default(true).notNull(),
+	directPurchaseEnabled: boolean().default(true).notNull(),
+	buyPagePath: text(),
+	termsText: text(),
+	confirmationEmailBody: text(),
+	confirmationRedirectUrl: text(),
+	commissionMode: text().default('NONE').notNull(),
+	commissionValue: numeric({ precision: 10, scale:  2 }),
+	maxPurchases: integer(),
+	maxPurchasesPerClient: integer(),
+	bookingLimits: jsonb().default({}).notNull(),
+	accessSummary: text(),
+	sortOrder: integer().default(0).notNull(),
+	isActive: boolean().default(true).notNull(),
+	metadata: jsonb().default({}).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+}, (table) => [
+	index("PricingOption_billingInterval_idx").using("btree", table.billingInterval.asc().nullsLast().op("enum_ops")),
+	index("PricingOption_isActive_idx").using("btree", table.isActive.asc().nullsLast().op("bool_ops")),
+	index("PricingOption_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
+	index("PricingOption_membershipPlanId_idx").using("btree", table.membershipPlanId.asc().nullsLast().op("text_ops")),
+	index("PricingOption_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	index("PricingOption_showInPos_idx").using("btree", table.showInPos.asc().nullsLast().op("bool_ops")),
+	index("PricingOption_type_idx").using("btree", table.type.asc().nullsLast().op("enum_ops")),
+	uniqueIndex("PricingOption_organizationId_slug_key").using("btree", table.organizationId.asc().nullsLast().op("text_ops"), table.slug.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "PricingOption_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "PricingOption_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.membershipPlanId],
+			foreignColumns: [membershipPlan.id],
+			name: "PricingOption_membershipPlanId_fkey"
 		}).onUpdate("cascade").onDelete("set null"),
 ]).enableRLS();
 
@@ -1115,6 +1362,70 @@ export const studioProduct = pgTable("StudioProduct", {
 			columns: [table.locationId],
 			foreignColumns: [location.id],
 			name: "StudioProduct_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	]).enableRLS();
+
+export const pricingOptionAccessGrant = pgTable("PricingOptionAccessGrant", {
+	id: text().primaryKey().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	pricingOptionId: text().notNull(),
+	targetType: pricingAccessTargetType().default('ALL_SERVICES').notNull(),
+	serviceTypeId: text(),
+	serviceCategoryId: text(),
+	classTypeId: text(),
+	productId: text(),
+	targetKey: text(),
+	visitLimit: integer(),
+	bookingLimitPerDay: integer(),
+	bookingLimitPerWeek: integer(),
+	bookingLimitPerMonth: integer(),
+	metadata: jsonb().default({}).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	updatedAt: timestamp({ precision: 3, mode: 'date' }).notNull(),
+}, (table) => [
+	index("PricingOptionAccessGrant_classTypeId_idx").using("btree", table.classTypeId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_locationId_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_pricingOptionId_idx").using("btree", table.pricingOptionId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_productId_idx").using("btree", table.productId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_serviceCategoryId_idx").using("btree", table.serviceCategoryId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_serviceTypeId_idx").using("btree", table.serviceTypeId.asc().nullsLast().op("text_ops")),
+	index("PricingOptionAccessGrant_targetType_idx").using("btree", table.targetType.asc().nullsLast().op("enum_ops")),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "PricingOptionAccessGrant_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "PricingOptionAccessGrant_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.pricingOptionId],
+			foreignColumns: [pricingOption.id],
+			name: "PricingOptionAccessGrant_pricingOptionId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.serviceTypeId],
+			foreignColumns: [serviceType.id],
+			name: "PricingOptionAccessGrant_serviceTypeId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.serviceCategoryId],
+			foreignColumns: [serviceCategory.id],
+			name: "PricingOptionAccessGrant_serviceCategoryId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.classTypeId],
+			foreignColumns: [classType.id],
+			name: "PricingOptionAccessGrant_classTypeId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.productId],
+			foreignColumns: [studioProduct.id],
+			name: "PricingOptionAccessGrant_productId_fkey"
 		}).onUpdate("cascade").onDelete("set null"),
 ]).enableRLS();
 
@@ -4471,6 +4782,75 @@ export const funnel = pgTable("Funnel", {
 			foreignColumns: [location.id],
 			name: "Funnel_locationId_fkey"
 		}).onUpdate("cascade").onDelete("set null"),
+]).enableRLS();
+
+export const externalFormSubmission = pgTable("ExternalFormSubmission", {
+	id: text().primaryKey().notNull(),
+	funnelId: text().notNull(),
+	organizationId: text().notNull(),
+	locationId: text(),
+	formId: text(),
+	formKey: text().notNull(),
+	formName: text(),
+	formType: text(),
+	formVersion: text(),
+	status: text().default('submitted').notNull(),
+	qualified: boolean(),
+	score: doublePrecision(),
+	reasonCodes: text().array().default([]).notNull(),
+	data: jsonb().notNull(),
+	normalized: jsonb().default({}).notNull(),
+	metadata: jsonb().default({}).notNull(),
+	sessionId: text(),
+	anonymousId: text(),
+	userId: text(),
+	pageUrl: text(),
+	pagePath: text(),
+	pageTitle: text(),
+	referrer: text(),
+	utmSource: text(),
+	utmMedium: text(),
+	utmCampaign: text(),
+	utmTerm: text(),
+	utmContent: text(),
+	firstTouchUtm: jsonb(),
+	lastTouchUtm: jsonb(),
+	clickIds: jsonb(),
+	cookies: jsonb(),
+	device: jsonb(),
+	ipAddress: text(),
+	userAgent: text(),
+	submittedAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+	createdAt: timestamp({ precision: 3, mode: 'date' }).default(sql`CURRENT_TIMESTAMP`).notNull(),
+}, (table) => [
+	index("ExternalFormSubmission_anonymousId_idx").using("btree", table.anonymousId.asc().nullsLast().op("text_ops")),
+	index("ExternalFormSubmission_formKey_idx").using("btree", table.formKey.asc().nullsLast().op("text_ops")),
+	index("ExternalFormSubmission_funnelId_submittedAt_idx").using("btree", table.funnelId.asc().nullsLast().op("text_ops"), table.submittedAt.asc().nullsLast().op("timestamp_ops")),
+	index("ExternalFormSubmission_locationId_submittedAt_idx").using("btree", table.locationId.asc().nullsLast().op("text_ops"), table.submittedAt.asc().nullsLast().op("timestamp_ops")),
+	index("ExternalFormSubmission_organizationId_idx").using("btree", table.organizationId.asc().nullsLast().op("text_ops")),
+	index("ExternalFormSubmission_qualified_idx").using("btree", table.qualified.asc().nullsLast().op("bool_ops")),
+	index("ExternalFormSubmission_sessionId_idx").using("btree", table.sessionId.asc().nullsLast().op("text_ops")),
+	index("ExternalFormSubmission_status_idx").using("btree", table.status.asc().nullsLast().op("text_ops")),
+	foreignKey({
+			columns: [table.formId],
+			foreignColumns: [form.id],
+			name: "ExternalFormSubmission_formId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.funnelId],
+			foreignColumns: [funnel.id],
+			name: "ExternalFormSubmission_funnelId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
+	foreignKey({
+			columns: [table.locationId],
+			foreignColumns: [location.id],
+			name: "ExternalFormSubmission_locationId_fkey"
+		}).onUpdate("cascade").onDelete("set null"),
+	foreignKey({
+			columns: [table.organizationId],
+			foreignColumns: [organization.id],
+			name: "ExternalFormSubmission_organizationId_fkey"
+		}).onUpdate("cascade").onDelete("cascade"),
 ]).enableRLS();
 
 export const anonymousUserProfiles = pgTable("anonymous_user_profiles", {
