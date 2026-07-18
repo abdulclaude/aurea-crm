@@ -20,8 +20,22 @@ import type {
   CommunicationProfileUpdate,
 } from "@/features/communications/contracts";
 import type { DeliveryTransaction } from "@/features/delivery/server/outbox";
+import { areServerPlanRestrictionsDisabled } from "@/features/subscriptions/lib/plan-restrictions";
 
 type CommunicationProfile = typeof communicationServiceProfile.$inferSelect;
+
+export function applyTestingPlanAccess(
+  profile: CommunicationProfile,
+): CommunicationProfile {
+  if (!areServerPlanRestrictionsDisabled()) return profile;
+  const entitledAt = profile.createdAt;
+  return {
+    ...profile,
+    brandedEmailEntitledAt: profile.brandedEmailEntitledAt ?? entitledAt,
+    smsEntitledAt: profile.smsEntitledAt ?? entitledAt,
+    voiceEntitledAt: profile.voiceEntitledAt ?? entitledAt,
+  };
+}
 
 const ENTITLEMENT_FIELDS = {
   EMAIL: "brandedEmailEntitledAt",
@@ -360,7 +374,9 @@ export async function requireCommunicationEntitlement(input: {
   organizationId: string;
   channel: CommunicationChannel;
 }): Promise<CommunicationProfile> {
-  const profile = await getOrCreateCommunicationProfile(input.organizationId);
+  const profile = applyTestingPlanAccess(
+    await getOrCreateCommunicationProfile(input.organizationId),
+  );
   const entitledAt = profile[ENTITLEMENT_FIELDS[input.channel]];
   const state = profile[STATE_FIELDS[input.channel]];
   if (!entitledAt || state === "SUSPENDED" || state === "RELEASED") {

@@ -13,6 +13,7 @@ import {
   voiceCall,
 } from "@/db/schema";
 import { getCommunicationsPublicUrl } from "./platform-credentials";
+import { applyTestingPlanAccess } from "./profile-service";
 import { reserveVoiceSpend } from "./voice-spend-policy";
 
 const TERMINAL_CALL_STATUSES: ReadonlySet<
@@ -44,16 +45,19 @@ export async function buildInboundVoiceResponse(input: {
       ),
     }),
   ]);
+  const effectiveProfile = profile
+    ? applyTestingPlanAccess(profile)
+    : undefined;
   const response = new twilio.twiml.VoiceResponse();
   const active =
     phone &&
-    profile?.voiceEntitledAt &&
+    effectiveProfile?.voiceEntitledAt &&
     !["SUSPENDED", "RELEASED", "CANCELLATION_GRACE_PERIOD"].includes(
-      profile.voiceState,
+      effectiveProfile.voiceState,
     );
   const countryAllowed =
     !input.fromCountry ||
-    profile?.allowedVoiceCountries.includes(input.fromCountry);
+    effectiveProfile?.allowedVoiceCountries.includes(input.fromCountry);
   if (!active || !countryAllowed) {
     response.reject({ reason: "rejected" });
     return response.toString();
@@ -76,9 +80,9 @@ export async function buildInboundVoiceResponse(input: {
           providerCallId: input.callSid,
           fromNumber: input.from,
           toNumber: input.to,
-          forwardingNumber: profile.voiceForwardingNumber,
-          recordingEnabled: profile.recordingEnabled,
-          currency: profile.spendCurrency,
+          forwardingNumber: effectiveProfile.voiceForwardingNumber,
+          recordingEnabled: effectiveProfile.recordingEnabled,
+          currency: effectiveProfile.spendCurrency,
           idempotencyKey: `twilio:voice:inbound:${input.callSid}`,
           startedAt: new Date(),
           updatedAt: new Date(),
@@ -138,14 +142,14 @@ export async function buildInboundVoiceResponse(input: {
     return response.toString();
   }
   const recordingAllowed = Boolean(
-    profile.recordingEnabled &&
-    profile.recordingLegalAcknowledgedAt &&
-    profile.recordingRetentionDays,
+    effectiveProfile.recordingEnabled &&
+    effectiveProfile.recordingLegalAcknowledgedAt &&
+    effectiveProfile.recordingRetentionDays,
   );
   const recordingCallback = `${getCommunicationsPublicUrl()}/api/webhooks/twilio/voice/recording`;
   if (
-    profile.voiceForwardingNumber &&
-    profile.voiceForwardingNumberVerifiedAt &&
+    effectiveProfile.voiceForwardingNumber &&
+    effectiveProfile.voiceForwardingNumberVerifiedAt &&
     maxDurationSeconds
   ) {
     const dial = response.dial({
@@ -155,10 +159,14 @@ export async function buildInboundVoiceResponse(input: {
       recordingStatusCallback: recordingAllowed ? recordingCallback : undefined,
       recordingStatusCallbackMethod: recordingAllowed ? "POST" : undefined,
     });
-    dial.number(profile.voiceForwardingNumber);
+    dial.number(effectiveProfile.voiceForwardingNumber);
     return response.toString();
   }
-  if (profile.voicemailEnabled && maxDurationSeconds && recordingAllowed) {
+  if (
+    effectiveProfile.voicemailEnabled &&
+    maxDurationSeconds &&
+    recordingAllowed
+  ) {
     response.say("Please leave a message after the tone.");
     response.record({
       maxLength: maxDurationSeconds,

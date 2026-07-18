@@ -26,6 +26,7 @@ import {
 } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { getCommunicationsPublicUrl } from "./platform-credentials";
+import { applyTestingPlanAccess } from "./profile-service";
 import { resolveTwilioPlatformAccount } from "./twilio-client";
 import {
   releaseVoiceSpendReservation,
@@ -133,10 +134,13 @@ export async function enqueueOutboundVoiceCall(input: {
         eq(communicationServiceProfile.organizationId, input.organizationId),
       )
       .limit(1);
+    const effectiveProfile = profile
+      ? applyTestingPlanAccess(profile)
+      : undefined;
     if (
-      !profile?.voiceEntitledAt ||
+      !effectiveProfile?.voiceEntitledAt ||
       ["SUSPENDED", "RELEASED", "CANCELLATION_GRACE_PERIOD"].includes(
-        profile.voiceState,
+        effectiveProfile.voiceState,
       )
     ) {
       throw new TRPCError({
@@ -144,19 +148,19 @@ export async function enqueueOutboundVoiceCall(input: {
         message: "Voice is not included in the active plan.",
       });
     }
-    if (!profile.voiceForwardingNumber) {
+    if (!effectiveProfile.voiceForwardingNumber) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: "Configure a verified staff forwarding number first.",
       });
     }
-    if (!profile.voiceForwardingNumberVerifiedAt) {
+    if (!effectiveProfile.voiceForwardingNumberVerifiedAt) {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",
         message: "Verify the staff forwarding number before placing calls.",
       });
     }
-    if (!profile.allowedVoiceCountries.includes(destination.country)) {
+    if (!effectiveProfile.allowedVoiceCountries.includes(destination.country)) {
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "The destination country is not allowed by voice policy.",
@@ -175,9 +179,9 @@ export async function enqueueOutboundVoiceCall(input: {
         status: "QUEUED",
         fromNumber: number.phoneNumber,
         toNumber: destination.e164,
-        forwardingNumber: profile.voiceForwardingNumber,
-        recordingEnabled: profile.recordingEnabled,
-        currency: profile.spendCurrency,
+        forwardingNumber: effectiveProfile.voiceForwardingNumber,
+        recordingEnabled: effectiveProfile.recordingEnabled,
+        currency: effectiveProfile.spendCurrency,
         idempotencyKey: input.idempotencyKey,
         nextAttemptAt: now,
         updatedAt: now,
@@ -273,9 +277,12 @@ export async function dispatchVoiceCall(voiceCallId: string) {
         ),
       }),
     ]);
+    const effectiveProfile = profile
+      ? applyTestingPlanAccess(profile)
+      : undefined;
     if (
-      !profile?.voiceEntitledAt ||
-      !profile.voiceMaxCallDurationSeconds ||
+      !effectiveProfile?.voiceEntitledAt ||
+      !effectiveProfile.voiceMaxCallDurationSeconds ||
       !number
     ) {
       throw new Error(
@@ -291,7 +298,7 @@ export async function dispatchVoiceCall(voiceCallId: string) {
     const response = new twilio.twiml.VoiceResponse();
     const dial = response.dial({
       callerId: call.fromNumber,
-      timeLimit: profile.voiceMaxCallDurationSeconds,
+      timeLimit: effectiveProfile.voiceMaxCallDurationSeconds,
       record: call.recordingEnabled
         ? "record-from-answer-dual"
         : "do-not-record",
@@ -322,7 +329,7 @@ export async function dispatchVoiceCall(voiceCallId: string) {
       to: call.forwardingNumber ?? "",
       twiml: response.toString(),
       timeout: 30,
-      timeLimit: profile.voiceMaxCallDurationSeconds,
+      timeLimit: effectiveProfile.voiceMaxCallDurationSeconds,
       statusCallback: `${getCommunicationsPublicUrl()}/api/webhooks/twilio/voice/status`,
       statusCallbackMethod: "POST",
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],

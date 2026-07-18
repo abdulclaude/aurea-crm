@@ -31,6 +31,7 @@ import { smsSegmentReservationAmount } from "./sms-spend-policy";
 import { reserveSmsSpend } from "./sms-spend-policy";
 import { enqueueDeliveryInTransaction } from "@/features/delivery/server/outbox";
 import { requestDeliveryDispatch } from "@/features/delivery/server/request-dispatch";
+import { applyTestingPlanAccess } from "./profile-service";
 
 type StatusEvent = z.infer<typeof twilioSmsStatusSchema>;
 type InboundEvent = z.infer<typeof twilioInboundSmsSchema>;
@@ -324,10 +325,13 @@ async function queueControlledHelpResponse(input: {
   profile: typeof communicationServiceProfile.$inferSelect | undefined;
   occurredAt: Date;
 }): Promise<void> {
+  const profile = input.profile
+    ? applyTestingPlanAccess(input.profile)
+    : undefined;
   if (
-    !input.profile?.smsEntitledAt ||
+    !profile?.smsEntitledAt ||
     ["SUSPENDED", "RELEASED", "CANCELLATION_GRACE_PERIOD"].includes(
-      input.profile.smsState,
+      profile.smsState,
     )
   ) {
     return;

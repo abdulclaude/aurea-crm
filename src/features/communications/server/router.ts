@@ -43,6 +43,7 @@ import {
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import {
   getOrCreateCommunicationProfile,
+  applyTestingPlanAccess,
   updateCommunicationProfile,
   requireCommunicationEntitlement,
 } from "./profile-service";
@@ -446,7 +447,7 @@ export const communicationsRouter = createTRPCRouter({
     ]);
     return {
       profile: {
-        ...profile,
+        ...applyTestingPlanAccess(profile),
         voiceForwardingVerificationHash: undefined,
       },
       domains,
@@ -513,7 +514,9 @@ export const communicationsRouter = createTRPCRouter({
 
   provisionTwilio: protectedProcedure.mutation(async ({ ctx }) => {
     const organizationId = await authorizeOrganizationManagement(ctx);
-    const profile = await getOrCreateCommunicationProfile(organizationId);
+    const profile = applyTestingPlanAccess(
+      await getOrCreateCommunicationProfile(organizationId),
+    );
     if (!profile.smsEntitledAt && !profile.voiceEntitledAt) {
       throw new TRPCError({
         code: "FORBIDDEN",
