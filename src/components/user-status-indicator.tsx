@@ -11,7 +11,6 @@ import { IconPeople as UserIcon } from "central-icons/IconPeople";
 import { IconSettingsGear3 as SettingsIcon } from "central-icons/IconSettingsGear3";
 
 import { IconDiamond as UpgradeIcon } from "central-icons/IconDiamond";
-import { IconTicket as UsersIcon } from "central-icons/IconTicket";
 import { IconRescueRing as HelpCircleIcon } from "central-icons/IconRescueRing";
 import { IconDoor as LogOutIcon } from "central-icons/IconDoor";
 import { IconBuildings as WorkspaceIcon } from "central-icons/IconBuildings";
@@ -170,10 +169,6 @@ function UserStatusIndicatorInner() {
     window.location.href = "/dashboard";
   };
 
-  // Check if user has premium subscription
-  // TODO: Implement premium check with Polar subscription
-  const isPremium = false; // Placeholder
-
   if (!session?.user) return null;
 
   const initials =
@@ -314,19 +309,6 @@ function UserStatusIndicatorInner() {
             >
               <UserIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
               <span className="text-xs font-medium">Profile</span>
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-
-          <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
-
-          {/* Premium & Affiliate */}
-          <DropdownMenuGroup>
-            <DropdownMenuItem
-              onClick={() => router.push("/affiliate")}
-              className="flex items-center gap-3 cursor-pointer hover:bg-foreground hover:text-black group"
-            >
-              <UsersIcon className="size-3.5 text-primary/75 group-hover:text-black shrink-0" />
-              <span className="text-xs font-medium">Refer & earn</span>
             </DropdownMenuItem>
           </DropdownMenuGroup>
 

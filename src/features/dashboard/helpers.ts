@@ -55,21 +55,22 @@ function getMaxVisibleLabels(points: number): number {
 
 export function getVisibleXAxisTicks<T extends { label: string }>(
   data: T[],
+  maxLabels?: number,
 ): string[] {
   if (data.length === 0) return [];
   if (data.length === 1) return [data[0].label];
 
-  const maxLabels = getMaxVisibleLabels(data.length);
-  const step = Math.max(1, Math.ceil((data.length - 1) / (maxLabels - 1)));
-  const ticks = new Set<string>();
-
-  data.forEach((item, index) => {
-    if (index === 0 || index === data.length - 1 || index % step === 0) {
-      ticks.add(item.label);
-    }
+  const visibleCount = Math.min(
+    maxLabels ?? getMaxVisibleLabels(data.length),
+    getMaxVisibleLabels(data.length),
+    data.length,
+  );
+  return Array.from({ length: visibleCount }, (_, index) => {
+    const dataIndex = Math.round(
+      (index * (data.length - 1)) / (visibleCount - 1),
+    );
+    return data[dataIndex].label;
   });
-
-  return Array.from(ticks);
 }
 
 export function getChartDensity(points: number): ChartDensity {
@@ -96,7 +97,7 @@ export function getTimeSeriesChartPresentation(
       barCategoryGap: "52%",
       xTickMargin: 6,
       yAxisWidth: 34,
-      margin: { top: 6, right: 6, left: 0, bottom: 2 },
+      margin: { top: 6, right: 6, left: 0, bottom: 12 },
     };
   }
 
@@ -111,7 +112,7 @@ export function getTimeSeriesChartPresentation(
       barCategoryGap: "44%",
       xTickMargin: 7,
       yAxisWidth: 34,
-      margin: { top: 6, right: 6, left: 0, bottom: 2 },
+      margin: { top: 6, right: 6, left: 0, bottom: 12 },
     };
   }
 
@@ -126,7 +127,7 @@ export function getTimeSeriesChartPresentation(
       barCategoryGap: "30%",
       xTickMargin: 8,
       yAxisWidth: 34,
-      margin: { top: 4, right: 4, left: 0, bottom: 4 },
+      margin: { top: 4, right: 4, left: 0, bottom: 12 },
     };
   }
 
@@ -140,7 +141,7 @@ export function getTimeSeriesChartPresentation(
     barCategoryGap: "18%",
     xTickMargin: 10,
     yAxisWidth: 34,
-    margin: { top: 4, right: 4, left: 0, bottom: 4 },
+    margin: { top: 4, right: 4, left: 0, bottom: 12 },
   };
 }
 
@@ -167,6 +168,34 @@ export function getCategoricalAxisLabel(
   return `${label.slice(0, maxLength - 1)}...`;
 }
 
+export function getCategoricalAxisLabelLines(
+  label: string,
+  maxLineLength = 11,
+): string[] {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+
+  const lines: string[] = [];
+  for (const word of words) {
+    const current = lines.at(-1);
+    if (current && `${current} ${word}`.length <= maxLineLength) {
+      lines[lines.length - 1] = `${current} ${word}`;
+    } else if (lines.length < 2) {
+      lines.push(word);
+    } else {
+      const last = `${lines[1]} ${word}`;
+      lines[1] = `${last.slice(0, maxLineLength - 3)}...`;
+      break;
+    }
+  }
+
+  return lines.map((line) =>
+    line.length <= maxLineLength
+      ? line
+      : `${line.slice(0, maxLineLength - 3)}...`,
+  );
+}
+
 export function formatDashboardLabel(value: string | null | undefined): string {
   const words = (value ?? "")
     .replace(/[^a-zA-Z0-9]+/g, " ")
@@ -180,4 +209,13 @@ export function formatDashboardLabel(value: string | null | undefined): string {
   const [firstWord, ...rest] = words;
   const first = `${firstWord.charAt(0).toUpperCase()}${firstWord.slice(1)}`;
   return [first, ...rest].join(" ");
+}
+
+export function formatDashboardMoney(value: number, currency?: string): string {
+  if (!currency) return value.toLocaleString("en-GB");
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(value);
 }

@@ -1,35 +1,32 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type {
-  ColumnDef,
-  ColumnOrderState,
-  SortingState,
-  VisibilityState,
-} from "@tanstack/react-table";
-import { useEffect, useMemo, useState } from "react";
+import type { ColumnDef, ColumnOrderState } from "@tanstack/react-table";
+import { useMemo } from "react";
 
 import { DataTable } from "@/components/data-table/data-table";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import type { ReportDataRow, ReportField, ReportGroupId } from "@/features/reports/types";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import type {
+  ReportDataRow,
+  ReportField,
+  ReportGroupId,
+} from "@/features/reports/types";
 import { useTRPC } from "@/trpc/client";
+import { Button } from "@/components/ui/button";
 
-import {
-  getTotalPages,
-  paginateItems,
-  REPORT_PAGE_SIZE_OPTIONS,
-} from "./report-pagination";
+import { REPORT_PAGE_SIZE_OPTIONS } from "./report-pagination";
 import { ReportTableToolbar } from "./report-table-toolbar";
+import { ReportDataHealthBar } from "./report-data-health-bar";
 import { renderReportValue } from "./report-table-formatters";
-import type { ReportFilterState } from "./report-table-types";
-import {
-  getUniqueValues,
-  matchesReportSearch,
-  matchesDateRange,
-  matchesSelectedFilters,
-  sortReportRows,
-} from "./report-table-utils";
-import { useReportDateFilter } from "./use-report-date-filter";
+import { ReportTableActions } from "./report-table-actions";
+import { getUniqueValues } from "./report-table-utils";
+import { useReportTableState } from "./use-report-table-state";
 
 type ReportDataTableProps = {
   fields: readonly ReportField[];
@@ -45,10 +42,15 @@ export function ReportDataTable({
   reportName,
 }: ReportDataTableProps) {
   const trpc = useTRPC();
-  const { data, isLoading } = useQuery(
+  const rowsQuery = useQuery(
     trpc.reports.rows.queryOptions({ groupId, reportId }),
   );
-  const rows = data?.rows ?? [];
+  const health = useQuery(
+    trpc.reportFoundation.dataHealth.queryOptions({ groupId, reportId }),
+  );
+  const permissions = useQuery(trpc.permissions.getCurrent.queryOptions());
+  const rows = rowsQuery.data?.rows ?? [];
+  const sourceLimitReached = rowsQuery.data?.sourceLimitReached ?? false;
   const primaryColumnId = fields[0]?.id ?? "report";
   const initialColumnOrder = useMemo<ColumnOrderState>(
     () => fields.map((field) => field.id),
@@ -61,17 +63,24 @@ export function ReportDataTable({
       ),
     [fields],
   );
-  const [search, setSearch] = useState("");
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: primaryColumnId, desc: false },
-  ]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const [columnOrder, setColumnOrder] =
-    useState<ColumnOrderState>(initialColumnOrder);
-  const [selectedFilters, setSelectedFilters] = useState<ReportFilterState>({});
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const { dateBounds, dateFilter, dateRange } = useReportDateFilter(rows, fields);
+  const state = useReportTableState({
+    fields,
+    groupId,
+    initialColumnOrder,
+    primaryColumnId,
+    reportId,
+    rows,
+  });
+  const canManage =
+    permissions.data?.capabilities.includes("reports.manage") ?? false;
+  const canExport =
+    permissions.data?.capabilities.includes("reports.export") ?? false;
+  const activeSavedViewId =
+    state.activeView &&
+    JSON.stringify(state.activeView.definition) ===
+      JSON.stringify(state.currentDefinition)
+      ? state.activeView.id
+      : null;
 
   const columns = useMemo<ColumnDef<ReportDataRow>[]>(
     () =>
@@ -82,11 +91,25 @@ export function ReportDataTable({
         enableHiding: field.id !== primaryColumnId,
         cell: ({ row }) => (
           <div className="min-w-0">
-            {renderReportValue(field, row.original[field.id] ?? null)}
+            {renderReportValue(
+              field,
+              row.original[field.id] ?? null,
+              typeof row.original.currency === "string"
+                ? row.original.currency
+                : health.data?.currency,
+              health.data?.locale,
+              health.data?.dateFormat,
+            )}
           </div>
         ),
       })),
-    [fields, primaryColumnId],
+    [
+      fields,
+      health.data?.currency,
+      health.data?.dateFormat,
+      health.data?.locale,
+      primaryColumnId,
+    ],
   );
   const filterOptions = useMemo(
     () =>
@@ -100,94 +123,104 @@ export function ReportDataTable({
         .filter((filter) => filter.values.length > 0),
     [fields, rows],
   );
-  const filteredRows = useMemo(
-    () =>
-      rows.filter(
-        (row) =>
-          matchesDateRange(row, dateBounds, dateRange) &&
-          matchesSelectedFilters(row, selectedFilters) &&
-          matchesReportSearch(row, search),
-      ),
-    [dateBounds, dateRange, rows, search, selectedFilters],
-  );
-  const sortedRows = useMemo(
-    () => sortReportRows(filteredRows, fields, sorting),
-    [fields, filteredRows, sorting],
-  );
-  const totalPages = getTotalPages(sortedRows.length, pageSize);
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const paginatedRows = useMemo(
-    () => paginateItems(sortedRows, safeCurrentPage, pageSize),
-    [pageSize, safeCurrentPage, sortedRows],
-  );
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [dateRange, groupId, pageSize, reportId, search, selectedFilters]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
   return (
-    <DataTable
-      columns={columns}
-      data={paginatedRows}
-      isLoading={isLoading}
-      getRowId={(_row, index) => `${reportName}-${safeCurrentPage}-${index}`}
-      enableGlobalSearch={false}
-      globalFilterValue={search}
-      onGlobalFilterChange={setSearch}
-      sorting={sorting}
-      onSortingChange={setSorting}
-      columnVisibility={columnVisibility}
-      onColumnVisibilityChange={setColumnVisibility}
-      columnOrder={columnOrder}
-      onColumnOrderChange={setColumnOrder}
-      initialColumnOrder={initialColumnOrder}
-      initialSorting={[{ id: primaryColumnId, desc: false }]}
-      toolbar={{
-        filters: (ctx) => (
-          <ReportTableToolbar
-            columnLabels={columnLabels}
-            columnOrder={columnOrder}
-            columnVisibility={columnVisibility}
-            dateFilter={dateFilter}
-            filters={filterOptions}
-            initialColumnOrder={initialColumnOrder}
-            onColumnOrderChange={setColumnOrder}
-            onFiltersChange={setSelectedFilters}
-            onSearchChange={setSearch}
-            onSortingChange={setSorting}
-            previewCount={filteredRows.length}
-            primaryColumnId={primaryColumnId}
-            search={search}
-            selectedFilters={selectedFilters}
-            sorting={sorting}
-            table={ctx.table}
-          />
-        ),
-      }}
-      pagination={{
-        currentPage: safeCurrentPage,
-        totalPages,
-        pageSize,
-        totalItems: sortedRows.length,
-        onPageChange: setCurrentPage,
-        onPageSizeChange: setPageSize,
-        pageSizeOptions: [...REPORT_PAGE_SIZE_OPTIONS],
-      }}
-      emptyState={
-        <Empty className="border-0 py-10">
-          <EmptyHeader>
-            <EmptyTitle className="text-sm">No report data found</EmptyTitle>
-            <EmptyDescription className="text-xs">
-              {reportName} uses this location&apos;s clients, instructors, revenue, inventory, and booking data.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      }
-    />
+    <>
+      <ReportDataHealthBar
+        groupId={groupId}
+        reportId={reportId}
+        sourceLimitReached={sourceLimitReached}
+      />
+      <DataTable
+        columns={columns}
+        data={state.paginatedRows}
+        isLoading={rowsQuery.isLoading}
+        getRowId={(_row, index) =>
+          `${reportName}-${state.currentPage}-${index}`
+        }
+        enableGlobalSearch={false}
+        globalFilterValue={state.search}
+        onGlobalFilterChange={state.setSearch}
+        sorting={state.sorting}
+        onSortingChange={state.setSorting}
+        columnVisibility={state.columnVisibility}
+        onColumnVisibilityChange={state.setColumnVisibility}
+        columnOrder={state.columnOrder}
+        onColumnOrderChange={state.setColumnOrder}
+        initialColumnOrder={initialColumnOrder}
+        initialSorting={[{ id: primaryColumnId, desc: false }]}
+        toolbar={{
+          filters: (ctx) => (
+            <ReportTableToolbar
+              actions={
+                <ReportTableActions
+                  activeViewId={state.activeView?.id ?? null}
+                  canExport={canExport}
+                  canManage={canManage}
+                  definition={state.currentDefinition}
+                  groupId={groupId}
+                  onApply={state.applySavedView}
+                  reportId={reportId}
+                  savedViewId={activeSavedViewId}
+                />
+              }
+              columnLabels={columnLabels}
+              columnOrder={state.columnOrder}
+              columnVisibility={state.columnVisibility}
+              dateFilter={state.dateFilter}
+              filters={filterOptions}
+              initialColumnOrder={initialColumnOrder}
+              onColumnOrderChange={state.setColumnOrder}
+              onFiltersChange={state.setSelectedFilters}
+              onSearchChange={state.setSearch}
+              onSortingChange={state.setSorting}
+              previewCount={state.filteredRows.length}
+              previewIsPartial={sourceLimitReached}
+              primaryColumnId={primaryColumnId}
+              search={state.search}
+              selectedFilters={state.selectedFilters}
+              sorting={state.sorting}
+              table={ctx.table}
+            />
+          ),
+        }}
+        pagination={{
+          currentPage: state.currentPage,
+          totalPages: state.totalPages,
+          pageSize: state.pageSize,
+          totalItems: state.sortedRows.length,
+          onPageChange: state.setCurrentPage,
+          onPageSizeChange: state.setPageSize,
+          pageSizeOptions: [...REPORT_PAGE_SIZE_OPTIONS],
+        }}
+        emptyState={
+          <Empty className="border-0 py-10">
+            <EmptyHeader>
+              <EmptyTitle className="text-sm">
+                {rowsQuery.isError
+                  ? "Report data unavailable"
+                  : "No report data found"}
+              </EmptyTitle>
+              <EmptyDescription className="text-xs">
+                {rowsQuery.isError
+                  ? rowsQuery.error.message
+                  : `${reportName} uses this location's clients, instructors, revenue, inventory, and booking data.`}
+              </EmptyDescription>
+              {rowsQuery.isError ? (
+                <EmptyContent>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void rowsQuery.refetch()}
+                  >
+                    Retry
+                  </Button>
+                </EmptyContent>
+              ) : null}
+            </EmptyHeader>
+          </Empty>
+        }
+      />
+    </>
   );
 }

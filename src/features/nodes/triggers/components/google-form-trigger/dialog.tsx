@@ -40,7 +40,8 @@ const formSchema = z.object({
       message:
         "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
     }),
-  formFields: z.array(z.string()).default([]),
+  formFields: z.array(z.string()),
+  webhookSecret: z.string().min(32),
 });
 
 export type GoogleFormTriggerFormValues = z.infer<typeof formSchema>;
@@ -63,11 +64,12 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
   const params = useParams();
   const workflowId = params.workflowId as string;
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema) as any,
+  const form = useForm<z.input<typeof formSchema>, unknown, z.output<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       variableName: defaultValues.variableName || "",
       formFields: defaultValues.formFields || [],
+      webhookSecret: defaultValues.webhookSecret || crypto.randomUUID(),
     },
   });
 
@@ -76,9 +78,16 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
       form.reset({
         variableName: defaultValues.variableName || "",
         formFields: defaultValues.formFields || [],
+        webhookSecret: defaultValues.webhookSecret || crypto.randomUUID(),
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.formFields, form]);
+  }, [
+    open,
+    defaultValues.variableName,
+    defaultValues.formFields,
+    defaultValues.webhookSecret,
+    form,
+  ]);
 
   const handleSubmit = (values: z.infer<typeof formSchema>) => {
     onSubmit(values);
@@ -87,20 +96,11 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
   // construct the webhook url
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const webhookUrl = `${baseUrl}/api/webhooks/google-form?workflowId=${workflowId}`;
-
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(webhookUrl);
-      toast.success("Webhook URL copied to clipboard.");
-    } catch {
-      toast.error("Failed to copy URL, please try again later.");
-    }
-  };
+  const webhookUrl = `${baseUrl}/api/webhooks/google-form?workflowId=${encodeURIComponent(workflowId)}`;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-black/10">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 p-6 pb-2 gap-1">
           <SheetTitle>Google Form Trigger</SheetTitle>
           <SheetDescription>
@@ -109,7 +109,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-4 bg-black/10" />
+        <Separator className="my-4 bg-border" />
 
         <Form {...form}>
           <form
@@ -146,7 +146,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
                     <FormControl>
                       <TagsInput
                         value={field.value}
-                        className="bg-background rounded-sm border border-black/10"
+                        className="bg-background rounded-sm border border-border"
                         onChange={field.onChange}
                         placeholder="Add field name (e.g., Name, Email, Phone)..."
                       />
@@ -162,7 +162,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
               />
             </div>
 
-            <Separator className="my-4 bg-black/10" />
+            <Separator className="my-4 bg-border" />
 
             <div className="space-y-4">
               <div className="space-y-2">
@@ -173,21 +173,16 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
                   Webhook URL
                 </Label>
 
-                <div className="flex gap-2">
-                  <Input
-                    id="webhook-url"
-                    value={webhookUrl}
-                    readOnly
-                    className="font-mono text-sm"
-                  />
-                  <Button type="button" size="icon" onClick={copyToClipboard}>
-                    <CopyIcon className="size-3 text-primary/75 hover:text-primary" />
-                  </Button>
-                </div>
+                <Input
+                  id="webhook-url"
+                  value={webhookUrl}
+                  readOnly
+                  className="font-mono text-sm"
+                />
               </div>
             </div>
 
-            <Separator className="my-4 bg-black/10" />
+            <Separator className="my-4 bg-border" />
 
             <div className="space-y-3">
               <h4 className="font-medium text-sm text-primary">
@@ -237,7 +232,10 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
                 type="button"
                 className="text-xs rounded-sm bg-primary-foreground hover:bg-primary/10 hover:text-black text-primary"
                 onClick={async () => {
-                  const script = generateGoogleFormScript(webhookUrl);
+                  const script = generateGoogleFormScript(
+                    webhookUrl,
+                    form.getValues("webhookSecret"),
+                  );
 
                   try {
                     await navigator.clipboard.writeText(script);
@@ -262,10 +260,10 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
             {/* <div className="px-8 space-y-2">
               <h4 className="font-medium text-sm"> Available variables </h4>
-              <ul className="text-xs text-white/40 space-y-4">
+              <ul className="text-xs text-primary/40 space-y-4">
                 <li>
                   {" "}
-                  <code className="bg-[#202e32] px-1 py-0.5 rounded text-white font-medium">
+                  <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
                     {`{{${
                       form.watch("variableName") || "googleForm"
                     }.respondentEmail}}`}
@@ -275,7 +273,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
                 <li>
                   {" "}
-                  <code className="bg-[#202e32] px-1 py-0.5 rounded text-white font-medium">
+                  <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
                     {`{{${
                       form.watch("variableName") || "googleForm"
                     }.responses['Question Name']}}`}
@@ -285,7 +283,7 @@ export const GoogleFormTriggerDialog: React.FC<Props> = ({
 
                 <li>
                   {" "}
-                  <code className="bg-[#202e32] px-1 py-0.5 rounded text-white font-medium">
+                  <code className="bg-background px-1 py-0.5 rounded text-primary font-medium">
                     {`{{json ${
                       form.watch("variableName") || "googleForm"
                     }.responses}}`}

@@ -73,6 +73,7 @@ export interface StudioTableToolbarProps {
   onColumnOrderChange: (order: ColumnOrderState) => void;
   initialColumnOrder: ColumnOrderState;
   primaryColumnId: string;
+  additionalControls?: React.ReactNode;
 }
 
 export function StudioTableToolbar({
@@ -89,6 +90,7 @@ export function StudioTableToolbar({
   onColumnOrderChange,
   initialColumnOrder,
   primaryColumnId,
+  additionalControls,
 }: StudioTableToolbarProps) {
   const [searchInput, setSearchInput] = React.useState(search);
   const debouncedSearch = useDebouncedCallback(onSearchChange, 400);
@@ -120,12 +122,13 @@ export function StudioTableToolbar({
   };
 
   return (
-    <div className="flex justify-between w-full items-center py-4">
-      <div className="flex items-center gap-2 w-full">
+    <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-4 sm:flex sm:justify-between">
+      <div className="contents sm:flex sm:w-full sm:items-center sm:gap-2">
         {/* Search + filter */}
-        <div className="flex w-80 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 rounded-lg h-8.5">
+        <div className="relative col-span-2 flex h-8.5 w-full min-w-0 items-center rounded-lg bg-background transition duration-250 hover:bg-primary-foreground/50 sm:w-80">
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
           <Input
+            aria-label={searchPlaceholder}
             placeholder={searchPlaceholder}
             value={searchInput}
             onChange={(e) => {
@@ -137,7 +140,14 @@ export function StudioTableToolbar({
           {filterGroups.length > 0 && (
             <DropdownMenu open={filtersOpen} onOpenChange={setFiltersOpen}>
               <DropdownMenuTrigger asChild>
-                <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Filter table"
+                  title="Filter table"
+                  className="absolute right-0 border-none bg-transparent hover:bg-transparent"
+                >
                   <FilterIcon className="text-primary/80 dark:text-white/60 size-4" />
                   {hasFilters && (
                     <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
@@ -229,7 +239,11 @@ export function StudioTableToolbar({
         {sortOptions.length > 0 && onSortChange && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button className="h-8.5!" variant="outline">
+              <Button
+                className="h-8.5!"
+                variant="outline"
+                aria-label={`Sort table. Current: ${sortOptions.find((option) => option.value === sortValue)?.label ?? "not selected"}`}
+              >
                 Sort by{" "}
                 <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
               </Button>
@@ -251,9 +265,11 @@ export function StudioTableToolbar({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+
+        {additionalControls}
       </div>
 
-      <div className="flex gap-1">
+      <div className="flex justify-end gap-1">
         <ColumnControls
           table={table}
           columnVisibility={columnVisibility}

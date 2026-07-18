@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ColumnDef,
   ColumnOrderState,
@@ -141,6 +137,7 @@ function buildColumns(
 export function ClassTypesTable() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [hydrated, setHydrated] = React.useState(false);
 
   const [search, setSearch] = React.useState("");
   const [sortValue, setSortValue] = React.useState(DEFAULT_SORT);
@@ -154,9 +151,13 @@ export function ClassTypesTable() {
   const [editDescription, setEditDescription] = React.useState("");
   const [editColor, setEditColor] = React.useState("#6366f1");
 
-  const { data: classTypes, isFetching } = useSuspenseQuery(
-    trpc.classTypes.list.queryOptions({ includeInactive: true }),
-  );
+  React.useEffect(() => setHydrated(true), []);
+
+  const classTypesQuery = useQuery({
+    ...trpc.classTypes.list.queryOptions({ includeInactive: true }),
+    enabled: hydrated,
+  });
+  const classTypes = classTypesQuery.data ?? [];
 
   const updateMutation = useMutation(trpc.classTypes.update.mutationOptions());
   const deleteMutation = useMutation(trpc.classTypes.delete.mutationOptions());
@@ -270,12 +271,44 @@ export function ClassTypesTable() {
   const columnOrderOrDefault =
     columnOrder.length > 0 ? columnOrder : COLUMN_IDS;
 
+  if (!hydrated || classTypesQuery.isPending) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading class types"
+        className="h-64 animate-pulse bg-muted/40"
+      />
+    );
+  }
+
+  if (classTypesQuery.isError) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p role="alert" className="text-sm font-medium">
+          Class types could not be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {classTypesQuery.error instanceof Error
+            ? classTypesQuery.error.message
+            : "Try the request again."}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void classTypesQuery.refetch()}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <>
       <DataTable
         columns={columns}
         data={filtered}
-        isLoading={isFetching}
+        isLoading={classTypesQuery.isFetching}
         getRowId={(row) => row.id}
         columnVisibility={columnVisibility}
         onColumnVisibilityChange={(updater) =>

@@ -1,11 +1,15 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
 
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleCalendarChannel } from "@/inngest/channels/google-calendar";
-import { auth } from "@/lib/auth";
 
 export type GoogleCalendarActionData = {
+  providerAccountId: string;
   variableName?: string;
   calendarId?: string;
   summary?: string;
@@ -14,6 +18,10 @@ export type GoogleCalendarActionData = {
   endDateTime?: string;
   timezone?: string;
 };
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_CALENDAR_EXECUTION,
+);
 
 const renderTemplate = (
   value: string | undefined,
@@ -24,7 +32,7 @@ const renderTemplate = (
 };
 
 export const googleCalendarActionExecutor: NodeExecutor<GoogleCalendarActionData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleCalendarChannel().status({ nodeId, status: "loading" })
     );
@@ -32,6 +40,11 @@ export const googleCalendarActionExecutor: NodeExecutor<GoogleCalendarActionData
     if (!data.calendarId) {
       await publish(googleCalendarChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError("Calendar ID is not configured.");
+    }
+
+    if (!data.providerAccountId) {
+      await publish(googleCalendarChannel().status({ nodeId, status: "error" }));
+      throw new NonRetriableError("Select a Google Calendar account.");
     }
 
     if (!data.variableName) {
@@ -63,21 +76,13 @@ export const googleCalendarActionExecutor: NodeExecutor<GoogleCalendarActionData
       );
     }
 
-    const tokenResponse = await auth.api.getAccessToken({
-      body: {
-        providerId: "google",
-        userId,
-      },
+    const grant = await resolveOAuthProviderGrant({
+      providerAccountId: data.providerAccountId,
+      provider: providerBinding.provider,
+      scope,
+      requiredScopes: providerBinding.requiredScopes,
     });
-
-    const accessToken = tokenResponse?.accessToken;
-
-    if (!accessToken) {
-      await publish(googleCalendarChannel().status({ nodeId, status: "error" }));
-      throw new NonRetriableError(
-        "Google Calendar is not connected. Please reconnect the integration."
-      );
-    }
+    const { accessToken } = grant;
 
     const payload = {
       summary,
@@ -93,7 +98,8 @@ export const googleCalendarActionExecutor: NodeExecutor<GoogleCalendarActionData
     };
 
     const result = await step.run("google-calendar-create-event", async () => {
-      const response = await fetch(
+      const response = await oauthAuthenticatedFetch(
+        grant,
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
           data.calendarId!
         )}/events`,
@@ -108,9 +114,8 @@ export const googleCalendarActionExecutor: NodeExecutor<GoogleCalendarActionData
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
         throw new NonRetriableError(
-          `Google Calendar API error (${response.status}): ${errorText}`
+          `Google Calendar API rejected the request with status ${response.status}.`,
         );
       }
 

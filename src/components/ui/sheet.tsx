@@ -154,7 +154,9 @@ function ResizableSheetContent({
           className
         )}
         style={{
-          [isHorizontal ? "width" : "height"]: `${size}px`,
+          [isHorizontal ? "width" : "height"]: isHorizontal
+            ? `min(${size}px, 100vw)`
+            : `${size}px`,
         }}
         {...props}
       >
@@ -162,21 +164,21 @@ function ResizableSheetContent({
         <button
           type="button"
           className={cn(
-            "absolute bg-white/5 hover:bg-white/10 transition-colors cursor-col-resize z-50 group border-0 p-0",
+            "absolute bg-border/60 transition-colors hover:bg-border cursor-col-resize z-50 group border-0 p-0 max-sm:hidden",
             side === "right" && "left-0 inset-y-0 w-1.5 -translate-x-0.5",
             side === "left" && "right-0 inset-y-0 w-1.5 translate-x-0.5",
             side === "top" &&
               "bottom-0 inset-x-0 h-1.5 translate-y-0.5 cursor-row-resize",
             side === "bottom" &&
               "top-0 inset-x-0 h-1.5 -translate-y-0.5 cursor-row-resize",
-            isDragging && "bg-white/20"
+            isDragging && "bg-border"
           )}
           onMouseDown={handleMouseDown}
           aria-label="Resize panel"
         >
           <span
             className={cn(
-              "absolute bg-white/40 group-hover:bg-white/60 transition-colors rounded-full",
+              "absolute rounded-full bg-muted-foreground/40 transition-colors group-hover:bg-muted-foreground/60",
               isHorizontal
                 ? "top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8"
                 : "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-1 w-8"

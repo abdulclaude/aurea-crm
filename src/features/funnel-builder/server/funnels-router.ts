@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -13,7 +13,11 @@ import {
 } from "@/db/schema";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { createNotification } from "@/lib/notifications";
-import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
+import {
+  publicationManageProcedure,
+  publicationViewProcedure,
+} from "@/features/permissions/server/publication-procedures";
+import { createTRPCRouter } from "@/trpc/init";
 
 const FUNNEL_PAGE_SIZE = 20;
 const jsonObjectSchema = z.record(z.string(), z.unknown());
@@ -113,7 +117,7 @@ const mapBlockForClient = <T extends FunnelBlockRow & { funnelBreakpoints?: Funn
 });
 
 export const funnelsRouter = createTRPCRouter({
-  list: protectedProcedure
+  list: publicationViewProcedure
     .input(
       z.object({
         cursor: z.string().optional(),
@@ -136,7 +140,7 @@ export const funnelsRouter = createTRPCRouter({
 
       if (input.cursor) {
         const cursorRow = await db.query.funnel.findFirst({
-          where: eq(funnel.id, input.cursor),
+          where: funnelScope(input.cursor, scope),
           columns: { id: true, updatedAt: true },
         });
 
@@ -188,7 +192,7 @@ export const funnelsRouter = createTRPCRouter({
       };
     }),
 
-  getById: protectedProcedure
+  getById: publicationViewProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -217,7 +221,7 @@ export const funnelsRouter = createTRPCRouter({
       return { ...row, funnelPage: row.funnelPages };
     }),
 
-  create: protectedProcedure
+  create: publicationManageProcedure
     .input(
       z.object({
         name: z.string().min(1).max(255),
@@ -275,7 +279,7 @@ export const funnelsRouter = createTRPCRouter({
       return created;
     }),
 
-  update: protectedProcedure
+  update: publicationManageProcedure
     .input(
       z.object({
         id: z.string(),
@@ -411,7 +415,7 @@ export const funnelsRouter = createTRPCRouter({
       return updated;
     }),
 
-  delete: protectedProcedure
+  delete: publicationManageProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -454,7 +458,7 @@ export const funnelsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  listPages: protectedProcedure
+  listPages: publicationViewProcedure
     .input(z.object({ funnelId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -479,7 +483,7 @@ export const funnelsRouter = createTRPCRouter({
       return pages.map(mapPageForClient);
     }),
 
-  getPage: protectedProcedure
+  getPage: publicationViewProcedure
     .input(z.object({ pageId: z.string() }))
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -519,7 +523,7 @@ export const funnelsRouter = createTRPCRouter({
       };
     }),
 
-  createPage: protectedProcedure
+  createPage: publicationManageProcedure
     .input(
       z.object({
         funnelId: z.string(),
@@ -698,7 +702,7 @@ export const funnelsRouter = createTRPCRouter({
       return createdPage;
     }),
 
-  updatePage: protectedProcedure
+  updatePage: publicationManageProcedure
     .input(
       z.object({
         pageId: z.string(),
@@ -830,7 +834,7 @@ export const funnelsRouter = createTRPCRouter({
       return updated;
     }),
 
-  reorderPages: protectedProcedure
+  reorderPages: publicationManageProcedure
     .input(
       z.object({
         funnelId: z.string(),
@@ -847,16 +851,50 @@ export const funnelsRouter = createTRPCRouter({
 
       await ensureFunnel(input.funnelId, { orgId: ctx.orgId, locationId: ctx.locationId ?? null });
 
-      await db.transaction(async (tx) => {
-        for (const [index, pageId] of input.pageIds.entries()) {
-          await tx.update(funnelPage).set({ order: index, updatedAt: new Date() }).where(eq(funnelPage.id, pageId));
-        }
-      });
+      if (new Set(input.pageIds).size !== input.pageIds.length) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Page order cannot contain duplicate pages",
+        });
+      }
+
+      const scopedPages = await db
+        .select({ id: funnelPage.id })
+        .from(funnelPage)
+        .where(eq(funnelPage.funnelId, input.funnelId));
+      const requestedPageIds = new Set(input.pageIds);
+      if (
+        scopedPages.length !== input.pageIds.length ||
+        scopedPages.some((page) => !requestedPageIds.has(page.id))
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Page order must include every page in this funnel",
+        });
+      }
+
+      if (input.pageIds.length) {
+        const orderCases = input.pageIds.map(
+          (pageId, index) => sql`when ${pageId} then ${index}`,
+        );
+        await db
+          .update(funnelPage)
+          .set({
+            order: sql`case ${funnelPage.id} ${sql.join(orderCases, sql` `)} end`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(funnelPage.funnelId, input.funnelId),
+              inArray(funnelPage.id, input.pageIds),
+            ),
+          );
+      }
 
       return { success: true };
     }),
 
-  deletePage: protectedProcedure
+  deletePage: publicationManageProcedure
     .input(z.object({ pageId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -920,7 +958,7 @@ export const funnelsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  createBlock: protectedProcedure
+  createBlock: publicationManageProcedure
     .input(
       z.object({
         pageId: z.string().optional(),
@@ -1006,7 +1044,7 @@ export const funnelsRouter = createTRPCRouter({
       return mapBlockForClient(created);
     }),
 
-  updateBlock: protectedProcedure
+  updateBlock: publicationManageProcedure
     .input(
       z.object({
         blockId: z.string(),
@@ -1047,7 +1085,7 @@ export const funnelsRouter = createTRPCRouter({
       return mapBlockForClient({ ...updated, funnelBreakpoints: breakpoints });
     }),
 
-  moveBlock: protectedProcedure
+  moveBlock: publicationManageProcedure
     .input(
       z.object({
         blockId: z.string(),
@@ -1082,7 +1120,7 @@ export const funnelsRouter = createTRPCRouter({
       return mapBlockForClient({ ...updated, funnelBreakpoints: breakpoints });
     }),
 
-  deleteBlock: protectedProcedure
+  deleteBlock: publicationManageProcedure
     .input(z.object({ blockId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -1098,7 +1136,7 @@ export const funnelsRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  duplicateBlock: protectedProcedure
+  duplicateBlock: publicationManageProcedure
     .input(z.object({ blockId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -1177,7 +1215,7 @@ export const funnelsRouter = createTRPCRouter({
       return { id: newBlockId };
     }),
 
-  updateBreakpoint: protectedProcedure
+  updateBreakpoint: publicationManageProcedure
     .input(
       z.object({
         blockId: z.string(),

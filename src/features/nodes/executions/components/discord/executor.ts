@@ -3,17 +3,15 @@ import Handlebars from "handlebars";
 import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { generateText } from "ai";
-
 import { discordChannel } from "@/inngest/channels/discord";
 
 import { decode } from "html-entities";
 import ky from "ky";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { webhook as webhookTable } from "@/db/schema";
+import { decrypt } from "@/lib/encryption";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -31,7 +29,7 @@ type DiscordData = {
 export const discordExecutor: NodeExecutor<DiscordData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -55,7 +53,7 @@ export const discordExecutor: NodeExecutor<DiscordData> = async ({
       );
     }
 
-    const resolvedWebhookUrl = await resolveWebhookUrl(data, userId);
+    const resolvedWebhookUrl = await resolveWebhookUrl(data, scope);
 
     const rawContent = Handlebars.compile(data.content)(context);
     const content = decode(rawContent);
@@ -89,25 +87,27 @@ export const discordExecutor: NodeExecutor<DiscordData> = async ({
 
 const resolveWebhookUrl = async (
   data: DiscordData,
-  userId: string
+  scope: { organizationId: string; locationId: string | null },
 ): Promise<string> => {
-  if (data.webhookId) {
-    const webhook = await db.query.webhook.findFirst({
-      where: and(eq(webhookTable.id, data.webhookId), eq(webhookTable.userId, userId)),
-    });
-    if (!webhook) {
-      throw new NonRetriableError(
-        "Saved Discord webhook could not be found. Re-select it or create a new one."
-      );
-    }
-    return webhook.url;
-  }
-
-  if (!data.webhookUrl) {
+  if (!data.webhookId) {
     throw new NonRetriableError(
-      "Discord Node error: No webhook url has been set."
+      "Discord Node error: Select a workspace-scoped webhook.",
     );
   }
-
-  return data.webhookUrl;
+  const webhook = await db.query.webhook.findFirst({
+    where: and(
+      eq(webhookTable.id, data.webhookId),
+      eq(webhookTable.organizationId, scope.organizationId),
+      scope.locationId
+        ? eq(webhookTable.locationId, scope.locationId)
+        : isNull(webhookTable.locationId),
+      eq(webhookTable.provider, "DISCORD"),
+    ),
+  });
+  if (!webhook) {
+    throw new NonRetriableError(
+      "Saved Discord webhook could not be found in this workspace.",
+    );
+  }
+  return decrypt(webhook.url);
 };

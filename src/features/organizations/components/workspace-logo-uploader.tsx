@@ -24,11 +24,13 @@ export function WorkspaceLogoUploader({
   onChange,
   disabled,
   className,
+  label = "Workspace logo",
 }: {
   value?: string | null;
   onChange: (url?: string | null) => void;
   disabled?: boolean;
   className?: string;
+  label?: string;
 }) {
   const [isUploading, setIsUploading] = React.useState(false);
   const [files, setFiles] = React.useState<File[]>([]);
@@ -107,6 +109,7 @@ export function WorkspaceLogoUploader({
   // Immediate mode: upload on selection
   return (
     <FileUpload
+      label={label}
       accept="image/*"
       maxFiles={1}
       maxSize={8 * 1024 * 1024}

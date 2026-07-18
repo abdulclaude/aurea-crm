@@ -23,7 +23,7 @@ export const ManualTriggerDialog: React.FC<Props> = ({
 }) => {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle> Manual Trigger </SheetTitle>
           <SheetDescription>
@@ -32,7 +32,7 @@ export const ManualTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <div className="px-6">
           <p className="text-muted-foreground text-sm">

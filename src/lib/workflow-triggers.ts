@@ -11,6 +11,7 @@ type TriggerWorkflowInput = {
   locationId?: string | null;
   triggerData: Record<string, unknown>;
   shouldTriggerNode?: (node: TriggerWorkflowNode) => boolean;
+  idempotencyKey?: string;
 };
 
 type TriggerWorkflowNode = {
@@ -58,6 +59,7 @@ export async function triggerWorkflowsForNodeType({
   locationId,
   triggerData,
   shouldTriggerNode,
+  idempotencyKey,
 }: TriggerWorkflowInput): Promise<number> {
   const rows = await db
     .select({
@@ -106,6 +108,11 @@ export async function triggerWorkflowsForNodeType({
     workflowsToRun.map((workflow) =>
       sendWorkflowExecution({
         workflowId: workflow.id,
+        expectedOrganizationId: organizationId,
+        expectedLocationId: locationId ?? null,
+        idempotencyKey: idempotencyKey
+          ? `${idempotencyKey}:${workflow.id}`
+          : undefined,
         initialData: {
           triggerData,
         },

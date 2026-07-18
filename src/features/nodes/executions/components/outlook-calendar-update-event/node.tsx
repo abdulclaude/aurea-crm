@@ -50,7 +50,7 @@ export const OutlookCalendarUpdateEventNode: React.FC<NodeProps<OutlookCalendarU
       nodeId: props.id,
       channel: OUTLOOK_CALENDAR_UPDATE_EVENT_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookCalendarUpdateEventRealtimeToken as any,
+      refreshToken: fetchOutlookCalendarUpdateEventRealtimeToken,
     });
 
     const handleOpenSettings = () => {

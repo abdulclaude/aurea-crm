@@ -50,7 +50,7 @@ export const OutlookSearchEmailsNode: React.FC<NodeProps<OutlookSearchEmailsNode
       nodeId: props.id,
       channel: OUTLOOK_SEARCH_EMAILS_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookSearchEmailsRealtimeToken as any,
+      refreshToken: fetchOutlookSearchEmailsRealtimeToken,
     });
 
     const handleOpenSettings = () => {

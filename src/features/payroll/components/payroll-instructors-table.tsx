@@ -1,183 +1,191 @@
 "use client";
 
-import type { ColumnDef } from "@tanstack/react-table";
-import type { inferRouterOutputs } from "@trpc/server";
-import { Download, FileText } from "lucide-react";
+import type {
+  ColumnOrderState,
+  SortingState,
+  VisibilityState,
+} from "@tanstack/react-table";
+import { endOfMonth, format, startOfMonth, subMonths } from "date-fns";
 import * as React from "react";
+
 import { DataTable } from "@/components/data-table/data-table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { AppRouter } from "@/trpc/routers/_app";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { PayrollPeriod } from "@/features/payroll/hooks/use-payroll-reporting-controller";
+import {
+  formatPayrollCurrency,
+  formatPayrollHours,
+} from "@/features/payroll/lib/payroll-formatters";
+import { StudioTableToolbar } from "@/features/studio/components/studio-table-toolbar";
 
-type RouterOutput = inferRouterOutputs<AppRouter>;
-type PayrollInstructorRow = RouterOutput["payroll"]["calculatePayroll"]["instructors"][number];
+import {
+  PAYROLL_INSTRUCTOR_COLUMN_ORDER,
+  payrollInstructorColumns,
+  type PayrollInstructorRow,
+} from "./payroll-instructor-columns";
+import { PayrollTableTotals } from "./payroll-table-totals";
 
-function formatCurrency(amount: number | { toNumber?: () => number }): string {
-  // Handle Prisma Decimal type
-  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
-    return `£${amount.toNumber().toFixed(2)}`;
-  }
-  return `£${Number(amount).toFixed(2)}`;
-}
+type PayrollSummary = {
+  totalGrossPay: number;
+  totalInstructors: number;
+  totalNetPay: number;
+  totalOvertimeHours: number;
+  totalRegularHours: number;
+};
 
-function formatHours(hours: number): string {
-  return `${hours.toFixed(1)}h`;
-}
-
-interface PayrollInstructorsTableProps {
-  instructors: PayrollInstructorRow[];
-  showPayslipActions?: boolean;
-  onDownloadPayslip?: (instructorId: string) => void;
-  onEmailPayslip?: (instructorId: string) => void;
-}
+const SORT_OPTIONS = [
+  { value: "instructor.asc", label: "Name A-Z" },
+  { value: "instructor.desc", label: "Name Z-A" },
+  { value: "totalHours.desc", label: "Most hours" },
+  { value: "grossPay.desc", label: "Highest gross pay" },
+];
 
 export function PayrollInstructorsTable({
   instructors,
-  showPayslipActions = false,
-  onDownloadPayslip,
-  onEmailPayslip,
-}: PayrollInstructorsTableProps) {
-  const columns: ColumnDef<PayrollInstructorRow>[] = [
-    {
-      id: "instructor",
-      accessorKey: "instructorName",
-      header: "Instructor",
-      meta: { label: "Instructor" },
-      cell: ({ row }) => (
-        <div>
-          <p className="font-medium text-xs">{row.original.instructorName}</p>
-          <p className="text-xs text-primary/60">
-            {row.original.timeLogCount} {row.original.timeLogCount === 1 ? "entry" : "entries"}
-          </p>
-        </div>
-      ),
-      enableHiding: false,
-    },
-    {
-      id: "regularHours",
-      accessorKey: "regularHours",
-      header: "Regular Hours",
-      meta: { label: "Regular Hours" },
-      cell: ({ row }) => (
-        <div className="text-xs">
-          <p className="font-medium">{formatHours(row.original.regularHours)}</p>
-          <p className="text-primary/60">{formatCurrency(row.original.regularPay)}</p>
-        </div>
-      ),
-    },
-    {
-      id: "overtimeHours",
-      accessorKey: "overtimeHours",
-      header: "Overtime",
-      meta: { label: "Overtime" },
-      cell: ({ row }) => (
-        <div className="text-xs">
-          {row.original.overtimeHours > 0 ? (
-            <>
-              <p className="font-medium text-amber-500">{formatHours(row.original.overtimeHours)}</p>
-              <p className="text-primary/60">{formatCurrency(row.original.overtimePay)}</p>
-            </>
-          ) : (
-            <p className="text-primary/40">—</p>
-          )}
-        </div>
-      ),
-    },
-    {
-      id: "bonuses",
-      header: "Bonuses",
-      meta: { label: "Bonuses" },
-      cell: ({ row }) => {
-        const bonuses = (row.original as any).bonuses || 0;
-        return (
-          <div className="text-xs">
-            {bonuses > 0 ? (
-              <p className="font-medium text-green-500">{formatCurrency(bonuses)}</p>
-            ) : (
-              <p className="text-primary/40">—</p>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      id: "grossPay",
-      accessorKey: "grossPay",
-      header: "Gross Pay",
-      meta: { label: "Gross Pay" },
-      cell: ({ row }) => (
-        <div className="text-xs">
-          <p className="font-semibold">{formatCurrency(row.original.grossPay)}</p>
-        </div>
-      ),
-    },
-    {
-      id: "deductions",
-      header: "Deductions",
-      meta: { label: "Deductions" },
-      cell: ({ row }) => {
-        const deductions = (row.original as any).deductions || 0;
-        return (
-          <div className="text-xs">
-            {deductions > 0 ? (
-              <p className="font-medium text-red-500">{formatCurrency(deductions)}</p>
-            ) : (
-              <p className="text-primary/40">—</p>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      id: "netPay",
-      accessorKey: "netPay",
-      header: "Net Pay",
-      meta: { label: "Net Pay" },
-      cell: ({ row }) => (
-        <div className="text-xs">
-          <p className="font-bold text-green-600">{formatCurrency(row.original.netPay)}</p>
-        </div>
-      ),
-    },
-  ];
-
-  // Add payslip actions column if enabled
-  if (showPayslipActions) {
-    columns.push({
-      id: "actions",
-      header: "Payslip",
-      cell: ({ row }) => (
-        <div className="flex gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2"
-            onClick={() => onDownloadPayslip?.(row.original.instructorId)}
-          >
-            <Download className="size-3.5 mr-1" />
-            <span className="text-xs">PDF</span>
-          </Button>
-        </div>
-      ),
-      enableSorting: false,
-    });
-  }
+  summary,
+  selectedPeriod,
+  onPeriodChange,
+}: {
+  instructors: PayrollInstructorRow[];
+  summary: PayrollSummary;
+  selectedPeriod: PayrollPeriod;
+  onPeriodChange: (period: PayrollPeriod) => void;
+}): React.JSX.Element {
+  const [search, setSearch] = React.useState("");
+  const [sort, setSort] = React.useState("instructor.asc");
+  const [columnVisibility, setColumnVisibility] =
+    React.useState<VisibilityState>({});
+  const [columnOrder, setColumnOrder] = React.useState<ColumnOrderState>(
+    PAYROLL_INSTRUCTOR_COLUMN_ORDER,
+  );
+  const filteredRows = React.useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return instructors;
+    return instructors.filter((row) =>
+      `${row.instructorName} ${row.instructorEmail ?? ""}`
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [instructors, search]);
+  const sorting = React.useMemo<SortingState>(() => {
+    const [id, direction] = sort.split(".");
+    return [{ id, desc: direction === "desc" }];
+  }, [sort]);
+  const monthOptions = React.useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, index) => {
+        const month = subMonths(new Date(), index);
+        return {
+          label: format(month, "MMMM yyyy"),
+          value: startOfMonth(month).toISOString(),
+        };
+      }),
+    [],
+  );
+  const currency = instructors[0]?.currency ?? "GBP";
 
   return (
     <DataTable
-      columns={columns}
-      data={instructors}
+      columns={payrollInstructorColumns}
+      data={filteredRows}
+      enableGlobalSearch={false}
+      sorting={sorting}
+      onSortingChange={(next) => {
+        const primary = next[0];
+        if (primary) setSort(`${primary.id}.${primary.desc ? "desc" : "asc"}`);
+      }}
+      columnVisibility={columnVisibility}
+      onColumnVisibilityChange={setColumnVisibility}
+      columnOrder={columnOrder}
+      onColumnOrderChange={setColumnOrder}
+      initialColumnOrder={PAYROLL_INSTRUCTOR_COLUMN_ORDER}
+      toolbar={{
+        filters: ({ table }) => (
+          <StudioTableToolbar
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search period overview..."
+            sortOptions={SORT_OPTIONS}
+            sortValue={sort}
+            onSortChange={setSort}
+            table={table}
+            columnVisibility={columnVisibility}
+            columnOrder={columnOrder}
+            onColumnOrderChange={setColumnOrder}
+            initialColumnOrder={PAYROLL_INSTRUCTOR_COLUMN_ORDER}
+            primaryColumnId="instructor"
+            additionalControls={
+              <Select
+                value={selectedPeriod.start.toISOString()}
+                onValueChange={(value) => {
+                  const month = new Date(value);
+                  onPeriodChange({
+                    start: startOfMonth(month),
+                    end: endOfMonth(month),
+                  });
+                }}
+              >
+                <SelectTrigger
+                  className="h-8.5 w-44 rounded-lg text-xs"
+                  aria-label="Payroll period"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {monthOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+          />
+        ),
+      }}
       emptyState={
-        <div className="text-center py-12">
-          <div className="mx-auto size-12 rounded-full bg-primary/5 flex items-center justify-center mb-4">
-            <FileText className="size-6 text-primary/40" />
-          </div>
-          <h3 className="text-sm font-medium text-primary mb-1">No instructors</h3>
-          <p className="text-xs text-primary/60">
-            No instructors have approved time logs in this period
-          </p>
+        <div className="py-12 text-center text-xs text-primary/50">
+          No approved time logs in this period.
         </div>
+      }
+      footer={
+        <PayrollTableTotals
+          items={[
+            {
+              label: "Team members",
+              value: new Intl.NumberFormat("en-GB").format(
+                summary.totalInstructors,
+              ),
+            },
+            {
+              label: "Regular hours",
+              value: formatPayrollHours(summary.totalRegularHours),
+            },
+            {
+              label: "Overtime",
+              value: formatPayrollHours(summary.totalOvertimeHours),
+            },
+            {
+              label: "Total hours",
+              value: formatPayrollHours(
+                summary.totalRegularHours + summary.totalOvertimeHours,
+              ),
+            },
+            {
+              label: "Gross pay",
+              value: formatPayrollCurrency(summary.totalGrossPay, currency),
+            },
+            {
+              label: "Estimated net",
+              value: formatPayrollCurrency(summary.totalNetPay, currency),
+            },
+          ]}
+        />
       }
     />
   );

@@ -48,35 +48,49 @@ export const useSyncDiscordApp = () => {
   return useMutation(trpc.apps.syncDiscord.mutationOptions({}));
 };
 
-export const useDiscordGuilds = (enabled = true) => {
+export const useSyncOAuthAccount = () => {
+  const trpc = useTRPC();
+  return useMutation(trpc.apps.syncOAuthAccount.mutationOptions({}));
+};
+
+export const useDiscordGuilds = (providerAccountId: string, enabled = true) => {
   const trpc = useTRPC();
   return useQuery({
-    ...trpc.apps.listDiscordGuilds.queryOptions(),
-    enabled,
+    ...trpc.apps.listDiscordGuilds.queryOptions({ providerAccountId }),
+    enabled: enabled && Boolean(providerAccountId),
   });
 };
 
-export const useSlackWorkspaces = (enabled = true) => {
+export const useSlackWorkspaces = (
+  providerAccountId: string,
+  enabled = true,
+) => {
   const trpc = useTRPC();
   return useQuery({
-    ...trpc.apps.listSlackWorkspaces.queryOptions(),
-    enabled,
+    ...trpc.apps.listSlackWorkspaces.queryOptions({ providerAccountId }),
+    enabled: enabled && Boolean(providerAccountId),
   });
 };
 
-export const useSlackChannels = (enabled = true) => {
+export const useSlackChannels = (providerAccountId: string, enabled = true) => {
   const trpc = useTRPC();
   return useQuery({
-    ...trpc.apps.listSlackChannels.queryOptions(),
-    enabled,
+    ...trpc.apps.listSlackChannels.queryOptions({ providerAccountId }),
+    enabled: enabled && Boolean(providerAccountId),
   });
 };
 
-export const useDiscordChannels = (guildId: string | null) => {
+export const useDiscordChannels = (
+  providerAccountId: string,
+  guildId: string | null,
+) => {
   const trpc = useTRPC();
   return useQuery({
-    ...trpc.apps.listDiscordChannels.queryOptions({ guildId: guildId ?? "" }),
-    enabled: !!guildId,
+    ...trpc.apps.listDiscordChannels.queryOptions({
+      providerAccountId,
+      guildId: guildId ?? "",
+    }),
+    enabled: Boolean(providerAccountId && guildId),
   });
 };
 

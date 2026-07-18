@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/db";
 import { ActivityAction, ModuleType } from "@/db/enums";
 import { locationModule } from "@/db/schema";
+import { requireCapability } from "@/features/permissions/server/authorization";
 import { logAnalytics } from "@/lib/analytics-logger";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 
@@ -15,7 +16,6 @@ export const MODULE_CONFIG = {
     description:
       "Track employee hours, shifts, and billable time with clock-in/out functionality",
     icon: "Clock",
-    requiresPremium: true,
     features: [
       "Clock in/out with multiple methods (Manual, QR Code)",
       "Timesheet management and approval workflows",
@@ -28,7 +28,6 @@ export const MODULE_CONFIG = {
     name: "Invoicing",
     description: "Generate and manage invoices from time logs and deals",
     icon: "FileText",
-    requiresPremium: true,
     features: [
       "Auto-generate invoices from time logs",
       "Customizable invoice templates",
@@ -40,7 +39,6 @@ export const MODULE_CONFIG = {
     name: "Inventory Management",
     description: "Track products, stock levels, and manage orders",
     icon: "Package",
-    requiresPremium: true,
     features: [
       "Product catalog",
       "Stock level tracking",
@@ -52,7 +50,6 @@ export const MODULE_CONFIG = {
     name: "Booking Calendar",
     description: "Schedule appointments and manage availability",
     icon: "Calendar",
-    requiresPremium: false,
     features: [
       "Client self-booking",
       "Calendar sync",
@@ -64,7 +61,6 @@ export const MODULE_CONFIG = {
     name: "Document Signing",
     description: "Send and track documents for e-signature",
     icon: "FileSignature",
-    requiresPremium: true,
     features: [
       "E-signature collection",
       "Document templates",
@@ -76,7 +72,6 @@ export const MODULE_CONFIG = {
     name: "Project Management",
     description: "Manage projects, tasks, and team collaboration",
     icon: "Kanban",
-    requiresPremium: true,
     features: [
       "Task boards",
       "Team assignments",
@@ -89,7 +84,6 @@ export const MODULE_CONFIG = {
     description:
       "Legacy studio module - use Studio Core instead for full studio management",
     icon: "Dumbbell",
-    requiresPremium: true,
     features: [
       "Mindbody integration for class sync",
       "Class schedule display on funnels",
@@ -104,7 +98,6 @@ export const MODULE_CONFIG = {
     description:
       "Complete fitness studio management with class scheduling, memberships, bookings, check-in, and instructor dashboards",
     icon: "Dumbbell",
-    requiresPremium: false,
     features: [
       "Class types and scheduling",
       "Membership plans and subscriptions",
@@ -120,6 +113,32 @@ export const MODULE_CONFIG = {
 
 const moduleTypes = Object.values(ModuleType);
 const moduleConfigSchema = z.record(z.string(), z.unknown());
+
+async function requireModuleManagement(ctx: {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+}) {
+  if (!ctx.orgId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select an organization before managing modules.",
+    });
+  }
+
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability: "settings.manage",
+    resource: {
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+  });
+}
 
 function moduleList(enabledModuleTypes: Set<ModuleType>) {
   return moduleTypes.map((type) => ({
@@ -236,12 +255,7 @@ export const modulesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId && !ctx.locationId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You must be in an organization or location context",
-        });
-      }
+      await requireModuleManagement(ctx);
 
       const moduleConfig = MODULE_CONFIG[input.moduleType];
       const isLocationLevel = !!ctx.locationId;
@@ -268,7 +282,6 @@ export const modulesRouter = createTRPCRouter({
         posthogProperties: {
           module_type: input.moduleType,
           enabled: true,
-          is_premium: moduleConfig.requiresPremium,
           is_location_level: isLocationLevel,
         },
       });
@@ -279,12 +292,7 @@ export const modulesRouter = createTRPCRouter({
   disable: protectedProcedure
     .input(z.object({ moduleType: z.nativeEnum(ModuleType) }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId && !ctx.locationId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You must be in an organization or location context",
-        });
-      }
+      await requireModuleManagement(ctx);
 
       const isLocationLevel = !!ctx.locationId;
       const moduleConfig = MODULE_CONFIG[input.moduleType];
@@ -327,10 +335,11 @@ export const modulesRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       if (!ctx.locationId) {
         throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You must be in a location context",
+          code: "PRECONDITION_FAILED",
+          message: "Select a location before configuring modules.",
         });
       }
+      await requireModuleManagement(ctx);
 
       const [module] = await db
         .update(locationModule)

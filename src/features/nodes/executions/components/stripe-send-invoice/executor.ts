@@ -29,7 +29,6 @@ export const stripeSendInvoiceExecutor: NodeExecutor<StripeSendInvoiceData> = as
     // Compile fields with Handlebars
     const invoiceId = data.invoiceId ? decode(Handlebars.compile(data.invoiceId)(context)) : undefined;
 
-    // TODO: Implement Stripe: Send Invoice logic here
     const result = await step.run("stripe-send-invoice", async () => {
       // Add implementation here
       throw new NonRetriableError("Stripe: Send Invoice: Not yet implemented");

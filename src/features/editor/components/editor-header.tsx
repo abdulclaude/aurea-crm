@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeftIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronLeftIcon, HistoryIcon } from "lucide-react";
 
 import { IconCloudCheck as SaveIcon } from "central-icons/IconCloudCheck";
-import { IconSquareDotedBehindSquare as TemplateIcon } from "central-icons/IconSquareDotedBehindSquare";
-import { IconArchive1 as ArchiveIcon } from "central-icons/IconArchive1";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -19,15 +17,14 @@ import Link from "next/link";
 import {
   useSuspenseWorkflow,
   useUpdateWorkflow,
-  useCreateTemplateFromWorkflow,
-  useUpdateWorkflowArchived,
   useUpdateWorkflowName,
 } from "@/features/workflows/hooks/use-workflows";
 import { Input } from "@/components/ui/input";
 import { useAtomValue } from "jotai";
 import { editorAtom } from "../store/atoms";
 import { useRouter } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
+import { WorkflowStateActions } from "./workflow-state-actions";
+import { WorkflowBehaviorSheet } from "@/features/workflows/components/workflow-behavior-sheet";
 
 export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   const editor = useAtomValue(editorAtom);
@@ -54,7 +51,7 @@ export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
       variant="gradient"
       onClick={handleSave}
       disabled={saveWorkflow.isPending}
-      className=" gap-1.5 text-xs w-max"
+      className="h-8 w-max gap-1.5 rounded-lg px-3.5 text-xs"
     >
       <SaveIcon className="size-3.5" />
       Save changes
@@ -119,7 +116,7 @@ export const EditorNameInput = ({ workflowId }: { workflowId: string }) => {
         onChange={(e) => setName(e.target.value)}
         onBlur={handleSave}
         onKeyDown={handleKeyDown}
-        className="h-7 w-auto min-w-[100px] px-2 text-xs text-primary bg-background border-none hover:bg-primary-foreground/25 hover:text-primary rounded-sm"
+        className="h-8 w-auto min-w-[100px] rounded-lg border-black/10 bg-background px-2 text-xs text-primary hover:bg-primary-foreground/25 hover:text-primary dark:border-white/10"
       />
     );
   }
@@ -136,7 +133,7 @@ export const EditorNameInput = ({ workflowId }: { workflowId: string }) => {
 
 export const EditorBreadcrumbs = ({ workflowId }: { workflowId: string }) => {
   return (
-    <Breadcrumb className="flex w-full items-center justify-center">
+    <Breadcrumb className="flex min-w-0 flex-1 items-center">
       <BreadcrumbList>
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
@@ -158,75 +155,9 @@ export const EditorBreadcrumbs = ({ workflowId }: { workflowId: string }) => {
   );
 };
 
-const WorkflowStateActions = ({ workflowId }: { workflowId: string }) => {
-  const { data: workflow } = useSuspenseWorkflow(workflowId);
-  const updateArchived = useUpdateWorkflowArchived();
-  const createTemplate = useCreateTemplateFromWorkflow();
-
-  const [hasNewTemplate, setHasNewTemplate] = useState(false);
-
-  const isArchived = workflow.archived ?? false;
-  const templated = (workflow.isTemplate ?? false) || hasNewTemplate;
-
-  const handleArchive = () => {
-    if (isArchived) {
-      return;
-    }
-    updateArchived.mutate({ id: workflowId, archived: true });
-  };
-
-  const handleTemplate = () => {
-    if (templated) {
-      return;
-    }
-    createTemplate.mutate(
-      { id: workflowId },
-      {
-        onSuccess: () => setHasNewTemplate(true),
-      }
-    );
-  };
-
-  return (
-    <div className="flex items-center gap-2">
-      {isArchived ? (
-        <Badge className="bg-sky-800 rounded-sm h-7 text-sky-300 border border-white/5 px-3 cursor-default">
-          Archived
-        </Badge>
-      ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-2 text-xs w-max h-8.5"
-          disabled={updateArchived.isPending}
-          onClick={handleArchive}
-        >
-          {/* <ArchiveIcon className="size-3.5" /> */}
-          Archive
-        </Button>
-      )}
-      {templated ? (
-        <Badge className="bg-teal-700 rounded-sm h-7 text-teal-300 border border-white/5 px-3 cursor-default">
-          Templated
-        </Badge>
-      ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          className=" gap-2 text-xs w-max h-8.5"
-          disabled={createTemplate.isPending}
-          onClick={handleTemplate}
-        >
-          {/* <TemplateIcon className="size-3.5" /> */}
-          Template
-        </Button>
-      )}
-    </div>
-  );
-};
-
 const EditorHeader = ({ workflowId }: { workflowId: string }) => {
   const router = useRouter();
+  const { data: workflow } = useSuspenseWorkflow(workflowId);
 
   const handleGoBack = () => {
     if (typeof window !== "undefined" && window.history.length > 1) {
@@ -238,21 +169,41 @@ const EditorHeader = ({ workflowId }: { workflowId: string }) => {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-black/10 dark:border-white/5 px-4 bg-background text-primary">
-      <div className="flex flex-row items-center justify-between gap-x-4 w-full">
-        <div className="flex items-center gap-3">
+    <header className="flex h-16 shrink-0 items-center border-b border-black/10 bg-background px-3 text-primary dark:border-white/5 md:px-4">
+      <div className="flex w-full items-center gap-3">
+        <div className="flex shrink-0 items-center">
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
-            className="text-primary hover:text-primary text-xs border-none hover:bg-primary-foreground gap-1.5 items-center"
+            className="rounded-lg text-primary hover:bg-primary-foreground hover:text-primary"
             onClick={handleGoBack}
+            aria-label="Back to workflows"
+            title="Back to workflows"
           >
-            <ChevronLeftIcon className="mt-0.5 size-2.5" />
-            Go back
+            <ChevronLeftIcon className="size-4" />
           </Button>
         </div>
         <EditorBreadcrumbs workflowId={workflowId} />
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            asChild
+            size="sm"
+            variant="ghost"
+            className="hidden h-8 rounded-lg text-xs sm:inline-flex"
+          >
+            <Link
+              href={`/executions?workflowId=${encodeURIComponent(workflow.id)}`}
+            >
+              <HistoryIcon className="size-3.5" />
+              History
+            </Link>
+          </Button>
+          {!workflow.isBundle ? (
+            <WorkflowBehaviorSheet
+              workflowId={workflow.id}
+              behavior={workflow.behavior}
+            />
+          ) : null}
           <WorkflowStateActions workflowId={workflowId} />
           <EditorSaveButton workflowId={workflowId} />
         </div>

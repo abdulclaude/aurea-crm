@@ -36,7 +36,6 @@ export const slackSendDmExecutor: NodeExecutor<SlackSendDmData> = async ({
     const userId = data.userId ? decode(Handlebars.compile(data.userId)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Slack: Send DM logic here
     const result = await step.run("slack-send-dm", async () => {
       // Add implementation here
       throw new NonRetriableError("Slack: Send DM: Not yet implemented");

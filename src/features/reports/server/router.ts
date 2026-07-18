@@ -1,23 +1,72 @@
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  or,
+  type SQL,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
 import {
   client as clientTable,
+  clientAccountBalance,
+  commerceLedgerEntry,
   giftCard,
   instructor,
-  instructorPayout,
+  invoice,
+  invoiceLineItem,
+  payrollRun,
+  payrollRunInstructor,
+  pricingOption,
+  rota,
   studioClass,
   studioMembership,
   studioPayment,
   studioPaymentLineItem,
   studioProduct,
   studioStaffMember,
+  task,
+  timeLog,
 } from "@/db/schema";
+import { getClassReportRows, getInvoiceReportRows, getOperationalStaffReportRows } from "@/features/reports/server/domain-report-rows";
 import { getReportById } from "@/features/reports/helpers";
+import {
+  formatReportDateInTimezone,
+  reportBucketKey,
+} from "@/features/reports/lib/report-time";
+import { buildPlainCsv } from "@/features/reports/lib/report-csv";
+import { minorUnitsToDecimal } from "@/features/commerce/lib/money";
+import {
+  addReportMoney,
+  averageReportMoney,
+  multiplyReportMoney,
+  normalizeReportMoney,
+  prorateReportMoney,
+  reportMoneyToMinor,
+  signedReportMoney,
+  subtractReportMoney,
+} from "@/features/reports/lib/report-money";
+import {
+  isLedgerEntryVisibleInTransactionReport,
+  reportLedgerStatus,
+  resolveReportCurrency,
+} from "@/features/reports/lib/report-row-policy";
+import {
+  reportExportProcedure,
+  reportViewProcedure,
+} from "@/features/reports/server/report-procedures";
+import { getReportLocale } from "@/features/reports/server/report-scope";
 import type { ReportDataRow } from "@/features/reports/types";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import type { ReportGroupId } from "@/features/reports/types";
+import { createTRPCRouter } from "@/trpc/init";
 
 const REPORT_ROW_LIMIT = 500;
 
@@ -33,7 +82,10 @@ const reportDataRowSchema = z.record(z.string(), reportDataValueSchema);
 
 function requireOrg(ctx: { orgId: string | null }) {
   if (!ctx.orgId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "No active organization",
+    });
   }
   return ctx.orgId;
 }
@@ -53,33 +105,87 @@ function requireOrgAndLocation(ctx: {
   return { locationId: ctx.locationId, orgId };
 }
 
-function formatDate(value: Date | null | undefined): string | null {
-  return value ? value.toISOString().split("T")[0] : null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function numberValue(value: string | number | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  return Number(value);
+function pricingOptionIdFromMetadata(metadata: unknown): string | null {
+  if (!isRecord(metadata)) return null;
+  return typeof metadata.pricingOptionId === "string"
+    ? metadata.pricingOptionId
+    : null;
 }
 
-function roundMoney(value: number): number {
-  return Math.round(value * 100) / 100;
+async function getPricingOptionNameById(
+  orgId: string,
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  const uniqueIds = Array.from(new Set(ids));
+  if (uniqueIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({ id: pricingOption.id, name: pricingOption.name })
+    .from(pricingOption)
+    .where(
+      and(
+        eq(pricingOption.organizationId, orgId),
+        inArray(pricingOption.id, uniqueIds),
+      ),
+    );
+
+  return new Map(rows.map((row) => [row.id, row.name]));
 }
 
-function scopePayment(orgId: string, locationId: string | null, startDate?: Date, endDate?: Date) {
+function scopePayment(
+  orgId: string,
+  locationId: string,
+  startDate?: Date,
+  endDate?: Date,
+) {
   return and(
     eq(studioPayment.organizationId, orgId),
-    locationId ? eq(studioPayment.locationId, locationId) : undefined,
+    eq(studioPayment.locationId, locationId),
     eq(studioPayment.status, "SUCCEEDED"),
     startDate ? gte(studioPayment.createdAt, startDate) : undefined,
     endDate ? lte(studioPayment.createdAt, endDate) : undefined,
   );
 }
 
+function transactionLedgerCondition(reportId: string): SQL {
+  if (reportId === "pending-transactions") {
+    return and(
+      inArray(commerceLedgerEntry.kind, ["PAYMENT", "REFUND"]),
+      eq(commerceLedgerEntry.status, "PENDING"),
+    )!;
+  }
+  if (reportId === "voided-rejected-transactions") {
+    return and(
+      inArray(commerceLedgerEntry.kind, ["PAYMENT", "REFUND"]),
+      inArray(commerceLedgerEntry.status, ["FAILED", "CANCELLED"]),
+    )!;
+  }
+  return or(
+    and(
+      eq(commerceLedgerEntry.kind, "PAYMENT"),
+      inArray(commerceLedgerEntry.status, [
+        "SUCCEEDED",
+        "PARTIALLY_REFUNDED",
+        "REFUNDED",
+      ]),
+    ),
+    and(
+      eq(commerceLedgerEntry.kind, "REFUND"),
+      eq(commerceLedgerEntry.status, "SUCCEEDED"),
+    ),
+  )!;
+}
+
 async function getSalesRows(
   orgId: string,
   locationId: string,
   reportId: string,
+  timezone: string,
+  fallbackCurrency: string,
 ): Promise<ReportDataRow[]> {
   if (
     [
@@ -88,15 +194,19 @@ async function getSalesRows(
       "average-revenue-analysis",
     ].includes(reportId)
   ) {
-    return getMembershipRows(orgId, locationId);
+    return getMembershipRows(orgId, locationId, timezone, fallbackCurrency);
   }
 
   if (["gift-cards", "gift-card-analysis"].includes(reportId)) {
-    return getGiftCardRows(orgId, locationId);
+    return getGiftCardRows(orgId, locationId, timezone);
   }
 
   if (reportId === "revenue-by-class") {
-    return getClassRows(orgId, locationId);
+    return getClassReportRows(orgId, locationId, timezone, fallbackCurrency);
+  }
+
+  if (reportId === "invoice") {
+    return getInvoiceReportRows(orgId, locationId, timezone);
   }
 
   const lineItems = await db.query.studioPaymentLineItem.findMany({
@@ -109,114 +219,155 @@ async function getSalesRows(
       client: { columns: { name: true } },
       studioPayment: {
         columns: {
+          currency: true,
           discountAmount: true,
           paymentMethod: true,
           status: true,
           taxAmount: true,
           type: true,
+          metadata: true,
         },
         with: {
           promoCode: { columns: { code: true } },
         },
       },
       studioProduct: {
-        columns: { category: true, cost: true, name: true, type: true },
+        columns: {
+          category: true,
+          cost: true,
+          currency: true,
+          name: true,
+          type: true,
+        },
       },
     },
     orderBy: desc(studioPaymentLineItem.soldAt),
     limit: REPORT_ROW_LIMIT,
   });
-  const netTotalByPayment = new Map<string, number>();
+  const netTotalByPaymentAndCurrency = new Map<string, number>();
+  const pricingOptionNameById = await getPricingOptionNameById(
+    orgId,
+    lineItems
+      .map((lineItem) =>
+        pricingOptionIdFromMetadata(lineItem.studioPayment?.metadata),
+      )
+      .filter((id): id is string => Boolean(id)),
+  );
 
   for (const lineItem of lineItems) {
     if (!lineItem.paymentId) continue;
-    netTotalByPayment.set(
-      lineItem.paymentId,
-      (netTotalByPayment.get(lineItem.paymentId) ?? 0) +
-        Math.abs(numberValue(lineItem.amount) ?? 0),
+    const key = `${lineItem.paymentId}:${lineItem.currency.toUpperCase()}`;
+    netTotalByPaymentAndCurrency.set(
+      key,
+      (netTotalByPaymentAndCurrency.get(key) ?? 0) +
+        Math.abs(reportMoneyToMinor(lineItem.amount, lineItem.currency)),
     );
   }
 
   const rows = lineItems.map((lineItem) => {
+    const currency = lineItem.currency;
     const quantity = lineItem.quantity;
-    const rawGross = Number(lineItem.unitPrice) * quantity;
-    const rawDiscount = numberValue(lineItem.discountAmount) ?? 0;
-    const rawNet = numberValue(lineItem.amount) ?? 0;
-    const gross = lineItem.returned ? -Math.abs(rawGross) : rawGross;
-    const discount = lineItem.returned ? -Math.abs(rawDiscount) : rawDiscount;
-    const net = lineItem.returned ? -Math.abs(rawNet) : rawNet;
-    const paymentTax = numberValue(lineItem.studioPayment?.taxAmount) ?? 0;
+    const gross = signedReportMoney(
+      multiplyReportMoney(lineItem.unitPrice, quantity, currency),
+      lineItem.returned,
+      currency,
+    );
+    const discount = signedReportMoney(
+      lineItem.discountAmount,
+      lineItem.returned,
+      currency,
+    );
+    const net = signedReportMoney(lineItem.amount, lineItem.returned, currency);
+    const rawNetMinor = Math.abs(reportMoneyToMinor(lineItem.amount, currency));
+    const paymentCurrency = lineItem.studioPayment?.currency;
     const paymentNetTotal = lineItem.paymentId
-      ? netTotalByPayment.get(lineItem.paymentId)
+      ? netTotalByPaymentAndCurrency.get(
+          `${lineItem.paymentId}:${currency.toUpperCase()}`,
+        )
       : null;
     const proratedTax =
-      paymentNetTotal && paymentNetTotal > 0
-        ? roundMoney((paymentTax * Math.abs(rawNet)) / paymentNetTotal)
-        : 0;
-    const tax = lineItem.returned ? -Math.abs(proratedTax) : proratedTax;
-    const cost = (numberValue(lineItem.studioProduct?.cost) ?? 0) * quantity;
-    const profit = net - cost;
-    const productName = lineItem.studioProduct?.name ?? lineItem.description ?? "Sale";
+      paymentCurrency?.toUpperCase() === currency.toUpperCase() &&
+      lineItem.studioPayment &&
+      paymentNetTotal &&
+      paymentNetTotal > 0
+        ? prorateReportMoney({
+            total: lineItem.studioPayment.taxAmount ?? "0",
+            numerator: rawNetMinor,
+            denominator: paymentNetTotal,
+            currency,
+          })
+        : null;
+    const tax = proratedTax
+      ? signedReportMoney(proratedTax, lineItem.returned, currency)
+      : null;
+    const productCurrency = lineItem.studioProduct?.currency;
+    const cost =
+      lineItem.studioProduct?.cost &&
+      productCurrency?.toUpperCase() === currency.toUpperCase()
+        ? signedReportMoney(
+            multiplyReportMoney(
+              lineItem.studioProduct.cost,
+              quantity,
+              currency,
+            ),
+            lineItem.returned,
+            currency,
+          )
+        : null;
+    const profit = cost ? subtractReportMoney(net, cost, currency) : null;
+    const productName =
+      lineItem.studioProduct?.name ?? lineItem.description ?? "Sale";
     const productType = lineItem.studioProduct?.type ?? null;
-    const category = lineItem.studioProduct?.category ?? lineItem.category ?? productType;
+    const category =
+      lineItem.studioProduct?.category ?? lineItem.category ?? productType;
+    const pricingOptionId = pricingOptionIdFromMetadata(
+      lineItem.studioPayment?.metadata,
+    );
 
     return {
-      amount: lineItem.returned ? -Math.abs(net) : net,
+      amount: net,
       category,
       client: lineItem.client?.name ?? null,
-      date: formatDate(lineItem.soldAt ?? lineItem.createdAt),
+      currency,
+      date: formatReportDateInTimezone(
+        lineItem.soldAt ?? lineItem.createdAt,
+        timezone,
+      ),
       discount,
       gross,
       item: productName,
-      margin: net !== 0 ? Math.round((profit / net) * 1000) / 10 : null,
-      method: lineItem.studioPayment?.paymentMethod ?? lineItem.studioPayment?.type ?? null,
+      margin:
+        profit && reportMoneyToMinor(net, currency) !== 0
+          ? Math.round(
+              (reportMoneyToMinor(profit, currency) /
+                reportMoneyToMinor(net, currency)) *
+                1_000,
+            ) / 10
+          : null,
+      method:
+        lineItem.studioPayment?.paymentMethod ??
+        lineItem.studioPayment?.type ??
+        null,
       net,
       product: productType === "RETAIL" ? productName : null,
       profit,
+      pricingOption: pricingOptionId
+        ? (pricingOptionNameById.get(pricingOptionId) ?? pricingOptionId)
+        : null,
       promotion: lineItem.studioPayment?.promoCode?.code ?? null,
       quantity,
       reason: lineItem.returned ? "Returned item" : null,
       revenue: net,
       service: productType === "RETAIL" ? null : productName,
       staff: null,
-      status: lineItem.returned ? "REFUNDED" : lineItem.studioPayment?.status ?? "SUCCEEDED",
+      status: lineItem.returned
+        ? "REFUNDED"
+        : (lineItem.studioPayment?.status ?? "SUCCEEDED"),
       supplier: category,
       tax,
       transactions: 1,
     };
   });
-
-  if (reportId === "daily-closeout") {
-    return aggregateRows(rows, ["date"]);
-  }
-
-  if (reportId === "cash-drawer") {
-    return aggregateRows(rows, ["date", "method"]);
-  }
-
-  if (reportId === "sales-by-category") {
-    return aggregateRows(rows, ["category"]);
-  }
-
-  if (reportId === "sales-tax") {
-    return aggregateRows(rows, ["date", "category"]);
-  }
-
-  if (reportId === "sales-by-service" || reportId === "earned-revenue") {
-    return aggregateRows(rows, ["service", "category"]);
-  }
-
-  if (reportId === "sales-by-product" || reportId === "best-sellers") {
-    return aggregateRows(rows, ["product", "category"]);
-  }
-
-  if (reportId === "sales-by-supplier") {
-    return aggregateRows(rows, ["supplier", "product"]);
-  }
-
-  if (reportId === "sales-promotions") {
-    return aggregateRows(rows.filter((row) => row.promotion), ["promotion"]);
-  }
 
   if (reportId === "returns") {
     return rows.filter((row) => row.status === "REFUNDED");
@@ -224,17 +375,58 @@ async function getSalesRows(
 
   if (reportId === "voided-sales") {
     return rows.filter((row) =>
-      ["CANCELLED", "FAILED", "REFUNDED"].includes(String(row.status ?? "")),
+      ["CANCELLED", "FAILED"].includes(String(row.status ?? "")),
     );
   }
 
-  return rows;
+  const finalRows = rows.filter((row) =>
+    ["SUCCEEDED", "REFUNDED"].includes(String(row.status ?? "")),
+  );
+
+  if (reportId === "daily-closeout") {
+    return aggregateRows(finalRows, ["date"]);
+  }
+
+  if (reportId === "cash-drawer") {
+    return aggregateRows(finalRows, ["date", "method"]);
+  }
+
+  if (reportId === "sales-by-category") {
+    return aggregateRows(finalRows, ["category"]);
+  }
+
+  if (reportId === "sales-tax") {
+    return aggregateRows(finalRows, ["date", "category"]);
+  }
+
+  if (reportId === "sales-by-service" || reportId === "earned-revenue") {
+    return aggregateRows(finalRows, ["service", "category"]);
+  }
+
+  if (reportId === "sales-by-product" || reportId === "best-sellers") {
+    return aggregateRows(finalRows, ["product", "category"]);
+  }
+
+  if (reportId === "sales-by-supplier") {
+    return aggregateRows(finalRows, ["supplier", "product"]);
+  }
+
+  if (reportId === "sales-promotions") {
+    return aggregateRows(
+      finalRows.filter((row) => row.promotion),
+      ["promotion", "pricingOption"],
+    );
+  }
+
+  return finalRows;
 }
 
 async function getPaymentRows(
   orgId: string,
   locationId: string,
   reportId: string,
+  timezone: string,
+  fallbackCurrency: string,
 ): Promise<ReportDataRow[]> {
   if (
     [
@@ -244,74 +436,98 @@ async function getPaymentRows(
       "autopay-summary",
     ].includes(reportId)
   ) {
-    return getMembershipRows(orgId, locationId);
+    return getMembershipRows(orgId, locationId, timezone, fallbackCurrency);
   }
 
-  const payments = await db.query.studioPayment.findMany({
-    where: and(
-      eq(studioPayment.organizationId, orgId),
-      eq(studioPayment.locationId, locationId),
-      isNull(studioPayment.deletedAt),
-    ),
-    with: {
-      client: { columns: { name: true } },
-      promoCode: { columns: { code: true } },
-      studioMembership: { columns: { endDate: true, name: true, renewalDate: true } },
-      studioProduct: { columns: { category: true, name: true, type: true } },
-    },
-    orderBy: desc(studioPayment.createdAt),
-    limit: REPORT_ROW_LIMIT,
-  });
+  if (
+    ["approved-transactions", "settled-transactions", "card-updater"].includes(
+      reportId,
+    )
+  ) {
+    return [];
+  }
 
-  const rows = payments.map((payment) => {
-    const amount = numberValue(payment.amount) ?? 0;
-    const discount = numberValue(payment.discountAmount) ?? 0;
-    const tax = numberValue(payment.taxAmount) ?? 0;
+  const payments = await db
+    .select({
+      amountMinor: commerceLedgerEntry.amountMinor,
+      clientName: clientTable.name,
+      currency: commerceLedgerEntry.currency,
+      currencyExponent: commerceLedgerEntry.currencyExponent,
+      kind: commerceLedgerEntry.kind,
+      occurredAt: commerceLedgerEntry.occurredAt,
+      paymentMethod: studioPayment.paymentMethod,
+      paymentMetadata: studioPayment.metadata,
+      provider: commerceLedgerEntry.provider,
+      status: commerceLedgerEntry.status,
+    })
+    .from(commerceLedgerEntry)
+    .leftJoin(
+      clientTable,
+      and(
+        eq(clientTable.id, commerceLedgerEntry.clientId),
+        eq(clientTable.organizationId, commerceLedgerEntry.organizationId),
+        eq(clientTable.locationId, commerceLedgerEntry.locationId),
+      ),
+    )
+    .leftJoin(
+      studioPayment,
+      and(
+        eq(studioPayment.id, commerceLedgerEntry.studioPaymentId),
+        eq(studioPayment.organizationId, commerceLedgerEntry.organizationId),
+        eq(studioPayment.locationId, commerceLedgerEntry.locationId),
+      ),
+    )
+    .where(
+      and(
+        eq(commerceLedgerEntry.organizationId, orgId),
+        eq(commerceLedgerEntry.locationId, locationId),
+        transactionLedgerCondition(reportId),
+      ),
+    )
+    .orderBy(desc(commerceLedgerEntry.occurredAt))
+    .limit(REPORT_ROW_LIMIT);
+  const visiblePayments = payments.filter((payment) => {
+    if (payment.kind !== "PAYMENT" && payment.kind !== "REFUND") return false;
+    return isLedgerEntryVisibleInTransactionReport({
+      reportId,
+      kind: payment.kind,
+      status: payment.status,
+    });
+  });
+  const pricingOptionNameById = await getPricingOptionNameById(
+    orgId,
+    visiblePayments
+      .map((payment) => pricingOptionIdFromMetadata(payment.paymentMetadata))
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const rows = visiblePayments.map((payment) => {
+    const signedAmount =
+      payment.kind === "REFUND"
+        ? -Math.abs(payment.amountMinor)
+        : payment.amountMinor;
+    const amount = minorUnitsToDecimal(signedAmount, payment.currencyExponent);
+    const pricingOptionId = pricingOptionIdFromMetadata(
+      payment.paymentMetadata,
+    );
 
     return {
       amount,
       cardBrand: inferCardBrand(payment.paymentMethod),
-      category: payment.studioProduct?.category ?? payment.type,
-      client: payment.client?.name ?? null,
-      contract: payment.studioMembership?.name ?? null,
-      date: formatDate(payment.createdAt),
-      discount,
-      gross: amount + discount,
-      item: payment.studioProduct?.name ?? payment.description ?? payment.type,
-      method: payment.paymentMethod ?? payment.type,
-      net: amount,
-      nextBillingDate: formatDate(payment.studioMembership?.renewalDate),
-      product: payment.studioProduct?.type === "RETAIL" ? payment.studioProduct.name : null,
-      promotion: payment.promoCode?.code ?? null,
-      revenue: amount,
-      status: payment.status,
-      tax,
+      client: payment.clientName,
+      currency: payment.currency,
+      date: formatReportDateInTimezone(payment.occurredAt, timezone),
+      method: payment.paymentMethod ?? payment.provider,
+      pricingOption: pricingOptionId
+        ? (pricingOptionNameById.get(pricingOptionId) ?? pricingOptionId)
+        : null,
+      status:
+        payment.kind === "REFUND"
+          ? reportLedgerStatus({ kind: payment.kind, status: payment.status })
+          : payment.status,
       transactions: 1,
     };
   });
-
-  if (reportId === "approved-transactions") {
-    return rows.filter((row) => row.status === "PENDING");
-  }
-
-  if (reportId === "settled-transactions") {
-    return rows.filter((row) => row.status === "SUCCEEDED");
-  }
-
-  if (reportId === "pending-transactions") {
-    return rows.filter((row) => row.status === "PENDING");
-  }
-
-  if (reportId === "voided-rejected-transactions") {
-    return rows.filter((row) =>
-      ["CANCELLED", "FAILED", "REFUNDED"].includes(String(row.status ?? "")),
-    );
-  }
-
-  if (reportId === "card-updater") {
-    return rows.map((row) => ({ ...row, status: "UPDATED" }));
-  }
-
   return rows;
 }
 
@@ -319,6 +535,8 @@ async function getClientRows(
   orgId: string,
   locationId: string,
   reportId: string,
+  timezone: string,
+  fallbackCurrency: string,
 ): Promise<ReportDataRow[]> {
   if (
     [
@@ -329,7 +547,7 @@ async function getClientRows(
       "visits-remaining",
     ].includes(reportId)
   ) {
-    return getMembershipRows(orgId, locationId);
+    return getMembershipRows(orgId, locationId, timezone, fallbackCurrency);
   }
 
   if (
@@ -342,16 +560,20 @@ async function getClientRows(
       "no-shows",
     ].includes(reportId)
   ) {
-    return getClassRows(orgId, locationId);
+    return getClassReportRows(orgId, locationId, timezone, fallbackCurrency);
   }
 
   if (reportId === "client-promotions") {
-    return getPaymentRows(orgId, locationId, "transactions").then((rows) =>
-      rows.filter((row) => row.promotion),
-    );
+    return getPaymentRows(
+      orgId,
+      locationId,
+      "transactions",
+      timezone,
+      fallbackCurrency,
+    ).then((rows) => rows.filter((row) => row.promotion));
   }
 
-  const [clients, memberships, payments] = await Promise.all([
+  const [clients, memberships, balances] = await Promise.all([
     db.query.client.findMany({
       where: and(
         eq(clientTable.organizationId, orgId),
@@ -374,13 +596,12 @@ async function getClientRows(
       ),
       with: { membershipPlan: { columns: { name: true, price: true } } },
     }),
-    db.query.studioPayment.findMany({
+    db.query.clientAccountBalance.findMany({
       where: and(
-        eq(studioPayment.organizationId, orgId),
-        eq(studioPayment.locationId, locationId),
-        isNull(studioPayment.deletedAt),
+        eq(clientAccountBalance.organizationId, orgId),
+        eq(clientAccountBalance.locationId, locationId),
       ),
-      columns: { amount: true, clientId: true, createdAt: true, status: true },
+      columns: { balance: true, clientId: true, currency: true },
     }),
   ]);
   const membershipByClient = new Map(
@@ -389,44 +610,51 @@ async function getClientRows(
       membership.membershipPlan?.name ?? membership.name,
     ]),
   );
-  const balanceByClient = new Map<string, number>();
-
-  for (const payment of payments) {
-    if (!payment.clientId || payment.status !== "SUCCEEDED") continue;
-    balanceByClient.set(
-      payment.clientId,
-      (balanceByClient.get(payment.clientId) ?? 0) + Number(payment.amount),
-    );
-  }
+  const accountBalanceByClient = new Map(
+    balances.map((balance) => [
+      balance.clientId,
+      {
+        balance: normalizeReportMoney(balance.balance, balance.currency),
+        currency: balance.currency,
+      },
+    ]),
+  );
 
   const rows = clients.map((client) => ({
-    balance: balanceByClient.get(client.id) ?? null,
+    balance: accountBalanceByClient.get(client.id)?.balance ?? null,
     category: client.source ?? client.type,
     client: client.name,
     contract: membershipByClient.get(client.id) ?? null,
-    date: formatDate(client.createdAt),
+    currency: accountBalanceByClient.get(client.id)?.currency ?? null,
+    date: formatReportDateInTimezone(client.createdAt, timezone),
     email: client.email,
-    lastVisit: formatDate(client.lastInteractionAt ?? client.updatedAt),
-    phone: client.phone ?? client.mobilePhone ?? client.homePhone ?? client.workPhone,
+    lastVisit: formatReportDateInTimezone(
+      client.lastInteractionAt ?? client.updatedAt,
+      timezone,
+    ),
+    phone:
+      client.phone ??
+      client.mobilePhone ??
+      client.homePhone ??
+      client.workPhone,
     referrals: 0,
-    revenue: balanceByClient.get(client.id) ?? 0,
     service: membershipByClient.get(client.id) ?? null,
     staff:
       client.clientInstructors
         .map((assignment) => assignment.instructor.name)
         .join(", ") || null,
     status: client.lifecycleStage ?? client.type,
-    transactions: payments.filter((payment) => payment.clientId === client.id).length,
-    updatedAt: formatDate(client.updatedAt),
+    updatedAt: formatReportDateInTimezone(client.updatedAt, timezone),
     visits: client.attendanceCount,
   }));
 
-  if (reportId === "big-spenders") {
-    return rows.sort((first, second) => Number(second.revenue) - Number(first.revenue));
-  }
-
-  if (reportId === "account-balances" || reportId === "unpaid-visits") {
-    return rows.filter((row) => Number(row.balance ?? 0) !== 0);
+  if (reportId === "account-balances") {
+    return rows.filter((row) => {
+      if (typeof row.balance !== "string" || typeof row.currency !== "string") {
+        return false;
+      }
+      return reportMoneyToMinor(row.balance, row.currency) !== 0;
+    });
   }
 
   return rows;
@@ -436,19 +664,12 @@ async function getStaffRows(
   orgId: string,
   locationId: string,
   reportId: string,
+  timezone: string,
+  fallbackCurrency: string,
 ): Promise<ReportDataRow[]> {
-  if (
-    [
-      "appointment-metrics",
-      "staff-clients-per-teacher",
-      "staff-schedule",
-      "staff-schedule-at-a-glance",
-    ].includes(reportId)
-  ) {
-    return getClassRows(orgId, locationId);
-  }
-
-  const [instructors, classes, payouts, staffMembers] = await Promise.all([
+  const operationalRows = await getOperationalStaffReportRows(orgId, locationId, reportId, timezone);
+  if (operationalRows) return operationalRows;
+  const [instructors, staffMembers] = await Promise.all([
     db.query.instructor.findMany({
       where: and(
         eq(instructor.organizationId, orgId),
@@ -456,28 +677,6 @@ async function getStaffRows(
       ),
       orderBy: asc(instructor.name),
       limit: REPORT_ROW_LIMIT,
-    }),
-    db.query.studioClass.findMany({
-      where: and(
-        eq(studioClass.organizationId, orgId),
-        eq(studioClass.locationId, locationId),
-      ),
-      columns: {
-        bookedCount: true,
-        endTime: true,
-        instructorId: true,
-        startTime: true,
-        status: true,
-        name: true,
-      },
-    }),
-    db.query.instructorPayout.findMany({
-      where: and(
-        eq(instructorPayout.organizationId, orgId),
-        eq(instructorPayout.locationId, locationId),
-        isNull(instructorPayout.deletedAt),
-      ),
-      columns: { amount: true, instructorId: true },
     }),
     db.query.studioStaffMember.findMany({
       where: and(
@@ -489,67 +688,42 @@ async function getStaffRows(
       limit: REPORT_ROW_LIMIT,
     }),
   ]);
-  const classesByInstructor = new Map<string, typeof classes>();
-  const payByInstructor = new Map<string, number>();
-
-  for (const item of classes) {
-    if (!item.instructorId) continue;
-    classesByInstructor.set(item.instructorId, [
-      ...(classesByInstructor.get(item.instructorId) ?? []),
-      item,
-    ]);
-  }
-
-  for (const payout of payouts) {
-    payByInstructor.set(
-      payout.instructorId,
-      (payByInstructor.get(payout.instructorId) ?? 0) + Number(payout.amount),
-    );
-  }
-
   const instructorRows = instructors.map((item) => {
-    const assignedClasses = classesByInstructor.get(item.id) ?? [];
-    const worked = assignedClasses.reduce(
-      (total, assignedClass) =>
-        total +
-        (assignedClass.endTime.getTime() - assignedClass.startTime.getTime()) /
-          3_600_000,
-      0,
-    );
-
+    const currency = resolveReportCurrency(item.currency, fallbackCurrency);
     return {
-      clientCount: assignedClasses.reduce(
-        (total, assignedClass) => total + assignedClass.bookedCount,
-        0,
-      ),
-      date: assignedClasses[0] ? formatDate(assignedClasses[0].startTime) : formatDate(item.updatedAt),
+      currency,
+      date: formatReportDateInTimezone(item.updatedAt, timezone),
       email: item.email,
-      pay: payByInstructor.get(item.id) ?? numberValue(item.hourlyRate),
+      pay: item.hourlyRate
+        ? normalizeReportMoney(item.hourlyRate, currency)
+        : null,
       role: item.role ?? "Instructor",
-      scheduled: assignedClasses.length,
-      service: assignedClasses[0]?.name ?? null,
       staff: item.name,
       status: item.isActive ? "ACTIVE" : "INACTIVE",
-      updatedAt: formatDate(item.updatedAt),
-      worked: Math.round(worked * 10) / 10,
+      updatedAt: formatReportDateInTimezone(item.updatedAt, timezone),
     };
   });
 
   const staffRows = staffMembers
-    .filter((item) => !instructors.some((teacher) => teacher.email === item.email))
-    .map((item) => ({
-      clientCount: null,
-      date: formatDate(item.updatedAt),
-      email: item.email,
-      pay: numberValue(item.hourlyRate),
-      phone: item.phone,
-      role: item.role ?? item.staffType,
-      scheduled: null,
-      staff: item.name,
-      status: item.isActive ? "ACTIVE" : "INACTIVE",
-      updatedAt: formatDate(item.updatedAt),
-      worked: null,
-    }));
+    .filter(
+      (item) => !instructors.some((teacher) => teacher.email === item.email),
+    )
+    .map((item) => {
+      const currency = resolveReportCurrency(item.currency, fallbackCurrency);
+      return {
+        currency,
+        date: formatReportDateInTimezone(item.updatedAt, timezone),
+        email: item.email,
+        pay: item.hourlyRate
+          ? normalizeReportMoney(item.hourlyRate, currency)
+          : null,
+        phone: item.phone,
+        role: item.role ?? item.staffType,
+        staff: item.name,
+        status: item.isActive ? "ACTIVE" : "INACTIVE",
+        updatedAt: formatReportDateInTimezone(item.updatedAt, timezone),
+      };
+    });
 
   return [...instructorRows, ...staffRows].slice(0, REPORT_ROW_LIMIT);
 }
@@ -558,9 +732,10 @@ async function getInventoryRows(
   orgId: string,
   locationId: string,
   reportId: string,
+  timezone: string,
 ): Promise<ReportDataRow[]> {
-  const [products, lineItems] = await Promise.all([
-    db.query.studioProduct.findMany({
+  if (reportId === "inventory-on-hand") {
+    const products = await db.query.studioProduct.findMany({
       where: and(
         eq(studioProduct.organizationId, orgId),
         eq(studioProduct.locationId, locationId),
@@ -568,94 +743,144 @@ async function getInventoryRows(
       ),
       orderBy: asc(studioProduct.name),
       limit: REPORT_ROW_LIMIT,
-    }),
-    db.query.studioPaymentLineItem.findMany({
-      where: and(
-        eq(studioPaymentLineItem.organizationId, orgId),
-        eq(studioPaymentLineItem.locationId, locationId),
-        isNull(studioPaymentLineItem.deletedAt),
-      ),
-      columns: { amount: true, productId: true, quantity: true, soldAt: true },
-      with: {
-        client: { columns: { name: true } },
-      },
-    }),
-  ]);
-  const revenueByProduct = new Map<string, number>();
-  const quantityByProduct = new Map<string, number>();
+    });
 
-  for (const lineItem of lineItems) {
-    if (!lineItem.productId) continue;
-    revenueByProduct.set(
-      lineItem.productId,
-      (revenueByProduct.get(lineItem.productId) ?? 0) + Number(lineItem.amount),
-    );
-    quantityByProduct.set(
-      lineItem.productId,
-      (quantityByProduct.get(lineItem.productId) ?? 0) + lineItem.quantity,
-    );
-  }
-
-  const rows = products.map((product) => {
-    const cost = numberValue(product.cost) ?? 0;
-    const revenue = revenueByProduct.get(product.id) ?? 0;
-    const quantity = product.stockQuantity ?? quantityByProduct.get(product.id) ?? 0;
-    const profit = revenue - cost * quantity;
-
-    return {
-      amount: revenue,
+    return products.map((product) => ({
       category: product.category ?? product.type,
-      cost,
-      date: formatDate(product.updatedAt),
-      margin: revenue !== 0 ? Math.round((profit / revenue) * 1000) / 10 : null,
-      orderStatus: product.isPublic ? "OPEN" : "CLOSED",
+      cost: normalizeReportMoney(product.cost ?? "0", product.currency),
+      currency: product.currency,
       product: product.name,
-      profit,
-      quantity,
-      revenue,
+      quantity: product.stockQuantity ?? 0,
       status: product.isActive ? "ACTIVE" : "INACTIVE",
       supplier: product.category ?? product.type,
-      updatedAt: formatDate(product.updatedAt),
-    };
-  });
-
-  if (reportId === "inventory-manage-online-orders") {
-    return lineItems.map((lineItem) => ({
-      amount: numberValue(lineItem.amount),
-      client: lineItem.client?.name ?? null,
-      date: formatDate(lineItem.soldAt),
-      orderStatus: "OPEN",
-      product: products.find((product) => product.id === lineItem.productId)?.name ?? "Product",
-      quantity: lineItem.quantity,
-      status: "OPEN",
+      updatedAt: formatReportDateInTimezone(product.updatedAt, timezone),
     }));
   }
 
-  if (reportId === "inventory-retail-sales-performance") {
-    return lineItems.map((lineItem) => {
-      const product = products.find((item) => item.id === lineItem.productId);
-      const revenue = numberValue(lineItem.amount) ?? 0;
-      const cost = (numberValue(product?.cost) ?? 0) * lineItem.quantity;
-      const profit = revenue - cost;
+  const lineItems = await db.query.studioPaymentLineItem.findMany({
+    where: and(
+      eq(studioPaymentLineItem.organizationId, orgId),
+      eq(studioPaymentLineItem.locationId, locationId),
+      isNull(studioPaymentLineItem.deletedAt),
+    ),
+    columns: {
+      amount: true,
+      currency: true,
+      discountAmount: true,
+      quantity: true,
+      returned: true,
+      soldAt: true,
+      unitPrice: true,
+    },
+    with: {
+      studioProduct: {
+        columns: {
+          category: true,
+          cost: true,
+          currency: true,
+          id: true,
+          isActive: true,
+          name: true,
+          type: true,
+        },
+      },
+    },
+    orderBy: desc(studioPaymentLineItem.soldAt),
+    limit: REPORT_ROW_LIMIT,
+  });
+  type InventorySalesTotal = {
+    category: string;
+    cost: string | null;
+    currency: string;
+    discount: string;
+    gross: string;
+    net: string;
+    product: string;
+    quantity: number;
+    status: string;
+    supplier: string;
+  };
+  const totals = new Map<string, InventorySalesTotal>();
 
-      return {
-        margin: revenue !== 0 ? Math.round((profit / revenue) * 1000) / 10 : null,
-        product: product?.name ?? "Product",
-        profit,
-        quantity: lineItem.quantity,
-        revenue,
-        staff: null,
-        status: "SUCCEEDED",
-      };
+  for (const lineItem of lineItems) {
+    const product = lineItem.studioProduct;
+    if (!product) continue;
+    const currency = lineItem.currency;
+    const key = `${product.id}:${currency.toUpperCase()}`;
+    const gross = signedReportMoney(
+      multiplyReportMoney(lineItem.unitPrice, lineItem.quantity, currency),
+      lineItem.returned,
+      currency,
+    );
+    const discount = signedReportMoney(
+      lineItem.discountAmount,
+      lineItem.returned,
+      currency,
+    );
+    const net = signedReportMoney(lineItem.amount, lineItem.returned, currency);
+    const cost =
+      product.cost && product.currency.toUpperCase() === currency.toUpperCase()
+        ? signedReportMoney(
+            multiplyReportMoney(product.cost, lineItem.quantity, currency),
+            lineItem.returned,
+            currency,
+          )
+        : null;
+    const existing = totals.get(key);
+
+    if (existing) {
+      existing.gross = addReportMoney(existing.gross, gross, currency);
+      existing.discount = addReportMoney(existing.discount, discount, currency);
+      existing.net = addReportMoney(existing.net, net, currency);
+      existing.cost =
+        existing.cost && cost
+          ? addReportMoney(existing.cost, cost, currency)
+          : null;
+      existing.quantity += lineItem.returned
+        ? -lineItem.quantity
+        : lineItem.quantity;
+      continue;
+    }
+
+    totals.set(key, {
+      category: product.category ?? product.type,
+      cost,
+      currency,
+      discount,
+      gross,
+      net,
+      product: product.name,
+      quantity: lineItem.returned ? -lineItem.quantity : lineItem.quantity,
+      status: product.isActive ? "ACTIVE" : "INACTIVE",
+      supplier: product.category ?? product.type,
     });
   }
 
-  return rows;
+  return Array.from(totals.values()).map((row) => {
+    const profit = row.cost
+      ? subtractReportMoney(row.net, row.cost, row.currency)
+      : null;
+    const netMinor = reportMoneyToMinor(row.net, row.currency);
+    return {
+      ...row,
+      amount: row.net,
+      margin:
+        profit && netMinor !== 0
+          ? Math.round(
+              (reportMoneyToMinor(profit, row.currency) / netMinor) * 1_000,
+            ) / 10
+          : null,
+      profit,
+      revenue: row.net,
+    };
+  });
 }
 
 async function getMembershipRows(
   orgId: string,
   locationId: string,
+  timezone: string,
+  fallbackCurrency: string,
 ): Promise<ReportDataRow[]> {
   const memberships = await db.query.studioMembership.findMany({
     where: and(
@@ -669,34 +894,61 @@ async function getMembershipRows(
     orderBy: desc(studioMembership.updatedAt),
     limit: REPORT_ROW_LIMIT,
   });
+  const pricingOptionNameById = await getPricingOptionNameById(
+    orgId,
+    memberships
+      .map((membership) => pricingOptionIdFromMetadata(membership.metadata))
+      .filter((id): id is string => Boolean(id)),
+  );
 
   return memberships.map((membership) => {
-    const revenue =
-      numberValue(membership.price) ??
-      numberValue(membership.membershipPlan?.price) ??
-      0;
+    const currency = membership.currency ?? fallbackCurrency;
+    const revenue = normalizeReportMoney(
+      membership.price ?? membership.membershipPlan?.price ?? "0",
+      currency,
+    );
     const totalClasses = membership.totalClasses ?? 0;
     const usedClasses = membership.usedClasses ?? 0;
     const remainingClasses = Math.max(totalClasses - usedClasses, 0);
     const deferredRevenue =
-      totalClasses > 0 ? Math.round((revenue * remainingClasses * 100) / totalClasses) / 100 : null;
+      totalClasses > 0
+        ? prorateReportMoney({
+            total: revenue,
+            numerator: remainingClasses,
+            denominator: totalClasses,
+            currency,
+          })
+        : null;
+    const pricingOptionId = pricingOptionIdFromMetadata(membership.metadata);
+    const pricingOptionName = pricingOptionId
+      ? (pricingOptionNameById.get(pricingOptionId) ?? pricingOptionId)
+      : null;
 
     return {
       amount: revenue,
       balance: deferredRevenue,
       client: membership.client.name,
       clientCount: 1,
-      contract: membership.membershipPlan?.name ?? membership.name,
+      contract:
+        pricingOptionName ?? membership.membershipPlan?.name ?? membership.name,
+      currency,
       deferredRevenue,
       email: membership.client.email,
-      endDate: formatDate(membership.endDate ?? membership.cancelledAt),
+      endDate: formatReportDateInTimezone(
+        membership.endDate ?? membership.cancelledAt,
+        timezone,
+      ),
       method: membership.paymentMethod ?? membership.paymentFrequency,
-      nextBillingDate: formatDate(membership.renewalDate ?? membership.endDate),
+      nextBillingDate: formatReportDateInTimezone(
+        membership.renewalDate ?? membership.endDate,
+        timezone,
+      ),
       phone: membership.client.phone,
+      pricingOption: pricingOptionName,
       quantity: totalClasses,
-      renewalDate: formatDate(membership.renewalDate),
+      renewalDate: formatReportDateInTimezone(membership.renewalDate, timezone),
       revenue,
-      startDate: formatDate(membership.startDate),
+      startDate: formatReportDateInTimezone(membership.startDate, timezone),
       status: membership.status,
       transactions: membership.totalPayments ?? 0,
       used: usedClasses,
@@ -704,48 +956,10 @@ async function getMembershipRows(
   });
 }
 
-async function getClassRows(
-  orgId: string,
-  locationId: string,
-): Promise<ReportDataRow[]> {
-  const classes = await db.query.studioClass.findMany({
-    where: and(
-      eq(studioClass.organizationId, orgId),
-      eq(studioClass.locationId, locationId),
-    ),
-    with: {
-      checkIns: { columns: { id: true } },
-      classType: { columns: { name: true } },
-      instructor: { columns: { name: true } },
-    },
-    orderBy: desc(studioClass.startTime),
-    limit: REPORT_ROW_LIMIT,
-  });
-
-  return classes.map((item) => {
-    const checkIns = item.checkIns.length;
-    const revenue = 0;
-
-    return {
-      arrivalTime: formatDate(item.startTime),
-      booked: item.bookedCount,
-      category: item.classType?.name ?? item.location ?? null,
-      checkIns,
-      className: item.name,
-      clientCount: item.bookedCount,
-      date: formatDate(item.startTime),
-      revenue,
-      service: item.classType?.name ?? item.name,
-      staff: item.instructor?.name ?? item.instructorName ?? null,
-      status: item.status,
-      visits: checkIns,
-    };
-  });
-}
-
 async function getGiftCardRows(
   orgId: string,
   locationId: string,
+  timezone: string,
 ): Promise<ReportDataRow[]> {
   const giftCards = await db.query.giftCard.findMany({
     where: and(
@@ -761,8 +975,16 @@ async function getGiftCardRows(
   });
 
   return giftCards.map((item) => {
-    const initialValue = numberValue(item.initialValue) ?? 0;
-    const remainingBalance = numberValue(item.remainingBalance) ?? 0;
+    const initialValue = normalizeReportMoney(item.initialValue, item.currency);
+    const remainingBalance = normalizeReportMoney(
+      item.remainingBalance,
+      item.currency,
+    );
+    const used = subtractReportMoney(
+      initialValue,
+      remainingBalance,
+      item.currency,
+    );
 
     return {
       amount: initialValue,
@@ -771,34 +993,67 @@ async function getGiftCardRows(
         item.client_redeemedByClientId?.name ??
         item.client_purchasedByClientId?.name ??
         null,
-      date: formatDate(item.purchasedAt),
-      endDate: formatDate(item.expiresAt),
-      revenue: initialValue - remainingBalance,
+      currency: item.currency,
+      date: formatReportDateInTimezone(item.purchasedAt, timezone),
+      endDate: formatReportDateInTimezone(item.expiresAt, timezone),
+      revenue: used,
       status: item.isActive ? "ACTIVE" : "INACTIVE",
-      used: initialValue - remainingBalance,
+      used,
     };
   });
 }
+
+const AGGREGATE_MONEY_FIELDS = [
+  "amount",
+  "cost",
+  "discount",
+  "gross",
+  "net",
+  "profit",
+  "revenue",
+  "tax",
+] as const;
 
 function aggregateRows(
   rows: readonly ReportDataRow[],
   groupFields: readonly string[],
 ): ReportDataRow[] {
-  const grouped = new Map<string, ReportDataRow & { clientNames?: Set<string> }>();
+  const grouped = new Map<
+    string,
+    ReportDataRow & { clientNames?: Set<string> }
+  >();
 
   for (const row of rows) {
-    const key = groupFields.map((field) => String(row[field] ?? "Unassigned")).join("|");
+    const effectiveGroupFields = row.currency
+      ? [...groupFields, "currency"]
+      : groupFields;
+    const key = effectiveGroupFields
+      .map((field) => String(row[field] ?? "Unassigned"))
+      .join("|");
     const existing = grouped.get(key);
 
     if (existing) {
-      existing.transactions = Number(existing.transactions ?? 0) + 1;
-      existing.quantity = Number(existing.quantity ?? 0) + Number(row.quantity ?? 0);
-      existing.gross = Number(existing.gross ?? 0) + Number(row.gross ?? 0);
-      existing.discount = Number(existing.discount ?? 0) + Number(row.discount ?? 0);
-      existing.tax = Number(existing.tax ?? 0) + Number(row.tax ?? 0);
-      existing.net = Number(existing.net ?? 0) + Number(row.net ?? 0);
-      existing.revenue = Number(existing.revenue ?? 0) + Number(row.revenue ?? 0);
-      existing.profit = Number(existing.profit ?? 0) + Number(row.profit ?? 0);
+      existing.transactions =
+        Number(existing.transactions ?? 0) + Number(row.transactions ?? 1);
+      existing.quantity =
+        Number(existing.quantity ?? 0) + Number(row.quantity ?? 0);
+      const currency =
+        typeof row.currency === "string" ? row.currency : undefined;
+      for (const field of AGGREGATE_MONEY_FIELDS) {
+        const current = existing[field];
+        const incoming = row[field];
+        if (
+          currency &&
+          typeof current === "string" &&
+          typeof incoming === "string"
+        ) {
+          existing[field] = addReportMoney(current, incoming, currency);
+        } else if (current === undefined && incoming !== undefined) {
+          existing[field] = incoming;
+        } else if (current === null || incoming === null) {
+          existing[field] = null;
+        }
+      }
       if (row.client) existing.clientNames?.add(String(row.client));
       continue;
     }
@@ -816,17 +1071,35 @@ function aggregateRows(
   }
 
   return Array.from(grouped.values()).map(({ clientNames, ...row }) => {
-    const revenue = Number(row.revenue ?? row.net ?? 0);
-    const profit = Number(row.profit ?? 0);
+    const currency =
+      typeof row.currency === "string" ? row.currency : undefined;
+    const revenue =
+      typeof row.revenue === "string"
+        ? row.revenue
+        : typeof row.net === "string"
+          ? row.net
+          : null;
+    const profit = typeof row.profit === "string" ? row.profit : null;
+    const transactions = Number(row.transactions ?? 0);
 
     return {
       ...row,
       averageRevenue:
-        Number(row.transactions ?? 0) > 0
-          ? Math.round((revenue / Number(row.transactions)) * 100) / 100
+        currency && revenue
+          ? averageReportMoney(revenue, transactions, currency)
           : null,
       clientCount: clientNames?.size ?? null,
-      margin: revenue !== 0 ? Math.round((profit / revenue) * 1000) / 10 : null,
+      margin:
+        currency &&
+        revenue &&
+        profit &&
+        reportMoneyToMinor(revenue, currency) !== 0
+          ? Math.round(
+              (reportMoneyToMinor(profit, currency) /
+                reportMoneyToMinor(revenue, currency)) *
+                1_000,
+            ) / 10
+          : null,
     };
   });
 }
@@ -836,24 +1109,36 @@ function inferCardBrand(method: string | null): string | null {
   const normalized = method.toLowerCase();
 
   if (normalized.includes("visa")) return "Visa";
-  if (normalized.includes("mastercard") || normalized.includes("master")) return "Mastercard";
-  if (normalized.includes("amex") || normalized.includes("american")) return "American Express";
+  if (normalized.includes("mastercard") || normalized.includes("master"))
+    return "Mastercard";
+  if (normalized.includes("amex") || normalized.includes("american"))
+    return "American Express";
   if (normalized.includes("ach")) return "ACH";
   if (normalized.includes("card")) return "Card";
 
   return method;
 }
 
-function scopeClass(orgId: string, locationId: string | null, startDate?: Date, endDate?: Date) {
+function scopeClass(
+  orgId: string,
+  locationId: string,
+  startDate?: Date,
+  endDate?: Date,
+) {
   return and(
     eq(studioClass.organizationId, orgId),
-    locationId ? eq(studioClass.locationId, locationId) : undefined,
+    eq(studioClass.locationId, locationId),
     startDate ? gte(studioClass.startTime, startDate) : undefined,
     endDate ? lte(studioClass.startTime, endDate) : undefined,
   );
 }
 
-async function reportClasses(orgId: string, locationId: string | null, startDate: Date, endDate: Date) {
+async function reportClasses(
+  orgId: string,
+  locationId: string,
+  startDate: Date,
+  endDate: Date,
+) {
   const classes = await db.query.studioClass.findMany({
     where: scopeClass(orgId, locationId, startDate, endDate),
     with: {
@@ -869,37 +1154,262 @@ async function reportClasses(orgId: string, locationId: string | null, startDate
   }));
 }
 
+export async function getReportRowsForScope(input: {
+  organizationId: string;
+  locationId: string;
+  groupId: ReportGroupId;
+  reportId: string;
+}): Promise<{ rows: ReportDataRow[]; sourceLimitReached: boolean }> {
+  if (!getReportById(input.groupId, input.reportId)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Report not found" });
+  }
+  const locale = await getReportLocale({
+    organizationId: input.organizationId,
+    locationId: input.locationId,
+  });
+  let rows: ReportDataRow[];
+  if (input.groupId === "sales") {
+    rows = await getSalesRows(
+      input.organizationId,
+      input.locationId,
+      input.reportId,
+      locale.timezone,
+      locale.currency,
+    );
+  } else if (input.groupId === "payment-processing") {
+    rows = await getPaymentRows(
+      input.organizationId,
+      input.locationId,
+      input.reportId,
+      locale.timezone,
+      locale.currency,
+    );
+  } else if (input.groupId === "clients") {
+    rows = await getClientRows(
+      input.organizationId,
+      input.locationId,
+      input.reportId,
+      locale.timezone,
+      locale.currency,
+    );
+  } else if (input.groupId === "staff") {
+    rows = await getStaffRows(
+      input.organizationId,
+      input.locationId,
+      input.reportId,
+      locale.timezone,
+      locale.currency,
+    );
+  } else {
+    rows = await getInventoryRows(
+      input.organizationId,
+      input.locationId,
+      input.reportId,
+      locale.timezone,
+    );
+  }
+  const sourceCount = await getReportSourceCount(input);
+  return { rows, sourceLimitReached: sourceCount > REPORT_ROW_LIMIT };
+}
+
+async function getReportSourceCount(input: {
+  organizationId: string;
+  locationId: string;
+  groupId: ReportGroupId;
+  reportId: string;
+}): Promise<number> {
+  if (input.groupId === "sales") {
+    if (["gift-cards", "gift-card-analysis"].includes(input.reportId)) {
+      const [row] = await db
+        .select({ value: count() })
+        .from(giftCard)
+        .where(
+          and(
+            eq(giftCard.organizationId, input.organizationId),
+            eq(giftCard.locationId, input.locationId),
+          ),
+        );
+      return row?.value ?? 0;
+    }
+    if (["contract-sales", "outstanding-series"].includes(input.reportId)) {
+      const [row] = await db
+        .select({ value: count() })
+        .from(studioMembership)
+        .where(
+          and(
+            eq(studioMembership.organizationId, input.organizationId),
+            eq(studioMembership.locationId, input.locationId),
+          ),
+        );
+      return row?.value ?? 0;
+    }
+    if (input.reportId === "revenue-by-class") {
+      const [row] = await db.select({ value: count() }).from(studioClass).where(and(
+        eq(studioClass.organizationId, input.organizationId),
+        eq(studioClass.locationId, input.locationId),
+      ));
+      return row?.value ?? 0;
+    }
+    if (input.reportId === "invoice") {
+      const [row] = await db.select({ value: count() })
+        .from(invoiceLineItem)
+        .innerJoin(invoice, eq(invoice.id, invoiceLineItem.invoiceId))
+        .where(and(
+          eq(invoice.organizationId, input.organizationId),
+          eq(invoice.locationId, input.locationId),
+        ));
+      return row?.value ?? 0;
+    }
+    const [row] = await db
+      .select({ value: count() })
+      .from(studioPaymentLineItem)
+      .where(
+        and(
+          eq(studioPaymentLineItem.organizationId, input.organizationId),
+          eq(studioPaymentLineItem.locationId, input.locationId),
+          isNull(studioPaymentLineItem.deletedAt),
+        ),
+      );
+    return row?.value ?? 0;
+  }
+  if (input.groupId === "payment-processing") {
+    const [row] = await db
+      .select({ value: count() })
+      .from(commerceLedgerEntry)
+      .where(
+        and(
+          eq(commerceLedgerEntry.organizationId, input.organizationId),
+          eq(commerceLedgerEntry.locationId, input.locationId),
+          transactionLedgerCondition(input.reportId),
+        ),
+      );
+    return row?.value ?? 0;
+  }
+  if (input.groupId === "clients") {
+    const table = [
+      "membership",
+      "pricing-option-expirations",
+      "new-members",
+      "visits-remaining",
+    ].includes(input.reportId)
+      ? studioMembership
+      : [
+          "attendance-analysis",
+          "attendance-without-revenue",
+          "client-arrivals",
+          "client-schedule-at-a-glance",
+          "clients-per-teacher",
+          "no-shows",
+        ].includes(input.reportId)
+        ? studioClass
+        : clientTable;
+    const [row] = await db
+      .select({ value: count() })
+      .from(table)
+      .where(
+        and(
+          eq(table.organizationId, input.organizationId),
+          eq(table.locationId, input.locationId),
+        ),
+      );
+    return row?.value ?? 0;
+  }
+  if (input.groupId === "staff") {
+    if (input.reportId === "payroll") {
+      const [row] = await db.select({ value: count() })
+        .from(payrollRunInstructor)
+        .innerJoin(payrollRun, eq(payrollRun.id, payrollRunInstructor.payrollRunId))
+        .where(and(eq(payrollRun.organizationId, input.organizationId), eq(payrollRun.locationId, input.locationId)));
+      return row?.value ?? 0;
+    }
+    const operationalTable = input.reportId === "time-clock"
+      ? timeLog
+      : ["staff-schedule", "staff-schedule-at-a-glance"].includes(input.reportId)
+        ? rota
+        : input.reportId === "tasks"
+          ? task
+          : null;
+    if (operationalTable) {
+      const [row] = await db.select({ value: count() }).from(operationalTable).where(and(
+        eq(operationalTable.organizationId, input.organizationId),
+        eq(operationalTable.locationId, input.locationId),
+      ));
+      return row?.value ?? 0;
+    }
+    const [teachers, staff] = await Promise.all([
+      db
+        .select({ value: count() })
+        .from(instructor)
+        .where(
+          and(
+            eq(instructor.organizationId, input.organizationId),
+            eq(instructor.locationId, input.locationId),
+          ),
+        ),
+      db
+        .select({ value: count() })
+        .from(studioStaffMember)
+        .where(
+          and(
+            eq(studioStaffMember.organizationId, input.organizationId),
+            eq(studioStaffMember.locationId, input.locationId),
+            isNull(studioStaffMember.deletedAt),
+          ),
+        ),
+    ]);
+    return (teachers[0]?.value ?? 0) + (staff[0]?.value ?? 0);
+  }
+  const inventorySales = [
+    "inventory-sales-by-product",
+    "cost-of-goods-sold",
+    "inventory-sales-by-supplier",
+  ].includes(input.reportId);
+  if (inventorySales) {
+    const [row] = await db
+      .select({ value: count() })
+      .from(studioPaymentLineItem)
+      .where(
+        and(
+          eq(studioPaymentLineItem.organizationId, input.organizationId),
+          eq(studioPaymentLineItem.locationId, input.locationId),
+          isNull(studioPaymentLineItem.deletedAt),
+        ),
+      );
+    return row?.value ?? 0;
+  }
+  const [row] = await db
+    .select({ value: count() })
+    .from(studioProduct)
+    .where(
+      and(
+        eq(studioProduct.organizationId, input.organizationId),
+        eq(studioProduct.locationId, input.locationId),
+        isNull(studioProduct.deletedAt),
+      ),
+    );
+  return row?.value ?? 0;
+}
+
 export const reportsRouter = createTRPCRouter({
-  rows: protectedProcedure
+  rows: reportViewProcedure
     .input(z.object({ groupId: ReportGroupIdSchema, reportId: z.string() }))
-    .output(z.object({ rows: z.array(reportDataRowSchema) }))
+    .output(
+      z.object({
+        rows: z.array(reportDataRowSchema),
+        sourceLimitReached: z.boolean(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
-      if (!getReportById(input.groupId, input.reportId)) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Report not found",
-        });
-      }
-
       const { locationId, orgId } = requireOrgAndLocation(ctx);
-
-      if (input.groupId === "sales") {
-        return { rows: await getSalesRows(orgId, locationId, input.reportId) };
-      }
-      if (input.groupId === "payment-processing") {
-        return { rows: await getPaymentRows(orgId, locationId, input.reportId) };
-      }
-      if (input.groupId === "clients") {
-        return { rows: await getClientRows(orgId, locationId, input.reportId) };
-      }
-      if (input.groupId === "staff") {
-        return { rows: await getStaffRows(orgId, locationId, input.reportId) };
-      }
-
-      return { rows: await getInventoryRows(orgId, locationId, input.reportId) };
+      return getReportRowsForScope({
+        organizationId: orgId,
+        locationId,
+        groupId: input.groupId,
+        reportId: input.reportId,
+      });
     }),
 
-  revenue: protectedProcedure
+  revenue: reportViewProcedure
     .input(
       z.object({
         startDate: z.string(),
@@ -908,51 +1418,86 @@ export const reportsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const payments = await db.query.studioPayment.findMany({
-        where: scopePayment(orgId, ctx.locationId, new Date(input.startDate), new Date(input.endDate)),
-        columns: { amount: true, type: true, createdAt: true, currency: true },
-        orderBy: asc(studioPayment.createdAt),
-      });
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
+      const [payments, locale] = await Promise.all([
+        db.query.studioPayment.findMany({
+          where: scopePayment(
+            orgId,
+            locationId,
+            new Date(input.startDate),
+            new Date(input.endDate),
+          ),
+          columns: { amount: true, type: true, createdAt: true, currency: true },
+          orderBy: asc(studioPayment.createdAt),
+        }),
+        getReportLocale({ organizationId: orgId, locationId }),
+      ]);
 
-      const totalRevenue = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+      const totalRevenue = payments.reduce(
+        (sum, payment) => sum + Number(payment.amount),
+        0,
+      );
       const byType: Record<string, number> = {};
       for (const payment of payments) {
-        byType[payment.type] = (byType[payment.type] ?? 0) + Number(payment.amount);
+        byType[payment.type] =
+          (byType[payment.type] ?? 0) + Number(payment.amount);
       }
 
       return {
         totalRevenue,
         byType,
         transactionCount: payments.length,
-        averageTransaction: payments.length > 0 ? totalRevenue / payments.length : 0,
-        currency: payments[0]?.currency ?? "GBP",
+        averageTransaction:
+          payments.length > 0 ? totalRevenue / payments.length : 0,
+        currency: payments[0]?.currency ?? locale.currency,
+        locale: locale.locale,
         payments,
       };
     }),
 
-  attendance: protectedProcedure
+  attendance: reportViewProcedure
     .input(z.object({ startDate: z.string(), endDate: z.string() }))
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
       const classes = await reportClasses(
         orgId,
-        ctx.locationId,
+        locationId,
         new Date(input.startDate),
         new Date(input.endDate),
       );
 
       const totalClasses = classes.length;
-      const totalCapacity = classes.reduce((sum, item) => sum + (item.maxCapacity ?? 0), 0);
-      const totalBooked = classes.reduce((sum, item) => sum + item.bookedCount, 0);
-      const totalCheckedIn = classes.reduce((sum, item) => sum + item._count.checkIn, 0);
-      const avgUtilization = totalCapacity > 0 ? (totalBooked / totalCapacity) * 100 : 0;
-      const noShowRate = totalBooked > 0 ? ((totalBooked - totalCheckedIn) / totalBooked) * 100 : 0;
+      const totalCapacity = classes.reduce(
+        (sum, item) => sum + (item.maxCapacity ?? 0),
+        0,
+      );
+      const totalBooked = classes.reduce(
+        (sum, item) => sum + item.bookedCount,
+        0,
+      );
+      const totalCheckedIn = classes.reduce(
+        (sum, item) => sum + item._count.checkIn,
+        0,
+      );
+      const avgUtilization =
+        totalCapacity > 0 ? (totalBooked / totalCapacity) * 100 : 0;
+      const noShowRate =
+        totalBooked > 0
+          ? ((totalBooked - totalCheckedIn) / totalBooked) * 100
+          : 0;
 
-      const byClassType: Record<string, { classes: number; booked: number; capacity: number; checkedIn: number }> = {};
+      const byClassType: Record<
+        string,
+        { classes: number; booked: number; capacity: number; checkedIn: number }
+      > = {};
       for (const item of classes) {
         const typeName = item.classType?.name ?? "Uncategorized";
-        byClassType[typeName] ??= { classes: 0, booked: 0, capacity: 0, checkedIn: 0 };
+        byClassType[typeName] ??= {
+          classes: 0,
+          booked: 0,
+          capacity: 0,
+          checkedIn: 0,
+        };
         byClassType[typeName].classes++;
         byClassType[typeName].booked += item.bookedCount;
         byClassType[typeName].capacity += item.maxCapacity ?? 0;
@@ -970,21 +1515,23 @@ export const reportsRouter = createTRPCRouter({
       };
     }),
 
-  membership: protectedProcedure
+  membership: reportViewProcedure
     .input(z.object({ startDate: z.string(), endDate: z.string() }))
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
       const startDate = new Date(input.startDate);
       const endDate = new Date(input.endDate);
       const memberships = await db.query.studioMembership.findMany({
         where: and(
           eq(studioMembership.organizationId, orgId),
-          ctx.locationId ? eq(studioMembership.locationId, ctx.locationId) : undefined,
+          eq(studioMembership.locationId, locationId),
         ),
         with: { membershipPlan: { columns: { name: true, price: true } } },
       });
 
-      const active = memberships.filter((membership) => membership.status === "ACTIVE");
+      const active = memberships.filter(
+        (membership) => membership.status === "ACTIVE",
+      );
       const cancelled = memberships.filter(
         (membership) =>
           membership.status === "CANCELLED" &&
@@ -992,10 +1539,12 @@ export const reportsRouter = createTRPCRouter({
           membership.updatedAt <= endDate,
       );
       const newMembers = memberships.filter(
-        (membership) => membership.createdAt >= startDate && membership.createdAt <= endDate,
+        (membership) =>
+          membership.createdAt >= startDate && membership.createdAt <= endDate,
       );
       const mrr = active.reduce(
-        (sum, membership) => sum + Number(membership.membershipPlan?.price ?? 0),
+        (sum, membership) =>
+          sum + Number(membership.membershipPlan?.price ?? 0),
         0,
       );
 
@@ -1006,7 +1555,9 @@ export const reportsRouter = createTRPCRouter({
       }
 
       const churnRate =
-        active.length > 0 ? (cancelled.length / (active.length + cancelled.length)) * 100 : 0;
+        active.length > 0
+          ? (cancelled.length / (active.length + cancelled.length)) * 100
+          : 0;
 
       return {
         totalActive: active.length,
@@ -1018,17 +1569,25 @@ export const reportsRouter = createTRPCRouter({
       };
     }),
 
-  instructorPerformance: protectedProcedure
+  instructorPerformance: reportViewProcedure
     .input(z.object({ startDate: z.string(), endDate: z.string() }))
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
       const classes = await reportClasses(
         orgId,
-        ctx.locationId,
+        locationId,
         new Date(input.startDate),
         new Date(input.endDate),
       );
-      const byInstructor: Record<string, { classesCount: number; totalBooked: number; totalCapacity: number; totalCheckedIn: number }> = {};
+      const byInstructor: Record<
+        string,
+        {
+          classesCount: number;
+          totalBooked: number;
+          totalCapacity: number;
+          totalCheckedIn: number;
+        }
+      > = {};
 
       for (const item of classes) {
         const name = item.instructorName ?? "Unassigned";
@@ -1050,13 +1609,14 @@ export const reportsRouter = createTRPCRouter({
           ...stats,
           fillRate:
             stats.totalCapacity > 0
-              ? Math.round((stats.totalBooked / stats.totalCapacity) * 1000) / 10
+              ? Math.round((stats.totalBooked / stats.totalCapacity) * 1000) /
+                10
               : 0,
         }))
         .sort((a, b) => b.fillRate - a.fillRate);
     }),
 
-  revenueTrend: protectedProcedure
+  revenueTrend: reportViewProcedure
     .input(
       z.object({
         startDate: z.string(),
@@ -1065,46 +1625,62 @@ export const reportsRouter = createTRPCRouter({
       }),
     )
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const payments = await db.query.studioPayment.findMany({
-        where: scopePayment(orgId, ctx.locationId, new Date(input.startDate), new Date(input.endDate)),
-        columns: { amount: true, createdAt: true },
-        orderBy: asc(studioPayment.createdAt),
-      });
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
+      const [payments, locale] = await Promise.all([
+        db.query.studioPayment.findMany({
+          where: scopePayment(
+            orgId,
+            locationId,
+            new Date(input.startDate),
+            new Date(input.endDate),
+          ),
+          columns: { amount: true, createdAt: true },
+          orderBy: asc(studioPayment.createdAt),
+        }),
+        getReportLocale({ organizationId: orgId, locationId }),
+      ]);
 
       const grouped: Record<string, number> = {};
       for (const payment of payments) {
-        const date = payment.createdAt;
-        const key =
-          input.groupBy === "month"
-            ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
-            : input.groupBy === "week"
-              ? new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay())
-                  .toISOString()
-                  .split("T")[0]
-              : date.toISOString().split("T")[0];
+        const key = reportBucketKey({
+          value: payment.createdAt,
+          timezone: locale.timezone,
+          weekStart: locale.weekStart,
+          groupBy: input.groupBy,
+        });
         grouped[key] = (grouped[key] ?? 0) + Number(payment.amount);
       }
 
-      return Object.entries(grouped).map(([date, amount]) => ({ date, amount }));
+      return Object.entries(grouped).map(([date, amount]) => ({
+        date,
+        amount,
+        currency: locale.currency,
+        locale: locale.locale,
+      }));
     }),
 
-  revenueForecast: protectedProcedure
+  revenueForecast: reportViewProcedure
     .input(z.object({ months: z.number().min(1).max(12).default(3) }))
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const activeMemberships = await db.query.studioMembership.findMany({
-        where: and(
-          eq(studioMembership.organizationId, orgId),
-          ctx.locationId ? eq(studioMembership.locationId, ctx.locationId) : undefined,
-          eq(studioMembership.status, "ACTIVE"),
-        ),
-        with: { membershipPlan: { columns: { price: true, billingInterval: true } } },
-      });
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
+      const [activeMemberships, locale] = await Promise.all([
+        db.query.studioMembership.findMany({
+          where: and(
+            eq(studioMembership.organizationId, orgId),
+            eq(studioMembership.locationId, locationId),
+            eq(studioMembership.status, "ACTIVE"),
+          ),
+          with: {
+            membershipPlan: { columns: { price: true, billingInterval: true } },
+          },
+        }),
+        getReportLocale({ organizationId: orgId, locationId }),
+      ]);
 
       const monthlyRecurring = activeMemberships.reduce((sum, membership) => {
         const price = Number(membership.membershipPlan?.price ?? 0);
-        const interval = membership.membershipPlan?.billingInterval ?? "MONTHLY";
+        const interval =
+          membership.membershipPlan?.billingInterval ?? "MONTHLY";
         if (interval === "ANNUALLY") return sum + price / 12;
         if (interval === "WEEKLY") return sum + price * 4.33;
         return sum + price;
@@ -1115,14 +1691,20 @@ export const reportsRouter = createTRPCRouter({
         if (membership.endDate) {
           const key = `${membership.endDate.getFullYear()}-${String(membership.endDate.getMonth() + 1).padStart(2, "0")}`;
           expiringByMonth[key] =
-            (expiringByMonth[key] ?? 0) + Number(membership.membershipPlan?.price ?? 0);
+            (expiringByMonth[key] ?? 0) +
+            Number(membership.membershipPlan?.price ?? 0);
         }
       }
 
-      const forecast: { month: string; projected: number; atRisk: number }[] = [];
+      const forecast: { month: string; projected: number; atRisk: number }[] =
+        [];
       const now = new Date();
       for (let index = 1; index <= input.months; index++) {
-        const futureDate = new Date(now.getFullYear(), now.getMonth() + index, 1);
+        const futureDate = new Date(
+          now.getFullYear(),
+          now.getMonth() + index,
+          1,
+        );
         const key = `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, "0")}`;
         const atRisk = expiringByMonth[key] ?? 0;
         forecast.push({
@@ -1132,49 +1714,78 @@ export const reportsRouter = createTRPCRouter({
         });
       }
 
-      return { currentMrr: Math.round(monthlyRecurring * 100) / 100, forecast };
+      return {
+        currentMrr: Math.round(monthlyRecurring * 100) / 100,
+        forecast,
+        currency: locale.currency,
+        locale: locale.locale,
+      };
     }),
 
-  attendanceTrend: protectedProcedure
+  attendanceTrend: reportViewProcedure
     .input(z.object({ startDate: z.string(), endDate: z.string() }))
     .query(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
-      const classes = await reportClasses(
-        orgId,
-        ctx.locationId,
-        new Date(input.startDate),
-        new Date(input.endDate),
-      );
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
+      const [classes, locale] = await Promise.all([
+        reportClasses(
+          orgId,
+          locationId,
+          new Date(input.startDate),
+          new Date(input.endDate),
+        ),
+        getReportLocale({ organizationId: orgId, locationId }),
+      ]);
 
-      const grouped: Record<string, { booked: number; checkedIn: number; capacity: number }> = {};
+      const grouped: Record<
+        string,
+        { booked: number; checkedIn: number; capacity: number }
+      > = {};
       for (const item of classes) {
-        const key = item.startTime.toISOString().split("T")[0];
+        const key = reportBucketKey({
+          value: item.startTime,
+          timezone: locale.timezone,
+          weekStart: locale.weekStart,
+          groupBy: "day",
+        });
         grouped[key] ??= { booked: 0, checkedIn: 0, capacity: 0 };
         grouped[key].booked += item.bookedCount;
         grouped[key].checkedIn += item._count.checkIn;
         grouped[key].capacity += item.maxCapacity ?? 0;
       }
 
-      return Object.entries(grouped).map(([date, stats]) => ({ date, ...stats }));
+      return Object.entries(grouped).map(([date, stats]) => ({
+        date,
+        ...stats,
+      }));
     }),
 
-  exportCsv: protectedProcedure
+  exportCsv: reportExportProcedure
     .input(
       z.object({
-        reportType: z.enum(["revenue", "attendance", "membership", "instructor"]),
+        reportType: z.enum([
+          "revenue",
+          "attendance",
+          "membership",
+          "instructor",
+        ]),
         startDate: z.string(),
         endDate: z.string(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const orgId = requireOrg(ctx);
+      const { locationId, orgId } = requireOrgAndLocation(ctx);
       let rows: string[][] = [];
       let headers: string[] = [];
 
       if (input.reportType === "revenue") {
         headers = ["Date", "Type", "Amount", "Currency"];
         const payments = await db.query.studioPayment.findMany({
-          where: scopePayment(orgId, ctx.locationId, new Date(input.startDate), new Date(input.endDate)),
+          where: scopePayment(
+            orgId,
+            locationId,
+            new Date(input.startDate),
+            new Date(input.endDate),
+          ),
           orderBy: asc(studioPayment.createdAt),
         });
         rows = payments.map((payment) => [
@@ -1187,7 +1798,7 @@ export const reportsRouter = createTRPCRouter({
         headers = ["Date", "Class", "Capacity", "Booked", "Checked In"];
         const classes = await reportClasses(
           orgId,
-          ctx.locationId,
+          locationId,
           new Date(input.startDate),
           new Date(input.endDate),
         );
@@ -1199,11 +1810,18 @@ export const reportsRouter = createTRPCRouter({
           String(item._count.checkIn),
         ]);
       } else if (input.reportType === "membership") {
-        headers = ["Member", "Plan", "Status", "Started", "Credits Used", "Credits Total"];
+        headers = [
+          "Member",
+          "Plan",
+          "Status",
+          "Started",
+          "Credits Used",
+          "Credits Total",
+        ];
         const memberships = await db.query.studioMembership.findMany({
           where: and(
             eq(studioMembership.organizationId, orgId),
-            ctx.locationId ? eq(studioMembership.locationId, ctx.locationId) : undefined,
+            eq(studioMembership.locationId, locationId),
           ),
           with: {
             membershipPlan: { columns: { name: true } },
@@ -1220,9 +1838,7 @@ export const reportsRouter = createTRPCRouter({
         ]);
       }
 
-      const csvContent = [headers, ...rows]
-        .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
-        .join("\n");
+      const csvContent = buildPlainCsv([headers, ...rows]);
 
       return {
         csv: csvContent,

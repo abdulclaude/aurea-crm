@@ -7,7 +7,6 @@ export type ClientsParamsState = {
   sort: string;
   types: string[];
   tags: string[];
-  assignedTo: string[];
   countries: string[];
   hiddenColumns: string[];
   createdAtStart: Date | null;
@@ -27,9 +26,6 @@ export const clientsParams = {
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   tags: parseAsArrayOf(parseAsString)
-    .withDefault([])
-    .withOptions({ clearOnDefault: true }),
-  assignedTo: parseAsArrayOf(parseAsString)
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   countries: parseAsArrayOf(parseAsString)

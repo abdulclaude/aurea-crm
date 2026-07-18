@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import z from "zod";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import {
   ACQUISITION_STAGE_VALUES,
@@ -7,6 +8,10 @@ import {
   CRM_PAGE_SIZE,
   LIFECYCLE_STAGE_VALUES,
 } from "@/features/crm/constants";
+import {
+  CLIENT_SEGMENT_VALUES,
+  type ClientSegment,
+} from "@/features/crm/clients/segments";
 import { NodeType } from "@/db/enums";
 
 import { db } from "@/db";
@@ -15,9 +20,13 @@ import {
   checkIn,
   churnRiskScore,
   client as clientTable,
+  clientAccountBalance,
+  clientAccountCreditTransaction,
   clientAssignee,
   clientInstructor,
+  giftCard,
   instructor,
+  introOffer,
   introOfferRedemption,
   locationMember,
   referral,
@@ -34,6 +43,12 @@ import { createNotification } from "@/lib/notifications";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { ActivityAction } from "@/db/enums";
 import { triggerWorkflowsForNodeType } from "@/lib/workflow-triggers";
+import { matchesClientCreatedTrigger } from "@/features/nodes/triggers/components/client-created-trigger/config";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import {
+  clientPaymentMethodsOutputSchema,
+  listClientPaymentMethods,
+} from "@/features/crm/server/client-payment-methods";
 import {
   and,
   arrayOverlaps,
@@ -45,11 +60,13 @@ import {
   gte,
   ilike,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
   max,
   min,
+  notInArray,
   or,
   type SQL,
 } from "drizzle-orm";
@@ -138,9 +155,20 @@ const mapClient = (
   };
 };
 
-async function getClientWithRelations(id: string) {
+async function getClientWithRelations(
+  id: string,
+  scope?: { organizationId: string; locationId: string | null },
+) {
   return db.query.client.findFirst({
-    where: eq(clientTable.id, id),
+    where: and(
+      eq(clientTable.id, id),
+      scope ? eq(clientTable.organizationId, scope.organizationId) : undefined,
+      scope
+        ? scope.locationId
+          ? eq(clientTable.locationId, scope.locationId)
+          : undefined
+        : undefined,
+    ),
     with: {
       clientAssignees: {
         with: {
@@ -185,6 +213,129 @@ function endOfDay(date: Date) {
   const value = new Date(date);
   value.setHours(23, 59, 59, 999);
   return value;
+}
+
+function clientSegmentCondition(
+  segment: ClientSegment,
+  organizationId: string,
+  locationId: string | null,
+  includeAllLocations: boolean,
+): SQL | undefined {
+  const exactLocation = (column: AnyPgColumn) =>
+    includeAllLocations
+      ? undefined
+      : locationId
+        ? eq(column, locationId)
+        : isNull(column);
+  const bookedClientIds = db
+    .select({ clientId: studioBooking.clientId })
+    .from(studioBooking)
+    .where(
+      and(
+        inArray(studioBooking.status, ["BOOKED", "ATTENDED"]),
+        inArray(
+          studioBooking.classId,
+          db
+            .select({ id: studioClass.id })
+            .from(studioClass)
+            .where(
+              and(
+                eq(studioClass.organizationId, organizationId),
+                exactLocation(studioClass.locationId),
+              ),
+            ),
+        ),
+      ),
+    );
+  const membershipClientIds = (
+    extraCondition?: SQL,
+  ) =>
+    db
+      .select({ clientId: studioMembership.clientId })
+      .from(studioMembership)
+      .where(
+        and(
+          eq(studioMembership.organizationId, organizationId),
+          exactLocation(studioMembership.locationId),
+          extraCondition,
+        ),
+      );
+
+  switch (segment) {
+    case "all":
+      return undefined;
+    case "no-purchases-or-reservations":
+      return and(
+        notInArray(
+          clientTable.id,
+          db
+            .select({ clientId: studioPayment.clientId })
+            .from(studioPayment)
+            .where(
+              and(
+                eq(studioPayment.organizationId, organizationId),
+                exactLocation(studioPayment.locationId),
+                isNotNull(studioPayment.clientId),
+                eq(studioPayment.status, "SUCCEEDED"),
+                isNull(studioPayment.deletedAt),
+              ),
+            ),
+        ),
+        notInArray(clientTable.id, bookedClientIds),
+      );
+    case "intro-offer":
+      return inArray(
+        clientTable.id,
+        db
+          .select({ clientId: introOfferRedemption.clientId })
+          .from(introOfferRedemption)
+          .where(
+            inArray(
+              introOfferRedemption.offerId,
+              db
+                .select({ id: introOffer.id })
+                .from(introOffer)
+                .where(
+                  and(
+                    eq(introOffer.organizationId, organizationId),
+                    exactLocation(introOffer.locationId),
+                  ),
+                ),
+            ),
+          ),
+      );
+    case "membership-last-7-days": {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      return inArray(
+        clientTable.id,
+        membershipClientIds(gte(studioMembership.createdAt, sevenDaysAgo)),
+      );
+    }
+    case "member":
+      return inArray(clientTable.id, membershipClientIds());
+    case "active-member":
+      return inArray(
+        clientTable.id,
+        membershipClientIds(eq(studioMembership.status, "ACTIVE")),
+      );
+    case "retention":
+      return inArray(
+        clientTable.id,
+        db
+          .select({ clientId: churnRiskScore.clientId })
+          .from(churnRiskScore)
+          .where(
+            and(
+              eq(churnRiskScore.organizationId, organizationId),
+              exactLocation(churnRiskScore.locationId),
+              inArray(churnRiskScore.riskLevel, ["MEDIUM", "HIGH", "CRITICAL"]),
+            ),
+          ),
+      );
+    case "first-class-booked":
+      return inArray(clientTable.id, bookedClientIds);
+  }
 }
 
 export const clientsRouter = createTRPCRouter({
@@ -250,6 +401,32 @@ export const clientsRouter = createTRPCRouter({
       role: w.role,
     }));
   }),
+
+  getById: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Organization context required",
+        });
+      }
+      const member = await getClientWithRelations(input.id, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      if (!member) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found" });
+      }
+      return mapClient(member);
+    }),
+
+  paymentMethods: protectedProcedure
+    .input(lifecycleQueryInput)
+    .output(clientPaymentMethodsOutputSchema)
+    .query(({ ctx, input }) =>
+      listClientPaymentMethods({ clientId: input.id, ctx }),
+    ),
 
   count: protectedProcedure.query(async ({ ctx }) => {
     const orgId = ctx.orgId;
@@ -337,6 +514,7 @@ export const clientsRouter = createTRPCRouter({
           page: z.number().min(1).default(1),
           pageSize: z.number().min(1).max(100).default(20),
           search: z.string().optional(),
+          segment: z.enum(CLIENT_SEGMENT_VALUES).default("all"),
           types: z.array(z.enum(CLIENT_TYPE_VALUES)).optional(),
           tags: z.array(z.string()).optional(),
           assignedTo: z.array(z.string()).optional(),
@@ -386,6 +564,16 @@ export const clientsRouter = createTRPCRouter({
         locationId,
         input?.includeAllClients
       );
+
+      const segmentCondition = clientSegmentCondition(
+        input?.segment ?? "all",
+        orgId,
+        locationId,
+        input?.includeAllClients === true,
+      );
+      if (segmentCondition) {
+        conditions.push(segmentCondition);
+      }
 
       if (input?.types && input.types.length > 0) {
         conditions.push(inArray(clientTable.type, input.types));
@@ -585,6 +773,9 @@ export const clientsRouter = createTRPCRouter({
         referralsReceived,
         automationEvents,
         churnRisk,
+        accountBalance,
+        accountTransactions,
+        giftCards,
       ] = await Promise.all([
         db.query.studioMembership.findMany({
           where: and(
@@ -627,11 +818,12 @@ export const clientsRouter = createTRPCRouter({
             currency: true,
             status: true,
             type: true,
+            paymentMethod: true,
             description: true,
             createdAt: true,
           },
           orderBy: desc(studioPayment.createdAt),
-          limit: 8,
+          limit: 100,
         }).catch(empty),
         db.query.studioBooking.findMany({
           where: and(
@@ -692,6 +884,7 @@ export const clientsRouter = createTRPCRouter({
           columns: {
             id: true,
             status: true,
+            bookedAt: true,
             checkedInAt: true,
             cancelledAt: true,
           },
@@ -700,9 +893,11 @@ export const clientsRouter = createTRPCRouter({
               columns: {
                 name: true,
                 startTime: true,
+                endTime: true,
               },
               with: {
                 classType: { columns: { name: true, color: true } },
+                instructor: { columns: { name: true } },
               },
             },
           },
@@ -741,7 +936,23 @@ export const clientsRouter = createTRPCRouter({
           orderBy: desc(waiverTemplate.createdAt),
         }).catch(empty),
         db.query.waiverSignature.findMany({
-          where: eq(waiverSignature.clientId, input.id),
+          where: and(
+            eq(waiverSignature.clientId, input.id),
+            exists(
+              db
+                .select({ id: waiverTemplate.id })
+                .from(waiverTemplate)
+                .where(
+                  and(
+                    eq(waiverTemplate.id, waiverSignature.templateId),
+                    eq(waiverTemplate.organizationId, orgId),
+                    locationId
+                      ? eq(waiverTemplate.locationId, locationId)
+                      : undefined,
+                  ),
+                ),
+            ),
+          ),
           columns: {
             id: true,
             templateId: true,
@@ -836,6 +1047,65 @@ export const clientsRouter = createTRPCRouter({
             suggestedActions: true,
           },
         }).catch(() => undefined),
+        db.query.clientAccountBalance.findFirst({
+          where: and(
+            eq(clientAccountBalance.organizationId, orgId),
+            eq(clientAccountBalance.clientId, input.id),
+            locationId
+              ? eq(clientAccountBalance.locationId, locationId)
+              : isNull(clientAccountBalance.locationId)
+          ),
+          columns: {
+            id: true,
+            balance: true,
+            currency: true,
+            updatedAt: true,
+          },
+        }).catch(() => undefined),
+        db.query.clientAccountCreditTransaction.findMany({
+          where: and(
+            eq(clientAccountCreditTransaction.organizationId, orgId),
+            eq(clientAccountCreditTransaction.clientId, input.id),
+            locationId
+              ? eq(clientAccountCreditTransaction.locationId, locationId)
+              : isNull(clientAccountCreditTransaction.locationId)
+          ),
+          columns: {
+            id: true,
+            amount: true,
+            currency: true,
+            type: true,
+            description: true,
+            createdAt: true,
+          },
+          orderBy: desc(clientAccountCreditTransaction.createdAt),
+          limit: 5,
+        }).catch(empty),
+        db.query.giftCard.findMany({
+          where: and(
+            eq(giftCard.organizationId, orgId),
+            locationId ? eq(giftCard.locationId, locationId) : undefined,
+            or(
+              eq(giftCard.purchasedByClientId, input.id),
+              eq(giftCard.redeemedByClientId, input.id)
+            )
+          ),
+          columns: {
+            id: true,
+            code: true,
+            initialValue: true,
+            remainingBalance: true,
+            currency: true,
+            isActive: true,
+            purchasedAt: true,
+            redeemedAt: true,
+            expiresAt: true,
+            purchasedByClientId: true,
+            redeemedByClientId: true,
+          },
+          orderBy: desc(giftCard.purchasedAt),
+          limit: 5,
+        }).catch(empty),
       ]);
 
       const signedRequiredTemplateIds = new Set(
@@ -915,6 +1185,27 @@ export const clientsRouter = createTRPCRouter({
         payments: payments.map((payment) => ({
           ...payment,
           amount: payment.amount.toString(),
+        })),
+        accountCredit: {
+          balance: accountBalance
+            ? {
+                ...accountBalance,
+                balance: accountBalance.balance.toString(),
+              }
+            : null,
+          transactions: accountTransactions.map((transaction) => ({
+            ...transaction,
+            amount: transaction.amount.toString(),
+          })),
+        },
+        giftCards: giftCards.map((card) => ({
+          ...card,
+          initialValue: card.initialValue.toString(),
+          remainingBalance: card.remainingBalance.toString(),
+          role:
+            card.purchasedByClientId === input.id
+              ? ("purchaser" as const)
+              : ("redeemer" as const),
         })),
         upcomingBookings: [...upcomingBookings]
           .sort(
@@ -1057,7 +1348,10 @@ export const clientsRouter = createTRPCRouter({
         }
       });
 
-      const client = await getClientWithRelations(clientId);
+      const client = await getClientWithRelations(clientId, {
+        organizationId: orgId,
+        locationId,
+      });
 
       if (!client) {
         throw new TRPCError({
@@ -1108,6 +1402,8 @@ export const clientsRouter = createTRPCRouter({
         triggerData: {
           client: toClientWorkflowPayload(client),
         },
+        shouldTriggerNode: (node) =>
+          matchesClientCreatedTrigger(node.data, client.type),
       });
 
       return mapClient(client);
@@ -1325,7 +1621,10 @@ export const clientsRouter = createTRPCRouter({
         }
       });
 
-      const client = await getClientWithRelations(id);
+      const client = await getClientWithRelations(id, {
+        organizationId: orgId,
+        locationId,
+      });
 
       if (!client) {
         throw new TRPCError({
@@ -1431,6 +1730,31 @@ export const clientsRouter = createTRPCRouter({
         );
       }
 
+      if (
+        oldClient.lifecycleStage !== client.lifecycleStage &&
+        client.lifecycleStage
+      ) {
+        await triggerWorkflowsForNodeType({
+          nodeType: NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
+          organizationId: orgId,
+          locationId,
+          idempotencyKey: `client-lifecycle:${client.id}:${oldClient.lifecycleStage}:${client.lifecycleStage}`,
+          triggerData: {
+            client: currentClientPayload,
+            oldStage: oldClient.lifecycleStage,
+            newStage: client.lifecycleStage,
+          },
+          shouldTriggerNode: (node) => {
+            const fromStage = getStringFromJson(node.data, "fromStage");
+            const toStage = getStringFromJson(node.data, "toStage");
+            return (
+              (!fromStage || fromStage === oldClient.lifecycleStage) &&
+              (!toStage || toStage === client.lifecycleStage)
+            );
+          },
+        });
+      }
+
       if (data.tags !== undefined) {
         const oldTags = oldClient.tags ?? [];
         const newTags = client.tags ?? [];
@@ -1480,6 +1804,72 @@ export const clientsRouter = createTRPCRouter({
       }
 
       return mapClient(client);
+    }),
+
+  delete: protectedProcedure
+    .input(
+      z.object({
+        ids: z.array(z.string().min(1)).min(1).max(100),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = ctx.orgId;
+      if (!organizationId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Organization context required to delete members",
+        });
+      }
+
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId: ctx.locationId,
+        },
+        capability: "customer.manage",
+        resource: { organizationId, locationId: ctx.locationId },
+      });
+
+      const uniqueIds = Array.from(new Set(input.ids));
+      const scopeConditions = [
+        eq(clientTable.organizationId, organizationId),
+        inArray(clientTable.id, uniqueIds),
+        ctx.locationId ? eq(clientTable.locationId, ctx.locationId) : undefined,
+      ];
+      const members = await db
+        .select({ id: clientTable.id, name: clientTable.name })
+        .from(clientTable)
+        .where(and(...scopeConditions));
+
+      if (members.length !== uniqueIds.length) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "One or more members were not found in this workspace",
+        });
+      }
+
+      await db.transaction(async (tx) => {
+        await tx.delete(clientTable).where(and(...scopeConditions));
+      });
+
+      await Promise.all(
+        members.map((member) =>
+          logAnalytics({
+            organizationId,
+            locationId: ctx.locationId,
+            userId: ctx.auth.user.id,
+            action: ActivityAction.DELETED,
+            entityType: "client",
+            entityId: member.id,
+            entityName: member.name,
+            metadata: { deletedName: member.name },
+            posthogProperties: { bulk_delete: members.length > 1 },
+          }),
+        ),
+      );
+
+      return { deletedIds: members.map((member) => member.id) };
     }),
 });
 

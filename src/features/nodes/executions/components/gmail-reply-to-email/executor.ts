@@ -1,9 +1,14 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveGoogleMailProviderGrant } from "@/features/nodes/lib/resolve-google-mail-provider-grant";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
 import { gmailReplyToEmailChannel } from "@/inngest/channels/gmail-reply-to-email";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
+import { safeGmailHeaderValue } from "../gmail-message-headers";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -11,13 +16,32 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GmailReplyToEmailData = {
+  providerAccountId?: string;
   variableName?: string;
   messageId: string;
   replyBody: string;
 };
 
+const gmailHeaderSchema = z.object({
+  name: z.string(),
+  value: z.string().optional(),
+});
+
+const gmailOriginalMessageSchema = z.object({
+  threadId: z.string(),
+  payload: z.object({
+    headers: z.array(gmailHeaderSchema),
+  }),
+});
+
+const gmailSendResponseSchema = z.object({
+  id: z.string().optional(),
+  threadId: z.string().optional(),
+  labelIds: z.array(z.string()).optional(),
+});
+
 export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       gmailReplyToEmailChannel().status({ nodeId, status: "loading" })
     );
@@ -32,26 +56,14 @@ export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
         );
       }
 
-      // Get Gmail OAuth token
-      const tokenResponse = await step.run("get-gmail-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          gmailReplyToEmailChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Gmail is not connected. Please connect Gmail in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-gmail-token", async () =>
+        resolveGoogleMailProviderGrant({
+          nodeType: NodeType.GMAIL_REPLY_TO_EMAIL,
+          providerAccountId: data.providerAccountId,
+          scope,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const messageId = decode(Handlebars.compile(data.messageId)(context));
@@ -61,8 +73,9 @@ export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
       const originalMessage = await step.run(
         "get-original-message",
         async () => {
-          const res = await fetch(
-            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+          const res = await oauthAuthenticatedFetch(
+            grant,
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`,
             {
               headers: {
                 Authorization: `Bearer ${accessToken}`,
@@ -71,27 +84,31 @@ export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
           );
 
           if (!res.ok) {
-            const error = await res.text();
-            throw new Error(`Gmail API error: ${error}`);
+            throw new NonRetriableError(
+              `Gmail API rejected the message lookup with status ${res.status}.`,
+            );
           }
 
-          return await res.json();
+          const payload: unknown = await res.json();
+          return gmailOriginalMessageSchema.parse(payload);
         }
       );
 
       const threadId = originalMessage.threadId;
       const headers = originalMessage.payload.headers;
-      const subject = headers.find((h: any) => h.name === "Subject")?.value || "";
-      const to = headers.find((h: any) => h.name === "From")?.value || "";
-      const messageIdHeader = headers.find((h: any) => h.name === "Message-ID")?.value || "";
-      const references = headers.find((h: any) => h.name === "References")?.value || "";
+      const subject = headers.find((header) => header.name === "Subject")?.value || "";
+      const to = headers.find((header) => header.name === "From")?.value || "";
+      const messageIdHeader =
+        headers.find((header) => header.name === "Message-ID")?.value || "";
+      const references =
+        headers.find((header) => header.name === "References")?.value || "";
 
       // Create RFC 2822 formatted reply email
       const emailLines = [
-        `To: ${to}`,
-        `Subject: Re: ${subject.replace(/^Re: /, "")}`,
-        `In-Reply-To: ${messageIdHeader}`,
-        `References: ${references} ${messageIdHeader}`.trim(),
+        `To: ${safeGmailHeaderValue("Recipient", to)}`,
+        `Subject: Re: ${safeGmailHeaderValue("Subject", subject.replace(/^Re: /, ""))}`,
+        `In-Reply-To: ${safeGmailHeaderValue("Message-ID", messageIdHeader)}`,
+        `References: ${safeGmailHeaderValue("References", `${references} ${messageIdHeader}`)}`,
         `Content-Type: text/html; charset=utf-8`,
         "",
         replyBody,
@@ -108,7 +125,8 @@ export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
 
       // Send reply via Gmail API
       const response = await step.run("send-gmail-reply", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
           {
             method: "POST",
@@ -124,11 +142,13 @@ export const gmailReplyToEmailExecutor: NodeExecutor<GmailReplyToEmailData> =
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Gmail API error: ${error}`);
+          throw new NonRetriableError(
+            `Gmail API rejected the reply with status ${res.status}.`,
+          );
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return gmailSendResponseSchema.parse(payload);
       });
 
       await publish(

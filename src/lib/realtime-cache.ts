@@ -145,3 +145,32 @@ export function clearRealtimeCache() {
   realtimeCache.clear();
   console.log("[Realtime Cache] Cleared all events");
 }
+
+export function removeRealtimeEventsForSubjects(input: {
+  anonymousIds: readonly string[];
+  funnelIds: readonly string[];
+  userIds: readonly string[];
+}): number {
+  const anonymousIds = new Set(input.anonymousIds);
+  const userIds = new Set(input.userIds);
+  let removed = 0;
+
+  for (const funnelId of input.funnelIds) {
+    const entry = realtimeCache.get(funnelId);
+    if (!entry) continue;
+    const retained = entry.events.filter((event) => {
+      const matches =
+        (event.anonymousId !== null && anonymousIds.has(event.anonymousId)) ||
+        (event.userId !== null && userIds.has(event.userId));
+      if (matches) removed += 1;
+      return !matches;
+    });
+    if (retained.length === 0) {
+      realtimeCache.delete(funnelId);
+    } else {
+      entry.events = retained;
+    }
+  }
+
+  return removed;
+}

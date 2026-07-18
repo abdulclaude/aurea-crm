@@ -1,19 +1,41 @@
-import { eq } from "drizzle-orm";
+import "server-only";
+
+import { and, eq, isNull } from "drizzle-orm";
+import { z } from "zod";
+
 import { db } from "@/db";
 import { apps, credential as credentialTable } from "@/db/schema";
-import { decrypt } from "@/lib/encryption";
+import { AppProvider, CredentialType } from "@/db/enums";
+import { decrypt, encrypt } from "@/lib/encryption";
 
-export type MindbodyApp = typeof apps.$inferSelect & { scopes: string[] };
+export type MindbodyApp = typeof apps.$inferSelect;
 
 export interface MindbodyConfig {
   siteId: string;
   apiKey: string;
   accessToken: string;
-  refreshToken: string;
   expiresAt: Date;
   username: string;
   password: string;
 }
+
+type MindbodyAppScope = Pick<
+  MindbodyApp,
+  "id" | "organizationId" | "locationId"
+>;
+
+const mindbodyCredentialSchema = z.object({
+  apiKey: z.string().min(1),
+  siteId: z.string().min(1),
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+const mindbodyTokenSchema = z.object({
+  AccessToken: z.string().min(1),
+  RefreshToken: z.string().min(1).optional(),
+  ExpiresIn: z.coerce.number().positive().optional(),
+});
 
 export interface MindbodyClient {
   Id: string;
@@ -85,11 +107,11 @@ export class MindbodyAPIError extends Error {
 export class MindbodyAPI {
   private baseUrl = "https://api.mindbodyonline.com/public/v6";
   private config: MindbodyConfig;
-  private appId: string;
+  private appScope: MindbodyAppScope;
 
-  constructor(config: MindbodyConfig, appId: string) {
+  constructor(config: MindbodyConfig, appScope: MindbodyAppScope) {
     this.config = config;
-    this.appId = appId;
+    this.appScope = appScope;
   }
 
   /**
@@ -186,23 +208,42 @@ export class MindbodyAPI {
 
     console.log('[Mindbody API] Token refreshed successfully');
 
-    const data = await response.json();
+    const data = mindbodyTokenSchema.parse(await response.json());
 
     // Update config
     this.config.accessToken = data.AccessToken;
-    this.config.refreshToken = data.RefreshToken || this.config.refreshToken;
-    this.config.expiresAt = new Date(Date.now() + 3600 * 1000); // 1 hour from now
+    this.config.expiresAt = new Date(
+      Date.now() + Math.max(data.ExpiresIn ?? 3600, 60) * 1000,
+    );
 
-    // Update database
-    await db
+    const [updated] = await db
       .update(apps)
       .set({
-        accessToken: data.AccessToken,
-        refreshToken: data.RefreshToken || this.config.refreshToken,
+        accessToken: encrypt(data.AccessToken),
+        ...(data.RefreshToken
+          ? { refreshToken: encrypt(data.RefreshToken) }
+          : {}),
         expiresAt: this.config.expiresAt,
         updatedAt: new Date(),
       })
-      .where(eq(apps.id, this.appId));
+      .where(
+        and(
+          eq(apps.id, this.appScope.id),
+          eq(apps.organizationId, this.appScope.organizationId),
+          this.appScope.locationId
+            ? eq(apps.locationId, this.appScope.locationId)
+            : isNull(apps.locationId),
+          eq(apps.provider, AppProvider.MINDBODY),
+        ),
+      )
+      .returning({ id: apps.id });
+
+    if (!updated) {
+      throw new MindbodyAPIError(
+        "Mindbody connection scope changed. Please reconnect the account.",
+        409,
+      );
+    }
   }
 
   /**
@@ -312,6 +353,15 @@ export class MindbodyAPI {
   async getClient(clientId: string): Promise<{ Client: MindbodyClient }> {
     return this.request(`/client/clients?clientIds=${clientId}`);
   }
+
+  async testConnection(): Promise<boolean> {
+    try {
+      await this.getClasses({ limit: 1 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 /**
@@ -320,14 +370,7 @@ export class MindbodyAPI {
 export async function createMindbodyAPI(
   app: MindbodyApp,
 ): Promise<MindbodyAPI> {
-  console.log('[Mindbody API] Creating API instance with app:', {
-    appId: app.id,
-    hasAccessToken: !!app.accessToken,
-    hasRefreshToken: !!app.refreshToken,
-    expiresAt: app.expiresAt,
-  });
-
-  if (!app.accessToken) {
+  if (app.provider !== AppProvider.MINDBODY || !app.accessToken) {
     throw new MindbodyAPIError("Missing Mindbody access token");
   }
 
@@ -338,29 +381,32 @@ export async function createMindbodyAPI(
     throw new MindbodyAPIError("Missing credential ID in app metadata. Please reconnect your Mindbody account.");
   }
 
-  // Fetch the credential from the Credential table
   const credential = await db.query.credential.findFirst({
-    where: eq(credentialTable.id, credentialId),
+    where: and(
+      eq(credentialTable.id, credentialId),
+      eq(credentialTable.organizationId, app.organizationId),
+      app.locationId
+        ? eq(credentialTable.locationId, app.locationId)
+        : isNull(credentialTable.locationId),
+      eq(credentialTable.type, CredentialType.MINDBODY),
+      eq(credentialTable.isActive, true),
+    ),
+    columns: { value: true },
   });
 
   if (!credential) {
     throw new MindbodyAPIError("Mindbody credential not found. Please reconnect your Mindbody account.");
   }
 
-  // Decrypt the credential value
-  let credentialData: {
-    apiKey: string;
-    siteId: string;
-    username: string;
-    password: string;
-  };
+  let credentialData: z.infer<typeof mindbodyCredentialSchema>;
+  let accessToken: string;
 
   try {
-    const decryptedValue = decrypt(credential.value);
-    credentialData = JSON.parse(decryptedValue);
-    console.log('[Mindbody API] Credential decrypted successfully');
-  } catch (error) {
-    console.error('[Mindbody API] Failed to decrypt credential:', error);
+    credentialData = mindbodyCredentialSchema.parse(
+      JSON.parse(decrypt(credential.value)),
+    );
+    accessToken = decrypt(app.accessToken);
+  } catch {
     throw new MindbodyAPIError("Failed to decrypt Mindbody credentials. Please reconnect your account.");
   }
 
@@ -369,12 +415,15 @@ export async function createMindbodyAPI(
     apiKey: credentialData.apiKey,
     username: credentialData.username,
     password: credentialData.password,
-    accessToken: app.accessToken,
-    refreshToken: app.refreshToken || "",
+    accessToken,
     expiresAt: app.expiresAt ?? new Date(),
   };
 
-  return new MindbodyAPI(config, app.id);
+  return new MindbodyAPI(config, {
+    id: app.id,
+    organizationId: app.organizationId,
+    locationId: app.locationId,
+  });
 }
 
 function getMetadata(value: unknown): Record<string, unknown> {

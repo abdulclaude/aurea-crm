@@ -19,7 +19,7 @@ interface PageProps {
 
 const Page = async ({ params }: PageProps) => {
   const { workflowId } = await params;
-  prefetchWorkflow(workflowId);
+  await prefetchWorkflow(workflowId);
 
   return (
     <HydrateClient>

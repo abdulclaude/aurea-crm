@@ -5,6 +5,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   Dialog,
   DialogContent,
@@ -29,11 +34,19 @@ interface RescheduleBookingDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function RescheduleBookingDialog({ booking, open, onOpenChange }: RescheduleBookingDialogProps) {
+export function RescheduleBookingDialog({
+  booking,
+  open,
+  onOpenChange,
+}: RescheduleBookingDialogProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [newDate, setNewDate] = useState(format(new Date(booking.startTime), "yyyy-MM-dd"));
-  const [newTime, setNewTime] = useState(format(new Date(booking.startTime), "HH:mm"));
+  const [newDate, setNewDate] = useState(
+    format(new Date(booking.startTime), "yyyy-MM-dd"),
+  );
+  const [newTime, setNewTime] = useState(
+    format(new Date(booking.startTime), "HH:mm"),
+  );
   const [reason, setReason] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
@@ -43,14 +56,14 @@ export function RescheduleBookingDialog({ booking, open, onOpenChange }: Resched
         queryClient.invalidateQueries(trpc.bookings.getMany.queryOptions({}));
         onOpenChange(false);
       },
-    })
+    }),
   );
 
   const handleReschedule = async () => {
     try {
       setIsLoading(true);
       const newStartTime = new Date(`${newDate}T${newTime}`).toISOString();
-      
+
       await rescheduleMutation.mutateAsync({
         id: booking.id,
         newStartTime,
@@ -86,11 +99,12 @@ export function RescheduleBookingDialog({ booking, open, onOpenChange }: Resched
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="new-date">New Date</Label>
-              <Input
+              <DatePicker
                 id="new-date"
-                type="date"
-                value={newDate}
-                onChange={(e) => setNewDate(e.target.value)}
+                date={parseDateValue(newDate)}
+                onSelect={(date) => setNewDate(formatDateValue(date))}
+                placeholder="Pick a date"
+                ariaLabel="New booking date"
               />
             </div>
 
@@ -118,7 +132,11 @@ export function RescheduleBookingDialog({ booking, open, onOpenChange }: Resched
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isLoading}
+          >
             Cancel
           </Button>
           <Button onClick={handleReschedule} disabled={isLoading}>

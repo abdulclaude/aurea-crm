@@ -2,21 +2,18 @@
 
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import type {
+  ColumnOrderState,
   ColumnDef,
-  RowSelectionState,
   SortingState,
   VisibilityState,
 } from "@tanstack/react-table";
-import { format } from "date-fns";
 import { Edit, MoreHorizontal, Trash2 } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
 import * as React from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,32 +23,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  getStaffRoleLabel,
-  getStaffTypeLabel,
   isStaffRoleValue,
   type StaffRoleValue,
 } from "@/features/staff/constants";
-import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { useDeleteStaff } from "../hooks/use-staff";
-import {
-  STAFF_DEFAULT_SORT,
-  useStaffParams,
-} from "../hooks/use-staff-params";
+import { STAFF_DEFAULT_SORT, useStaffParams } from "../hooks/use-staff-params";
 import type { StaffRow } from "../types";
 import { EditStaffDialog } from "./edit-staff-dialog";
-import { StaffToolbar, type StaffToolbarFilters } from "./staff-toolbar";
+import { StaffEmploymentTypeBadge, StaffRoleBadge } from "./staff-badges";
+import { StaffTableToolbar } from "./staff-table-toolbar";
 
-const SORTABLE_COLUMNS = new Set(["createdAt", "name", "role", "staffType"]);
+const TABLE_SORTABLE_COLUMNS = new Set(["name", "role"]);
 type StaffSortValue =
   | "createdAt.desc"
   | "createdAt.asc"
   | "name.asc"
   | "name.desc"
   | "role.asc"
-  | "role.desc"
-  | "staffType.asc"
-  | "staffType.desc";
+  | "role.desc";
 
 const STAFF_SORT_VALUES: readonly StaffSortValue[] = [
   "createdAt.desc",
@@ -60,8 +50,6 @@ const STAFF_SORT_VALUES: readonly StaffSortValue[] = [
   "name.desc",
   "role.asc",
   "role.desc",
-  "staffType.asc",
-  "staffType.desc",
 ];
 
 function isStaffSortValue(value: string): value is StaffSortValue {
@@ -71,13 +59,13 @@ function isStaffSortValue(value: string): value is StaffSortValue {
 function sortValueToState(value?: string): SortingState {
   const sort = value || STAFF_DEFAULT_SORT;
   const [column, direction] = sort.split(".");
-  if (!SORTABLE_COLUMNS.has(column)) return [];
+  if (!TABLE_SORTABLE_COLUMNS.has(column)) return [];
   return [{ id: column, desc: direction === "desc" }];
 }
 
 function sortingStateToValue(state: SortingState): string | null {
   const primary = state[0];
-  if (!primary || !SORTABLE_COLUMNS.has(primary.id)) return null;
+  if (!primary || !TABLE_SORTABLE_COLUMNS.has(primary.id)) return null;
   return `${primary.id}.${primary.desc ? "desc" : "asc"}`;
 }
 
@@ -88,18 +76,6 @@ function initialsFor(name: string): string {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function getRoleBadgeColor(role: string | null): string {
-  const colors: Record<string, string> = {
-    ADMIN: "bg-blue-100 text-blue-600 ring-blue-300 dark:border-blue-800",
-    MANAGER: "bg-teal-100 text-teal-600 ring-teal-300 dark:border-teal-800",
-    INSTRUCTOR:
-      "bg-emerald-100 text-emerald-600 ring-emerald-300 dark:border-emerald-800",
-    FRONT_DESK:
-      "bg-amber-100 text-amber-600 ring-amber-200 dark:border-amber-800",
-  };
-  return colors[role ?? ""] ?? "bg-gray-100 text-gray-500 ring-gray-200";
 }
 
 function StaffActionsCell({ staff }: { staff: StaffRow }) {
@@ -118,7 +94,11 @@ function StaffActionsCell({ staff }: { staff: StaffRow }) {
   };
 
   const handleDelete = () => {
-    if (!window.confirm(`Delete ${staff.name}? This will remove them from staff lists.`)) {
+    if (
+      !window.confirm(
+        `Delete ${staff.name}? This will remove them from staff lists.`,
+      )
+    ) {
       return;
     }
 
@@ -185,29 +165,6 @@ function StaffActionsCell({ staff }: { staff: StaffRow }) {
 
 const staffColumns: ColumnDef<StaffRow>[] = [
   {
-    id: "select",
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() ||
-          (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        onClick={(event) => event.stopPropagation()}
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
-  {
     id: "name",
     accessorKey: "name",
     header: "Name",
@@ -216,11 +173,14 @@ const staffColumns: ColumnDef<StaffRow>[] = [
     enableHiding: false,
     cell: ({ row }) => (
       <div className="flex items-center gap-3">
-        <Avatar className="size-9">
+        <Avatar className="size-8 rounded-full bg-slate-100">
           {row.original.profilePhoto ? (
-            <AvatarImage src={row.original.profilePhoto} alt={row.original.name} />
+            <AvatarImage
+              src={row.original.profilePhoto}
+              alt={row.original.name}
+            />
           ) : (
-            <AvatarFallback className="text-[11px]">
+            <AvatarFallback className="rounded-full border border-slate-200 bg-slate-100 text-[9px] font-medium text-slate-800">
               {initialsFor(row.original.name)}
             </AvatarFallback>
           )}
@@ -237,72 +197,42 @@ const staffColumns: ColumnDef<StaffRow>[] = [
     header: "Email",
     meta: { label: "Email" },
     cell: ({ row }) => (
-      <span className="text-xs text-primary/70">{row.original.email || "-"}</span>
+      <span className="text-xs text-primary/70">
+        {row.original.email || "-"}
+      </span>
     ),
   },
   {
     id: "phone",
     accessorKey: "phone",
-    header: "Phone",
-    meta: { label: "Phone" },
+    header: "Phone number",
+    meta: { label: "Phone number" },
     cell: ({ row }) => (
-      <span className="text-xs text-primary/70">{row.original.phone || "-"}</span>
+      <span className="text-xs text-primary/70">
+        {row.original.phone || "-"}
+      </span>
     ),
   },
   {
     id: "role",
-    accessorKey: "staffType",
+    accessorKey: "role",
     header: "Role",
     meta: { label: "Role" },
     enableSorting: true,
-    cell: ({ row }) => (
-      <Badge
-        variant="outline"
-        className={cn("w-fit text-[11px]", getRoleBadgeColor(row.original.role))}
-      >
-        {getStaffTypeLabel(row.original.staffType)}
-      </Badge>
-    ),
+    cell: ({ row }) => <StaffRoleBadge role={row.original.role} />,
   },
   {
-    id: "employeeId",
-    accessorKey: "employeeId",
-    header: "Employee ID",
-    meta: { label: "Employee ID" },
-    cell: ({ row }) => (
-      <span className="text-xs text-primary/70">{row.original.employeeId || "-"}</span>
-    ),
-  },
-  {
-    id: "isActive",
-    accessorKey: "isActive",
-    header: "Status",
-    meta: { label: "Status" },
-    cell: ({ row }) => (
-      <Badge
-        variant="outline"
-        className={cn(
-          "text-[11px]",
-          row.original.isActive
-            ? "bg-emerald-100 text-emerald-600 ring-emerald-300"
-            : "bg-rose-100 text-rose-600 ring-rose-300",
-        )}
-      >
-        {row.original.isActive ? "Active" : "Inactive"}
-      </Badge>
-    ),
-  },
-  {
-    id: "createdAt",
-    accessorKey: "createdAt",
-    header: "Added",
-    meta: { label: "Added" },
-    enableSorting: true,
-    cell: ({ row }) => (
-      <span className="text-xs text-primary/60">
-        {format(new Date(row.original.createdAt), "MMM d, yy")}
-      </span>
-    ),
+    id: "staffType",
+    accessorKey: "employmentType",
+    header: "Staff type",
+    meta: { label: "Staff type" },
+    cell: ({ row }) => {
+      return (
+        <StaffEmploymentTypeBadge
+          employmentType={row.original.employmentType}
+        />
+      );
+    },
   },
   {
     id: "actions",
@@ -317,11 +247,19 @@ const STAFF_COLUMN_IDS = staffColumns.map(
   (column, index) => (column.id ?? `column-${index}`) as string,
 );
 
-export function StaffTable({ scope = "studio" }: { scope?: "studio" | "all-locations" }) {
+export function StaffTable({
+  canManage = false,
+  scope = "studio",
+}: {
+  canManage?: boolean;
+  scope?: "studio" | "all-locations";
+}) {
   const trpc = useTRPC();
   const [params, setParams] = useStaffParams();
-  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({});
-  const [selectedLocationId] = useQueryState("locationId", parseAsString.withDefault(""));
+  const [selectedLocationId] = useQueryState(
+    "locationId",
+    parseAsString.withDefault(""),
+  );
   const includeAllLocations = scope === "all-locations" && !selectedLocationId;
   const selectedRoles = React.useMemo<StaffRoleValue[]>(
     () => params.roles.filter(isStaffRoleValue),
@@ -336,7 +274,6 @@ export function StaffTable({ scope = "studio" }: { scope?: "studio" | "all-locat
     pageSize: params.pageSize,
     search: params.search || undefined,
     roles: selectedRoles.length > 0 ? selectedRoles : undefined,
-    staffTypes: params.staffTypes.length > 0 ? params.staffTypes : undefined,
     isActive: params.isActive ?? undefined,
     sort: sortValue,
     ...(scope === "all-locations"
@@ -352,23 +289,12 @@ export function StaffTable({ scope = "studio" }: { scope?: "studio" | "all-locat
   );
 
   const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({});
+    React.useState<VisibilityState>(() => ({ actions: canManage }));
+  const [columnOrder, setColumnOrder] =
+    React.useState<ColumnOrderState>(STAFF_COLUMN_IDS);
   const sortingState = React.useMemo(
     () => sortValueToState(params.sort),
     [params.sort],
-  );
-
-  const handleApplyFilters = React.useCallback(
-    (filters: StaffToolbarFilters) => {
-      setParams((prev) => ({
-        ...prev,
-        page: 1,
-        roles: filters.roles,
-        staffTypes: filters.staffTypes,
-        isActive: filters.status,
-      }));
-    },
-    [setParams],
   );
 
   return (
@@ -386,11 +312,10 @@ export function StaffTable({ scope = "studio" }: { scope?: "studio" | "all-locat
       }
       columnVisibility={columnVisibility}
       onColumnVisibilityChange={setColumnVisibility}
+      columnOrder={columnOrder}
+      onColumnOrderChange={setColumnOrder}
       initialColumnOrder={STAFF_COLUMN_IDS}
       enableGlobalSearch={false}
-      enableRowSelection
-      rowSelection={rowSelection}
-      onRowSelectionChange={setRowSelection}
       emptyState={
         <div className="py-12 text-center text-xs text-primary/60">
           No staff found.
@@ -398,22 +323,27 @@ export function StaffTable({ scope = "studio" }: { scope?: "studio" | "all-locat
       }
       toolbar={{
         filters: (ctx) => (
-          <StaffToolbar
+          <StaffTableToolbar
             search={params.search}
             onSearchChange={(search) =>
               setParams((prev) => ({ ...prev, search, page: 1 }))
             }
-            sortValue={sortValue}
+            sort={sortValue}
             onSortChange={(sort) => setParams((prev) => ({ ...prev, sort }))}
-            selectedRoles={selectedRoles}
-            selectedStaffTypes={params.staffTypes}
-            selectedStatus={params.isActive ?? null}
-            onApplyFilters={handleApplyFilters}
+            roles={selectedRoles}
+            onRolesChange={(roles) =>
+              setParams((prev) => ({ ...prev, roles, page: 1 }))
+            }
+            status={params.isActive ?? null}
+            onStatusChange={(isActive) =>
+              setParams((prev) => ({ ...prev, isActive, page: 1 }))
+            }
             table={ctx.table}
             columnVisibility={columnVisibility}
-            columnOrder={STAFF_COLUMN_IDS}
-            selectedLocationId={selectedLocationId || undefined}
-            includeAllLocations={includeAllLocations}
+            columnOrder={columnOrder}
+            onColumnOrderChange={setColumnOrder}
+            initialColumnOrder={STAFF_COLUMN_IDS}
+            primaryColumnId="name"
           />
         ),
       }}

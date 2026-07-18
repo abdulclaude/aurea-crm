@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   BarChart,
   Bar,
@@ -33,6 +34,7 @@ export function ChartMemberships({
   isEditing?: boolean;
   isLoading?: boolean;
 }) {
+  const isMobile = useIsMobile();
   const merged = useMemo(() => {
     if (!comparisonData?.length) return data;
     const len = Math.max(data.length, comparisonData.length);
@@ -55,7 +57,10 @@ export function ChartMemberships({
     merged.length,
     hasComparison,
   );
-  const xTicks = useMemo(() => getVisibleXAxisTicks(merged), [merged]);
+  const xTicks = useMemo(
+    () => getVisibleXAxisTicks(merged, isMobile ? 5 : undefined),
+    [isMobile, merged],
+  );
 
   return (
     <ChartShell

@@ -25,14 +25,12 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
   step,
   publish,
 }) => {
-  // TODO: publish loading state for http request
 
   await publish(httpRequestChannel().status({ nodeId, status: "loading" }));
 
   try {
     const result = await step.run("http-request", async () => {
       if (!data.endpoint) {
-        // TODO: publish 'error' state for http req
 
         await publish(httpRequestChannel().status({ nodeId, status: "error" }));
 
@@ -42,21 +40,12 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
       }
 
       if (!data.variableName) {
-        // TODO: publish 'error' state for http req
 
         await publish(httpRequestChannel().status({ nodeId, status: "error" }));
 
         throw new NonRetriableError(
           "HTTP Request Node: No variable name configured."
         );
-      }
-
-      if (!data.variableName) {
-        // TODO: publish 'error' state for http req
-
-        await publish(httpRequestChannel().status({ nodeId, status: "error" }));
-
-        throw new NonRetriableError("HTTP Request Node: No method configured.");
       }
 
       const endpoint = Handlebars.compile(data.endpoint)(context);
@@ -94,7 +83,6 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
         [data.variableName]: responsePayload,
       };
 
-      // fall back to direct httpResponse for backwards compatability
     });
 
     await publish(httpRequestChannel().status({ nodeId, status: "success" }));
@@ -104,6 +92,4 @@ export const httpRequestExecutor: NodeExecutor<HttpRequestData> = async ({
     await publish(httpRequestChannel().status({ nodeId, status: "error" }));
     throw error;
   }
-
-  // TODO: publish success state for http request
 };

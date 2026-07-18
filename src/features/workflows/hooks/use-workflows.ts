@@ -4,6 +4,7 @@ import { useTRPC } from "@/trpc/client";
 
 import {
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query";
@@ -18,10 +19,31 @@ export const useSuspenseWorkflows = () => {
   const trpc = useTRPC();
   const [params] = useWorkflowsParams();
 
-  const { page, pageSize, search } = params;
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 5;
+  const search = params.search ?? "";
+  const folder = params.folder ?? "all";
+  const kind = params.kind ?? "all";
+  const sort = params.sort ?? "updatedAt.desc";
   return useSuspenseQuery(
-    trpc.workflows.getMany.queryOptions({ page, pageSize, search })
+    trpc.workflows.getMany.queryOptions({
+      page,
+      pageSize,
+      search,
+      folderId: folder,
+      isBundle:
+        kind === "bundle" ? true : kind === "workflow" ? false : undefined,
+      sort,
+    }),
   );
+};
+
+export const useWorkflowFolders = () => {
+  const trpc = useTRPC();
+  return useQuery({
+    ...trpc.workflows.getFolders.queryOptions(),
+    placeholderData: { folders: [], unfiledCount: 0 },
+  });
 };
 
 // hook to fetch a single workflow using suspense
@@ -44,18 +66,77 @@ export const useCreateWorkflow = () => {
         toast.success(`Workflow "${data.name}" created.`);
 
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
         queryClient.invalidateQueries(
-          trpc.workflows.getArchived.queryOptions({})
+          trpc.workflows.getArchived.queryOptions({}),
         );
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
       },
       onError: (error) => {
         // toast.error(`Failed to create workflow: ${error.message}`);
         console.log(`Failed to create workflow: ${error.message}`);
       },
-    })
+    }),
+  );
+};
+
+export const useCreateWorkflowFolder = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.workflows.createFolder.mutationOptions({
+      onSuccess: (folder) => {
+        toast.success(`Folder "${folder.name}" created.`);
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+};
+
+export const useUpdateWorkflowFolder = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.workflows.updateFolder.mutationOptions({
+      onSuccess: (folder) => {
+        toast.success(`Folder "${folder.name}" updated.`);
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+};
+
+export const useDeleteWorkflowFolder = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.workflows.deleteFolder.mutationOptions({
+      onSuccess: (folder) => {
+        toast.success(`Folder "${folder.name}" deleted.`);
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+};
+
+export const useMoveWorkflowToFolder = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.workflows.moveToFolder.mutationOptions({
+      onSuccess: (workflow) => {
+        toast.success(`Workflow "${workflow.name}" moved.`);
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
+        queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+      },
+      onError: (error) => toast.error(error.message),
+    }),
   );
 };
 
@@ -72,11 +153,12 @@ export const useRemoveWorkflow = () => {
 
         // checking the WHOLE cache and finding the difference without the id
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
+        queryClient.invalidateQueries(trpc.workflows.getFolders.queryOptions());
         queryClient.invalidateQueries(
-          trpc.workflows.getArchived.queryOptions({})
+          trpc.workflows.getArchived.queryOptions({}),
         );
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
 
         // below is a better option, you're getting the actual item you want to invalidate from the cache
@@ -84,7 +166,7 @@ export const useRemoveWorkflow = () => {
         //   trpc.workflows.getOne.queryFilter({ id: data.id })
         // );
       },
-    })
+    }),
   );
 };
 
@@ -101,20 +183,20 @@ export const useUpdateWorkflowName = () => {
 
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
-          trpc.workflows.getArchived.queryOptions({})
+          trpc.workflows.getArchived.queryOptions({}),
         );
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
 
         queryClient.invalidateQueries(
-          trpc.workflows.getOne.queryOptions({ id: data.id })
+          trpc.workflows.getOne.queryOptions({ id: data.id }),
         );
       },
       onError: (error) => {
         toast.error(`Failed to update workflow name: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -131,20 +213,20 @@ export const useUpdateWorkflow = () => {
 
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
-          trpc.workflows.getArchived.queryOptions({})
+          trpc.workflows.getArchived.queryOptions({}),
         );
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
 
         queryClient.invalidateQueries(
-          trpc.workflows.getOne.queryOptions({ id: data.id })
+          trpc.workflows.getOne.queryOptions({ id: data.id }),
         );
       },
       onError: (error) => {
         toast.error(`Failed to save workflow: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -161,7 +243,7 @@ export const useExecuteWorkflow = () => {
       onError: (error) => {
         toast.error(`Failed to execute workflow: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -179,20 +261,20 @@ export const useUpdateWorkflowArchived = () => {
             (data as unknown as { archived?: boolean }).archived
               ? "archived"
               : "activated"
-          }.`
+          }.`,
         );
         queryClient.invalidateQueries(trpc.workflows.getMany.queryOptions({}));
         queryClient.invalidateQueries(
-          trpc.workflows.getArchived.queryOptions({})
+          trpc.workflows.getArchived.queryOptions({}),
         );
         queryClient.invalidateQueries(
-          trpc.workflows.getOne.queryOptions({ id: data.id })
+          trpc.workflows.getOne.queryOptions({ id: data.id }),
         );
       },
       onError: (error) => {
         toast.error(`Failed to update workflow: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -201,9 +283,17 @@ export const useUpdateWorkflowArchived = () => {
 export const useSuspenseArchivedWorkflows = () => {
   const trpc = useTRPC();
   const [params] = useWorkflowsParams();
-  const { page, pageSize, search } = params;
+  const { page, pageSize, search, folder, kind, sort } = params;
   return useSuspenseQuery(
-    trpc.workflows.getArchived.queryOptions({ page, pageSize, search })
+    trpc.workflows.getArchived.queryOptions({
+      page,
+      pageSize,
+      search,
+      folderId: folder,
+      isBundle:
+        kind === "bundle" ? true : kind === "workflow" ? false : undefined,
+      sort,
+    }),
   );
 };
 
@@ -214,7 +304,7 @@ export const useSuspenseTemplates = () => {
   const [params] = useWorkflowsParams();
   const { page, pageSize, search } = params;
   return useSuspenseQuery(
-    trpc.workflows.getTemplates.queryOptions({ page, pageSize, search })
+    trpc.workflows.getTemplates.queryOptions({ page, pageSize, search }),
   );
 };
 
@@ -227,13 +317,13 @@ export const useCreateTemplateFromWorkflow = () => {
       onSuccess: (data) => {
         toast.success(`Template "${data.name}" created.`);
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
       },
       onError: (error) => {
         toast.error(`Failed to create template: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -250,7 +340,7 @@ export const useCreateWorkflowFromTemplate = () => {
       onError: (error) => {
         toast.error(`Failed to use template: ${error.message}`);
       },
-    })
+    }),
   );
 };
 
@@ -287,12 +377,12 @@ export const useUpdateTemplateMeta = () => {
       onSuccess: (data) => {
         toast.success(`Template "${data.name}" updated.`);
         queryClient.invalidateQueries(
-          trpc.workflows.getTemplates.queryOptions({})
+          trpc.workflows.getTemplates.queryOptions({}),
         );
       },
       onError: (error) => {
         toast.error(`Failed to update template: ${error.message}`);
       },
-    })
+    }),
   );
 };

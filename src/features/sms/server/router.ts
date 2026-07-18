@@ -1,52 +1,34 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { and, desc, eq, lt, or, sql, type SQL } from "drizzle-orm";
-import { createId } from "@paralleldrive/cuid2";
-
+import { and, desc, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { smsConfig, smsMessage } from "@/db/schema";
+import { smsMessage } from "@/db/schema";
+import { InvalidDeliveryDestinationError } from "@/features/delivery/lib/normalization";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import {
+  disconnectSmsConfigProcedure,
+  getSmsConfigProcedure,
+  saveSmsConfigProcedure,
+} from "@/features/sms/server/config-procedures";
+import { enqueueSmsMessages } from "@/features/sms/server/services/enqueue-sms";
+
+function capabilityActor(ctx: {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+}) {
+  return {
+    userId: ctx.auth.user.id,
+    organizationId: ctx.orgId,
+    locationId: ctx.locationId,
+  };
+}
 
 export const smsRouter = createTRPCRouter({
-  getConfig: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-    return db.query.smsConfig.findFirst({
-      where: eq(smsConfig.organizationId, ctx.orgId),
-    });
-  }),
-
-  saveConfig: protectedProcedure
-    .input(
-      z.object({
-        provider: z.enum(["TWILIO", "VONAGE", "MESSAGEBIRD"]).default("TWILIO"),
-        accountSid: z.string().min(1),
-        authToken: z.string().min(1),
-        fromNumber: z.string().min(1),
-        monthlyLimit: z.number().int().min(100).default(5000),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const now = new Date();
-      const [config] = await db
-        .insert(smsConfig)
-        .values({
-          id: createId(),
-          organizationId: ctx.orgId,
-          ...input,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: smsConfig.organizationId,
-          set: { ...input, updatedAt: now },
-        })
-        .returning();
-
-      return config;
-    }),
+  getConfig: getSmsConfigProcedure,
+  saveConfig: saveSmsConfigProcedure,
+  disconnectConfig: disconnectSmsConfigProcedure,
 
   send: protectedProcedure
     .input(
@@ -58,47 +40,32 @@ export const smsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const config = await db.query.smsConfig.findFirst({
-        where: eq(smsConfig.organizationId, ctx.orgId),
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.send",
       });
-
-      if (!config || !config.isActive) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "SMS not configured" });
+      try {
+        const result = await enqueueSmsMessages({
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? null,
+          recipients: [{ to: input.to, clientId: input.clientId }],
+          body: input.body,
+          purpose: "ONE_TO_ONE",
+        });
+        return {
+          id: result.messageIds[0],
+          status: result.queued === 1 ? "QUEUED" : "FAILED",
+          suppressed: result.suppressed === 1,
+        };
+      } catch (error) {
+        if (error instanceof InvalidDeliveryDestinationError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Phone numbers must use international E.164 format",
+          });
+        }
+        throw error;
       }
-
-      if (config.sentThisMonth >= config.monthlyLimit) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Monthly SMS limit reached" });
-      }
-
-      const message = await db.transaction(async (tx) => {
-        const [createdMessage] = await tx
-          .insert(smsMessage)
-          .values({
-            id: createId(),
-            organizationId: ctx.orgId!,
-            locationId: ctx.locationId ?? null,
-            clientId: input.clientId,
-            to: input.to,
-            from: config.fromNumber,
-            body: input.body,
-            direction: "OUTBOUND",
-            status: "QUEUED",
-          })
-          .returning();
-
-        await tx
-          .update(smsConfig)
-          .set({
-            sentThisMonth: sql`${smsConfig.sentThisMonth} + 1`,
-            updatedAt: new Date(),
-          })
-          .where(eq(smsConfig.organizationId, ctx.orgId!));
-
-        return createdMessage;
-      });
-
-      return message;
     }),
 
   sendBulk: protectedProcedure
@@ -113,50 +80,32 @@ export const smsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const config = await db.query.smsConfig.findFirst({
-        where: eq(smsConfig.organizationId, ctx.orgId),
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.send",
       });
-
-      if (!config || !config.isActive) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "SMS not configured" });
+      try {
+        const result = await enqueueSmsMessages({
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? null,
+          recipients: input.recipients,
+          body: input.body,
+          purpose: "MARKETING",
+        });
+        return {
+          count: result.messageIds.length,
+          queued: result.queued,
+          suppressed: result.suppressed,
+        };
+      } catch (error) {
+        if (error instanceof InvalidDeliveryDestinationError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "All phone numbers must use international E.164 format",
+          });
+        }
+        throw error;
       }
-
-      const remaining = config.monthlyLimit - config.sentThisMonth;
-      if (input.recipients.length > remaining) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `Only ${remaining} SMS remaining this month` });
-      }
-
-      const messages = await db.transaction(async (tx) => {
-        const insertedMessages = await tx
-          .insert(smsMessage)
-          .values(
-            input.recipients.map((recipient) => ({
-              id: createId(),
-              organizationId: ctx.orgId!,
-              locationId: ctx.locationId ?? null,
-              clientId: recipient.clientId,
-              to: recipient.to,
-              from: config.fromNumber,
-              body: input.body,
-              direction: "OUTBOUND" as const,
-              status: "QUEUED" as const,
-            }))
-          )
-          .returning({ id: smsMessage.id });
-
-        await tx
-          .update(smsConfig)
-          .set({
-            sentThisMonth: sql`${smsConfig.sentThisMonth} + ${input.recipients.length}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(smsConfig.organizationId, ctx.orgId!));
-
-        return insertedMessages;
-      });
-
-      return { count: messages.length };
     }),
 
   list: protectedProcedure
@@ -170,16 +119,28 @@ export const smsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.view",
+      });
 
       const conditions: SQL[] = [
         eq(smsMessage.organizationId, ctx.orgId),
-        ...(ctx.locationId ? [eq(smsMessage.locationId, ctx.locationId)] : []),
+        ctx.locationId
+          ? eq(smsMessage.locationId, ctx.locationId)
+          : isNull(smsMessage.locationId),
       ];
       if (input.direction) conditions.push(eq(smsMessage.direction, input.direction));
       if (input.clientId) conditions.push(eq(smsMessage.clientId, input.clientId));
       if (input.cursor) {
         const cursor = await db.query.smsMessage.findFirst({
-          where: eq(smsMessage.id, input.cursor),
+          where: and(
+            eq(smsMessage.id, input.cursor),
+            eq(smsMessage.organizationId, ctx.orgId),
+            ctx.locationId
+              ? eq(smsMessage.locationId, ctx.locationId)
+              : isNull(smsMessage.locationId),
+          ),
           columns: { id: true, createdAt: true },
         });
         if (cursor) {

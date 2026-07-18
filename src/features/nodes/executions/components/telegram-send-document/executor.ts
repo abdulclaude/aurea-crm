@@ -36,7 +36,6 @@ export const telegramSendDocumentExecutor: NodeExecutor<TelegramSendDocumentData
     const chatId = data.chatId ? decode(Handlebars.compile(data.chatId)(context)) : undefined;
     const documentUrl = data.documentUrl ? decode(Handlebars.compile(data.documentUrl)(context)) : undefined;
 
-    // TODO: Implement Telegram: Send Document logic here
     const result = await step.run("telegram-send-document", async () => {
       // Add implementation here
       throw new NonRetriableError("Telegram: Send Document: Not yet implemented");

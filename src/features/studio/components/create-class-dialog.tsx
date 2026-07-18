@@ -4,6 +4,11 @@ import { useState, useEffect } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -66,15 +71,15 @@ export function CreateClassDialog({
     enabled: !forInstructorId,
   });
   const instructors = instructorsData?.items;
-  const classes = forInstructorId
-    ? myClassesData
-    : allClassesData?.classes;
+  const classes = forInstructorId ? myClassesData : allClassesData?.classes;
 
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [classTypeId, setClassTypeId] = useState<string>("");
-  const [instructorId, setInstructorId] = useState<string>(forInstructorId ?? "");
+  const [instructorId, setInstructorId] = useState<string>(
+    forInstructorId ?? "",
+  );
   const [roomId, setRoomId] = useState<string>("");
   const [difficulty, setDifficulty] = useState<Difficulty>("ALL_LEVELS");
   const [maxCapacity, setMaxCapacity] = useState("");
@@ -239,10 +244,11 @@ export function CreateClassDialog({
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-3">
               <Label>Date</Label>
-              <Input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
+              <DatePicker
+                date={parseDateValue(date)}
+                onSelect={(nextDate) => setDate(formatDateValue(nextDate))}
+                placeholder="Pick a date"
+                ariaLabel="Class date"
               />
             </div>
             <div className="space-y-3">

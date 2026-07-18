@@ -105,7 +105,7 @@ export const ClientUpdatedTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Client Updated Trigger Configuration</SheetTitle>
           <SheetDescription>
@@ -113,7 +113,7 @@ export const ClientUpdatedTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -131,11 +131,11 @@ export const ClientUpdatedTriggerDialog: React.FC<Props> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Access the updated client data in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "updatedClient"}.name}}`}
                     </span>
                     {", "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "updatedClient"}.changes}}`}
                     </span>
                   </FormDescription>
@@ -178,7 +178,7 @@ export const ClientUpdatedTriggerDialog: React.FC<Props> = ({
                       {field.value.map((watchField) => (
                         <div
                           key={watchField}
-                          className="bg-white/10 px-3 py-1 rounded text-sm flex items-center gap-2"
+                          className="bg-muted px-3 py-1 rounded text-sm flex items-center gap-2"
                         >
                           {CLIENT_FIELDS.find((f) => f.value === watchField)?.label ||
                             watchField}
@@ -189,7 +189,7 @@ export const ClientUpdatedTriggerDialog: React.FC<Props> = ({
                                 field.value?.filter((f) => f !== watchField)
                               );
                             }}
-                            className="text-white/60 hover:text-white"
+                            className="text-muted-foreground hover:text-primary"
                           >
                             ×
                           </button>

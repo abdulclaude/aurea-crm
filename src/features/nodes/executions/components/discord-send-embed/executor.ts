@@ -43,7 +43,6 @@ export const discordSendEmbedExecutor: NodeExecutor<DiscordSendEmbedData> = asyn
     const title = data.title ? decode(Handlebars.compile(data.title)(context)) : undefined;
     const description = data.description ? decode(Handlebars.compile(data.description)(context)) : undefined;
 
-    // TODO: Implement Discord: Send Embed logic here
     const result = await step.run("discord-send-embed", async () => {
       // Add implementation here
       throw new NonRetriableError("Discord: Send Embed: Not yet implemented");

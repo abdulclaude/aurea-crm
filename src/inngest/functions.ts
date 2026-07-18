@@ -3,19 +3,28 @@ import type { Realtime } from "@inngest/realtime";
 import { inngest } from "./client";
 import { ExecutionStatus, NodeType } from "@/db/enums";
 import { db } from "@/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
+  client,
   execution as executionTable,
+  workflowEnrollment,
   workflows,
 } from "@/db/schema";
 import { topologicalSort } from "./utils";
 import { NonRetriableError } from "inngest";
 import { createNotification } from "@/lib/notifications";
 import { recordAutomationEventsForExecution } from "@/features/executions/server/automation-events";
+import { workflowMatchesExecutionSnapshot } from "@/features/executions/lib/workflow-execution-scope";
 import type { JsonValue } from "@/db/json";
+import { getWorkflowProviderReadinessIssues } from "@/features/workflows/server/workflow-provider-readiness";
+import { getWorkflowActivationIssues } from "@/features/workflows/lib/workflow-activation-policy";
+import {
+  parseWorkflowBehavior,
+  workflowEnrollmentClientId,
+} from "@/features/workflows/lib/workflow-behavior";
 
 function hasRealtimePublish(
-  value: unknown
+  value: unknown,
 ): value is { publish: Realtime.PublishFn } {
   return (
     typeof value === "object" &&
@@ -63,6 +72,9 @@ import { clientCreatedTriggerChannel } from "./channels/client-created-trigger";
 import { clientUpdatedTriggerChannel } from "./channels/client-updated-trigger";
 import { clientFieldChangedTriggerChannel } from "./channels/client-field-changed-trigger";
 import { birthdayTriggerChannel } from "./channels/birthday-trigger";
+import { formSubmittedTriggerChannel } from "./channels/form-submitted-trigger";
+import { pricingOptionPurchasedTriggerChannel } from "./channels/pricing-option-purchased-trigger";
+import { clientInactivityTriggerChannel } from "./channels/client-inactivity-trigger";
 import { clientDeletedTriggerChannel } from "./channels/client-deleted-trigger";
 import { clientTypeChangedTriggerChannel } from "./channels/client-type-changed-trigger";
 import { clientLifecycleStageChangedTriggerChannel } from "./channels/client-lifecycle-stage-changed-trigger";
@@ -94,6 +106,7 @@ import { membershipCancelledTriggerChannel } from "./channels/membership-cancell
 import { waitlistSpotOpenedTriggerChannel } from "./channels/waitlist-spot-opened-trigger";
 import { introOfferRedeemedTriggerChannel } from "./channels/intro-offer-redeemed-trigger";
 import { introOfferCompletedTriggerChannel } from "./channels/intro-offer-completed-trigger";
+import { referralConvertedTriggerChannel } from "./channels/referral-converted-trigger";
 import { memberClassCountTriggerChannel } from "./channels/member-class-count-trigger";
 import { clientTagAddedTriggerChannel } from "./channels/client-tag-added-trigger";
 import { clientTagRemovedTriggerChannel } from "./channels/client-tag-removed-trigger";
@@ -103,6 +116,9 @@ import { sendClassReminderChannel } from "./channels/send-class-reminder";
 import { awardLoyaltyPointsChannel } from "./channels/award-loyalty-points";
 import { calculateChurnScoreChannel } from "./channels/calculate-churn-score";
 import { sendSmsChannel } from "./channels/send-sms";
+import { sendEmailChannel } from "./channels/send-email";
+import { createTaskChannel } from "./channels/create-task";
+import { studioBookingActionChannel } from "./channels/studio-booking-action";
 export const executeWorkflow = inngest.createFunction(
   {
     id: "execute-workflow",
@@ -113,6 +129,8 @@ export const executeWorkflow = inngest.createFunction(
         throw new NonRetriableError("Failed workflow event ID is missing.");
       }
 
+      const failedWorkflowId = (event.data as Record<string, unknown>)
+        .workflowId;
       const [execution] = await db
         .update(executionTable)
         .set({
@@ -120,15 +138,25 @@ export const executeWorkflow = inngest.createFunction(
           error: event.data.error.message,
           errorStack: event.data.error.stack,
         })
-        .where(eq(executionTable.inngestEventId, failedEventId))
+        .where(
+          and(
+            eq(executionTable.inngestEventId, failedEventId),
+            eq(executionTable.status, ExecutionStatus.RUNNING),
+            typeof failedWorkflowId === "string"
+              ? eq(executionTable.workflowId, failedWorkflowId)
+              : undefined,
+          ),
+        )
         .returning();
 
       if (!execution) {
-        throw new NonRetriableError("Failed workflow execution record not found.");
+        return null;
       }
 
       const workflowId =
-        ((event.data as Record<string, unknown>).workflowId as string | undefined) ?? execution.workflowId;
+        ((event.data as Record<string, unknown>).workflowId as
+          | string
+          | undefined) ?? execution.workflowId;
 
       if (workflowId) {
         const workflow = await db.query.workflows.findFirst({
@@ -206,6 +234,9 @@ export const executeWorkflow = inngest.createFunction(
       clientUpdatedTriggerChannel(),
       clientFieldChangedTriggerChannel(),
       birthdayTriggerChannel(),
+      formSubmittedTriggerChannel(),
+      pricingOptionPurchasedTriggerChannel(),
+      clientInactivityTriggerChannel(),
       clientDeletedTriggerChannel(),
       clientTypeChangedTriggerChannel(),
       clientLifecycleStageChangedTriggerChannel(),
@@ -237,6 +268,7 @@ export const executeWorkflow = inngest.createFunction(
       waitlistSpotOpenedTriggerChannel(),
       introOfferRedeemedTriggerChannel(),
       introOfferCompletedTriggerChannel(),
+      referralConvertedTriggerChannel(),
       memberClassCountTriggerChannel(),
       clientTagAddedTriggerChannel(),
       clientTagRemovedTriggerChannel(),
@@ -246,6 +278,9 @@ export const executeWorkflow = inngest.createFunction(
       awardLoyaltyPointsChannel(),
       calculateChurnScoreChannel(),
       sendSmsChannel(),
+      sendEmailChannel(),
+      createTaskChannel(),
+      studioBookingActionChannel(),
     ],
   },
   async (args) => {
@@ -265,11 +300,41 @@ export const executeWorkflow = inngest.createFunction(
       throw new NonRetriableError("Workflow ID is missing.");
     }
 
-    const execution = await step.run("create-execution", async () => {
+    const executionClaim = await step.run("create-execution", async () => {
+      const expectedOrganizationId = event.data.expectedOrganizationId;
+      const expectedLocationId = event.data.expectedLocationId;
+      if (
+        expectedOrganizationId !== undefined &&
+        (typeof expectedOrganizationId !== "string" ||
+          (expectedLocationId !== null &&
+            expectedLocationId !== undefined &&
+            typeof expectedLocationId !== "string"))
+      ) {
+        throw new NonRetriableError("Expected workflow scope is invalid.");
+      }
       const workflowMeta = await db.query.workflows.findFirst({
         where: eq(workflows.id, workflowId),
         columns: {
+          archived: true,
+          isBundle: true,
+          isTemplate: true,
+          organizationId: true,
           locationId: true,
+          behaviorConfig: true,
+        },
+        with: {
+          nodes: {
+            columns: {
+              id: true,
+              type: true,
+              data: true,
+              credentialId: true,
+              providerAccountId: true,
+            },
+          },
+          connections: {
+            columns: { fromNodeId: true, toNodeId: true },
+          },
         },
       });
 
@@ -277,19 +342,164 @@ export const executeWorkflow = inngest.createFunction(
         throw new NonRetriableError("Workflow not found.");
       }
 
-      const [createdExecution] = await db
-        .insert(executionTable)
-        .values({
-          id: crypto.randomUUID(),
-          workflowId,
-          inngestEventId,
-          locationId: workflowMeta.locationId,
-          startedAt: new Date(),
-        })
-        .returning();
+      if (!workflowMeta.organizationId) {
+        throw new NonRetriableError(
+          "Workflow execution requires an organization scope.",
+        );
+      }
 
-      return createdExecution;
+      if (
+        typeof expectedOrganizationId === "string" &&
+        (workflowMeta.organizationId !== expectedOrganizationId ||
+          workflowMeta.locationId !== (expectedLocationId ?? null))
+      ) {
+        throw new NonRetriableError(
+          "Workflow does not match the expected execution scope.",
+        );
+      }
+
+      if (workflowMeta.isTemplate || workflowMeta.archived) {
+        throw new NonRetriableError(
+          "Archived workflows and templates cannot be executed.",
+        );
+      }
+
+      const readinessIssues = [
+        ...getWorkflowActivationIssues(workflowMeta),
+        ...(await getWorkflowProviderReadinessIssues({
+          nodes: workflowMeta.nodes,
+          organizationId: workflowMeta.organizationId,
+          locationId: workflowMeta.locationId,
+        })),
+      ];
+      if (readinessIssues.length > 0) {
+        throw new NonRetriableError(readinessIssues.join(" "));
+      }
+
+      const behavior = parseWorkflowBehavior(workflowMeta.behaviorConfig);
+      const enrollmentClientId = workflowEnrollmentClientId(
+        event.data.initialData,
+      );
+      const executionOrganizationId = workflowMeta.organizationId;
+      const executionLocationId = workflowMeta.locationId;
+      return db.transaction(async (tx) => {
+        const [createdExecution] = await tx
+          .insert(executionTable)
+          .values({
+            id: crypto.randomUUID(),
+            workflowId,
+            inngestEventId,
+            organizationId: executionOrganizationId,
+            locationId: executionLocationId,
+            startedAt: new Date(),
+          })
+          .onConflictDoNothing({ target: executionTable.inngestEventId })
+          .returning();
+
+        if (!createdExecution) {
+          const [existingExecution] = await tx
+            .select()
+            .from(executionTable)
+            .where(eq(executionTable.inngestEventId, inngestEventId))
+            .limit(1);
+          if (
+            !existingExecution ||
+            existingExecution.workflowId !== workflowId
+          ) {
+            throw new NonRetriableError(
+              "Workflow execution idempotency key belongs to another workflow.",
+            );
+          }
+          return {
+            execution: existingExecution,
+            duplicate: true,
+            skipped: false,
+          };
+        }
+
+        if (behavior.enrollment === "ONCE_PER_MEMBER" && enrollmentClientId) {
+          const [scopedClient] = await tx
+            .select({ id: client.id })
+            .from(client)
+            .where(
+              and(
+                eq(client.id, enrollmentClientId),
+                eq(client.organizationId, executionOrganizationId),
+                executionLocationId
+                  ? eq(client.locationId, executionLocationId)
+                  : isNull(client.locationId),
+              ),
+            )
+            .limit(1);
+          if (!scopedClient) {
+            throw new NonRetriableError(
+              "Workflow enrollment member does not match the workflow scope.",
+            );
+          }
+          const [enrollment] = await tx
+            .insert(workflowEnrollment)
+            .values({
+              id: crypto.randomUUID(),
+              workflowId,
+              executionId: createdExecution.id,
+              organizationId: executionOrganizationId,
+              locationId: executionLocationId,
+              clientId: scopedClient.id,
+            })
+            .onConflictDoNothing({
+              target: [
+                workflowEnrollment.workflowId,
+                workflowEnrollment.clientId,
+              ],
+            })
+            .returning({ id: workflowEnrollment.id });
+          if (!enrollment) {
+            const [skippedExecution] = await tx
+              .update(executionTable)
+              .set({
+                status: ExecutionStatus.SUCCESS,
+                completedAt: new Date(),
+                output: {
+                  skipped: true,
+                  reason: "ONCE_PER_MEMBER",
+                  clientId: scopedClient.id,
+                },
+              })
+              .where(eq(executionTable.id, createdExecution.id))
+              .returning();
+            return {
+              execution: skippedExecution ?? createdExecution,
+              duplicate: false,
+              skipped: true,
+            };
+          }
+        }
+
+        return {
+          execution: createdExecution,
+          duplicate: false,
+          skipped: false,
+        };
+      });
     });
+
+    if (executionClaim.duplicate) {
+      return {
+        workflowId,
+        result: executionClaim.execution.output ?? {},
+        duplicate: true,
+      };
+    }
+
+    if (executionClaim.skipped) {
+      return {
+        workflowId,
+        result: executionClaim.execution.output ?? {},
+        skipped: true,
+      };
+    }
+
+    const execution = executionClaim.execution;
 
     const { workflow, userId } = await step.run(
       "prepare-workflow",
@@ -306,12 +516,32 @@ export const executeWorkflow = inngest.createFunction(
           throw new NonRetriableError("Workflow not found.");
         }
 
+        if (!workflowMatchesExecutionSnapshot(workflowRecord, execution)) {
+          throw new NonRetriableError(
+            "Workflow scope changed after execution was created.",
+          );
+        }
+
         const workflow = {
           ...workflowRecord,
-          Node: workflowRecord.nodes.map((workflowNode) => ({
-            ...workflowNode,
-            data: workflowNode.data as JsonValue,
-          })),
+          Node: workflowRecord.nodes.map((workflowNode) => {
+            const rawData = workflowNode.data;
+            const data: Record<string, unknown> =
+              typeof rawData === "object" &&
+              rawData !== null &&
+              !Array.isArray(rawData)
+                ? { ...rawData }
+                : {};
+            if (workflowNode.providerAccountId) {
+              data.providerAccountId = workflowNode.providerAccountId;
+            } else {
+              delete data.providerAccountId;
+            }
+            return {
+              ...workflowNode,
+              data: data as JsonValue,
+            };
+          }),
           Connection: workflowRecord.connections,
         };
 
@@ -319,7 +549,7 @@ export const executeWorkflow = inngest.createFunction(
           workflow,
           userId: workflow.userId,
         };
-      }
+      },
     );
 
     //  initialize context with any initial data from the trigger
@@ -329,10 +559,7 @@ export const executeWorkflow = inngest.createFunction(
     const nodeLevelContext = new Map<string, Record<string, unknown>>();
 
     // Get topologically sorted nodes for execution order
-    const sortedNodes = topologicalSort(
-      workflow.Node,
-      workflow.Connection
-    );
+    const sortedNodes = topologicalSort(workflow.Node, workflow.Connection);
 
     // Build adjacency map for conditional branching
     const adjacencyMap = new Map<
@@ -383,6 +610,14 @@ export const executeWorkflow = inngest.createFunction(
         data: node.data as Record<string, unknown>,
         nodeId: node.id,
         userId,
+        scope: {
+          executionId: execution.id,
+          rootWorkflowId: workflow.id,
+          workflowId: workflow.id,
+          organizationId: execution.organizationId,
+          locationId: execution.locationId,
+          workflowPath: [workflow.id],
+        },
         context,
         step,
         publish,
@@ -441,9 +676,9 @@ export const executeWorkflow = inngest.createFunction(
           // Fallback: use variable-based branch (for IF/ELSE compatibility)
           const nodeConfig = node.data as Record<string, unknown>;
           const variableName = nodeConfig.variableName as string;
-          const branchResult = (context.variables as Record<string, Record<string, unknown>>)?.[
-            variableName
-          ]?.branchToFollow;
+          const branchResult = (
+            context.variables as Record<string, Record<string, unknown>>
+          )?.[variableName]?.branchToFollow;
 
           if (branchResult) {
             for (const conn of nextConnections) {
@@ -469,7 +704,12 @@ export const executeWorkflow = inngest.createFunction(
           completedAt: new Date(),
           output: context,
         })
-        .where(and(eq(executionTable.inngestEventId, inngestEventId), eq(executionTable.workflowId, workflowId)))
+        .where(
+          and(
+            eq(executionTable.inngestEventId, inngestEventId),
+            eq(executionTable.workflowId, workflowId),
+          ),
+        )
         .returning();
 
       return updatedExecution;
@@ -485,5 +725,5 @@ export const executeWorkflow = inngest.createFunction(
     });
 
     return { workflowId, result: context };
-  }
+  },
 );

@@ -78,6 +78,531 @@
       "when": 1782756000000,
       "tag": "0010_pricing_options",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782760200000,
+      "tag": "0011_promo_pricing_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782762000000,
+      "tag": "0012_account_credit_wallet",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782848400000,
+      "tag": "0013_instructor_profile_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1782852000000,
+      "tag": "0014_organization_billing_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1783956566000,
+      "tag": "0015_commerce_reliability",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1783958400000,
+      "tag": "0016_delivery_outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783962000000,
+      "tag": "0017_public_invoice_payment",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783965600000,
+      "tag": "0018_saved_audiences",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783969200000,
+      "tag": "0019_campaign_saved_audiences",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783972800000,
+      "tag": "0020_staff_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783976400000,
+      "tag": "0021_publication_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1783980000000,
+      "tag": "0022_report_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1783983600000,
+      "tag": "0023_account_credit_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1783987200000,
+      "tag": "0024_provider_account_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783990800000,
+      "tag": "0025_scoped_sms_provider_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1783994400000,
+      "tag": "0026_provider_location_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1783998000000,
+      "tag": "0027_execution_scope_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1784001600000,
+      "tag": "0028_scoped_oauth_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784005200000,
+      "tag": "0029_legacy_provider_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1784008800000,
+      "tag": "0030_scoped_calcom_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784012400000,
+      "tag": "0031_scoped_provider_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784016000000,
+      "tag": "0032_scoped_ad_conversion_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784019600000,
+      "tag": "0033_stripe_historical_account_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1784023200000,
+      "tag": "0034_scoped_ai_provider_defaults",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1784026800000,
+      "tag": "0035_scoped_inbound_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1784030400000,
+      "tag": "0036_native_public_form_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1784034000000,
+      "tag": "0037_scoped_tracking_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1784037600000,
+      "tag": "0038_demo_data_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1784064196691,
+      "tag": "0039_scoped_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1784073600000,
+      "tag": "0040_intro_offer_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1784077200000,
+      "tag": "0041_event_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1784080800000,
+      "tag": "0042_on_demand_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1784084400000,
+      "tag": "0043_scoped_referrals",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1784088000000,
+      "tag": "0044_referral_widgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1784091600000,
+      "tag": "0045_referral_conversion_automation",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1784095200000,
+      "tag": "0046_workflow_provider_account_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1784098800000,
+      "tag": "0047_workflow_draft_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1784102400000,
+      "tag": "0048_backfill_workflow_provider_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1784106000000,
+      "tag": "0049_disable_unsigned_google_form_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1784109600000,
+      "tag": "0050_unique_scoped_oauth_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1784113200000,
+      "tag": "0051_archive_unready_provider_workflows",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1784116800000,
+      "tag": "0052_checkin_scope_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1784120400000,
+      "tag": "0053_churn_score_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1784124000000,
+      "tag": "0054_active_booking_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1784127600000,
+      "tag": "0055_cancellation_charge_collection",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1784131200000,
+      "tag": "0056_cancellation_integrity_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1784134800000,
+      "tag": "0057_cancellation_refund_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1784138400000,
+      "tag": "0058_payment_recovery_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1784142000000,
+      "tag": "0059_payment_recovery_provider_binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1784145600000,
+      "tag": "0060_payment_recovery_workflow_action",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1784149200000,
+      "tag": "0061_studio_booking_payment_holds",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1784152800000,
+      "tag": "0062_scoped_api_keys_and_class_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1784156400000,
+      "tag": "0063_global_stripe_event_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1784160000000,
+      "tag": "0064_waiver_pdf_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1784163600000,
+      "tag": "0065_workflow_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1784167200000,
+      "tag": "0066_waiver_signature_snapshots",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1784170800000,
+      "tag": "0067_waiver_snapshot_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1784174400000,
+      "tag": "0068_arketa_workflow_node_types",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1784178000000,
+      "tag": "0069_durable_form_trigger_dispatch",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1784181600000,
+      "tag": "0070_workflow_create_task",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1784185200000,
+      "tag": "0071_studio_class_action",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1784188800000,
+      "tag": "0072_form_member_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1784192400000,
+      "tag": "0073_workflow_enrollment_behavior",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1784196000000,
+      "tag": "0074_form_theme_colors",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1784199600000,
+      "tag": "0075_form_progress_display",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1784203200000,
+      "tag": "0076_form_button_text_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1784206800000,
+      "tag": "0077_form_automation_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1784210400000,
+      "tag": "0078_workspace_regional_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1784296800000,
+      "tag": "0079_scheduling_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1784361600000,
+      "tag": "0080_communications_platform_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1784365200000,
+      "tag": "0081_workspace_operations_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1784368800000,
+      "tag": "0082_customer_settings_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1784372400000,
+      "tag": "0083_commerce_settings_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1784376000000,
+      "tag": "0084_staff_settings_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1784379600000,
+      "tag": "0085_communications_schema_convergence",
+      "breakpoints": true
     }
   ]
 }

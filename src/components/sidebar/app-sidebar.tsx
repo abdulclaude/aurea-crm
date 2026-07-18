@@ -28,12 +28,25 @@ import {
   Settings,
   Workflow,
   ListChecks,
+  TicketPercent,
+  WalletCards,
+  Repeat,
+  Inbox,
+  Archive,
 } from "lucide-react";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -104,7 +117,13 @@ function CompletionRing({ pct }: { pct: number }) {
 
 const AppSidebar = () => {
   const pathname = usePathname();
+  const router = useRouter();
   const trpc = useTRPC();
+
+  const prefetchRoute = useCallback(
+    (url: string) => router.prefetch(url),
+    [router],
+  );
 
   const { state: sidebarState } = useSidebar();
   const isIconMode = sidebarState === "collapsed";
@@ -112,7 +131,7 @@ const AppSidebar = () => {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     Home: true,
     "Schedule & booking": true,
-    Members: true,
+    People: true,
     Earnings: true,
     Team: true,
     Revenue: true,
@@ -126,19 +145,29 @@ const AppSidebar = () => {
   };
 
   const FAVORITES_KEY = "sidebar-favorites";
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = window.localStorage.getItem(FAVORITES_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [favoritesHydrated, setFavoritesHydrated] = useState(false);
 
   useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(FAVORITES_KEY);
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      if (
+        Array.isArray(parsed) &&
+        parsed.every((value): value is string => typeof value === "string")
+      ) {
+        setFavorites(parsed);
+      }
+    } catch {
+      setFavorites([]);
+    }
+    setFavoritesHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!favoritesHydrated) return;
     window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
-  }, [favorites]);
+  }, [favorites, favoritesHydrated]);
 
   const toggleFavorite = useCallback((url: string) => {
     setFavorites((prev) =>
@@ -152,9 +181,9 @@ const AppSidebar = () => {
 
   const { isInstructor } = useIsInstructor();
 
-  const activeClient = active?.activeLocation ?? null;
+  const activeLocation = active?.activeLocation ?? null;
 
-  const enabled = !!activeClient;
+  const enabled = favoritesHydrated && !!activeLocation;
   const { data: launchpadProgress } = useQuery({
     ...trpc.launchpad.progress.queryOptions(),
     enabled,
@@ -194,20 +223,48 @@ const AppSidebar = () => {
 
   const adminMenuItems: SidebarGroup[] = [
     {
+      title: "Home",
+      icon: HomeIcon,
+      items: [
+        { title: "Dashboard", icon: HomeIcon, url: "/dashboard" },
+        { title: "Inbox", icon: Inbox, url: "/inbox" },
+        ...(process.env.NODE_ENV !== "production"
+          ? [
+              {
+                title: "Route checklist",
+                icon: ListChecks,
+                url: "/qa/routes",
+              },
+            ]
+          : []),
+      ],
+    },
+    {
       title: "Schedule & booking",
       icon: ClassesIcon,
       items: [
         { title: "Schedule", icon: ClassesIcon, url: "/studio/schedule" },
-        { title: "Service types", icon: ListChecks, url: "/studio/service-types" },
+        {
+          title: "Service types",
+          icon: ListChecks,
+          url: "/studio/service-types",
+        },
+        {
+          title: "Rooms",
+          icon: ListChecks,
+          url: "/studio/rooms",
+        },
         { title: "Classes", icon: ClassesIcon, url: "/studio/classes" },
+        { title: "Class series", icon: Repeat, url: "/studio/class-series" },
         { title: "Check-in", icon: DoorOpen, url: "/studio/check-in" },
+        { title: "Sub requests", icon: DoorOpen, url: "/studio/substitutions" },
       ],
     },
     {
-      title: "Members",
+      title: "People",
       icon: MembersGroupIcon,
       items: [
-        { title: "Clients", icon: Users, url: "/clients" },
+        { title: "Members", icon: Users, url: "/clients" },
         { title: "Households", icon: Users, url: "/households" },
         { title: "Waivers", icon: FileText, url: "/waivers" },
       ],
@@ -217,11 +274,24 @@ const AppSidebar = () => {
       icon: Receipt,
       items: [
         { title: "Overview", icon: CreditCard, url: "/revenue" },
-        { title: "Pricing options", icon: Receipt, url: "/studio/pricing-options" },
-        { title: "Memberships", icon: Receipt, url: "/studio/memberships" },
+        {
+          title: "Pricing options",
+          icon: Receipt,
+          url: "/studio/pricing-options",
+        },
         { title: "Invoices", icon: Receipt, url: "/invoices" },
         { title: "Products & POS", icon: Package, url: "/studio/pos" },
+        {
+          title: "Account credit",
+          icon: WalletCards,
+          url: "/studio/account-credit",
+        },
         { title: "Gift cards", icon: Gift, url: "/studio/gift-cards" },
+        {
+          title: "Promo codes",
+          icon: TicketPercent,
+          url: "/studio/promo-codes",
+        },
       ],
     },
     {
@@ -229,8 +299,8 @@ const AppSidebar = () => {
       icon: InstructorsIcon,
       items: [
         { title: "Staff", icon: InstructorsIcon, url: "/team" },
-        { title: "Payroll", icon: Banknote, url: "/payroll" },
-        { title: "Time logs", icon: TimeLogsIcon, url: "/time-logs" },
+        // { title: "Payroll", icon: Banknote, url: "/payroll" },
+        // { title: "Time logs", icon: TimeLogsIcon, url: "/time-logs" },
       ],
     },
     {
@@ -240,7 +310,8 @@ const AppSidebar = () => {
         { title: "Campaigns", icon: Send, url: "/campaigns" },
         { title: "Intro offers", icon: Sparkles, url: "/intro-offers" },
         { title: "Referrals", icon: Gift, url: "/referrals" },
-        { title: "Funnels & forms", icon: Zap, url: "/funnels" },
+        { title: "Forms", icon: FileText, url: "/builder/forms" },
+        { title: "Funnels", icon: Zap, url: "/funnels" },
       ],
     },
     {
@@ -248,6 +319,7 @@ const AppSidebar = () => {
       icon: Workflow,
       items: [
         { title: "Workflows", icon: Workflow, url: "/workflows" },
+        { title: "Archives", icon: Archive, url: "/archives" },
         { title: "Executions", icon: History, url: "/executions" },
         { title: "Bundles", icon: Package, url: "/bundles" },
       ],
@@ -255,9 +327,7 @@ const AppSidebar = () => {
     {
       title: "Reports",
       icon: AnalyticsIcon,
-      items: [
-        { title: "Reports", icon: AnalyticsIcon, url: "/reports" },
-      ],
+      items: [{ title: "Reports", icon: AnalyticsIcon, url: "/reports" }],
     },
   ];
 
@@ -293,11 +363,13 @@ const AppSidebar = () => {
           <div className="mb-1 w-full px-2 group-data-[collapsible=icon]:mb-0 group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
             <Link
               href="/launchpad"
+              prefetch={false}
+              onMouseEnter={() => prefetchRoute("/launchpad")}
+              onFocus={() => prefetchRoute("/launchpad")}
               className={cn(
                 "group/lp relative flex w-full items-center gap-x-2.5 rounded-sm px-2.5 py-2 text-xs transition duration-150 hover:bg-primary-foreground",
                 "group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0",
-                pathname.startsWith("/launchpad") &&
-                  "bg-primary-foreground",
+                pathname.startsWith("/launchpad") && "bg-primary-foreground",
               )}
             >
               <Rocket
@@ -343,14 +415,11 @@ const AppSidebar = () => {
                   }
                   strokeWidth={2}
                   strokeDasharray={2 * Math.PI * 13}
-                  strokeDashoffset={
-                    2 * Math.PI * 13 * (1 - launchpadPct / 100)
-                  }
+                  strokeDashoffset={2 * Math.PI * 13 * (1 - launchpadPct / 100)}
                   strokeLinecap="round"
                   transform="rotate(-90 16 16)"
                   style={{
-                    transition:
-                      "stroke-dashoffset 0.5s ease, stroke 0.5s ease",
+                    transition: "stroke-dashoffset 0.5s ease, stroke 0.5s ease",
                   }}
                 />
               </svg>
@@ -383,7 +452,12 @@ const AppSidebar = () => {
                             "bg-primary-foreground",
                         )}
                       >
-                        <Link href={item.url} prefetch>
+                        <Link
+                          href={item.url}
+                          prefetch={false}
+                          onMouseEnter={() => prefetchRoute(item.url)}
+                          onFocus={() => prefetchRoute(item.url)}
+                        >
                           <item.icon
                             className={cn(
                               "size-4 select-none text-primary/80 hover:text-primary",
@@ -399,35 +473,77 @@ const AppSidebar = () => {
                 </>
               )}
 
-              {/* Group icons — each links to the first item in the group */}
+              {/* Group icons */}
               {visibleMenuItems.map((group) => {
                 const GroupIcon = group.icon;
-                const firstUrl = group.items[0]?.url ?? "/";
                 const isGroupActive = group.items.some((item) =>
                   pathname.startsWith(item.url),
                 );
 
                 return (
-                  <SidebarMenuItem key={group.title}>
-                    <SidebarMenuButton
-                      tooltip={group.title}
-                      isActive={isGroupActive}
-                      asChild
-                      className={cn(
-                        "w-10 h-10 flex items-center justify-center rounded-sm transition duration-150 hover:bg-primary-foreground",
-                        isGroupActive && "bg-primary-foreground",
-                      )}
-                    >
-                      <Link href={firstUrl} prefetch>
-                        <GroupIcon
+                  <DropdownMenu key={group.title}>
+                    <SidebarMenuItem>
+                      <DropdownMenuTrigger asChild>
+                        <SidebarMenuButton
+                          tooltip={group.title}
+                          isActive={isGroupActive}
                           className={cn(
-                            "size-4 select-none text-primary/80 hover:text-primary",
-                            isGroupActive && "text-black hover:text-black",
+                            "w-10 h-10 flex items-center justify-center rounded-sm transition duration-150 hover:bg-primary-foreground",
+                            isGroupActive && "bg-primary-foreground",
                           )}
-                        />
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                        >
+                          <GroupIcon
+                            className={cn(
+                              "size-4 select-none text-primary/80 hover:text-primary",
+                              isGroupActive && "text-black hover:text-black",
+                            )}
+                          />
+
+                          <span className="sr-only">Open {group.title}</span>
+                        </SidebarMenuButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        side="right"
+                        align="start"
+                        sideOffset={8}
+                        className="min-w-44 border-black/5 bg-background p-1 text-primary shadow-2xs dark:border-white/5"
+                      >
+                        <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-medium text-primary/60">
+                          {group.title}
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
+                        {group.items.map((item) => {
+                          const isActive = pathname.startsWith(item.url);
+
+                          return (
+                            <DropdownMenuItem
+                              key={item.url}
+                              asChild
+                              className={cn(
+                                "cursor-pointer text-xs focus:bg-primary-foreground focus:text-primary",
+                                isActive && "bg-primary-foreground",
+                              )}
+                            >
+                              <Link
+                                href={item.url}
+                                prefetch={false}
+                                onMouseEnter={() => prefetchRoute(item.url)}
+                                onFocus={() => prefetchRoute(item.url)}
+                              >
+                                <item.icon
+                                  className={cn(
+                                    "size-3.5 text-primary/80",
+                                    isActive && "text-black",
+                                  )}
+                                />
+                                <span>{item.title}</span>
+                              </Link>
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </DropdownMenuContent>
+                    </SidebarMenuItem>
+                  </DropdownMenu>
                 );
               })}
             </motion.div>
@@ -458,6 +574,9 @@ const AppSidebar = () => {
                         <div key={item.url} className="group/pin relative">
                           <Link
                             href={item.url}
+                            prefetch={false}
+                            onMouseEnter={() => prefetchRoute(item.url)}
+                            onFocus={() => prefetchRoute(item.url)}
                             className={cn(
                               "flex items-center gap-x-2.5 text-xs py-2 px-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground group/menu-item",
                               isActive && "bg-primary-foreground",
@@ -513,7 +632,7 @@ const AppSidebar = () => {
                     <button
                       onClick={() => toggleGroup(group.title)}
                       className={cn(
-                        "text-xs select-none px-2.5 py-2 mb-1 w-full flex items-center gap-x-2.5 hover:bg-primary-foreground transition-colors rounded-sm",
+                        "text-xs select-none px-2.5 py-2 mb-1 w-full flex items-center gap-x-2 hover:bg-primary-foreground transition-colors rounded-sm",
                         isGroupActive
                           ? "bg-primary-foreground"
                           : "text-primary/80",
@@ -523,16 +642,16 @@ const AppSidebar = () => {
                         className={cn(
                           "size-3 shrink-0",
                           isGroupActive
-                            ? "text-black dark:text-white"
-                            : "text-primary/80 dark:text-white/60",
+                            ? "text-primary dark:text-white"
+                            : "text-primary/75 dark:text-white/60",
                         )}
                       />
                       <span
                         className={cn(
                           "flex-1 text-left font-medium tracking-tight",
                           isGroupActive
-                            ? "text-black dark:text-white"
-                            : "text-primary/80",
+                            ? "text-primary dark:text-white"
+                            : "text-primary/75",
                         )}
                       >
                         {group.title}
@@ -544,6 +663,7 @@ const AppSidebar = () => {
                         )}
                       />
                     </button>
+
                     <AnimatePresence initial={false}>
                       {isOpen && (
                         <motion.div
@@ -577,16 +697,21 @@ const AppSidebar = () => {
                                   >
                                     <Link
                                       href={item.url}
+                                      prefetch={false}
+                                      onMouseEnter={() =>
+                                        prefetchRoute(item.url)
+                                      }
+                                      onFocus={() => prefetchRoute(item.url)}
                                       className={cn(
-                                        "flex items-center text-xs py-2 pl-7 pr-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground group/menu-item",
+                                        "flex items-center text-xs py-2 pl-7.5 pr-2.5 rounded-sm transition duration-150 hover:bg-primary-foreground group/menu-item",
                                         isActive && "bg-primary-foreground",
                                       )}
                                     >
                                       <span
                                         className={cn(
-                                          "flex-1 text-primary/80 group-hover/menu-item:text-primary font-medium tracking-tight",
+                                          "flex-1 text-primary/50 group-hover/menu-item:text-primary font-medium tracking-tight",
                                           isActive &&
-                                            "text-black font-medium group-hover/menu-item:text-black",
+                                            "text-primary font-medium group-hover/menu-item:text-black",
                                         )}
                                       >
                                         {item.title}
@@ -636,20 +761,25 @@ const AppSidebar = () => {
           <SidebarMenuItem className="w-full">
             <SidebarMenuButton
               tooltip="Studio settings"
-              isActive={pathname.startsWith("/settings/workspace")}
+              isActive={pathname.startsWith("/settings")}
               asChild
               className={cn(
                 "h-9 justify-start rounded-sm px-2.5 text-xs hover:bg-primary-foreground",
                 "group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0",
-                pathname.startsWith("/settings/workspace") &&
+                pathname.startsWith("/settings") &&
                   "bg-primary-foreground",
               )}
             >
-              <Link href="/settings/workspace" prefetch>
+              <Link
+                href="/settings"
+                prefetch={false}
+                onMouseEnter={() => prefetchRoute("/settings")}
+                onFocus={() => prefetchRoute("/settings")}
+              >
                 <Settings
                   className={cn(
                     "size-3.5 shrink-0 text-primary/80",
-                    pathname.startsWith("/settings/workspace") && "text-black",
+                    pathname.startsWith("/settings") && "text-black",
                   )}
                 />
                 <span className="font-medium tracking-tight text-primary/80 group-data-[collapsible=icon]:hidden">

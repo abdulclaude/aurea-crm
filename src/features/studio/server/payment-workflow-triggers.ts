@@ -1,4 +1,8 @@
+import { and, count, eq } from "drizzle-orm";
+
+import { db } from "@/db";
 import { NodeType, StudioPaymentStatus } from "@/db/enums";
+import { studioPayment } from "@/db/schema";
 
 import { triggerWorkflowsForNodeType } from "@/lib/workflow-triggers";
 
@@ -19,10 +23,12 @@ type StudioPaymentWorkflowPayment = {
 
 type StudioPaymentWorkflowInput = {
   payment: StudioPaymentWorkflowPayment;
+  idempotencyKey?: string;
 };
 
 export async function triggerStudioPaymentWorkflows({
   payment,
+  idempotencyKey,
 }: StudioPaymentWorkflowInput): Promise<number> {
   const nodeType = getPaymentNodeType(payment.status);
 
@@ -30,10 +36,16 @@ export async function triggerStudioPaymentWorkflows({
     return 0;
   }
 
+  const firstMembershipPayment =
+    payment.status === StudioPaymentStatus.SUCCEEDED && payment.membershipId
+      ? await isFirstSuccessfulMembershipPayment(payment.membershipId)
+      : false;
+
   return triggerWorkflowsForNodeType({
     nodeType,
     organizationId: payment.organizationId,
     locationId: payment.locationId,
+    idempotencyKey,
     triggerData: {
       payment: {
         id: payment.id,
@@ -50,9 +62,31 @@ export async function triggerStudioPaymentWorkflows({
     },
     shouldTriggerNode: (node) => {
       const paymentType = getStringFromJson(node.data, "paymentType");
-      return !paymentType || paymentType === payment.type;
+      const firstPaymentOnly = getBooleanFromJson(
+        node.data,
+        "firstPaymentOnly",
+      );
+      return (
+        (!paymentType || paymentType === payment.type) &&
+        (!firstPaymentOnly || firstMembershipPayment)
+      );
     },
   });
+}
+
+async function isFirstSuccessfulMembershipPayment(
+  membershipId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(studioPayment)
+    .where(
+      and(
+        eq(studioPayment.membershipId, membershipId),
+        eq(studioPayment.status, StudioPaymentStatus.SUCCEEDED),
+      ),
+    );
+  return (row?.value ?? 0) === 1;
 }
 
 function getPaymentNodeType(status: StudioPaymentStatus): NodeType | null {
@@ -67,16 +101,18 @@ function getPaymentNodeType(status: StudioPaymentStatus): NodeType | null {
   return null;
 }
 
-function getStringFromJson(
-  value: unknown,
-  key: string,
-): string | undefined {
+function getStringFromJson(value: unknown, key: string): string | undefined {
   if (!isJsonObject(value)) {
     return undefined;
   }
 
   const nested = value[key];
   return typeof nested === "string" ? nested : undefined;
+}
+
+function getBooleanFromJson(value: unknown, key: string): boolean {
+  if (!isJsonObject(value)) return false;
+  return value[key] === true;
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {

@@ -15,6 +15,11 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   Form,
   FormControl,
@@ -142,6 +147,7 @@ interface ClientEditSheetProps {
     currentStreak?: number | null;
   };
   clientView?: "members" | "leads" | "all";
+  initialTab?: "profile" | "payments" | "waivers" | "activity";
 }
 
 export function ClientEditSheet({
@@ -149,10 +155,15 @@ export function ClientEditSheet({
   onOpenChange,
   client,
   clientView = "all",
+  initialTab = "profile",
 }: ClientEditSheetProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [activeDetailTab, setActiveDetailTab] = useState("profile");
+  const [activeDetailTab, setActiveDetailTab] = useState(initialTab);
+
+  useEffect(() => {
+    if (open) setActiveDetailTab(initialTab);
+  }, [initialTab, open]);
 
   const { data: membersData } = useQuery(
     trpc.clients.getLocationMembers.queryOptions(),
@@ -328,7 +339,10 @@ export function ClientEditSheet({
         <PageTabs
           tabs={[...DETAIL_TABS]}
           activeTab={activeDetailTab}
-          onTabChange={setActiveDetailTab}
+          onTabChange={(tabId) => {
+            const tab = DETAIL_TABS.find((item) => item.id === tabId);
+            if (tab) setActiveDetailTab(tab.id);
+          }}
           className="px-4"
         />
 
@@ -591,7 +605,14 @@ export function ClientEditSheet({
                                 Birthday
                               </FormLabel>
                               <FormControl>
-                                <Input type="date" {...field} />
+                                <DatePicker
+                                  date={parseDateValue(field.value)}
+                                  onSelect={(date) =>
+                                    field.onChange(formatDateValue(date))
+                                  }
+                                  placeholder="Pick a birthday"
+                                  ariaLabel="Birthday"
+                                />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -605,7 +626,7 @@ export function ClientEditSheet({
                             render={({ field }) => (
                               <FormItem>
                                 <FormLabel className="text-xs">
-                                  Emergency Client
+                                  Emergency contact
                                 </FormLabel>
                                 <FormControl>
                                   <Input placeholder="Full name" {...field} />

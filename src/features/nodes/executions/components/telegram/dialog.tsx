@@ -111,7 +111,7 @@ export const TelegramExecutionDialog: React.FC<
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Telegram action</SheetTitle>
           <SheetDescription>
@@ -119,7 +119,7 @@ export const TelegramExecutionDialog: React.FC<
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -137,7 +137,7 @@ export const TelegramExecutionDialog: React.FC<
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Reference the send result via{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${
                         field.value || "telegramMessage"
                       }.result.message_id}}`}
@@ -176,7 +176,7 @@ export const TelegramExecutionDialog: React.FC<
                   <FormDescription className="text-xs">
                     Manage bot tokens under{" "}
                     <Button variant="link" className="px-1 text-xs" asChild>
-                      <Link href="/credentials" prefetch>
+                      <Link href="/settings/credentials" prefetch>
                         Credentials
                       </Link>
                     </Button>
@@ -204,8 +204,8 @@ export const TelegramExecutionDialog: React.FC<
                   </FormControl>
                   <FormDescription className="text-xs">
                     Provide the target chat ID (e.g.{" "}
-                    <span className="text-white">123456789</span> for a DM or{" "}
-                    <span className="text-white">-1001234567890</span> for a
+                    <span className="text-primary">123456789</span> for a DM or{" "}
+                    <span className="text-primary">-1001234567890</span> for a
                     channel/group).
                   </FormDescription>
                   <FormMessage />
@@ -229,11 +229,11 @@ export const TelegramExecutionDialog: React.FC<
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Supports templating via{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>
                     . Use Handlebars helpers like{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{json telegramTrigger}}"}
                     </span>{" "}
                     to inspect incoming data.
@@ -273,7 +273,7 @@ export const TelegramExecutionDialog: React.FC<
               control={form.control}
               name="disableNotification"
               render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-md border border-white/5 px-4 py-3">
+                <FormItem className="flex items-center justify-between rounded-md border border-border px-4 py-3">
                   <div>
                     <FormLabel>Send silently</FormLabel>
                     <FormDescription className="text-xs">

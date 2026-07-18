@@ -1,63 +1,55 @@
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
-import { gmailTriggerChannel } from "@/inngest/channels/gmail-trigger";
-import { auth } from "@/lib/auth";
-import { NonRetriableError } from "inngest";
 import {
   fetchGmailMessages,
   type GmailTriggerConfig,
 } from "@/features/gmail/server/messages";
+import { resolveGoogleMailProviderGrant } from "@/features/nodes/lib/resolve-google-mail-provider-grant";
+import { gmailTriggerChannel } from "@/inngest/channels/gmail-trigger";
 
-export const gmailTriggerExecutor: NodeExecutor<GmailTriggerConfig> = async ({
-  data,
-  nodeId,
-  userId,
-  context,
-  step,
-  publish,
-}) => {
-  await publish(gmailTriggerChannel().status({ nodeId, status: "loading" }));
-
-  try {
-    const variableName = normalizeVariableName(data?.variableName);
-
-    const tokenResponse = await auth.api.getAccessToken({
-      body: {
-        providerId: "google",
-        userId,
-      },
-    });
-
-    const accessToken = tokenResponse?.accessToken;
-    if (!accessToken) {
-      throw new NonRetriableError(
-        "Gmail is not connected. Please reconnect the integration."
-      );
-    }
-
-    const payload = await step.run("gmail-fetch-messages", async () =>
-      fetchGmailMessages({
-        accessToken,
-        config: {
-          variableName,
-          labelId: data?.labelId,
-          query: data?.query,
-          includeSpamTrash: data?.includeSpamTrash,
-          maxResults: data?.maxResults,
-        },
-      })
-    );
-
-    await publish(gmailTriggerChannel().status({ nodeId, status: "success" }));
-
-    return {
-      ...context,
-      [variableName]: payload,
-    };
-  } catch (error) {
-    await publish(gmailTriggerChannel().status({ nodeId, status: "error" }));
-    throw error;
-  }
+type BoundGmailTriggerConfig = GmailTriggerConfig & {
+  providerAccountId?: string;
 };
+
+export const gmailTriggerExecutor: NodeExecutor<BoundGmailTriggerConfig> =
+  async ({ data, nodeId, scope, context, step, publish }) => {
+    await publish(gmailTriggerChannel().status({ nodeId, status: "loading" }));
+
+    try {
+      const variableName = normalizeVariableName(data?.variableName);
+
+      const grant = await resolveGoogleMailProviderGrant({
+        nodeType: NodeType.GMAIL_TRIGGER,
+        providerAccountId: data.providerAccountId,
+        scope,
+      });
+
+      const payload = await step.run("gmail-fetch-messages", async () =>
+        fetchGmailMessages({
+          grant,
+          config: {
+            variableName,
+            labelId: data?.labelId,
+            query: data?.query,
+            includeSpamTrash: data?.includeSpamTrash,
+            maxResults: data?.maxResults,
+          },
+        }),
+      );
+
+      await publish(
+        gmailTriggerChannel().status({ nodeId, status: "success" }),
+      );
+
+      return {
+        ...context,
+        [variableName]: payload,
+      };
+    } catch (error) {
+      await publish(gmailTriggerChannel().status({ nodeId, status: "error" }));
+      throw error;
+    }
+  };
 
 function normalizeVariableName(value?: string | null) {
   const fallback = "gmailTrigger";

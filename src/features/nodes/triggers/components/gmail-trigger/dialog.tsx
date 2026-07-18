@@ -29,8 +29,13 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
+import {
+  requiredWorkflowProviderBindingSchema,
+} from "@/features/workflows/lib/workflow-provider-binding";
 
-const formSchema = z.object({
+const formSchema = requiredWorkflowProviderBindingSchema.extend({
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -44,12 +49,12 @@ const formSchema = z.object({
   query: z.string().optional(),
   includeSpamTrash: z.boolean().default(false),
   maxResults: z.coerce
-    .number()
+    .number<number>()
     .min(1, "Max results must be at least 1.")
     .max(50, "Max results must be at most 50.")
     .default(5),
   pollIntervalMinutes: z.coerce
-    .number()
+    .number<number>()
     .min(1, "Poll interval must be at least 1 minute.")
     .max(60, "Poll interval must be at most 60 minutes.")
     .default(5),
@@ -72,9 +77,14 @@ export const GmailTriggerDialog: React.FC<Props> = ({
   defaultValues,
   variables,
 }) => {
-  const form = useForm<GmailTriggerFormValues>({
-    resolver: zodResolver(formSchema) as any,
+  const form = useForm<
+    z.input<typeof formSchema>,
+    unknown,
+    GmailTriggerFormValues
+  >({
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "gmailTrigger",
       labelId: defaultValues?.labelId || "INBOX",
       query: defaultValues?.query || "",
@@ -87,6 +97,7 @@ export const GmailTriggerDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "gmailTrigger",
         labelId: defaultValues?.labelId || "INBOX",
         query: defaultValues?.query || "",
@@ -95,7 +106,17 @@ export const GmailTriggerDialog: React.FC<Props> = ({
         pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.labelId, defaultValues?.query, defaultValues?.includeSpamTrash, defaultValues?.maxResults, defaultValues?.pollIntervalMinutes, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.labelId,
+    defaultValues?.query,
+    defaultValues?.includeSpamTrash,
+    defaultValues?.maxResults,
+    defaultValues?.pollIntervalMinutes,
+    form,
+  ]);
 
   const handleSubmit = (values: GmailTriggerFormValues) => {
     onSubmit(values);
@@ -104,7 +125,7 @@ export const GmailTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Gmail trigger</SheetTitle>
           <SheetDescription>
@@ -112,13 +133,28 @@ export const GmailTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 px-6"
           >
+            <FormField
+              control={form.control}
+              name="providerAccountId"
+              render={({ field }) => (
+                <FormItem>
+                  <WorkflowProviderAccountSelect
+                    nodeType={NodeType.GMAIL_TRIGGER}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="variableName"
@@ -130,7 +166,7 @@ export const GmailTriggerDialog: React.FC<Props> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Reference the latest message using{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "gmailTrigger"}.snippet}}`}
                     </span>
                     .
@@ -221,7 +257,7 @@ export const GmailTriggerDialog: React.FC<Props> = ({
               control={form.control}
               name="includeSpamTrash"
               render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-md border border-white/5 px-4 py-3">
+                <FormItem className="flex items-center justify-between rounded-md border border-border px-4 py-3">
                   <div>
                     <FormLabel>Include spam & trash</FormLabel>
                     <FormDescription className="text-xs">

@@ -10,6 +10,11 @@ import z from "zod";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   Form,
   FormControl,
@@ -148,7 +153,9 @@ export default function NewClientPage() {
       <div className="flex items-end justify-between gap-2 p-6 pb-0">
         <div>
           <h1 className="text-lg font-semibold text-primary">Add member</h1>
-          <p className="text-xs text-primary/75">Add a new member to your studio.</p>
+          <p className="text-xs text-primary/75">
+            Add a new member to your studio.
+          </p>
         </div>
       </div>
 
@@ -164,9 +171,15 @@ export default function NewClientPage() {
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-primary/75">Full name</FormLabel>
+                    <FormLabel className="text-xs text-primary/75">
+                      Full name
+                    </FormLabel>
                     <FormControl>
-                      <Input placeholder="John Doe" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                      <Input
+                        placeholder="John Doe"
+                        className="border-black/10 dark:border-white/5 text-primary text-xs"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage className="text-xs" />
                   </FormItem>
@@ -180,9 +193,15 @@ export default function NewClientPage() {
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Email</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Email
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="john@example.com" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="john@example.com"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -193,9 +212,15 @@ export default function NewClientPage() {
                   name="phone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Phone</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Phone
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="+44 7123 456789" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="+44 7123 456789"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -210,8 +235,13 @@ export default function NewClientPage() {
                   name="type"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Member type</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormLabel className="text-xs text-primary/75">
+                        Member type
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select type" />
@@ -220,8 +250,12 @@ export default function NewClientPage() {
                         <SelectContent className="bg-background border-black/10 dark:border-white/5">
                           <SelectItem value="LEAD">Lead</SelectItem>
                           <SelectItem value="PROSPECT">Trial Member</SelectItem>
-                          <SelectItem value="CUSTOMER">Active Member</SelectItem>
-                          <SelectItem value="CHURN">Lapsed / At-Risk</SelectItem>
+                          <SelectItem value="CUSTOMER">
+                            Active Member
+                          </SelectItem>
+                          <SelectItem value="CHURN">
+                            Lapsed / At-Risk
+                          </SelectItem>
                           <SelectItem value="CLOSED">Former Member</SelectItem>
                         </SelectContent>
                       </Select>
@@ -235,8 +269,13 @@ export default function NewClientPage() {
                   name="lifecycleStage"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Lifecycle stage</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormLabel className="text-xs text-primary/75">
+                        Lifecycle stage
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select stage" />
@@ -247,8 +286,12 @@ export default function NewClientPage() {
                           <SelectItem value="LEAD">Lead</SelectItem>
                           <SelectItem value="MQL">Trial</SelectItem>
                           <SelectItem value="SQL">Onboarding</SelectItem>
-                          <SelectItem value="OPPORTUNITY">Ready to Join</SelectItem>
-                          <SelectItem value="CUSTOMER">Active Member</SelectItem>
+                          <SelectItem value="OPPORTUNITY">
+                            Ready to Join
+                          </SelectItem>
+                          <SelectItem value="CUSTOMER">
+                            Active Member
+                          </SelectItem>
                           <SelectItem value="EVANGELIST">Ambassador</SelectItem>
                         </SelectContent>
                       </Select>
@@ -265,8 +308,13 @@ export default function NewClientPage() {
                   name="acquisitionStage"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Acquisition stage</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormLabel className="text-xs text-primary/75">
+                        Acquisition stage
+                      </FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
                         <FormControl>
                           <SelectTrigger className="w-full">
                             <SelectValue placeholder="Select stage" />
@@ -289,12 +337,17 @@ export default function NewClientPage() {
                   name="birthday"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Birthday</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Birthday
+                      </FormLabel>
                       <FormControl>
-                        <Input
-                          type="date"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
+                        <DatePicker
+                          date={parseDateValue(field.value)}
+                          onSelect={(date) =>
+                            field.onChange(formatDateValue(date))
+                          }
+                          placeholder="Pick a birthday"
+                          ariaLabel="Birthday"
                         />
                       </FormControl>
                       <FormMessage className="text-xs" />
@@ -309,7 +362,9 @@ export default function NewClientPage() {
                 name="tags"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-primary/75">Tags</FormLabel>
+                    <FormLabel className="text-xs text-primary/75">
+                      Tags
+                    </FormLabel>
                     <FormControl>
                       <TagsInput
                         value={field.value ?? []}
@@ -329,9 +384,15 @@ export default function NewClientPage() {
                   name="city"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">City</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        City
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="London" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="London"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -342,9 +403,15 @@ export default function NewClientPage() {
                   name="country"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Country</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Country
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="United Kingdom" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="United Kingdom"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -359,9 +426,15 @@ export default function NewClientPage() {
                   name="source"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Source</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Source
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="Referral, Instagram, Walk-in..." className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="Referral, Instagram, Walk-in..."
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -372,9 +445,15 @@ export default function NewClientPage() {
                   name="linkedin"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">LinkedIn</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        LinkedIn
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="https://linkedin.com/in/..." className="bg-background border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="https://linkedin.com/in/..."
+                          className="bg-background border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -382,16 +461,22 @@ export default function NewClientPage() {
                 />
               </div>
 
-              {/* Emergency Client */}
+              {/* Emergency contact */}
               <div className="grid gap-4 md:grid-cols-2">
                 <FormField
                   control={form.control}
                   name="emergencyContactName"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Emergency client</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Emergency contact
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="Jane Doe" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="Jane Doe"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -402,9 +487,15 @@ export default function NewClientPage() {
                   name="emergencyContactPhone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-xs text-primary/75">Emergency phone</FormLabel>
+                      <FormLabel className="text-xs text-primary/75">
+                        Emergency phone
+                      </FormLabel>
                       <FormControl>
-                        <Input placeholder="+1 555 123 4567" className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                        <Input
+                          placeholder="+1 555 123 4567"
+                          className="border-black/10 dark:border-white/5 text-primary text-xs"
+                          {...field}
+                        />
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -418,9 +509,15 @@ export default function NewClientPage() {
                 name="healthNotes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-primary/75">Health notes</FormLabel>
+                    <FormLabel className="text-xs text-primary/75">
+                      Health notes
+                    </FormLabel>
                     <FormControl>
-                      <Input placeholder="Injuries, conditions, limitations..." className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                      <Input
+                        placeholder="Injuries, conditions, limitations..."
+                        className="border-black/10 dark:border-white/5 text-primary text-xs"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage className="text-xs" />
                   </FormItem>
@@ -432,9 +529,15 @@ export default function NewClientPage() {
                 name="contraindications"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-xs text-primary/75">Contraindications</FormLabel>
+                    <FormLabel className="text-xs text-primary/75">
+                      Contraindications
+                    </FormLabel>
                     <FormControl>
-                      <Input placeholder="Exercises or movements to avoid..." className="border-black/10 dark:border-white/5 text-primary text-xs" {...field} />
+                      <Input
+                        placeholder="Exercises or movements to avoid..."
+                        className="border-black/10 dark:border-white/5 text-primary text-xs"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage className="text-xs" />
                   </FormItem>
@@ -454,7 +557,8 @@ export default function NewClientPage() {
                       />
                     </FormControl>
                     <FormLabel className="text-xs text-primary/75 !mt-0">
-                      VIP / Trusted member (skip cancellation fees, priority waitlist)
+                      VIP / Trusted member (skip cancellation fees, priority
+                      waitlist)
                     </FormLabel>
                     <FormMessage className="text-xs" />
                   </FormItem>
@@ -481,20 +585,31 @@ export default function NewClientPage() {
                               variant="outline"
                               className="w-full justify-between text-xs h-10 bg-background hover:bg-primary-foreground/75 text-primary hover:text-primary px-2 rounded-sm"
                             >
-                              {selectedInstructors && selectedInstructors.length > 0 ? (
+                              {selectedInstructors &&
+                              selectedInstructors.length > 0 ? (
                                 <div className="flex items-center gap-2">
                                   <div className="flex -space-x-2">
-                                    {selectedInstructors.slice(0, 3).map((instructor) => (
-                                      <Avatar key={instructor.id} className="size-6">
-                                        {instructor.image ? (
-                                          <AvatarImage src={instructor.image} alt={instructor.name} />
-                                        ) : (
-                                          <AvatarFallback className="bg-[#202e32] text-white text-[10px] rounded-sm">
-                                            {(instructor.name?.[0] ?? "U").toUpperCase()}
-                                          </AvatarFallback>
-                                        )}
-                                      </Avatar>
-                                    ))}
+                                    {selectedInstructors
+                                      .slice(0, 3)
+                                      .map((instructor) => (
+                                        <Avatar
+                                          key={instructor.id}
+                                          className="size-6"
+                                        >
+                                          {instructor.image ? (
+                                            <AvatarImage
+                                              src={instructor.image}
+                                              alt={instructor.name}
+                                            />
+                                          ) : (
+                                            <AvatarFallback className="bg-[#202e32] text-white text-[10px] rounded-sm">
+                                              {(
+                                                instructor.name?.[0] ?? "U"
+                                              ).toUpperCase()}
+                                            </AvatarFallback>
+                                          )}
+                                        </Avatar>
+                                      ))}
                                   </div>
                                   <span className="text-xs">
                                     {selectedInstructors.length === 1
@@ -517,7 +632,9 @@ export default function NewClientPage() {
                           <div className="max-h-64 overflow-y-auto p-2">
                             {instructorsData && instructorsData.length > 0 ? (
                               instructorsData.map((instructor) => {
-                                const isSelected = field.value?.includes(instructor.id);
+                                const isSelected = field.value?.includes(
+                                  instructor.id,
+                                );
                                 return (
                                   <button
                                     key={instructor.id}
@@ -526,26 +643,42 @@ export default function NewClientPage() {
                                     onClick={() => {
                                       const current = field.value ?? [];
                                       if (isSelected) {
-                                        field.onChange(current.filter((id) => id !== instructor.id));
+                                        field.onChange(
+                                          current.filter(
+                                            (id) => id !== instructor.id,
+                                          ),
+                                        );
                                       } else {
-                                        field.onChange([...current, instructor.id]);
+                                        field.onChange([
+                                          ...current,
+                                          instructor.id,
+                                        ]);
                                       }
                                     }}
                                   >
                                     <div
                                       className={cn(
                                         "flex size-4 shrink-0 items-center justify-center rounded-xs border border-black/10 dark:border-white/5",
-                                        isSelected ? "bg-background text-primary" : "bg-background",
+                                        isSelected
+                                          ? "bg-background text-primary"
+                                          : "bg-background",
                                       )}
                                     >
-                                      {isSelected && <CheckIcon className="size-3" />}
+                                      {isSelected && (
+                                        <CheckIcon className="size-3" />
+                                      )}
                                     </div>
                                     <Avatar className="size-7">
                                       {instructor.image ? (
-                                        <AvatarImage src={instructor.image} alt={instructor.name} />
+                                        <AvatarImage
+                                          src={instructor.image}
+                                          alt={instructor.name}
+                                        />
                                       ) : (
                                         <AvatarFallback className="bg-muted text-muted-foreground text-[11px]">
-                                          {(instructor.name?.[0] ?? "U").toUpperCase()}
+                                          {(
+                                            instructor.name?.[0] ?? "U"
+                                          ).toUpperCase()}
                                         </AvatarFallback>
                                       )}
                                     </Avatar>

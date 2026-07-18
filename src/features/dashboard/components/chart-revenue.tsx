@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   AreaChart,
   Area,
@@ -21,6 +22,7 @@ import {
 import {
   getTimeSeriesChartPresentation,
   getVisibleXAxisTicks,
+  formatDashboardMoney,
 } from "../helpers";
 
 export function ChartRevenue({
@@ -29,13 +31,16 @@ export function ChartRevenue({
   range,
   isEditing,
   isLoading,
+  currency,
 }: {
   data: { label: string; displayLabel: string; fullLabel?: string; revenue: number }[];
   comparisonData?: { label: string; fullLabel?: string; revenue: number }[] | null;
   range: { start: Date; end: Date };
   isEditing?: boolean;
   isLoading?: boolean;
+  currency?: string;
 }) {
+  const isMobile = useIsMobile();
   const merged = useMemo(() => {
     if (!comparisonData?.length) return data;
     const len = Math.max(data.length, comparisonData.length);
@@ -57,7 +62,10 @@ export function ChartRevenue({
     merged.length,
     !!comparisonData?.length,
   );
-  const xTicks = useMemo(() => getVisibleXAxisTicks(merged), [merged]);
+  const xTicks = useMemo(
+    () => getVisibleXAxisTicks(merged, isMobile ? 5 : undefined),
+    [isMobile, merged],
+  );
 
   return (
     <ChartShell
@@ -108,7 +116,7 @@ export function ChartRevenue({
                 compareKey="compareRevenue"
                 range={range}
                 color={DASHBOARD_REVENUE_COLOUR}
-                valueFormatter={(value) => `£${value.toLocaleString()}`}
+                valueFormatter={(value) => formatDashboardMoney(value, currency)}
               />
             }
             animationDuration={200}

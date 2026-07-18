@@ -2,16 +2,38 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Resend } from "resend";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { resolveProviderAccount } from "@/features/provider-accounts/server/resolver";
 
-function getResendClient() {
-  if (!process.env.RESEND_API_KEY) {
+type EmailTemplateContext = {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+};
+
+async function getResendClient(ctx: EmailTemplateContext) {
+  if (!ctx.orgId) {
     throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: "Resend API key is not configured",
+      code: "BAD_REQUEST",
+      message: "Select an organization before viewing provider templates.",
     });
   }
-
-  return new Resend(process.env.RESEND_API_KEY);
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability: "provider.manage",
+  });
+  const account = await resolveProviderAccount({
+    provider: "RESEND",
+    scope: {
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId ?? null,
+    },
+  });
+  return new Resend(account.secret);
 }
 
 export const emailTemplatesRouter = createTRPCRouter({
@@ -25,8 +47,8 @@ export const emailTemplatesRouter = createTRPCRouter({
         })
         .optional()
     )
-    .query(async ({ input }) => {
-      const resend = getResendClient();
+    .query(async ({ ctx, input }) => {
+      const resend = await getResendClient(ctx);
       const pagination = input?.before
         ? { limit: input?.limit, before: input.before }
         : input?.after
@@ -46,8 +68,8 @@ export const emailTemplatesRouter = createTRPCRouter({
     }),
   getResend: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
-    .query(async ({ input }) => {
-      const resend = getResendClient();
+    .query(async ({ ctx, input }) => {
+      const resend = await getResendClient(ctx);
       const { data, error } = await resend.templates.get(input.id);
 
       if (error) {

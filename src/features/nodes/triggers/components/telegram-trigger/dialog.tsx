@@ -102,7 +102,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Telegram trigger</SheetTitle>
           <SheetDescription>
@@ -111,7 +111,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -129,7 +129,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Reference the latest update via{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "telegramTrigger"}.message.text}}`}
                     </span>
                     .
@@ -166,7 +166,7 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
                   <FormDescription className="text-xs">
                     Connect a bot token under{" "}
                     <Button variant="link" className="px-1 text-xs" asChild>
-                      <Link href="/credentials" prefetch>
+                      <Link href="/settings/credentials" prefetch>
                         Credentials
                       </Link>
                     </Button>
@@ -195,8 +195,8 @@ export const TelegramTriggerDialog: React.FC<TelegramTriggerDialogProps> = ({
                   <FormDescription className="text-xs">
                     Leave blank to trigger on every incoming message for this
                     bot. To limit to a specific chat or group, provide the chat
-                    ID (e.g. <span className="text-white">123456789</span> or{" "}
-                    <span className="text-white">-1001234567890</span>).
+                    ID (e.g. <span className="text-primary">123456789</span> or{" "}
+                    <span className="text-primary">-1001234567890</span>).
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

@@ -4,8 +4,9 @@ import { and, count, desc, eq, ilike, ne, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { booking, bookingEventType, calComCredential } from "@/db/schema";
+import { booking, bookingEventType } from "@/db/schema";
 import { getCalComClient } from "@/lib/calcom";
+import { requireActiveCalComCredential } from "./calcom-scope";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const locationTypeSchema = z.enum([
@@ -170,26 +171,23 @@ export const eventTypesRouter = createTRPCRouter({
       }
 
       let calEventTypeId: number | null = null;
+      let calComCredentialId: string | null = null;
       if (input.syncToCalCom) {
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, organizationId),
-            eq(calComCredential.locationId, locationId),
-            eq(calComCredential.isActive, true),
-          ),
+        const credential = await requireActiveCalComCredential({
+          organizationId,
+          locationId,
         });
-        if (credential) {
-          const calClient = await getCalComClient(credential.apiKey);
-          const created = await calClient.createEventType({
-            title: input.title,
-            slug: input.slug,
-            description: input.description,
-            length: input.duration,
-            hidden: !input.isActive,
-            metadata: { aureaCrmEventType: true, locationId },
-          } as Parameters<typeof calClient.createEventType>[0]);
-          calEventTypeId = created.data.id;
-        }
+        const calClient = await getCalComClient(credential.apiKey);
+        const created = await calClient.createEventType({
+          title: input.title,
+          slug: input.slug,
+          description: input.description,
+          length: input.duration,
+          hidden: !input.isActive,
+          metadata: { aureaCrmEventType: true, locationId },
+        } as Parameters<typeof calClient.createEventType>[0]);
+        calEventTypeId = created.data.id;
+        calComCredentialId = credential.id;
       }
 
       const [created] = await db
@@ -215,6 +213,7 @@ export const eventTypesRouter = createTRPCRouter({
           currency: input.currency,
           metadata: pricingMetadata(input),
           calEventTypeId,
+          calComCredentialId,
           calTeamId: null,
           lastSyncedAt: calEventTypeId ? new Date() : null,
           createdAt: new Date(),
@@ -292,26 +291,27 @@ export const eventTypesRouter = createTRPCRouter({
       }
 
       if (input.syncToCalCom && existing.calEventTypeId) {
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, organizationId),
-            eq(calComCredential.locationId, locationId),
-            eq(calComCredential.isActive, true),
-          ),
+        const credential = await requireActiveCalComCredential({
+          organizationId,
+          locationId,
         });
-        if (credential) {
-          const calClient = await getCalComClient(credential.apiKey);
-          await calClient.updateEventType(existing.calEventTypeId, {
-            ...(input.title ? { title: input.title } : {}),
-            ...(input.slug ? { slug: input.slug } : {}),
-            ...(input.description !== undefined ? { description: input.description } : {}),
-            ...(input.duration ? { length: input.duration } : {}),
-            ...(input.isActive !== undefined ? { hidden: !input.isActive } : {}),
-            ...(input.requiresConfirmation !== undefined
-              ? { requiresConfirmation: input.requiresConfirmation }
-              : {}),
+        if (existing.calComCredentialId !== credential.id) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "This event type belongs to a different Cal.com connection.",
           });
         }
+        const calClient = await getCalComClient(credential.apiKey);
+        await calClient.updateEventType(existing.calEventTypeId, {
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.slug ? { slug: input.slug } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.duration ? { length: input.duration } : {}),
+          ...(input.isActive !== undefined ? { hidden: !input.isActive } : {}),
+          ...(input.requiresConfirmation !== undefined
+            ? { requiresConfirmation: input.requiresConfirmation }
+            : {}),
+        });
       }
 
       const existingMetadata = metadataRecord(existing.metadata);
@@ -377,17 +377,18 @@ export const eventTypesRouter = createTRPCRouter({
       }
 
       if (input.syncToCalCom && existing.calEventTypeId) {
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, organizationId),
-            eq(calComCredential.locationId, locationId),
-            eq(calComCredential.isActive, true),
-          ),
+        const credential = await requireActiveCalComCredential({
+          organizationId,
+          locationId,
         });
-        if (credential) {
-          const calClient = await getCalComClient(credential.apiKey);
-          await calClient.deleteEventType(existing.calEventTypeId);
+        if (existing.calComCredentialId !== credential.id) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "This event type belongs to a different Cal.com connection.",
+          });
         }
+        const calClient = await getCalComClient(credential.apiKey);
+        await calClient.deleteEventType(existing.calEventTypeId);
       }
 
       await db.delete(bookingEventType).where(eq(bookingEventType.id, input.id));

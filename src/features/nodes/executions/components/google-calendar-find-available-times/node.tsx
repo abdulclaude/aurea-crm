@@ -50,7 +50,7 @@ export const GoogleCalendarFindAvailableTimesNode: React.FC<NodeProps<GoogleCale
       nodeId: props.id,
       channel: GOOGLE_CALENDAR_FIND_AVAILABLE_TIMES_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchGoogleCalendarFindAvailableTimesRealtimeToken as any,
+      refreshToken: fetchGoogleCalendarFindAvailableTimesRealtimeToken,
     });
 
     const handleOpenSettings = () => {

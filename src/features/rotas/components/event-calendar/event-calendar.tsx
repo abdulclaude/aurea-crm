@@ -56,6 +56,8 @@ export interface EventCalendarProps {
   className?: string;
   initialView?: CalendarView;
   timeBounds?: { startHour: number; endHour: number };
+  weekStartsOn?: 0 | 1 | 6;
+  slotMinutes?: number;
   enableCellEventCreate?: boolean;
 }
 
@@ -69,6 +71,8 @@ export function EventCalendar({
   className,
   initialView = "month",
   timeBounds = { startHour: 7, endHour: 24 },
+  weekStartsOn = 1,
+  slotMinutes = 15,
   enableCellEventCreate = true,
 }: EventCalendarProps) {
   // Use the shared calendar context instead of local state
@@ -167,16 +171,14 @@ export function EventCalendar({
   const handleEventCreate = (startTime: Date, endTime?: Date) => {
     console.log("Creating new event at:", startTime); // Debug log
 
-    // Snap to 15-minute intervals
+    // Snap creation to the configured calendar interval.
     const minutes = startTime.getMinutes();
-    const remainder = minutes % 15;
+    const remainder = minutes % slotMinutes;
     if (remainder !== 0) {
-      if (remainder < 7.5) {
-        // Round down to nearest 15 min
+      if (remainder < slotMinutes / 2) {
         startTime.setMinutes(minutes - remainder);
       } else {
-        // Round up to nearest 15 min
-        startTime.setMinutes(minutes + (15 - remainder));
+        startTime.setMinutes(minutes + (slotMinutes - remainder));
       }
       startTime.setSeconds(0);
       startTime.setMilliseconds(0);
@@ -253,8 +255,8 @@ export function EventCalendar({
     if (view === "month") {
       return format(currentDate, "MMMM yyyy");
     } else if (view === "week") {
-      const start = startOfWeek(currentDate, { weekStartsOn: 0 });
-      const end = endOfWeek(currentDate, { weekStartsOn: 0 });
+      const start = startOfWeek(currentDate, { weekStartsOn });
+      const end = endOfWeek(currentDate, { weekStartsOn });
       if (isSameMonth(start, end)) {
         return format(start, "MMMM yyyy");
       } else {
@@ -287,7 +289,7 @@ export function EventCalendar({
     } else {
       return format(currentDate, "MMMM yyyy");
     }
-  }, [currentDate, view]);
+  }, [currentDate, view, weekStartsOn]);
 
   return (
     <div
@@ -403,6 +405,7 @@ export function EventCalendar({
             <MonthView
               currentDate={currentDate}
               events={events}
+              weekStartsOn={weekStartsOn}
               onEventSelect={handleEventSelect}
               onEventCreate={
                 enableCellEventCreate ? handleEventCreate : undefined
@@ -418,6 +421,8 @@ export function EventCalendar({
                 enableCellEventCreate ? handleEventCreate : undefined
               }
               timeBounds={timeBounds}
+              weekStartsOn={weekStartsOn}
+              slotMinutes={slotMinutes}
             />
           )}
           {view === "day" && (
@@ -429,6 +434,7 @@ export function EventCalendar({
                 enableCellEventCreate ? handleEventCreate : undefined
               }
               timeBounds={timeBounds}
+              slotMinutes={slotMinutes}
             />
           )}
           {view === "agenda" && (

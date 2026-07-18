@@ -178,7 +178,7 @@ Use ngrok to test with external visitors or from different devices:
 ```bash
 cd /Users/abdul/Desktop/aurea-crm
 npm run ngrok:dev
-# Update TTR .env: NEXT_PUBLIC_AUREA_API_URL=https://aureacrm.ngrok.dev/api
+# Update TTR .env: NEXT_PUBLIC_AUREA_API_URL=https://tweezers-retry-palpable.ngrok-free.dev/api
 ```
 
 **Option 3: Deploy to Production**

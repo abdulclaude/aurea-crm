@@ -1,35 +1,45 @@
-import type { NodeExecutor } from "@/features/executions/types";
-import { oneDriveTriggerChannel } from "@/inngest/channels/onedrive-trigger";
-import { auth } from "@/lib/auth";
 import { NonRetriableError } from "inngest";
-import type { OneDriveTriggerConfig } from "@/features/onedrive/server/subscriptions";
 
-export const oneDriveTriggerExecutor: NodeExecutor<OneDriveTriggerConfig> = async ({
-  data,
-  nodeId,
-  userId,
-  context,
-  step,
-  publish,
-}) => {
+import { NodeType } from "@/db/enums";
+import type { NodeExecutor } from "@/features/executions/types";
+import type { OneDriveTriggerConfig } from "@/features/onedrive/server/subscriptions";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
+import { oneDriveTriggerChannel } from "@/inngest/channels/onedrive-trigger";
+
+type ScopedOneDriveTriggerConfig = OneDriveTriggerConfig & {
+  providerAccountId?: string;
+};
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.ONEDRIVE_TRIGGER,
+);
+
+export const oneDriveTriggerExecutor: NodeExecutor<
+  ScopedOneDriveTriggerConfig
+> = async ({ data, nodeId, scope, context, step, publish }) => {
   await publish(oneDriveTriggerChannel().status({ nodeId, status: "loading" }));
 
   try {
     const variableName = normalizeVariableName(data?.variableName);
 
-    const tokenResponse = await auth.api.getAccessToken({
-      body: {
-        providerId: "microsoft",
-        userId,
-      },
-    });
-
-    const accessToken = tokenResponse?.accessToken;
-    if (!accessToken) {
+    if (!data.providerAccountId) {
       throw new NonRetriableError(
-        "OneDrive is not connected. Please connect Microsoft 365."
+        "Select a OneDrive account for this trigger.",
       );
     }
+
+    const grant = await resolveOAuthProviderGrant({
+      providerAccountId: data.providerAccountId,
+      provider: providerBinding.provider,
+      scope: {
+        organizationId: scope.organizationId,
+        locationId: scope.locationId,
+      },
+      requiredScopes: providerBinding.requiredScopes,
+    });
+    const { accessToken } = grant;
 
     const folderPath = data?.folderPath;
     const resource = folderPath
@@ -37,13 +47,14 @@ export const oneDriveTriggerExecutor: NodeExecutor<OneDriveTriggerConfig> = asyn
       : "me/drive/root/children";
 
     const files = await step.run("onedrive-fetch-changes", async () => {
-      const response = await fetch(
+      const response = await oauthAuthenticatedFetch(
+        grant,
         `https://graph.microsoft.com/v1.0/${resource}?$orderby=lastModifiedDateTime desc&$top=10`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
-        }
+        },
       );
 
       if (!response.ok) {
@@ -56,9 +67,10 @@ export const oneDriveTriggerExecutor: NodeExecutor<OneDriveTriggerConfig> = asyn
 
     // Filter by file pattern if provided
     let filteredFiles = files;
-    if (data?.filePattern) {
+    const filePattern = data?.filePattern;
+    if (filePattern) {
       filteredFiles = filteredFiles.filter((file: { name: string }) =>
-        file.name?.includes(data.filePattern!)
+        file.name?.includes(filePattern),
       );
     }
 
@@ -67,7 +79,9 @@ export const oneDriveTriggerExecutor: NodeExecutor<OneDriveTriggerConfig> = asyn
       count: filteredFiles.length,
     };
 
-    await publish(oneDriveTriggerChannel().status({ nodeId, status: "success" }));
+    await publish(
+      oneDriveTriggerChannel().status({ nodeId, status: "success" }),
+    );
 
     return {
       ...context,

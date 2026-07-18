@@ -44,6 +44,7 @@ export type ServiceTypeSelectOption = {
 
 export type CancellationPolicyOption = {
   id: string;
+  isDefault?: boolean;
   name: string;
 };
 
@@ -64,9 +65,12 @@ const moneyStringSchema = z
 const optionalUrlSchema = z
   .string()
   .trim()
-  .refine((value) => value === "" || z.string().url().safeParse(value).success, {
-    message: "Use a valid URL",
-  });
+  .refine(
+    (value) => value === "" || z.string().url().safeParse(value).success,
+    {
+      message: "Use a valid URL",
+    },
+  );
 
 export const classFormSchema = z
   .object({
@@ -95,6 +99,8 @@ export const classFormSchema = z
     currency: z.string().length(3),
     bookingWindowHours: integerStringSchema,
     cancellationWindowHours: integerStringSchema,
+    bookingWindowPolicyOverrideId: z.string(),
+    waitlistPolicyOverrideId: z.string(),
     waitlistEnabled: z.boolean(),
     autoPromoteWaitlist: z.boolean(),
     onlineBookingEnabled: z.boolean(),

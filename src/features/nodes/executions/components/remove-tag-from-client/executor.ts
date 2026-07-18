@@ -5,18 +5,19 @@ import { removeTagFromClientChannel } from "@/inngest/channels/remove-tag-from-c
 import { decode } from "html-entities";
 import { db } from "@/db";
 import { client as clientTable } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 type RemoveTagFromClientData = {
   clientId: string;
-  tag: string;
+  tag?: string;
+  tags?: string[];
   variableName?: string;
 };
 
 export const removeTagFromClientExecutor: NodeExecutor<RemoveTagFromClientData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -31,7 +32,7 @@ export const removeTagFromClientExecutor: NodeExecutor<RemoveTagFromClientData> 
       );
     }
 
-    if (!data.tag) {
+    if (!data.tag && !data.tags?.length) {
       await publish(removeTagFromClientChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError(
         "Remove Tag from Client Node error: Tag is required."
@@ -40,12 +41,22 @@ export const removeTagFromClientExecutor: NodeExecutor<RemoveTagFromClientData> 
 
     // Compile fields with Handlebars
     const clientId = decode(Handlebars.compile(data.clientId)(context));
-    const tag = decode(Handlebars.compile(data.tag)(context)).trim();
+    const tags = new Set(
+      (data.tags?.length ? data.tags : [data.tag || ""])
+        .map((tag) => decode(Handlebars.compile(tag)(context)).trim())
+        .filter(Boolean),
+    );
 
     const client = await step.run("remove-tag-from-client", async () => {
       // Fetch the current client
       const existingClient = await db.query.client.findFirst({
-        where: eq(clientTable.id, clientId),
+        where: and(
+          eq(clientTable.id, clientId),
+          eq(clientTable.organizationId, scope.organizationId),
+          scope.locationId
+            ? eq(clientTable.locationId, scope.locationId)
+            : isNull(clientTable.locationId),
+        ),
       });
 
       if (!existingClient) {
@@ -56,7 +67,7 @@ export const removeTagFromClientExecutor: NodeExecutor<RemoveTagFromClientData> 
 
       // Remove tag if it exists
       const currentTags = existingClient.tags || [];
-      const updatedTags = currentTags.filter(t => t !== tag);
+      const updatedTags = currentTags.filter((tag) => !tags.has(tag));
 
       const [updatedClient] = await db
         .update(clientTable)
@@ -64,7 +75,15 @@ export const removeTagFromClientExecutor: NodeExecutor<RemoveTagFromClientData> 
           tags: updatedTags,
           updatedAt: new Date(),
         })
-        .where(eq(clientTable.id, clientId))
+        .where(
+          and(
+            eq(clientTable.id, clientId),
+            eq(clientTable.organizationId, scope.organizationId),
+            scope.locationId
+              ? eq(clientTable.locationId, scope.locationId)
+              : isNull(clientTable.locationId),
+          ),
+        )
         .returning();
 
       return updatedClient;

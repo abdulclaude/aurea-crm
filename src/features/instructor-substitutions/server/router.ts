@@ -1,18 +1,30 @@
 import { randomUUID } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  ne,
+  or,
+} from "drizzle-orm";
 import { z } from "zod";
 
-import { MessageDirection, SmsStatus } from "@/db/enums";
 import { db } from "@/db";
 import {
   instructor,
   instructorAvailability,
   instructorSubstitutionRequest,
-  smsConfig,
-  smsMessage,
   studioClass,
 } from "@/db/schema";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { enqueueSmsMessages } from "@/features/sms/server/services/enqueue-sms";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const substitutionStatuses = [
@@ -49,15 +61,21 @@ async function findAvailableSubstitutes(params: {
   classTypeName: string | null;
 }) {
   const dayOfWeek = params.startTime.getDay();
-  const startMinutes = params.startTime.getHours() * 60 + params.startTime.getMinutes();
-  const endMinutes = params.endTime.getHours() * 60 + params.endTime.getMinutes();
+  const startMinutes =
+    params.startTime.getHours() * 60 + params.startTime.getMinutes();
+  const endMinutes =
+    params.endTime.getHours() * 60 + params.endTime.getMinutes();
 
   const instructors = await db.query.instructor.findMany({
     where: and(
       eq(instructor.organizationId, params.organizationId),
-      params.locationId ? eq(instructor.locationId, params.locationId) : undefined,
+      params.locationId
+        ? eq(instructor.locationId, params.locationId)
+        : undefined,
       eq(instructor.isActive, true),
-      params.originalInstructorId ? ne(instructor.id, params.originalInstructorId) : undefined,
+      params.originalInstructorId
+        ? ne(instructor.id, params.originalInstructorId)
+        : undefined,
     ),
     with: {
       instructorAvailabilities: {
@@ -141,9 +159,15 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
       const rows = await db.query.instructorSubstitutionRequest.findMany({
         where: and(
           eq(instructorSubstitutionRequest.organizationId, organizationId),
-          ctx.locationId ? eq(instructorSubstitutionRequest.locationId, ctx.locationId) : undefined,
-          input?.status ? eq(instructorSubstitutionRequest.status, input.status) : undefined,
-          input?.classId ? eq(instructorSubstitutionRequest.classId, input.classId) : undefined,
+          ctx.locationId
+            ? eq(instructorSubstitutionRequest.locationId, ctx.locationId)
+            : undefined,
+          input?.status
+            ? eq(instructorSubstitutionRequest.status, input.status)
+            : undefined,
+          input?.classId
+            ? eq(instructorSubstitutionRequest.classId, input.classId)
+            : undefined,
         ),
         orderBy: desc(instructorSubstitutionRequest.requestedAt),
         with: {
@@ -154,10 +178,16 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
             },
           },
           instructor_originalInstructorId: {
-            columns: { id: true, name: true, email: true },
+            columns: { id: true, name: true, email: true, profilePhoto: true },
           },
           instructor_substituteId: {
-            columns: { id: true, name: true, email: true, phone: true },
+            columns: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true,
+              profilePhoto: true,
+            },
           },
         },
       });
@@ -209,6 +239,14 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
       const locationId = ctx.locationId ?? null;
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId,
+        },
+        capability: "messaging.send",
+      });
       const targetClass = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, input.classId),
@@ -232,11 +270,6 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
         startTime: targetClass.startTime,
         endTime: targetClass.endTime,
         classTypeName: targetClass.classType?.name ?? null,
-      });
-
-      const config = await db.query.smsConfig.findFirst({
-        where: eq(smsConfig.organizationId, organizationId),
-        columns: { fromNumber: true, isActive: true },
       });
 
       const requests = await db.transaction(async (tx) => {
@@ -275,28 +308,48 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
                   updatedAt: new Date(),
                 })
                 .returning();
-
-        const messages = candidates
-          .filter((candidate) => candidate.phone)
-          .map((candidate) => ({
-            id: randomUUID(),
-            organizationId,
-            locationId,
-            to: candidate.phone || "",
-            from: config?.fromNumber ?? "",
-            body: `Sub cover needed for ${targetClass.name} on ${targetClass.startTime.toLocaleString()}. Reply to the studio if available.`,
-            direction: MessageDirection.OUTBOUND,
-            status: SmsStatus.QUEUED,
-            createdAt: new Date(),
-          }));
-        if (config?.isActive && messages.length > 0) {
-          await tx.insert(smsMessage).values(messages);
-        }
-
         return createdRequests;
       });
 
-      return { requests, candidateCount: candidates.length };
+      const recipients = candidates.flatMap((candidate) =>
+        candidate.phone ? [{ to: candidate.phone }] : [],
+      );
+      let notificationResult: {
+        queued: number;
+        suppressed: number;
+        error: string | null;
+      } = { queued: 0, suppressed: 0, error: null };
+      if (recipients.length > 0) {
+        try {
+          const result = await enqueueSmsMessages({
+            organizationId,
+            locationId,
+            recipients,
+            body: `Sub cover needed for ${targetClass.name} on ${targetClass.startTime.toLocaleString()}. Reply to the studio if available.`,
+            purpose: "ONE_TO_ONE",
+          });
+          notificationResult = {
+            queued: result.queued,
+            suppressed: result.suppressed,
+            error: null,
+          };
+        } catch (error) {
+          notificationResult = {
+            queued: 0,
+            suppressed: 0,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Substitution SMS notifications could not be queued.",
+          };
+        }
+      }
+
+      return {
+        requests,
+        candidateCount: candidates.length,
+        notifications: notificationResult,
+      };
     }),
 
   accept: protectedProcedure
@@ -307,7 +360,9 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
         where: and(
           eq(instructorSubstitutionRequest.id, input.requestId),
           eq(instructorSubstitutionRequest.organizationId, organizationId),
-          ctx.locationId ? eq(instructorSubstitutionRequest.locationId, ctx.locationId) : undefined,
+          ctx.locationId
+            ? eq(instructorSubstitutionRequest.locationId, ctx.locationId)
+            : undefined,
         ),
         columns: { id: true, classId: true, substituteId: true, status: true },
       });
@@ -335,7 +390,9 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
 
       const substituteId =
         request.substituteId ??
-        (request.status === "OPEN" && instructorRecord ? instructorRecord.id : null);
+        (request.status === "OPEN" && instructorRecord
+          ? instructorRecord.id
+          : null);
       if (!substituteId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -344,27 +401,30 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
       }
 
       return db.transaction(async (tx) => {
-        const freshRequest = await tx.query.instructorSubstitutionRequest.findFirst({
-          where: eq(instructorSubstitutionRequest.id, request.id),
-          columns: { status: true, classId: true },
-        });
+        const freshRequest =
+          await tx.query.instructorSubstitutionRequest.findFirst({
+            where: eq(instructorSubstitutionRequest.id, request.id),
+            columns: { status: true, classId: true },
+          });
         if (
           !freshRequest ||
           (freshRequest.status !== "OFFERED" && freshRequest.status !== "OPEN")
         ) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "This substitution request has already been handled by another instructor",
+            message:
+              "This substitution request has already been handled by another instructor",
           });
         }
 
-        const alreadyAccepted = await tx.query.instructorSubstitutionRequest.findFirst({
-          where: and(
-            eq(instructorSubstitutionRequest.classId, freshRequest.classId),
-            eq(instructorSubstitutionRequest.status, "ACCEPTED"),
-          ),
-          columns: { id: true },
-        });
+        const alreadyAccepted =
+          await tx.query.instructorSubstitutionRequest.findFirst({
+            where: and(
+              eq(instructorSubstitutionRequest.classId, freshRequest.classId),
+              eq(instructorSubstitutionRequest.status, "ACCEPTED"),
+            ),
+            columns: { id: true },
+          });
         if (alreadyAccepted) {
           throw new TRPCError({
             code: "CONFLICT",
@@ -384,7 +444,10 @@ export const instructorSubstitutionsRouter = createTRPCRouter({
             and(
               eq(instructorSubstitutionRequest.classId, freshRequest.classId),
               ne(instructorSubstitutionRequest.id, request.id),
-              inArray(instructorSubstitutionRequest.status, ["OFFERED", "OPEN"]),
+              inArray(instructorSubstitutionRequest.status, [
+                "OFFERED",
+                "OPEN",
+              ]),
             ),
           );
 

@@ -1,31 +1,35 @@
 import { relations } from "drizzle-orm/relations";
-import { classType, studioClass, instructor, organization, room, location, client, studioMembership, membershipPlan, workflows, user, credential, node, connection, execution, googleCalendarSubscription, telegramTriggerState, gmailSubscription, gmailTriggerState, webhook, classCredit, classWaitlist, checkIn, apps, aiLog, outlookSubscription, outlookTriggerState, oneDriveSubscription, oneDriveTriggerState, studioPayment, promoCode, instructorPayout, giftCard, studioProduct, studioPaymentLineItem, apiKey, widgetConfig, importJob, deviceToken, mobileSession, inboxConversation, inboxMessage, clientInstructor, externalChannelIntegration, clientHousehold, clientHouseholdMember, instructorSubstitutionRequest, dynamicPricingRule, studioPaymentPlan, videoOnDemandAsset, accessControlIntegration, performanceMetric, workoutProgram, soapNote, marketplaceListing, automationEvent, smsConfig, smsMessage, waiverTemplate, waiverSignature, clientDocument, roomLayout, classReminderConfig, retentionAutomation, introOffer, introOfferRedemption, churnRiskScore, referralProgram, referral, loyaltyProgram, loyaltyBalance, loyaltyTransaction, loyaltyReward, spot, studioBooking, studioBookingPayment, spotBooking, cancellationPolicy, spotReservation, account, activity, bankTransferSettings, clientAssignee, locationMember, deal, pipeline, pipelineStage, dealClient, dealAssignee, form, globalStylePreset, formStep, formField, formSubmission, externalFormSubmission, funnel, funnelAnalytics, funnelPage, funnelBlock, smartSection, smartSectionInstance, funnelBlockAnalytics, funnelBlockEvent, funnelBreakpoint, funnelPixelIntegration, invitation, invoice, invoiceLineItem, invoicePayment, invoiceReminder, member, notification, notificationPreference, qrCode, recurringInvoice, recurringInvoiceGeneration, rota, session, stripeConnection, locationModule, userPresence, instructorDocument, timeLog, shiftSwapRequest, instructorAvailability, timeOffRequest, overtimeTracking, invoiceTemplate, payrollRun, instructorPayment, payrollRunInstructor, studioStaffMember, funnelSession, funnelWebVital, funnelEvent, anonymousUserProfiles, adSpend, adPlatformCredential, emailDomain, emailTemplate, campaign, campaignRecipient, unsubscribeToken, booking, bookingEventType, calComCredential, bookingAvailability, bookingHoliday, note, noteMention, task } from "./schema";
+import { classType, serviceType, studioClass, instructor, organization, room, location, client, studioMembership, membershipPlan, workflows, user, credential, node, connection, execution, googleCalendarSubscription, telegramTriggerState, gmailSubscription, gmailTriggerState, webhook, classCredit, classWaitlist, checkIn, apps, aiLog, outlookSubscription, outlookTriggerState, oneDriveSubscription, oneDriveTriggerState, studioPayment, promoCode, instructorPayout, giftCard, studioProduct, studioPaymentLineItem, apiKey, widgetConfig, importJob, deviceToken, mobileSession, inboxConversation, inboxMessage, clientInstructor, externalChannelIntegration, clientHousehold, clientHouseholdMember, instructorSubstitutionRequest, dynamicPricingRule, studioPaymentPlan, videoOnDemandAsset, accessControlIntegration, performanceMetric, workoutProgram, soapNote, marketplaceListing, automationEvent, smsConfig, smsMessage, waiverTemplate, waiverSignature, clientDocument, roomLayout, classReminderConfig, retentionAutomation, introOffer, introOfferRedemption, churnRiskScore, referralProgram, referral, loyaltyProgram, loyaltyBalance, loyaltyTransaction, loyaltyReward, spot, studioBooking, studioBookingPayment, spotBooking, cancellationPolicy, spotReservation, account, activity, bankTransferSettings, clientAssignee, locationMember, deal, pipeline, pipelineStage, dealClient, dealAssignee, form, globalStylePreset, formStep, formField, formSubmission, publicFormSubmissionReceipt, externalFormSubmission, funnel, funnelAnalytics, funnelPage, funnelBlock, smartSection, smartSectionInstance, funnelBlockAnalytics, funnelBlockEvent, funnelBreakpoint, funnelPixelIntegration, invitation, invoice, invoiceLineItem, invoicePayment, invoiceReminder, member, notification, notificationPreference, qrCode, recurringInvoice, recurringInvoiceGeneration, rota, session, stripeConnection, stripeEvent, commerceOperation, commerceLedgerEntry, locationModule, userPresence, instructorDocument, timeLog, shiftSwapRequest, instructorAvailability, timeOffRequest, overtimeTracking, invoiceTemplate, payrollRun, instructorPayment, payrollRunInstructor, studioStaffMember, funnelSession, funnelWebVital, funnelEvent, adConversionDelivery, anonymousUserProfiles, adSpend, adPlatformCredential, providerAccount, providerOAuthGrant, emailDomain, emailTemplate, campaign, campaignRecipient, unsubscribeToken, booking, bookingEventType, calComCredential, calComWebhookReceipt, bookingAvailability, bookingHoliday, note, noteMention, task, savedAudience } from "./schema";
 
-export const studioClassRelations = relations(studioClass, ({one, many}) => ({
-	classType: one(classType, {
-		fields: [studioClass.classTypeId],
-		references: [classType.id]
-	}),
-	instructor: one(instructor, {
-		fields: [studioClass.instructorId],
-		references: [instructor.id]
-	}),
-	organization: one(organization, {
-		fields: [studioClass.organizationId],
-		references: [organization.id]
-	}),
-	room: one(room, {
-		fields: [studioClass.roomId],
-		references: [room.id]
-	}),
-	location: one(location, {
-		fields: [studioClass.locationId],
-		references: [location.id]
-	}),
-	classWaitlists: many(classWaitlist),
-	checkIns: many(checkIn),
-	instructorSubstitutionRequests: many(instructorSubstitutionRequest),
-	studioBookings: many(studioBooking),
+export const studioClassRelations = relations(studioClass, ({ one, many }) => ({
+  classType: one(classType, {
+    fields: [studioClass.classTypeId],
+    references: [classType.id],
+  }),
+  serviceType: one(serviceType, {
+    fields: [studioClass.serviceTypeId],
+    references: [serviceType.id],
+  }),
+  instructor: one(instructor, {
+    fields: [studioClass.instructorId],
+    references: [instructor.id],
+  }),
+  organization: one(organization, {
+    fields: [studioClass.organizationId],
+    references: [organization.id],
+  }),
+  room: one(room, {
+    fields: [studioClass.roomId],
+    references: [room.id],
+  }),
+  location: one(location, {
+    fields: [studioClass.locationId],
+    references: [location.id],
+  }),
+  classWaitlists: many(classWaitlist),
+  checkIns: many(checkIn),
+  instructorSubstitutionRequests: many(instructorSubstitutionRequest),
+  studioBookings: many(studioBooking),
 }));
 
 export const classTypeRelations = relations(classType, ({one, many}) => ({
@@ -95,6 +99,10 @@ export const organizationRelations = relations(organization, ({many}) => ({
 	studioClasses: many(studioClass),
 	studioMemberships: many(studioMembership),
 	workflows: many(workflows),
+	googleCalendarSubscriptions: many(googleCalendarSubscription),
+	gmailSubscriptions: many(gmailSubscription),
+	outlookSubscriptions: many(outlookSubscription),
+	oneDriveSubscriptions: many(oneDriveSubscription),
 	classTypes: many(classType),
 	rooms: many(room),
 	checkIns: many(checkIn),
@@ -195,6 +203,10 @@ export const locationRelations = relations(location, ({one, many}) => ({
 	studioClasses: many(studioClass),
 	studioMemberships: many(studioMembership),
 	workflows: many(workflows),
+	googleCalendarSubscriptions: many(googleCalendarSubscription),
+	gmailSubscriptions: many(gmailSubscription),
+	outlookSubscriptions: many(outlookSubscription),
+	oneDriveSubscriptions: many(oneDriveSubscription),
 	credentials: many(credential),
 	executions: many(execution),
 	classTypes: many(classType),
@@ -291,6 +303,10 @@ export const studioMembershipRelations = relations(studioMembership, ({one, many
 		fields: [studioMembership.locationId],
 		references: [location.id]
 	}),
+	stripeConnection: one(stripeConnection, {
+		fields: [studioMembership.stripeConnectionId],
+		references: [stripeConnection.id]
+	}),
 	classCredits: many(classCredit),
 	studioPayments: many(studioPayment),
 	clientDocuments: many(clientDocument),
@@ -356,6 +372,10 @@ export const membershipPlanRelations = relations(membershipPlan, ({one, many}) =
 	location: one(location, {
 		fields: [membershipPlan.locationId],
 		references: [location.id]
+	}),
+	stripeConnection: one(stripeConnection, {
+		fields: [membershipPlan.stripeConnectionId],
+		references: [stripeConnection.id]
 	}),
 	studioPaymentPlans: many(studioPaymentPlan),
 }));
@@ -425,6 +445,10 @@ export const nodeRelations = relations(node, ({one, many}) => ({
 		fields: [node.credentialId],
 		references: [credential.id]
 	}),
+	providerAccount: one(providerAccount, {
+		fields: [node.providerAccountId],
+		references: [providerAccount.id]
+	}),
 	workflow: one(workflows, {
 		fields: [node.workflowId],
 		references: [workflows.id]
@@ -444,6 +468,10 @@ export const nodeRelations = relations(node, ({one, many}) => ({
 
 export const credentialRelations = relations(credential, ({one, many}) => ({
 	nodes: many(node),
+	organization: one(organization, {
+		fields: [credential.organizationId],
+		references: [organization.id]
+	}),
 	location: one(location, {
 		fields: [credential.locationId],
 		references: [location.id]
@@ -472,6 +500,10 @@ export const connectionRelations = relations(connection, ({one}) => ({
 }));
 
 export const executionRelations = relations(execution, ({one, many}) => ({
+	organization: one(organization, {
+		fields: [execution.organizationId],
+		references: [organization.id]
+	}),
 	location: one(location, {
 		fields: [execution.locationId],
 		references: [location.id]
@@ -484,9 +516,21 @@ export const executionRelations = relations(execution, ({one, many}) => ({
 }));
 
 export const googleCalendarSubscriptionRelations = relations(googleCalendarSubscription, ({one}) => ({
+	organization: one(organization, {
+		fields: [googleCalendarSubscription.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [googleCalendarSubscription.locationId],
+		references: [location.id]
+	}),
 	node: one(node, {
 		fields: [googleCalendarSubscription.nodeId],
 		references: [node.id]
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [googleCalendarSubscription.providerAccountId],
+		references: [providerAccount.id]
 	}),
 	user: one(user, {
 		fields: [googleCalendarSubscription.userId],
@@ -510,6 +554,18 @@ export const telegramTriggerStateRelations = relations(telegramTriggerState, ({o
 }));
 
 export const gmailSubscriptionRelations = relations(gmailSubscription, ({one}) => ({
+	organization: one(organization, {
+		fields: [gmailSubscription.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [gmailSubscription.locationId],
+		references: [location.id]
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [gmailSubscription.providerAccountId],
+		references: [providerAccount.id]
+	}),
 	user: one(user, {
 		fields: [gmailSubscription.userId],
 		references: [user.id]
@@ -528,6 +584,10 @@ export const gmailTriggerStateRelations = relations(gmailTriggerState, ({one}) =
 }));
 
 export const webhookRelations = relations(webhook, ({one}) => ({
+	organization: one(organization, {
+		fields: [webhook.organizationId],
+		references: [organization.id]
+	}),
 	location: one(location, {
 		fields: [webhook.locationId],
 		references: [location.id]
@@ -593,6 +653,14 @@ export const checkInRelations = relations(checkIn, ({one}) => ({
 }));
 
 export const appsRelations = relations(apps, ({one}) => ({
+	organization: one(organization, {
+		fields: [apps.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [apps.locationId],
+		references: [location.id]
+	}),
 	user: one(user, {
 		fields: [apps.userId],
 		references: [user.id]
@@ -600,6 +668,10 @@ export const appsRelations = relations(apps, ({one}) => ({
 }));
 
 export const aiLogRelations = relations(aiLog, ({one}) => ({
+	credential: one(credential, {
+		fields: [aiLog.credentialId],
+		references: [credential.id]
+	}),
 	organization: one(organization, {
 		fields: [aiLog.organizationId],
 		references: [organization.id]
@@ -615,6 +687,18 @@ export const aiLogRelations = relations(aiLog, ({one}) => ({
 }));
 
 export const outlookSubscriptionRelations = relations(outlookSubscription, ({one}) => ({
+	organization: one(organization, {
+		fields: [outlookSubscription.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [outlookSubscription.locationId],
+		references: [location.id]
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [outlookSubscription.providerAccountId],
+		references: [providerAccount.id]
+	}),
 	user: one(user, {
 		fields: [outlookSubscription.userId],
 		references: [user.id]
@@ -633,6 +717,18 @@ export const outlookTriggerStateRelations = relations(outlookTriggerState, ({one
 }));
 
 export const oneDriveSubscriptionRelations = relations(oneDriveSubscription, ({one}) => ({
+	organization: one(organization, {
+		fields: [oneDriveSubscription.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [oneDriveSubscription.locationId],
+		references: [location.id]
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [oneDriveSubscription.providerAccountId],
+		references: [providerAccount.id]
+	}),
 	user: one(user, {
 		fields: [oneDriveSubscription.userId],
 		references: [user.id]
@@ -677,6 +773,10 @@ export const studioPaymentRelations = relations(studioPayment, ({one, many}) => 
 	location: one(location, {
 		fields: [studioPayment.locationId],
 		references: [location.id]
+	}),
+	stripeConnection: one(stripeConnection, {
+		fields: [studioPayment.stripeConnectionId],
+		references: [stripeConnection.id]
 	}),
 }));
 
@@ -778,6 +878,10 @@ export const widgetConfigRelations = relations(widgetConfig, ({one}) => ({
 	organization: one(organization, {
 		fields: [widgetConfig.organizationId],
 		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [widgetConfig.locationId],
+		references: [location.id]
 	}),
 }));
 
@@ -1059,10 +1163,18 @@ export const automationEventRelations = relations(automationEvent, ({one}) => ({
 }));
 
 export const smsConfigRelations = relations(smsConfig, ({one}) => ({
-	organization: one(organization, {
-		fields: [smsConfig.organizationId],
-		references: [organization.id]
-	}),
+		organization: one(organization, {
+			fields: [smsConfig.organizationId],
+			references: [organization.id]
+		}),
+		location: one(location, {
+			fields: [smsConfig.locationId],
+			references: [location.id]
+		}),
+		providerAccount: one(providerAccount, {
+			fields: [smsConfig.providerAccountId],
+			references: [providerAccount.id]
+		}),
 }));
 
 export const smsMessageRelations = relations(smsMessage, ({one}) => ({
@@ -1177,6 +1289,14 @@ export const churnRiskScoreRelations = relations(churnRiskScore, ({one}) => ({
 		fields: [churnRiskScore.organizationId],
 		references: [organization.id]
 	}),
+	location: one(location, {
+		fields: [churnRiskScore.locationId],
+		references: [location.id]
+	}),
+	client: one(client, {
+		fields: [churnRiskScore.clientId],
+		references: [client.id]
+	}),
 }));
 
 export const referralProgramRelations = relations(referralProgram, ({one, many}) => ({
@@ -1184,10 +1304,22 @@ export const referralProgramRelations = relations(referralProgram, ({one, many})
 		fields: [referralProgram.organizationId],
 		references: [organization.id]
 	}),
+	location: one(location, {
+		fields: [referralProgram.locationId],
+		references: [location.id]
+	}),
 	referrals: many(referral),
 }));
 
 export const referralRelations = relations(referral, ({one}) => ({
+	organization: one(organization, {
+		fields: [referral.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [referral.locationId],
+		references: [location.id]
+	}),
 	referralProgram: one(referralProgram, {
 		fields: [referral.programId],
 		references: [referralProgram.id]
@@ -1319,11 +1451,12 @@ export const spotReservationRelations = relations(spotReservation, ({one}) => ({
 	}),
 }));
 
-export const accountRelations = relations(account, ({one}) => ({
+export const accountRelations = relations(account, ({one, many}) => ({
 	user: one(user, {
 		fields: [account.userId],
 		references: [user.id]
 	}),
+	providerOAuthGrants: many(providerOAuthGrant),
 }));
 
 export const activityRelations = relations(activity, ({one}) => ({
@@ -1496,6 +1629,41 @@ export const formSubmissionRelations = relations(formSubmission, ({one}) => ({
 	form: one(form, {
 		fields: [formSubmission.formId],
 		references: [form.id]
+	}),
+	organization: one(organization, {
+		fields: [formSubmission.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [formSubmission.locationId],
+		references: [location.id]
+	}),
+	receipt: one(publicFormSubmissionReceipt, {
+		fields: [formSubmission.receiptId],
+		references: [publicFormSubmissionReceipt.id]
+	}),
+}));
+
+export const publicFormSubmissionReceiptRelations = relations(publicFormSubmissionReceipt, ({one}) => ({
+	organization: one(organization, {
+		fields: [publicFormSubmissionReceipt.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [publicFormSubmissionReceipt.locationId],
+		references: [location.id]
+	}),
+	form: one(form, {
+		fields: [publicFormSubmissionReceipt.formId],
+		references: [form.id]
+	}),
+	workflow: one(workflows, {
+		fields: [publicFormSubmissionReceipt.workflowId],
+		references: [workflows.id]
+	}),
+	submission: one(formSubmission, {
+		fields: [publicFormSubmissionReceipt.id],
+		references: [formSubmission.receiptId]
 	}),
 }));
 
@@ -1779,7 +1947,7 @@ export const sessionRelations = relations(session, ({one}) => ({
 	}),
 }));
 
-export const stripeConnectionRelations = relations(stripeConnection, ({one}) => ({
+export const stripeConnectionRelations = relations(stripeConnection, ({one, many}) => ({
 	organization: one(organization, {
 		fields: [stripeConnection.organizationId],
 		references: [organization.id]
@@ -1787,6 +1955,51 @@ export const stripeConnectionRelations = relations(stripeConnection, ({one}) => 
 	location: one(location, {
 		fields: [stripeConnection.locationId],
 		references: [location.id]
+	}),
+	stripeEvents: many(stripeEvent),
+	commerceOperations: many(commerceOperation),
+	commerceLedgerEntries: many(commerceLedgerEntry),
+	studioPayments: many(studioPayment),
+	studioMemberships: many(studioMembership),
+	membershipPlans: many(membershipPlan),
+}));
+
+export const stripeEventRelations = relations(stripeEvent, ({one, many}) => ({
+	stripeConnection: one(stripeConnection, {
+		fields: [stripeEvent.stripeConnectionId],
+		references: [stripeConnection.id]
+	}),
+	instructor: one(instructor, {
+		fields: [stripeEvent.instructorId],
+		references: [instructor.id]
+	}),
+	commerceLedgerEntries: many(commerceLedgerEntry),
+}));
+
+export const commerceOperationRelations = relations(commerceOperation, ({one, many}) => ({
+	stripeConnection: one(stripeConnection, {
+		fields: [commerceOperation.stripeConnectionId],
+		references: [stripeConnection.id]
+	}),
+	commerceLedgerEntries: many(commerceLedgerEntry),
+}));
+
+export const commerceLedgerEntryRelations = relations(commerceLedgerEntry, ({one}) => ({
+	stripeConnection: one(stripeConnection, {
+		fields: [commerceLedgerEntry.stripeConnectionId],
+		references: [stripeConnection.id]
+	}),
+	instructor: one(instructor, {
+		fields: [commerceLedgerEntry.instructorId],
+		references: [instructor.id]
+	}),
+	commerceOperation: one(commerceOperation, {
+		fields: [commerceLedgerEntry.operationId],
+		references: [commerceOperation.id]
+	}),
+	stripeEvent: one(stripeEvent, {
+		fields: [commerceLedgerEntry.stripeEventId],
+		references: [stripeEvent.id]
 	}),
 }));
 
@@ -1982,7 +2195,7 @@ export const funnelSessionRelations = relations(funnelSession, ({one, many}) => 
 	}),
 }));
 
-export const funnelEventRelations = relations(funnelEvent, ({one}) => ({
+export const funnelEventRelations = relations(funnelEvent, ({one, many}) => ({
 	funnel: one(funnel, {
 		fields: [funnelEvent.funnelId],
 		references: [funnel.id]
@@ -1990,6 +2203,26 @@ export const funnelEventRelations = relations(funnelEvent, ({one}) => ({
 	location: one(location, {
 		fields: [funnelEvent.locationId],
 		references: [location.id]
+	}),
+	adConversionDeliveries: many(adConversionDelivery),
+}));
+
+export const adConversionDeliveryRelations = relations(adConversionDelivery, ({one}) => ({
+	funnelEvent: one(funnelEvent, {
+		fields: [adConversionDelivery.eventId],
+		references: [funnelEvent.eventId],
+	}),
+	organization: one(organization, {
+		fields: [adConversionDelivery.organizationId],
+		references: [organization.id],
+	}),
+	location: one(location, {
+		fields: [adConversionDelivery.locationId],
+		references: [location.id],
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [adConversionDelivery.providerAccountId],
+		references: [providerAccount.id],
 	}),
 }));
 
@@ -2023,6 +2256,45 @@ export const adPlatformCredentialRelations = relations(adPlatformCredential, ({o
 	}),
 }));
 
+export const providerAccountRelations = relations(providerAccount, ({one, many}) => ({
+	organization: one(organization, {
+		fields: [providerAccount.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [providerAccount.locationId],
+		references: [location.id]
+	}),
+	createdBy: one(user, {
+		fields: [providerAccount.createdByUserId],
+		references: [user.id]
+	}),
+	googleCalendarSubscriptions: many(googleCalendarSubscription),
+	gmailSubscriptions: many(gmailSubscription),
+	outlookSubscriptions: many(outlookSubscription),
+	oneDriveSubscriptions: many(oneDriveSubscription),
+	adConversionDeliveries: many(adConversionDelivery),
+	emailDomains: many(emailDomain),
+	smsConfigs: many(smsConfig),
+	nodes: many(node),
+	oauthGrant: one(providerOAuthGrant),
+}));
+
+export const providerOAuthGrantRelations = relations(providerOAuthGrant, ({one}) => ({
+	providerAccount: one(providerAccount, {
+		fields: [providerOAuthGrant.providerAccountId],
+		references: [providerAccount.id]
+	}),
+	oauthAccount: one(account, {
+		fields: [providerOAuthGrant.oauthAccountId],
+		references: [account.id]
+	}),
+	authorizedBy: one(user, {
+		fields: [providerOAuthGrant.authorizedByUserId],
+		references: [user.id]
+	}),
+}));
+
 export const emailDomainRelations = relations(emailDomain, ({one, many}) => ({
 	organization: one(organization, {
 		fields: [emailDomain.organizationId],
@@ -2031,6 +2303,10 @@ export const emailDomainRelations = relations(emailDomain, ({one, many}) => ({
 	location: one(location, {
 		fields: [emailDomain.locationId],
 		references: [location.id]
+	}),
+	providerAccount: one(providerAccount, {
+		fields: [emailDomain.providerAccountId],
+		references: [providerAccount.id]
 	}),
 	campaigns: many(campaign),
 }));
@@ -2058,24 +2334,28 @@ export const campaignRecipientRelations = relations(campaignRecipient, ({one}) =
 	}),
 }));
 
-export const campaignRelations = relations(campaign, ({one, many}) => ({
-	campaignRecipients: many(campaignRecipient),
-	emailDomain: one(emailDomain, {
-		fields: [campaign.emailDomainId],
-		references: [emailDomain.id]
-	}),
-	organization: one(organization, {
-		fields: [campaign.organizationId],
-		references: [organization.id]
-	}),
-	location: one(location, {
-		fields: [campaign.locationId],
-		references: [location.id]
-	}),
-	emailTemplate: one(emailTemplate, {
-		fields: [campaign.templateId],
-		references: [emailTemplate.id]
-	}),
+export const campaignRelations = relations(campaign, ({ one, many }) => ({
+  campaignRecipients: many(campaignRecipient),
+  emailDomain: one(emailDomain, {
+    fields: [campaign.emailDomainId],
+    references: [emailDomain.id],
+  }),
+  organization: one(organization, {
+    fields: [campaign.organizationId],
+    references: [organization.id],
+  }),
+  location: one(location, {
+    fields: [campaign.locationId],
+    references: [location.id],
+  }),
+  emailTemplate: one(emailTemplate, {
+    fields: [campaign.templateId],
+    references: [emailTemplate.id],
+  }),
+  savedAudience: one(savedAudience, {
+    fields: [campaign.savedAudienceId],
+    references: [savedAudience.id],
+  }),
 }));
 
 export const unsubscribeTokenRelations = relations(unsubscribeToken, ({one}) => ({
@@ -2086,6 +2366,10 @@ export const unsubscribeTokenRelations = relations(unsubscribeToken, ({one}) => 
 }));
 
 export const bookingRelations = relations(booking, ({one}) => ({
+	calComCredential: one(calComCredential, {
+		fields: [booking.calComCredentialId],
+		references: [calComCredential.id]
+	}),
 	client: one(client, {
 		fields: [booking.clientId],
 		references: [client.id]
@@ -2110,6 +2394,10 @@ export const bookingRelations = relations(booking, ({one}) => ({
 
 export const bookingEventTypeRelations = relations(bookingEventType, ({one, many}) => ({
 	bookings: many(booking),
+	calComCredential: one(calComCredential, {
+		fields: [bookingEventType.calComCredentialId],
+		references: [calComCredential.id]
+	}),
 	organization: one(organization, {
 		fields: [bookingEventType.organizationId],
 		references: [organization.id]
@@ -2120,13 +2408,35 @@ export const bookingEventTypeRelations = relations(bookingEventType, ({one, many
 	}),
 }));
 
-export const calComCredentialRelations = relations(calComCredential, ({one}) => ({
+export const calComCredentialRelations = relations(calComCredential, ({one, many}) => ({
+	bookings: many(booking),
+	bookingEventTypes: many(bookingEventType),
+	webhookReceipts: many(calComWebhookReceipt),
 	organization: one(organization, {
 		fields: [calComCredential.organizationId],
 		references: [organization.id]
 	}),
 	location: one(location, {
 		fields: [calComCredential.locationId],
+		references: [location.id]
+	}),
+}));
+
+export const calComWebhookReceiptRelations = relations(calComWebhookReceipt, ({one}) => ({
+	booking: one(booking, {
+		fields: [calComWebhookReceipt.bookingId],
+		references: [booking.id]
+	}),
+	credential: one(calComCredential, {
+		fields: [calComWebhookReceipt.credentialId],
+		references: [calComCredential.id]
+	}),
+	organization: one(organization, {
+		fields: [calComWebhookReceipt.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [calComWebhookReceipt.locationId],
 		references: [location.id]
 	}),
 }));

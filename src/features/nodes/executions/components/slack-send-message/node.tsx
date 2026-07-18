@@ -45,7 +45,7 @@ export const SlackSendMessageNode: React.FC<
     nodeId: props.id,
     channel: SLACK_SEND_MESSAGE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchSlackSendMessageRealtimeToken as any,
+    refreshToken: fetchSlackSendMessageRealtimeToken,
   });
 
   const handleSubmit = (values: SlackSendMessageFormValues) => {

@@ -8,9 +8,15 @@ import {
   studioClass,
   instructor,
 } from "@/db/schema";
-import { validateApiKey, requireScope, apiError } from "@/lib/api-auth";
+import {
+  apiError,
+  requireApiKeyLocation,
+  requireScope,
+  validateApiKey,
+} from "@/lib/api-auth";
+import { occupiedStudioBookingStatuses } from "@/features/studio/server/class-booking-service";
 import { addDays, startOfDay } from "date-fns";
-import { and, asc, count, eq, gte, lte, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lte, type SQL } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
@@ -20,6 +26,8 @@ export async function GET(req: NextRequest) {
 
   const scope = requireScope(auth.apiKey.scopes, "classes:read");
   if (!scope.ok) return apiError(scope.error, 403);
+  const keyLocation = requireApiKeyLocation(auth.apiKey);
+  if (!keyLocation.ok) return apiError(keyLocation.error, 403);
 
   const { searchParams } = req.nextUrl;
   const daysAhead = Math.min(Number(searchParams.get("days") ?? "14"), 90);
@@ -32,6 +40,7 @@ export async function GET(req: NextRequest) {
 
   const conditions: SQL[] = [
     eq(studioClass.organizationId, auth.apiKey.organizationId),
+    eq(studioClass.locationId, keyLocation.locationId),
     eq(studioClass.status, ClassInstanceStatus.SCHEDULED),
     gte(studioClass.startTime, from),
     lte(studioClass.startTime, to),
@@ -73,7 +82,13 @@ export async function GET(req: NextRequest) {
     .leftJoin(classType, eq(studioClass.classTypeId, classType.id))
     .leftJoin(instructor, eq(studioClass.instructorId, instructor.id))
     .leftJoin(room, eq(studioClass.roomId, room.id))
-    .leftJoin(studioBooking, eq(studioBooking.classId, studioClass.id))
+    .leftJoin(
+      studioBooking,
+      and(
+        eq(studioBooking.classId, studioClass.id),
+        inArray(studioBooking.status, occupiedStudioBookingStatuses),
+      ),
+    )
     .where(and(...conditions))
     .groupBy(
       studioClass.id,
@@ -83,7 +98,7 @@ export async function GET(req: NextRequest) {
       instructor.id,
       instructor.name,
       room.id,
-      room.name
+      room.name,
     )
     .orderBy(asc(studioClass.startTime))
     .limit(limit);
@@ -96,7 +111,10 @@ export async function GET(req: NextRequest) {
     endTime: c.endTime,
     capacity: c.maxCapacity,
     bookedCount: c.bookedCount,
-    availableSpots: c.maxCapacity ? c.maxCapacity - c.bookedCount : null,
+    availableSpots:
+      c.maxCapacity !== null
+        ? Math.max(0, c.maxCapacity - c.bookedCount)
+        : null,
     status: c.status,
     isVirtual: c.isVirtual,
     difficulty: c.difficulty,

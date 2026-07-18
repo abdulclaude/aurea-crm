@@ -1,67 +1,23 @@
-"use client";
+import type { SearchParams } from "nuqs";
 
-import { Suspense } from "react";
+import { WorkflowsPageContent } from "@/features/workflows/components/workflows-page-content";
+import { workflowsParamsLoader } from "@/features/workflows/server/params-loader";
+import { prefetchWorkflows } from "@/features/workflows/server/prefetch";
+import { requireAuth } from "@/lib/auth-utils";
+import { HydrateClient } from "@/trpc/server";
 
-import { ErrorBoundary } from "react-error-boundary";
+type Props = {
+  searchParams: Promise<SearchParams>;
+};
 
-import WorkflowsList, {
-  WorkflowsContainer,
-  WorkflowsError,
-  WorkflowsLoading,
-  WorkflowsHeader,
-  WorkflowsSearch,
-} from "@/features/workflows/components/workflows";
-
-import { PageTabs } from "@/components/ui/page-tabs";
-import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
-import { Separator } from "@/components/ui/separator";
-import { useWorkflowsParams } from "@/features/workflows/hooks/use-workflows-params";
-
-export default function Page() {
-  const [params, setParams] = useWorkflowsParams();
-  const view = params.view || "all";
-
-  const handleTabChange = (tabId: string) => {
-    setParams({ ...params, view: tabId, page: 1 });
-  };
+export default async function Page({ searchParams }: Props) {
+  await requireAuth();
+  const params = await workflowsParamsLoader(searchParams);
+  await prefetchWorkflows(params);
 
   return (
-    <div className="space-y-0">
-      <div className="flex items-end justify-between gap-2 p-6 pb-6">
-        <div className="flex-1">
-          <WorkflowsHeader />
-        </div>
-
-        <WorkflowsSearch className="w-72" />
-      </div>
-
-      <Separator className="bg-black/5 dark:bg-white/5" />
-
-      <PageTabs
-        tabs={[
-          { id: "all", label: "All workflows" },
-          { id: "archived", label: "Archived" },
-          { id: "templates", label: "Templates" },
-          { id: "activity", label: "Activity" },
-        ]}
-        activeTab={view}
-        onTabChange={handleTabChange}
-        className="px-6"
-      />
-
-      {view === "activity" ? (
-        <div className="p-6">
-          <ActivityTimeline limit={50} filterByEntityType="workflow" />
-        </div>
-      ) : (
-        <WorkflowsContainer>
-          <ErrorBoundary fallback={<WorkflowsError />}>
-            <Suspense fallback={<WorkflowsLoading />}>
-              <WorkflowsList />
-            </Suspense>
-          </ErrorBoundary>
-        </WorkflowsContainer>
-      )}
-    </div>
+    <HydrateClient>
+      <WorkflowsPageContent />
+    </HydrateClient>
   );
 }

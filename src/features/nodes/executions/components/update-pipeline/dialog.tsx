@@ -128,7 +128,7 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Update Pipeline Stage Configuration</SheetTitle>
           <SheetDescription>
@@ -136,7 +136,7 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -154,7 +154,7 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Reference the updated deal in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "movedDeal"}.pipelineStageId}}`}
                     </span>
                   </FormDescription>
@@ -171,7 +171,7 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
                   <div className="flex items-center justify-between mb-2">
                     <FormLabel>Deal ID</FormLabel>
                     <div className="flex items-center space-x-2">
-                      <Label htmlFor="use-variable-deal-pipeline" className="text-xs text-white/60 cursor-pointer">
+                      <Label htmlFor="use-variable-deal-pipeline" className="text-xs text-muted-foreground cursor-pointer">
                         Use variables
                       </Label>
                       <Switch
@@ -205,14 +205,14 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
                               <div className="flex flex-col">
                                 <span className="font-medium">{deal.name}</span>
                                 {deal.value && (
-                                  <span className="text-xs text-white/60">
+                                  <span className="text-xs text-muted-foreground">
                                     {deal.currency} {deal.value.toString()}
                                   </span>
                                 )}
                               </div>
                             </SelectItem>
                           )) ?? (
-                            <div className="px-2 py-4 text-sm text-white/60">No deals found</div>
+                            <div className="px-2 py-4 text-sm text-muted-foreground">No deals found</div>
                           )}
                         </SelectContent>
                       </Select>

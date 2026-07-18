@@ -4,7 +4,7 @@ import { useState, use } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Command,
   CommandEmpty,
@@ -13,7 +13,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -22,21 +21,21 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
-import {
-  Calendar,
-  Users,
-  UserCheck,
-  UserX,
-  Search,
-  Plus,
-  Dumbbell,
-  ListOrdered,
-  Ban,
-} from "lucide-react";
+import { Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ClassRoomField } from "@/features/studio/components/class-room-field";
+import { ClassEditDialog } from "@/features/studio/components/class-edit-dialog";
+import { BookingOutcomeConfirmDialog } from "@/features/studio/components/booking-outcome-confirm-dialog";
+import { ClassBookingsTable } from "@/features/studio/components/class-bookings-table";
+import { ClassDetailActions } from "@/features/studio/components/class-detail-actions";
+import type { BookingOutcome } from "@/features/studio/lib/booking-outcome-impact";
+
+type PendingBookingOutcome = {
+  bookingIds: string[];
+  outcome: BookingOutcome;
+};
 
 export default function ClassDetailPage({
   params,
@@ -48,9 +47,11 @@ export default function ClassDetailPage({
   const queryClient = useQueryClient();
   const [bookClientId, setBookClientId] = useState("");
   const [clientSearch, setClientSearch] = useState("");
-  const [bookingSearch, setBookingSearch] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
+  const [editOpen, setEditOpen] = useState(false);
+  const [pendingOutcome, setPendingOutcome] =
+    useState<PendingBookingOutcome | null>(null);
 
   const { data: studioClass, isLoading } = useQuery(
     trpc.studioClassesEnhanced.getById.queryOptions({ classId }),
@@ -61,14 +62,35 @@ export default function ClassDetailPage({
     enabled: clientSearch.length >= 2,
   });
 
+  const permissions = useQuery(trpc.permissions.getCurrent.queryOptions());
+  const canManageAttendance = Boolean(
+    permissions.data?.capabilities.includes("attendance.manage"),
+  );
+  const canManageSchedule = Boolean(
+    permissions.data?.capabilities.includes("schedule.manage"),
+  );
+  const canManageWorkflows = Boolean(
+    permissions.data?.capabilities.includes("workflow.manage"),
+  );
+  const policyPreview = useQuery({
+    ...trpc.cancellationPolicy.getOutcomePolicyPreview.queryOptions({
+      classId,
+    }),
+    enabled: canManageAttendance,
+  });
+
   const bookMutation = useMutation(
     trpc.studioBookings.book.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (result) => {
         queryClient.invalidateQueries({
           queryKey: trpc.studioClassesEnhanced.getById.queryKey(),
         });
         setBookClientId("");
         setClientSearch("");
+        if (result.checkout?.url) {
+          window.location.assign(result.checkout.url);
+          return;
+        }
         toast.success("Booking confirmed");
       },
       onError: (err: { message: string }) => toast.error(err.message),
@@ -88,12 +110,13 @@ export default function ClassDetailPage({
   );
 
   const bulkStatusMutation = useMutation(
-    trpc.studioBookings.bulkUpdateStatus.mutationOptions({
+    trpc.cancellationPolicy.applyBookingOutcome.mutationOptions({
       onSuccess: (data) => {
         queryClient.invalidateQueries({
           queryKey: trpc.studioClassesEnhanced.getById.queryKey(),
         });
         setSelectedBookingIds([]);
+        setPendingOutcome(null);
         toast.success(
           `${data.updated} booking${data.updated === 1 ? "" : "s"} updated`,
         );
@@ -135,32 +158,25 @@ export default function ClassDetailPage({
   const STATUS_MAP: Record<string, { label: string; className: string }> = {
     SCHEDULED: {
       label: "Scheduled",
-      className: "text-sky-600 ring-sky-300 bg-sky-100 dark:border-sky-800",
+      className: "bg-sky-500/15 text-sky-700 ring-sky-500/30 dark:text-sky-200",
     },
     CANCELLED: {
       label: "Cancelled",
-      className: "text-rose-600 ring-rose-300 bg-rose-100 dark:border-rose-800",
+      className:
+        "bg-rose-500/15 text-rose-700 ring-rose-500/30 dark:text-rose-200",
     },
     COMPLETED: {
       label: "Completed",
       className:
-        "text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800",
+        "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-200",
     },
   };
   const statusInfo = STATUS_MAP[studioClass.status] ?? {
     label: studioClass.status,
-    className: "text-gray-600 ring-gray-300 bg-gray-100 dark:border-gray-700",
+    className: "bg-primary/10 text-primary ring-black/10",
   };
 
-  const filteredBookings = studioClass.studioBooking.filter((b) => {
-    if (!bookingSearch.trim()) return true;
-    const q = bookingSearch.toLowerCase();
-    return (
-      b.client.name?.toLowerCase().includes(q) ||
-      b.client.email?.toLowerCase().includes(q)
-    );
-  });
-  const eligibleBookings = filteredBookings.filter(
+  const eligibleBookings = studioClass.studioBooking.filter(
     (booking) =>
       booking.status === "BOOKED" && !checkedInClientIds.has(booking.clientId),
   );
@@ -168,24 +184,16 @@ export default function ClassDetailPage({
   const selectedEligibleBookingIds = selectedBookingIds.filter((id) =>
     eligibleBookingIds.includes(id),
   );
-  const allEligibleSelected =
-    eligibleBookingIds.length > 0 &&
-    eligibleBookingIds.every((id) => selectedBookingIds.includes(id));
   const selectedClient = clients?.items.find(
     (client) => client.id === bookClientId,
   );
-
-  function toggleBookingSelection(bookingId: string, checked: boolean) {
-    setSelectedBookingIds((current) =>
-      checked
-        ? Array.from(new Set([...current, bookingId]))
-        : current.filter((id) => id !== bookingId),
-    );
-  }
-
-  function toggleAllEligible(checked: boolean) {
-    setSelectedBookingIds(checked ? eligibleBookingIds : []);
-  }
+  const pendingBookingNames = pendingOutcome
+    ? studioClass.studioBooking
+        .filter((booking) => pendingOutcome.bookingIds.includes(booking.id))
+        .map(
+          (booking) => booking.client.name ?? booking.client.email ?? "Member",
+        )
+    : [];
 
   function bulkCheckIn() {
     if (selectedEligibleBookingIds.length === 0) return;
@@ -205,7 +213,7 @@ export default function ClassDetailPage({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
-      <div className="flex items-end justify-between gap-3 px-6 py-4 shrink-0">
+      <div className="flex shrink-0 flex-col gap-3 px-4 py-4 sm:flex-row sm:items-end sm:justify-between sm:px-6">
         <div className="min-w-0">
           <h1 className="text-base font-semibold text-primary">
             {studioClass.name}
@@ -217,41 +225,42 @@ export default function ClassDetailPage({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {studioClass.classType && (
-            <Badge
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {canManageSchedule ? (
+            <Button
+              size="sm"
               variant="outline"
-              className="text-[11px] w-fit capitalize"
-              style={{
-                backgroundColor: studioClass.classType.color
-                  ? `${studioClass.classType.color}20`
-                  : undefined,
-                color: studioClass.classType.color ?? undefined,
-                borderColor: studioClass.classType.color
-                  ? `${studioClass.classType.color}40`
-                  : undefined,
-                boxShadow: studioClass.classType.color
-                  ? `0 0 0 1px ${studioClass.classType.color}30`
-                  : undefined,
-              }}
+              className="h-8"
+              onClick={() => setEditOpen(true)}
             >
-              {studioClass.classType.name}
-            </Badge>
-          )}
-          <Badge
-            variant="outline"
-            className={cn("text-[11px] w-fit capitalize", statusInfo.className)}
-          >
-            {statusInfo.label}
-          </Badge>
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          ) : null}
+          <ClassDetailActions
+            canManage={canManageSchedule}
+            canManageWorkflows={canManageWorkflows}
+            classId={classId}
+            className={studioClass.name}
+            organizationSlug={studioClass.organizationSlug}
+            rows={studioClass.studioBooking.map((booking) => ({
+              name: booking.client.name ?? "Member",
+              email: booking.client.email,
+              phone: booking.client.phone,
+              status: booking.status,
+            }))}
+            startTime={studioClass.startTime}
+            status={studioClass.status}
+            onEdit={() => setEditOpen(true)}
+          />
         </div>
       </div>
 
       <Separator className="bg-black/5 dark:bg-white/5" />
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
         {/* Left sidebar */}
-        <div className="w-72 shrink-0 border-r border-black/5 dark:border-white/5 overflow-y-auto">
+        <div className="w-full shrink-0 border-b border-black/5 dark:border-white/5 lg:w-72 lg:border-r lg:border-b-0 lg:overflow-y-auto">
           <div className="">
             {/* Stats row */}
             <div className="grid grid-cols-3 gap-2 p-5">
@@ -308,6 +317,38 @@ export default function ClassDetailPage({
             {/* Class info fields */}
             <div className="space-y-3 p-5">
               <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2 pb-1">
+                  {studioClass.serviceType && (
+                    <Badge
+                      variant="outline"
+                      className="max-w-44 truncate text-[10px] ring-0"
+                      style={{
+                        backgroundColor: studioClass.serviceType.calendarColor
+                          ? `${studioClass.serviceType.calendarColor}18`
+                          : undefined,
+                        borderColor: studioClass.serviceType.calendarColor
+                          ? `${studioClass.serviceType.calendarColor}66`
+                          : undefined,
+                        boxShadow: studioClass.serviceType.calendarColor
+                          ? `0 0 0 1px ${studioClass.serviceType.calendarColor}66`
+                          : undefined,
+                        color:
+                          studioClass.serviceType.calendarColor ?? undefined,
+                      }}
+                    >
+                      {studioClass.serviceType.name}
+                    </Badge>
+                  )}
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "w-fit text-[10px] capitalize",
+                      statusInfo.className,
+                    )}
+                  >
+                    {statusInfo.label}
+                  </Badge>
+                </div>
                 <div className="flex items-start gap-3">
                   <div className="space-y-1">
                     <p className="text-[11px] text-primary/50">Date</p>
@@ -323,14 +364,24 @@ export default function ClassDetailPage({
                   <div className="space-y-1">
                     <p className="text-[11px] text-primary/50">Time</p>
                     <p className="text-xs text-primary font-medium">
-                      {format(new Date(studioClass.startTime), "h:mm a")} –{" "}
-                      {format(new Date(studioClass.endTime), "h:mm a")}
+                      {format(new Date(studioClass.startTime), "HH:mm")} -{" "}
+                      {format(new Date(studioClass.endTime), "HH:mm")}
                     </p>
                   </div>
                 </div>
 
                 {studioClass.instructor && (
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="size-9 shrink-0 overflow-hidden rounded-full">
+                      <AvatarImage
+                        src={studioClass.instructor.profilePhoto ?? undefined}
+                        alt={`${studioClass.instructor.name} profile`}
+                        className="size-full object-cover object-center"
+                      />
+                      <AvatarFallback className="rounded-full text-[10px]">
+                        {studioClass.instructor.name.slice(0, 1).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
                     <div className="space-y-1">
                       <p className="text-[11px] text-primary/50">Instructor</p>
                       <p className="text-xs text-primary font-medium">
@@ -448,7 +499,7 @@ export default function ClassDetailPage({
             {studioClass.classWaitlist.length > 0 && (
               <>
                 <Separator className="bg-black/5 dark:bg-white/5" />
-                <div className="space-y-2">
+                <div className="space-y-2 px-5 py-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium text-primary/50">
                       Waitlist
@@ -461,7 +512,7 @@ export default function ClassDetailPage({
                     {studioClass.classWaitlist.map((entry, i) => (
                       <div
                         key={entry.id}
-                        className="flex items-center gap-2.5 py-1.5"
+                        className="flex items-center gap-2.5 rounded-md px-2 py-1.5 ring-1 ring-black/5 dark:ring-white/5"
                       >
                         <span className="text-[10px] text-primary/30 w-4 text-right font-semibold">
                           #{i + 1}
@@ -476,16 +527,21 @@ export default function ClassDetailPage({
                         </div>
                         <Badge
                           variant="outline"
-                          className={`text-[9px] px-1.5 shrink-0 ${
+                          className={`px-1.5 text-[9px] shrink-0 ${
                             entry.status === "WAITING"
-                              ? "text-blue-600 border-blue-200 dark:border-blue-800"
+                              ? "bg-sky-500/15 text-sky-700 ring-sky-500/30 dark:text-sky-200"
                               : entry.status === "NOTIFIED"
-                                ? "text-amber-600 border-amber-200 dark:border-amber-800"
-                                : "text-emerald-600 border-emerald-200 dark:border-emerald-800"
+                                ? "bg-amber-500/15 text-amber-700 ring-amber-500/30 dark:text-amber-200"
+                                : entry.status === "CANCELLED_WAITLIST" ||
+                                    entry.status === "EXPIRED"
+                                  ? "bg-rose-500/15 text-rose-700 ring-rose-500/30 dark:text-rose-200"
+                                  : "bg-emerald-500/15 text-emerald-700 ring-emerald-500/30 dark:text-emerald-200"
                           }`}
                         >
-                          {entry.status.charAt(0) +
-                            entry.status.slice(1).toLowerCase()}
+                          {entry.status
+                            .replaceAll("_", " ")
+                            .toLowerCase()
+                            .replace(/^\w/, (letter) => letter.toUpperCase())}
                         </Badge>
                       </div>
                     ))}
@@ -496,279 +552,49 @@ export default function ClassDetailPage({
           </div>
         </div>
 
-        {/* Main: Bookings table */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          {/* Table toolbar */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-black/5 dark:border-white/5 shrink-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <ListOrdered className="size-4 text-primary/40" />
-              <span className="text-sm font-medium text-primary">Bookings</span>
-              <span className="text-xs text-primary/40">
-                / {studioClass.studioBooking.length} total
-              </span>
-
-              {selectedEligibleBookingIds.length > 0 && (
-                <div className="ml-2 flex flex-wrap items-center gap-1">
-                  <Badge
-                    variant="secondary"
-                    className="text-xs h-7 rounded-md ring ring-black/10"
-                  >
-                    {selectedEligibleBookingIds.length} selected
-                  </Badge>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    disabled={checkInMutation.isPending}
-                    onClick={bulkCheckIn}
-                  >
-                    Bulk approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    disabled={bulkStatusMutation.isPending}
-                    onClick={() =>
-                      bulkStatusMutation.mutate({
-                        bookingIds: selectedEligibleBookingIds,
-                        status: "NO_SHOW",
-                      })
-                    }
-                  >
-                    Bulk no-show
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    disabled={bulkStatusMutation.isPending}
-                    onClick={() =>
-                      bulkStatusMutation.mutate({
-                        bookingIds: selectedEligibleBookingIds,
-                        status: "LATE_CANCEL",
-                      })
-                    }
-                  >
-                    Bulk late cancel
-                  </Button>
-                </div>
-              )}
-            </div>
-            <div className="relative w-56">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-primary/40 z-10" />
-              <Input
-                value={bookingSearch}
-                onChange={(e) => setBookingSearch(e.target.value)}
-                placeholder="Search members..."
-                className="pl-8 text-xs h-8"
-              />
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="flex-1 overflow-y-auto">
-            {filteredBookings.length > 0 ? (
-              <table className="w-full">
-                <thead className="sticky top-0 bg-background z-10 border-b border-black/5 dark:border-white/5">
-                  <tr>
-                    <th className="px-5 py-2.5 text-left w-8">
-                      <Checkbox
-                        checked={allEligibleSelected}
-                        disabled={eligibleBookingIds.length === 0}
-                        onCheckedChange={(checked) =>
-                          toggleAllEligible(checked === true)
-                        }
-                        aria-label="Select all eligible bookings"
-                      />
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Name
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Email
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Date
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Start time
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      End time
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Status
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-xs font-normal text-primary/45">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5 dark:divide-white/5">
-                  {filteredBookings.map((booking) => {
-                    const isCheckedIn = checkedInClientIds.has(
-                      booking.clientId,
-                    );
-                    const isCancelled =
-                      booking.status === "CANCELLED" ||
-                      booking.status === "LATE_CANCEL";
-                    const isNoShow = booking.status === "NO_SHOW";
-                    const canSelect = !isCheckedIn && !isCancelled && !isNoShow;
-
-                    return (
-                      <tr
-                        key={booking.id}
-                        className="group hover:bg-primary/[0.02] transition-colors"
-                      >
-                        <td className="px-5 py-3">
-                          <Checkbox
-                            checked={selectedBookingIds.includes(booking.id)}
-                            disabled={!canSelect}
-                            onCheckedChange={(checked) =>
-                              toggleBookingSelection(
-                                booking.id,
-                                checked === true,
-                              )
-                            }
-                            aria-label={`Select ${booking.client.name}`}
-                          />
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`size-7 rounded-md flex items-center justify-center text-[10px] font-semibold shrink-0 ${
-                                isCheckedIn
-                                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                  : isCancelled
-                                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                    : isNoShow
-                                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                                      : "bg-primary/5 text-primary/60"
-                              }`}
-                            >
-                              {booking.client.name?.[0]?.toUpperCase() ?? "?"}
-                            </div>
-                            <p className="text-xs font-medium text-primary/75 truncate">
-                              {booking.client.name}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-3 py-3">
-                          <p className="text-xs text-primary/75 truncate">
-                            {booking.client.email}
-                          </p>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="text-xs text-primary/75 whitespace-nowrap">
-                            {format(
-                              new Date(studioClass.startTime),
-                              "MMM d, yyyy",
-                            )}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="text-[11px] text-primary/75 whitespace-nowrap">
-                            {format(new Date(studioClass.startTime), "h:mm a")}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="text-[11px] text-primary/75 whitespace-nowrap">
-                            {format(new Date(studioClass.endTime), "h:mm a")}
-                          </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          {isCheckedIn ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[11px] w-fit capitalize text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800"
-                            >
-                              Checked in
-                            </Badge>
-                          ) : isCancelled ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[11px] w-fit capitalize text-gray-600 ring-gray-300 bg-gray-100 dark:border-gray-700"
-                            >
-                              {booking.status === "LATE_CANCEL"
-                                ? "Late cancel"
-                                : "Cancelled"}
-                            </Badge>
-                          ) : isNoShow ? (
-                            <Badge
-                              variant="outline"
-                              className="text-[11px] w-fit capitalize text-rose-600 ring-rose-300 bg-rose-100 dark:border-rose-800"
-                            >
-                              No-show
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className="text-[11px] w-fit capitalize text-sky-600 ring-sky-300 bg-sky-100 dark:border-sky-800"
-                            >
-                              Booked
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="px-3 py-3">
-                          {!isCheckedIn && !isCancelled && !isNoShow && (
-                            <div className="flex items-center gap-1">
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                className="h-7 w-max text-xs"
-                                onClick={() =>
-                                  bulkStatusMutation.mutate({
-                                    bookingIds: [booking.id],
-                                    status: "NO_SHOW",
-                                  })
-                                }
-                                disabled={bulkStatusMutation.isPending}
-                              >
-                                No show
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="success"
-                                className="h-7 w-max text-xs"
-                                onClick={() =>
-                                  checkInMutation.mutate({
-                                    classId,
-                                    clientId: booking.clientId,
-                                    method: "MANUAL",
-                                  })
-                                }
-                                disabled={checkInMutation.isPending}
-                              >
-                                Check in
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <Users className="size-8 text-primary/15 mb-3" />
-                <p className="text-sm font-medium text-primary">
-                  {bookingSearch
-                    ? "No members match your search"
-                    : "No bookings yet"}
-                </p>
-                <p className="text-xs text-primary/50 mt-1">
-                  {bookingSearch
-                    ? "Try a different name or email"
-                    : "Bookings will appear here once made"}
-                </p>
-              </div>
-            )}
-          </div>
+        <div className="min-h-[28rem] min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto">
+          <ClassBookingsTable
+            bookings={studioClass.studioBooking}
+            startTime={studioClass.startTime}
+            endTime={studioClass.endTime}
+            checkedInClientIds={checkedInClientIds}
+            selectedBookingIds={selectedBookingIds}
+            canManageAttendance={canManageAttendance}
+            checkInPending={checkInMutation.isPending}
+            outcomePending={bulkStatusMutation.isPending}
+            onSelectedBookingIdsChange={setSelectedBookingIds}
+            onNoShow={(bookingIds) =>
+              setPendingOutcome({ bookingIds, outcome: "NO_SHOW" })
+            }
+            onLateCancel={(bookingIds) =>
+              setPendingOutcome({ bookingIds, outcome: "LATE_CANCEL" })
+            }
+            onBulkCheckIn={bulkCheckIn}
+          />
         </div>
       </div>
+      <ClassEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        studioClass={studioClass}
+      />
+      <BookingOutcomeConfirmDialog
+        bookingNames={pendingBookingNames}
+        open={Boolean(pendingOutcome)}
+        outcome={pendingOutcome?.outcome ?? "NO_SHOW"}
+        pending={bulkStatusMutation.isPending}
+        policy={policyPreview.data ?? null}
+        policyError={policyPreview.error?.message ?? null}
+        policyLoading={policyPreview.isLoading}
+        onOpenChange={(open) => !open && setPendingOutcome(null)}
+        onConfirm={() => {
+          if (!pendingOutcome) return;
+          bulkStatusMutation.mutate({
+            bookingIds: pendingOutcome.bookingIds,
+            status: pendingOutcome.outcome,
+          });
+        }}
+      />
     </div>
   );
 }

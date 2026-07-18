@@ -1,48 +1,82 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { enqueueOutlookNotification } from "@/features/outlook/server/subscriptions";
+import {
+  authenticateOutlookNotifications,
+  enqueueOutlookNotifications,
+} from "@/features/outlook/server/subscriptions";
+import {
+  MAX_MICROSOFT_NOTIFICATION_BYTES,
+  microsoftChangeNotificationCollectionSchema,
+  microsoftValidationTokenSchema,
+} from "@/features/microsoft/lib/subscription-contracts";
+import {
+  readBoundedRawBody,
+  WebhookPayloadTooLargeError,
+} from "@/features/webhooks/server/bounded-raw-body";
 
-export async function POST(request: NextRequest) {
+export const runtime = "nodejs";
+
+export async function POST(request: NextRequest): Promise<Response> {
+  const validationToken = request.nextUrl.searchParams.get("validationToken");
+  if (validationToken !== null) {
+    const parsed = microsoftValidationTokenSchema.safeParse(validationToken);
+    return parsed.success
+      ? new Response(parsed.data, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      : NextResponse.json(
+          { success: false, error: "Invalid validation token." },
+          { status: 400 },
+        );
+  }
+
   try {
-    // Microsoft sends a validation token on subscription creation
-    const validationToken = request.nextUrl.searchParams.get("validationToken");
-    if (validationToken) {
-      return new Response(validationToken, {
-        status: 200,
-        headers: { "Content-Type": "text/plain" },
-      });
-    }
-
-    // Verify clientState matches what we sent
-    const body = await request.json().catch(() => null);
-    const notifications = body?.value;
-
-    if (!Array.isArray(notifications)) {
+    const rawBody = await readBoundedRawBody(
+      request,
+      MAX_MICROSOFT_NOTIFICATION_BYTES,
+    );
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
       return NextResponse.json(
         { success: false, error: "Invalid notification payload." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    for (const notification of notifications) {
-      if (notification.clientState !== "aurea-crm-outlook-webhook") {
-        continue;
-      }
-
-      await enqueueOutlookNotification({
-        subscriptionId: notification.subscriptionId,
-        changeType: notification.changeType,
-        resource: notification.resource,
-      });
+    const parsed =
+      microsoftChangeNotificationCollectionSchema.safeParse(payload);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { success: false, error: "Invalid notification payload." },
+        { status: 400 },
+      );
     }
 
-    return NextResponse.json({ success: true });
+    const notifications = await authenticateOutlookNotifications(
+      parsed.data.value,
+    );
+    await enqueueOutlookNotifications(notifications);
+
+    return NextResponse.json(
+      { success: true, accepted: notifications.length },
+      { status: 202 },
+    );
   } catch (error) {
+    if (error instanceof WebhookPayloadTooLargeError) {
+      return NextResponse.json(
+        { success: false, error: "Notification payload too large." },
+        { status: 413 },
+      );
+    }
+
     console.error("Outlook webhook error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to handle Outlook webhook." },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

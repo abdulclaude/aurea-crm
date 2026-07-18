@@ -36,7 +36,6 @@ export const stripeCreateInvoiceExecutor: NodeExecutor<StripeCreateInvoiceData> 
     const customerId = data.customerId ? decode(Handlebars.compile(data.customerId)(context)) : undefined;
     const amount = data.amount ? decode(Handlebars.compile(data.amount)(context)) : undefined;
 
-    // TODO: Implement Stripe: Create Invoice logic here
     const result = await step.run("stripe-create-invoice", async () => {
       // Add implementation here
       throw new NonRetriableError("Stripe: Create Invoice: Not yet implemented");

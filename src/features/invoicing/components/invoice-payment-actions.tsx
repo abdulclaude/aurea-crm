@@ -7,23 +7,25 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useTRPC } from "@/trpc/client";
-import { Loader2, Copy, Check } from "lucide-react";
-import { ButtonGroup } from "@/components/ui/button-group";
+import { Check, CheckCircle2, Copy, Loader2 } from "lucide-react";
 
-interface InvoicePaymentActionsProps {
-  invoiceId: string;
+type InvoicePaymentActionsProps = {
+  accessToken: string;
   invoiceNumber: string;
   amountDue: string;
-  currency: string;
   isPaid: boolean;
-}
+  paymentOptions: {
+    stripe: boolean;
+    bankTransfer: boolean;
+  };
+};
 
 export function InvoicePaymentActions({
-  invoiceId,
+  accessToken,
   invoiceNumber,
   amountDue,
-  currency,
   isPaid,
+  paymentOptions,
 }: InvoicePaymentActionsProps) {
   const trpc = useTRPC();
   const router = useRouter();
@@ -34,15 +36,11 @@ export function InvoicePaymentActions({
   const paymentSuccess = searchParams.get("success") === "true";
   const paymentCanceled = searchParams.get("canceled") === "true";
 
-  // Generate Stripe payment link mutation
   const { mutate: generateStripeLink, isPending: isGeneratingLink } =
     useMutation(
-      trpc.invoices.generatePaymentLink.mutationOptions({
+      trpc.publicInvoices.createCheckout.mutationOptions({
         onSuccess: (data) => {
-          if (data.paymentLink) {
-            // Redirect to Stripe Checkout
-            window.location.href = data.paymentLink;
-          }
+          window.location.href = data.checkoutUrl;
         },
         onError: (error) => {
           toast.error(error.message || "Failed to initialize payment");
@@ -51,42 +49,51 @@ export function InvoicePaymentActions({
       })
     );
 
-  const handleStripePayment = () => {
+  const handleStripePayment = (): void => {
     setIsProcessing(true);
-    generateStripeLink({
-      invoiceId,
-      provider: "STRIPE",
-    });
+    generateStripeLink({ token: accessToken });
   };
 
   const [showBankDetails, setShowBankDetails] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Fetch bank transfer details
   const { data: bankTransferDetails, isLoading: isLoadingBankDetails } =
     useQuery({
-      ...trpc.invoices.getBankTransferDetails.queryOptions({ invoiceId }),
+      ...trpc.publicInvoices.getBankTransferDetails.queryOptions({
+        token: accessToken,
+      }),
+      enabled: paymentOptions.bankTransfer,
     });
 
-  const handleBankTransfer = () => {
+  useEffect(() => {
+    if (paymentCanceled) {
+      toast.error("Payment was canceled", { id: "payment-canceled" });
+    }
+  }, [paymentCanceled]);
+
+  const handleBankTransfer = (): void => {
     if (bankTransferDetails) {
       setShowBankDetails(true);
     } else {
       toast.info(
-        "For bank transfer, please client the merchant directly. Payment instructions may have been included in your invoice email.",
+        "Contact the merchant for bank transfer instructions.",
         { duration: 5000 }
       );
     }
   };
 
-  const copyToClipboard = (text: string, field: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedField(field);
-    toast.success(`${field} copied to clipboard`);
-    setTimeout(() => setCopiedField(null), 2000);
+  const copyToClipboard = async (text: string, field: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      toast.success(`${field} copied to clipboard`);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      toast.error(`Could not copy ${field.toLowerCase()}`);
+    }
   };
 
-  const formatReference = (format: string | null | undefined) => {
+  const formatReference = (format: string | null | undefined): string => {
     if (!format) return invoiceNumber;
     return format.replace("{invoiceNumber}", invoiceNumber);
   };
@@ -95,19 +102,7 @@ export function InvoicePaymentActions({
     return (
       <div className="bg-emerald-50 dark:bg-green-900/20  p-8 text-center">
         <div className="inline-flex items-center justify-center size-12 rounded-full bg-emerald-100 dark:bg-emerald-900/40 mb-2">
-          <svg
-            className="size-6 text-emerald-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
+          <CheckCircle2 className="size-6 text-emerald-500" />
         </div>
         <h3 className="text-lg font-semibold text-emerald-500 mb-1">
           Invoice paid
@@ -125,26 +120,14 @@ export function InvoicePaymentActions({
         <Separator />
         <div className="bg-emerald-50 dark:bg-emerald-900/20 p-8 text-center">
           <div className="inline-flex items-center justify-center size-12 rounded-full bg-emerald-100 dark:bg-emerald-900/40 mb-2">
-            <svg
-              className="w-8 h-8 text-emerald-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
+            <CheckCircle2 className="size-8 text-emerald-500" />
           </div>
           <h3 className="text-lg font-semibold text-emerald-500 mb-1">
-            Payment Successful!
+            Payment submitted
           </h3>
           <p className="text-xs text-emerald-500">
-            Your payment has been processed successfully. A receipt has been
-            sent to your email.
+            We are confirming the payment with the payment provider. This
+            invoice will show as paid once confirmation is complete.
           </p>
           <Button onClick={() => router.refresh()} variant="outline">
             Refresh invoice details
@@ -152,10 +135,6 @@ export function InvoicePaymentActions({
         </div>
       </>
     );
-  }
-
-  if (paymentCanceled) {
-    toast.error("Payment was canceled", { id: "payment-canceled" });
   }
 
   return (
@@ -166,34 +145,40 @@ export function InvoicePaymentActions({
           Click below to pay this invoice securely
         </p>
         <div className="flex flex-col sm:flex-row gap-2 justify-center">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleBankTransfer}
-            disabled={isProcessing || isLoadingBankDetails}
-          >
-            Pay with Bank Transfer
-          </Button>
+          {paymentOptions.bankTransfer ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBankTransfer}
+              disabled={isProcessing || isLoadingBankDetails}
+            >
+              Pay with Bank Transfer
+            </Button>
+          ) : null}
 
-          <Button
-            size="sm"
-            className="w-max"
-            onClick={handleStripePayment}
-            disabled={isProcessing || isGeneratingLink}
-            variant="gradient"
-          >
-            {isProcessing || isGeneratingLink ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              "Pay with Stripe"
-            )}
-          </Button>
+          {paymentOptions.stripe ? (
+            <Button
+              size="sm"
+              className="w-max"
+              onClick={handleStripePayment}
+              disabled={isProcessing || isGeneratingLink}
+              variant="gradient"
+            >
+              {isProcessing || isGeneratingLink ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Pay with Stripe"
+              )}
+            </Button>
+          ) : null}
         </div>
         <p className="text-xs text-primary mt-4">
-          Secure payment processing • All major cards accepted
+          {paymentOptions.stripe || paymentOptions.bankTransfer
+            ? "Choose one of the available payment methods."
+            : "Contact the merchant to arrange payment."}
         </p>
       </div>
 
@@ -443,16 +428,6 @@ export function InvoicePaymentActions({
                   </p>
                 </div>
 
-                {/* TODO: Add upload proof of payment button here */}
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    toast.info("Upload functionality coming soon");
-                  }}
-                >
-                  Upload Proof of Payment
-                </Button>
               </div>
             </div>
           </div>

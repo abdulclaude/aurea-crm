@@ -1,0 +1,4 @@
+ALTER TYPE "public"."NodeType" ADD VALUE IF NOT EXISTS 'FORM_SUBMITTED_TRIGGER';--> statement-breakpoint
+ALTER TYPE "public"."NodeType" ADD VALUE IF NOT EXISTS 'PRICING_OPTION_PURCHASED_TRIGGER';--> statement-breakpoint
+ALTER TYPE "public"."NodeType" ADD VALUE IF NOT EXISTS 'CLIENT_INACTIVITY_TRIGGER';--> statement-breakpoint
+ALTER TYPE "public"."NodeType" ADD VALUE IF NOT EXISTS 'SEND_EMAIL';

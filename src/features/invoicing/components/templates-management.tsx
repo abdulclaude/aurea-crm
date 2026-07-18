@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Eye, Pencil, Copy, Trash, FileText } from "lucide-react";
+import { Copy, Trash, FileText } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTRPC } from "@/trpc/client";
 import { PRESET_TEMPLATES } from "../lib/template-presets";
+
+const PRESET_TEMPLATE_KEYS = ["minimal", "corporate"] as const;
 
 export function TemplatesManagement() {
   const trpc = useTRPC();
@@ -54,7 +56,7 @@ export function TemplatesManagement() {
       onError: (error) => {
         toast.error(error.message || "Failed to delete template");
       },
-    })
+    }),
   );
 
   // Duplicate mutation
@@ -69,8 +71,22 @@ export function TemplatesManagement() {
       onError: (error) => {
         toast.error(error.message || "Failed to duplicate template");
       },
-    })
+    }),
   );
+  const { mutate: duplicatePreset, isPending: isDuplicatingPreset } =
+    useMutation(
+      trpc.invoices.duplicatePreset.mutationOptions({
+        onSuccess: () => {
+          queryClient.invalidateQueries({
+            queryKey: [["invoices", "listTemplates"]],
+          });
+          toast.success("Template created from preset");
+        },
+        onError: (error) => {
+          toast.error(error.message || "Failed to use preset");
+        },
+      }),
+    );
 
   const handleDelete = (templateId: string) => {
     deleteTemplate({ id: templateId });
@@ -80,24 +96,20 @@ export function TemplatesManagement() {
     duplicateTemplate({ id: templateId });
   };
 
-  const presetTemplates = Object.entries(PRESET_TEMPLATES).map(([key, template]) => ({
+  const presetTemplates = PRESET_TEMPLATE_KEYS.map((key) => ({
     id: key,
-    name: template.name,
-    description: template.description,
+    name: PRESET_TEMPLATES[key].name,
+    description: PRESET_TEMPLATES[key].description,
     isSystem: true,
   }));
 
   return (
     <div className="space-y-6">
-      {/* Header with Create Button */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
           {templates.length} custom template{templates.length !== 1 ? "s" : ""}
         </div>
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
-          Create Template
-        </Button>
       </div>
 
       {/* Loading State */}
@@ -128,7 +140,9 @@ export function TemplatesManagement() {
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <CardTitle className="text-base">{template.name}</CardTitle>
+                        <CardTitle className="text-base">
+                          {template.name}
+                        </CardTitle>
                         <CardDescription className="mt-1">
                           {template.description}
                         </CardDescription>
@@ -144,19 +158,19 @@ export function TemplatesManagement() {
                     </div>
                   </CardContent>
                   <CardFooter className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1">
-                      <Eye className="mr-2 h-4 w-4" />
-                      Preview
-                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => {
-                        // TODO: Implement duplicate from preset
-                        toast.info("Feature coming soon");
-                      }}
+                      className="flex-1"
+                      disabled={isDuplicatingPreset}
+                      onClick={() =>
+                        duplicatePreset({
+                          preset: template.id,
+                        })
+                      }
                     >
                       <Copy className="h-4 w-4" />
+                      Use preset
                     </Button>
                   </CardFooter>
                 </Card>
@@ -174,7 +188,9 @@ export function TemplatesManagement() {
                     <CardHeader>
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <CardTitle className="text-base">{template.name}</CardTitle>
+                          <CardTitle className="text-base">
+                            {template.name}
+                          </CardTitle>
                           {template.description && (
                             <CardDescription className="mt-1">
                               {template.description}
@@ -194,16 +210,10 @@ export function TemplatesManagement() {
                       </div>
                     </CardContent>
                     <CardFooter className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        <Eye className="mr-2 h-4 w-4" />
-                        Preview
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
+                        className="flex-1"
                         onClick={() => handleDuplicate(template.id)}
                         disabled={isDuplicating}
                       >
@@ -231,14 +241,13 @@ export function TemplatesManagement() {
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                <h3 className="text-lg font-semibold mb-2">No custom templates yet</h3>
-                <p className="text-sm text-muted-foreground text-center mb-6">
-                  Create your first custom invoice template or use one of our system templates
+                <h3 className="text-lg font-semibold mb-2">
+                  No custom templates yet
+                </h3>
+                <p className="text-sm text-muted-foreground text-center">
+                  Use one of the system templates above to create your first
+                  custom template.
                 </p>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Template
-                </Button>
               </CardContent>
             </Card>
           )}
@@ -246,13 +255,17 @@ export function TemplatesManagement() {
       )}
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteTemplateId} onOpenChange={() => setDeleteTemplateId(null)}>
+      <AlertDialog
+        open={!!deleteTemplateId}
+        onOpenChange={() => setDeleteTemplateId(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Template</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this template? This action cannot be undone.
-              Invoices using this template will revert to the default template.
+              Are you sure you want to delete this template? This action cannot
+              be undone. Invoices using this template will revert to the default
+              template.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -45,7 +45,7 @@ export const GmailReplyToEmailNode: React.FC<
     nodeId: props.id,
     channel: GMAIL_REPLY_TO_EMAIL_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGmailReplyToEmailRealtimeToken as any,
+    refreshToken: fetchGmailReplyToEmailRealtimeToken,
   });
 
   const handleSubmit = (values: GmailReplyToEmailFormValues) => {

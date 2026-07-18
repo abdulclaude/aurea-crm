@@ -5,6 +5,7 @@
  */
 
 import type { FunnelDomainType } from "@/db/enums";
+import QRCode from "qrcode";
 
 export const PLATFORM_BASE_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || "localhost:3000";
 
@@ -59,17 +60,19 @@ export function getFunnelEditorUrl(
 /**
  * Generate shareable link for a funnel page
  */
-export function generateShareableLink(
+export async function generateShareableLink(
   funnelId: string,
   pageSlug: string,
   domainConfig?: FunnelDomainConfig
-): {
+): Promise<{
   url: string;
   qrCodeUrl: string;
-} {
+}> {
   const url = getPublicFunnelPageUrl(funnelId, pageSlug, domainConfig);
-  // QR code can be generated using a service like api.qrserver.com
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`;
+  const qrCodeUrl = await QRCode.toDataURL(url, {
+    width: 300,
+    margin: 2,
+  });
 
   return { url, qrCodeUrl };
 }

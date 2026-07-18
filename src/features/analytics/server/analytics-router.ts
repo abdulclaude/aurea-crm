@@ -81,6 +81,7 @@ export const analyticsRouter = createTRPCRouter({
       }
 
       const executionConditions: (SQL | undefined)[] = [
+        eq(execution.organizationId, orgId),
         locationId ? eq(execution.locationId, locationId) : undefined,
         input?.dateFrom ? gte(execution.startedAt, input.dateFrom) : undefined,
         input?.dateTo ? lte(execution.startedAt, input.dateTo) : undefined,

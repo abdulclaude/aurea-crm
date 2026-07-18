@@ -34,8 +34,11 @@ import {
 } from "@/components/ui/select";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
 
 const formSchema = z.object({
+  providerAccountId: z.string().trim().min(1, "Select a OneDrive account."),
   variableName: z
     .string()
     .min(1, "Variable name is required.")
@@ -68,6 +71,7 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
   const form = useForm<OneDriveExecutionFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "oneDriveFile",
       action: defaultValues?.action || "upload",
       filePath: defaultValues?.filePath || "",
@@ -80,13 +84,22 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "oneDriveFile",
         action: defaultValues?.action || "upload",
         filePath: defaultValues?.filePath || "",
         content: defaultValues?.content || "",
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.action, defaultValues?.filePath, defaultValues?.content, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.action,
+    defaultValues?.filePath,
+    defaultValues?.content,
+    form,
+  ]);
 
   const handleSubmit = (values: OneDriveExecutionFormValues) => {
     onSubmit(values);
@@ -95,8 +108,11 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent side="right" className="overflow-y-auto p-0">
-        <div className="sticky top-0 z-10 border-b border-white/5 bg-[#202e32] px-6 py-4">
+      <ResizableSheetContent
+        side="right"
+        className="overflow-y-auto border-border bg-background p-0"
+      >
+        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
           <SheetHeader>
             <SheetTitle>OneDrive File Operation</SheetTitle>
             <SheetDescription>
@@ -111,6 +127,21 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
               onSubmit={form.handleSubmit(handleSubmit)}
               className="space-y-6"
             >
+              <FormField
+                control={form.control}
+                name="providerAccountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <WorkflowProviderAccountSelect
+                      nodeType={NodeType.ONEDRIVE_EXECUTION}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="variableName"
@@ -128,7 +159,7 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
                 )}
               />
 
-              <Separator className="bg-white/5" />
+              <Separator className="bg-border" />
 
               <FormField
                 control={form.control}
@@ -136,10 +167,7 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Action</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select action" />
@@ -200,7 +228,7 @@ export const OneDriveExecutionDialog: React.FC<Props> = ({
                 />
               )}
 
-              <SheetFooter className="sticky bottom-0 border-t border-white/5 bg-[#202e32] px-6 py-4">
+              <SheetFooter className="sticky bottom-0 border-t border-border bg-background px-6 py-4">
                 <Button type="submit">Save Configuration</Button>
               </SheetFooter>
             </form>

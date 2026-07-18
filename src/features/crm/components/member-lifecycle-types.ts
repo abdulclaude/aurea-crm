@@ -6,9 +6,16 @@ type RouterOutput = inferRouterOutputs<AppRouter>;
 export type LifecycleSummary = RouterOutput["clients"]["memberLifecycle"];
 export type MemberLifecycleView =
   | "overview"
+  | "personal-info"
+  | "households"
+  | "bookings"
+  | "pricing-options"
   | "payments"
   | "waivers"
-  | "activity";
+  | "notes"
+  | "activity"
+  | "guest-passes"
+  | "inbox";
 
 export const funnelSteps = [
   ["leadCaptured", "Lead captured"],

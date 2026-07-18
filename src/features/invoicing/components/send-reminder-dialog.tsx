@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -69,17 +69,6 @@ export function SendReminderDialog({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  // Generate payment link
-  const { data: paymentLinkData } = useQuery({
-    ...(trpc.invoices.generatePaymentLink as any).queryOptions({
-      invoiceId: invoice.id,
-      provider: "HOSTED",
-    }),
-    enabled: open,
-  });
-
-  const paymentLink = (paymentLinkData as any)?.paymentLink || "";
-
   const defaultSubject = `Payment Reminder: Invoice ${invoice.invoiceNumber}`;
   const defaultMessage = `Dear ${invoice.clientName},
 
@@ -89,9 +78,6 @@ This is a friendly reminder that invoice ${
 
 Amount Due: ${formatCurrency(invoice.amountDue, invoice.currency)}
 Due Date: ${format(new Date(invoice.dueDate), "MMMM dd, yyyy")}
-
-You can view and pay this invoice online at:
-${paymentLink}
 
 Payment Methods Accepted:
 - Credit/Debit Card
@@ -123,7 +109,7 @@ Best regards`;
           queryKey: trpc.invoices.getById.queryOptions({ id: invoice.id })
             .queryKey,
         });
-        toast.success(`Reminder sent successfully to ${result.sentTo}`);
+        toast.success(`Reminder queued for ${result.sentTo}`);
         onOpenChange(false);
         form.reset();
       },
@@ -194,12 +180,10 @@ Best regards`;
                 </div>
               </div>
               <Separator />
-              {paymentLink && (
-                <div className="flex items-center gap-2 text-xs text-green-500 px-6 py-2">
-                  <PaymentLinkIcon className="size-3.5" />
-                  <span>Payment link will be included in the email</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 text-xs text-green-500 px-6 py-2">
+                <PaymentLinkIcon className="size-3.5" />
+                <span>A secure payment link will be included in the email</span>
+              </div>
               <Separator />
             </div>
 

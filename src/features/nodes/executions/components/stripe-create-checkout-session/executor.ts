@@ -43,7 +43,6 @@ export const stripeCreateCheckoutSessionExecutor: NodeExecutor<StripeCreateCheck
     const successUrl = data.successUrl ? decode(Handlebars.compile(data.successUrl)(context)) : undefined;
     const cancelUrl = data.cancelUrl ? decode(Handlebars.compile(data.cancelUrl)(context)) : undefined;
 
-    // TODO: Implement Stripe: Create Checkout Session logic here
     const result = await step.run("stripe-create-checkout-session", async () => {
       // Add implementation here
       throw new NonRetriableError("Stripe: Create Checkout Session: Not yet implemented");

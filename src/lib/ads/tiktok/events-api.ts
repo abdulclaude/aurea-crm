@@ -1,43 +1,21 @@
-/**
- * TikTok Events API Implementation
- * 
- * Sends server-side conversion events to TikTok for:
- * - iOS 14.5+ attribution (bypasses ATT opt-out)
- * - Ad blocker bypass
- * - Improved conversion measurement accuracy
- * 
- * Docs: https://business-api.tiktok.com/portal/docs?id=1771100865818625
- * Events API: https://business-api.tiktok.com/portal/docs?id=1771101204239362
- */
+import crypto from "node:crypto";
+import { z } from "zod";
 
-import crypto from 'crypto';
+const PROVIDER_TIMEOUT_MS = 10_000;
 
-export interface TikTokEvent {
-  // Event details
-  event: string;  // 'CompletePayment', 'SubmitForm', 'ViewContent', 'AddToCart', etc.
-  eventId?: string;  // Unique event ID (for deduplication)
-  timestamp?: string;  // ISO 8601 timestamp or Unix timestamp
-  
-  // Page info
+export type TikTokEvent = {
+  event: string;
+  eventId: string;
+  timestamp?: string;
   pageUrl?: string;
   referrerUrl?: string;
-  
-  // User info (for matching)
   email?: string;
   phone?: string;
-  
-  // External IDs
-  externalId?: string;  // Your user ID
-  
-  // TikTok Click ID
-  ttclid?: string;  // TikTok Click ID from URL parameter
-  
-  // Browser data
+  externalId?: string;
+  ttclid?: string;
   userAgent?: string;
   ipAddress?: string;
-  ttp?: string;  // _ttp cookie (TikTok Pixel cookie)
-  
-  // Event properties
+  ttp?: string;
   value?: number;
   currency?: string;
   contentType?: string;
@@ -54,218 +32,161 @@ export interface TikTokEvent {
   quantity?: number;
   description?: string;
   query?: string;
-  
-  // Custom properties
-  properties?: Record<string, any>;
-}
+  properties?: Record<string, unknown>;
+};
 
-export interface TikTokEventsAPIConfig {
-  pixelCode: string;  // TikTok Pixel ID
-  accessToken: string;  // TikTok Marketing API access token
-  testEventCode?: string;  // For testing events
-}
+export type TikTokEventsAPIConfig = {
+  pixelCode: string;
+  accessToken: string;
+  testEventCode?: string;
+};
 
-/**
- * Hash a string value with SHA-256
- * Required by TikTok for PII (email, phone)
- */
+export type TikTokConversionResult = {
+  success: boolean;
+  providerEventId: string;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+type TikTokContext = {
+  ad: { callback?: string };
+  page: { url?: string; referrer?: string };
+  user: {
+    email?: string;
+    phone_number?: string;
+    external_id?: string;
+    ttp?: string;
+    ip?: string;
+    user_agent?: string;
+  };
+};
+
+const tiktokResponseSchema = z.object({
+  code: z.number().int(),
+  message: z.string().optional(),
+});
+
 function hashValue(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  
-  // Normalize: lowercase and trim
-  const normalized = value.toLowerCase().trim();
-  if (!normalized) return undefined;
-  
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+  const normalized = value?.toLowerCase().trim();
+  return normalized
+    ? crypto.createHash("sha256").update(normalized).digest("hex")
+    : undefined;
 }
 
-/**
- * Format phone number to E.164 format
- */
 function formatPhone(phone: string): string {
-  // Remove all non-digit characters
-  const digits = phone.replace(/\D/g, '');
-  
-  // Add + prefix if not present
-  return digits.startsWith('+') ? digits : `+${digits}`;
+  return `+${phone.replace(/\D/g, "")}`;
 }
 
-/**
- * Send event to TikTok Events API
- */
 export async function sendTikTokEvent(
   config: TikTokEventsAPIConfig,
-  event: TikTokEvent
-): Promise<{ success: boolean; eventId?: string; error?: string }> {
+  event: TikTokEvent,
+): Promise<TikTokConversionResult> {
+  const context: TikTokContext = { ad: {}, page: {}, user: {} };
+  if (event.ttclid) context.ad.callback = event.ttclid;
+  if (event.pageUrl) context.page.url = event.pageUrl;
+  if (event.referrerUrl) context.page.referrer = event.referrerUrl;
+
+  const hashedEmail = hashValue(event.email);
+  const hashedPhone = event.phone ? hashValue(formatPhone(event.phone)) : undefined;
+  if (hashedEmail) context.user.email = hashedEmail;
+  if (hashedPhone) context.user.phone_number = hashedPhone;
+  if (event.externalId) context.user.external_id = event.externalId;
+  if (event.ttp) context.user.ttp = event.ttp;
+  if (event.ipAddress) context.user.ip = event.ipAddress;
+  if (event.userAgent) context.user.user_agent = event.userAgent;
+
+  const properties: Record<string, unknown> = { ...event.properties };
+  if (event.value !== undefined) properties.value = event.value;
+  if (event.currency) properties.currency = event.currency;
+  if (event.contentType) properties.content_type = event.contentType;
+  if (event.contentId) properties.content_id = event.contentId;
+  if (event.contentName) properties.content_name = event.contentName;
+  if (event.contentCategory) properties.content_category = event.contentCategory;
+  if (event.contents) properties.contents = event.contents;
+  if (event.quantity !== undefined) properties.quantity = event.quantity;
+  if (event.description) properties.description = event.description;
+  if (event.query) properties.query = event.query;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
-    // Build user context
-    const context: any = {
-      ad: {},
-      page: {},
-      user: {},
-    };
-
-    // Add click ID
-    if (event.ttclid) {
-      context.ad.callback = event.ttclid;
-    }
-
-    // Add page info
-    if (event.pageUrl) {
-      context.page.url = event.pageUrl;
-    }
-    if (event.referrerUrl) {
-      context.page.referrer = event.referrerUrl;
-    }
-
-    // Add user data (hashed PII)
-    if (event.email) {
-      context.user.email = hashValue(event.email);
-    }
-    if (event.phone) {
-      const formatted = formatPhone(event.phone);
-      context.user.phone_number = hashValue(formatted);
-    }
-    if (event.externalId) {
-      context.user.external_id = event.externalId;
-    }
-    if (event.ttp) {
-      context.user.ttp = event.ttp;
-    }
-
-    // Add IP and user agent
-    if (event.ipAddress) {
-      context.user.ip = event.ipAddress;
-    }
-    if (event.userAgent) {
-      context.user.user_agent = event.userAgent;
-    }
-
-    // Build properties
-    const properties: any = {
-      ...(event.properties || {}),
-    };
-
-    if (event.value !== undefined) {
-      properties.value = event.value;
-    }
-    if (event.currency) {
-      properties.currency = event.currency;
-    }
-    if (event.contentType) {
-      properties.content_type = event.contentType;
-    }
-    if (event.contentId) {
-      properties.content_id = event.contentId;
-    }
-    if (event.contentName) {
-      properties.content_name = event.contentName;
-    }
-    if (event.contentCategory) {
-      properties.content_category = event.contentCategory;
-    }
-    if (event.contents) {
-      properties.contents = event.contents;
-    }
-    if (event.quantity !== undefined) {
-      properties.quantity = event.quantity;
-    }
-    if (event.description) {
-      properties.description = event.description;
-    }
-    if (event.query) {
-      properties.query = event.query;
-    }
-
-    // Build event payload
-    const eventPayload: any = {
-      event: event.event,
-      event_id: event.eventId || crypto.randomBytes(16).toString('hex'),
-      timestamp: event.timestamp || new Date().toISOString(),
-      context,
-      properties,
-    };
-
-    // Build API payload
-    const payload = {
-      pixel_code: config.pixelCode,
-      event_source: 'web',
-      event_source_id: config.pixelCode,
-      data: [eventPayload],
-      ...(config.testEventCode && { test_event_code: config.testEventCode }),
-    };
-
-    // Send to TikTok
-    const url = 'https://business-api.tiktok.com/open_api/v1.3/event/track/';
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Token': config.accessToken,
+    const response = await fetch(
+      "https://business-api.tiktok.com/open_api/v1.3/event/track/",
+      {
+        method: "POST",
+        headers: {
+          "Access-Token": config.accessToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pixel_code: config.pixelCode,
+          event_source: "web",
+          event_source_id: config.pixelCode,
+          data: [
+            {
+              event: event.event,
+              event_id: event.eventId,
+              timestamp: event.timestamp ?? new Date().toISOString(),
+              context,
+              properties,
+            },
+          ],
+          test_event_code: config.testEventCode,
+        }),
+        signal: controller.signal,
       },
-      body: JSON.stringify(payload),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || result.code !== 0) {
-      console.error('[TikTok Events API] Error:', result);
+    );
+    const parsed = tiktokResponseSchema.safeParse(await response.json());
+    if (!response.ok || !parsed.success || parsed.data.code !== 0) {
+      const providerCode = parsed.success ? parsed.data.code : undefined;
       return {
         success: false,
-        eventId: eventPayload.event_id,
-        error: result.message || 'Unknown error',
+        providerEventId: event.eventId,
+        errorCode: providerCode
+          ? `TIKTOK_${providerCode}`
+          : response.ok
+            ? "TIKTOK_RESPONSE_INVALID"
+            : `TIKTOK_HTTP_${response.status}`,
+        errorMessage: "TikTok did not accept the conversion event.",
       };
     }
-
-    console.log('[TikTok Events API] Event sent successfully:', {
-      eventId: eventPayload.event_id,
-      event: event.event,
-      message: result.message,
-    });
-
-    return {
-      success: true,
-      eventId: eventPayload.event_id,
-    };
+    return { success: true, providerEventId: event.eventId };
   } catch (error) {
-    console.error('[TikTok Events API] Exception:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown exception',
+      providerEventId: event.eventId,
+      errorCode: error instanceof Error && error.name === "AbortError"
+        ? "TIKTOK_TIMEOUT"
+        : "TIKTOK_REQUEST_FAILED",
+      errorMessage: "TikTok conversion delivery failed.",
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-/**
- * Send purchase event to TikTok
- * Helper function for common purchase event
- */
 export async function sendTikTokPurchase(
   config: TikTokEventsAPIConfig,
   data: {
-    eventId?: string;
+    eventId: string;
     email?: string;
     phone?: string;
     value: number;
     currency: string;
     contentId?: string;
-    contents?: Array<{
-      content_id: string;
-      content_name?: string;
-      quantity?: number;
-      price?: number;
-    }>;
+    contents?: TikTokEvent["contents"];
     ttclid?: string;
     ttp?: string;
     ipAddress?: string;
     userAgent?: string;
     pageUrl?: string;
-  }
-) {
+    timestamp?: string;
+  },
+): Promise<TikTokConversionResult> {
   return sendTikTokEvent(config, {
-    event: 'CompletePayment',
+    event: "CompletePayment",
     eventId: data.eventId,
+    timestamp: data.timestamp,
     email: data.email,
     phone: data.phone,
     value: data.value,
@@ -280,13 +201,10 @@ export async function sendTikTokPurchase(
   });
 }
 
-/**
- * Send lead event to TikTok
- */
 export async function sendTikTokLead(
   config: TikTokEventsAPIConfig,
   data: {
-    eventId?: string;
+    eventId: string;
     email?: string;
     phone?: string;
     value?: number;
@@ -296,11 +214,13 @@ export async function sendTikTokLead(
     ipAddress?: string;
     userAgent?: string;
     pageUrl?: string;
-  }
-) {
+    timestamp?: string;
+  },
+): Promise<TikTokConversionResult> {
   return sendTikTokEvent(config, {
-    event: 'SubmitForm',
+    event: "SubmitForm",
     eventId: data.eventId,
+    timestamp: data.timestamp,
     email: data.email,
     phone: data.phone,
     value: data.value,

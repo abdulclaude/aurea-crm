@@ -36,7 +36,6 @@ export const onedriveMoveFileExecutor: NodeExecutor<OnedriveMoveFileData> = asyn
     const fileId = data.fileId ? decode(Handlebars.compile(data.fileId)(context)) : undefined;
     const destinationFolderId = data.destinationFolderId ? decode(Handlebars.compile(data.destinationFolderId)(context)) : undefined;
 
-    // TODO: Implement OneDrive: Move File logic here
     const result = await step.run("onedrive-move-file", async () => {
       // Add implementation here
       throw new NonRetriableError("OneDrive: Move File: Not yet implemented");

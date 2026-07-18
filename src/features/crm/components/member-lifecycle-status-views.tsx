@@ -5,58 +5,14 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
-  CreditCard,
   FileCheck2,
-  HeartPulse,
   Share2,
 } from "lucide-react";
 import type { LifecycleSummary } from "./member-lifecycle-types";
 import { labelize } from "./member-lifecycle-types";
 import { EmptyLine, Metric, Row, Section } from "./member-lifecycle-shared";
 
-export function PaymentsView({ data }: { data: LifecycleSummary }) {
-  const failedCount = data.payments.filter(
-    (payment) => payment.status === "FAILED",
-  ).length;
-  return (
-    <div className="space-y-5 py-5">
-      <div className="grid gap-2 md:grid-cols-2 px-6">
-        <Metric
-          label="Payment status"
-          value={labelize(data.summary.paymentStatus)}
-        />
-        <Metric label="Failed payments" value={`${failedCount}`} />
-      </div>
-      <Section title="Memberships" icon={HeartPulse}>
-        {data.memberships.map((membership) => (
-          <Row
-            key={membership.id}
-            title={membership.name}
-            meta={`${membership.plan?.name ?? "No plan"} · ${format(new Date(membership.startDate), "d MMM yyyy")}`}
-            status={membership.status}
-          />
-        ))}
-        {data.memberships.length === 0 ? (
-          <EmptyLine label="No membership record yet." />
-        ) : null}
-      </Section>
-      <Section title="Payment ledger" icon={CreditCard}>
-        {data.payments.map((payment) => (
-          <Row
-            key={payment.id}
-            title={`${payment.currency} ${Number(payment.amount).toLocaleString()}`}
-            meta={`${labelize(payment.type)} · ${format(new Date(payment.createdAt), "d MMM yyyy")}`}
-            status={payment.status}
-            tone={payment.status === "FAILED" ? "danger" : undefined}
-          />
-        ))}
-        {data.payments.length === 0 ? (
-          <EmptyLine label="No payment history yet." />
-        ) : null}
-      </Section>
-    </div>
-  );
-}
+export { PaymentsView } from "./member-lifecycle-payments-view";
 
 export function WaiversView({ data }: { data: LifecycleSummary }) {
   return (

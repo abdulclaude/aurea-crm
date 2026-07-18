@@ -26,6 +26,10 @@ This is not optional and applies to ALL work in this repository — new features
 - Stripe Connect: Express accounts, destination charges, `application_fee_amount`. Never manual transfers.
 - All money: Postgres `numeric` / integer pence. Never floating point.
 - Webhooks: `req.text()` → verify → idempotency + business logic in `db.transaction` → 200. Heavy work → Inngest.
+- Every third-party account is owned by an `organizationId` and optional `locationId`. Tenant work must resolve and revalidate that account before an external call; never fall back to an unqualified environment credential.
+- Platform credentials such as Stripe Connect's platform key are protocol infrastructure only. They do not authorize tenant work, select a tenant, or replace a scoped provider-account/connection binding.
+- Persist the internal provider account/connection ID on outbound work, financial operations, webhook receipts, and subscriptions. Webhooks must derive scope from verified account identity, never untrusted payload metadata.
+- Store provider secrets encrypted and return only redacted health/configuration state to clients. Provider management requires `provider.manage`.
 - No `TODO`/`FIXME` in committed code.
 - **Always use ShadCN components** where one exists (`Button`, `Separator`, `Badge`, `Input`, `Select`, etc.). Never create raw `<button>`, `<input>`, or `<select>` elements when a ShadCN equivalent is available in `src/components/ui/`.
 - **Keep files small and focused.** Never dump an entire page's worth of components, helpers, constants, and types into a single file. Extract into `src/features/<feature>/components/`, `src/features/<feature>/constants.ts`, `src/features/<feature>/helpers.ts`, etc. Each component should be its own file. Use barrel `index.ts` exports. Target ≤ 200 lines per file for components, ≤ 300 for pages.

@@ -1,8 +1,12 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleCalendarDeleteEventChannel } from "@/inngest/channels/google-calendar-delete-event";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,50 +15,46 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleCalendarDeleteEventData = {
+  providerAccountId: string;
   variableName?: string;
   eventId: string;
 };
 
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_CALENDAR_DELETE_EVENT,
+);
+
 export const googleCalendarDeleteEventExecutor: NodeExecutor<GoogleCalendarDeleteEventData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleCalendarDeleteEventChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.eventId) {
+      if (!data.providerAccountId || !data.eventId) {
         await publish(
           googleCalendarDeleteEventChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Calendar: Event ID is required"
+          "Google Calendar: Account and event ID are required"
         );
       }
 
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          googleCalendarDeleteEventChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Calendar is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       const eventId = decode(Handlebars.compile(data.eventId)(context));
 
       await step.run("delete-calendar-event", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
           {
             method: "DELETE",
@@ -65,8 +65,7 @@ export const googleCalendarDeleteEventExecutor: NodeExecutor<GoogleCalendarDelet
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Calendar API error: ${error}`);
+          throw new Error(`Google Calendar API rejected the request with status ${res.status}.`);
         }
       });
 

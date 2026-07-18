@@ -43,7 +43,6 @@ export const slackUpdateMessageExecutor: NodeExecutor<SlackUpdateMessageData> = 
     const timestamp = data.timestamp ? decode(Handlebars.compile(data.timestamp)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Slack: Update Message logic here
     const result = await step.run("slack-update-message", async () => {
       // Add implementation here
       throw new NonRetriableError("Slack: Update Message: Not yet implemented");

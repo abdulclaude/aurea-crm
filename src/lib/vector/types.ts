@@ -8,6 +8,7 @@ export interface VectorMetadata {
   entityType: EntityType;
   entityId: string;
   name: string;
+  organizationId: string;
   locationId: string;
   fields: Record<string, unknown>;
   updatedAt: string;

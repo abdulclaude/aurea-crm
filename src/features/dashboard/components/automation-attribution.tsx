@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Workflow } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { SectionShell } from "./section-shell";
+import { formatDashboardMoney } from "../helpers";
 
 type AutomationAttributionRow = {
   workflowId: string;
@@ -15,9 +16,11 @@ type AutomationAttributionRow = {
 export function AutomationAttribution({
   data,
   isEditing,
+  currency,
 }: {
   data: AutomationAttributionRow[] | undefined;
   isEditing?: boolean;
+  currency?: string;
 }) {
   return (
     <SectionShell
@@ -44,7 +47,7 @@ export function AutomationAttribution({
                       {row.workflowName}
                     </p>
                     <p className="text-[11px] text-black/35">
-                      {row.value < 0 ? `-£${Math.abs(row.value).toLocaleString()}` : `£${row.value.toLocaleString()}`} attributed value
+                      {formatDashboardMoney(row.value, currency)} attributed value
                     </p>
                   </div>
                   <div className="shrink-0 text-right">

@@ -26,6 +26,7 @@ Handlebars.registerHelper("json", (context) => {
 
 type FindClientsData = {
   variableName?: string;
+  clientId?: string;
   email?: string;
   name?: string;
   companyName?: string;
@@ -79,6 +80,9 @@ export const findClientsExecutor: NodeExecutor<FindClientsData> = async ({
     });
 
     // Compile search parameters
+    const clientId = data.clientId
+      ? decode(Handlebars.compile(data.clientId)(context)).trim()
+      : undefined;
     const email = data.email
       ? decode(Handlebars.compile(data.email)(context))
       : undefined;
@@ -99,6 +103,9 @@ export const findClientsExecutor: NodeExecutor<FindClientsData> = async ({
         : isNull(client.locationId),
     ];
 
+    if (clientId) {
+      where.push(eq(client.id, clientId));
+    }
     if (email) {
       where.push(ilike(client.email, `%${email}%`));
     }

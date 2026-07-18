@@ -546,7 +546,7 @@ export function TimeLogEditSheet({
                 disabled={updateMutation.isPending}
                 className="flex-1"
               >
-                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+                {updateMutation.isPending ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </form>

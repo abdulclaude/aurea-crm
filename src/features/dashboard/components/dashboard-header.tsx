@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Loader2, RotateCcw, Settings2, Sparkles } from "lucide-react";
+import { Check, RotateCcw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getGreeting } from "../helpers";
 
@@ -8,9 +8,7 @@ interface DashboardHeaderProps {
   userName: string | null | undefined;
   userImage: string | null | undefined;
   isEditing: boolean;
-  isSeedPending: boolean;
-  isSeedSuccess: boolean;
-  onSeed: () => void;
+  demoDataControl?: React.ReactNode;
   onToggleEdit: () => void;
   onReset: () => void;
   datePicker?: React.ReactNode;
@@ -20,16 +18,14 @@ export function DashboardHeader({
   userName,
   userImage,
   isEditing,
-  isSeedPending,
-  isSeedSuccess,
-  onSeed,
+  demoDataControl,
   onToggleEdit,
   onReset,
   datePicker,
 }: DashboardHeaderProps) {
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-3">
         {userImage ? (
           <img
             src={userImage}
@@ -46,29 +42,12 @@ export function DashboardHeader({
               .toUpperCase() ?? "U"}
           </div>
         )}
-        <p className="text-[15px] font-semibold text-black/80">
+        <p className="min-w-0 text-[15px] font-semibold text-black/80">
           {getGreeting(userName ?? "there")}
         </p>
       </div>
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={isSeedPending}
-          onClick={onSeed}
-          className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 text-[11px] font-medium text-amber-600 shadow-none ring-0 hover:bg-amber-100 disabled:opacity-50"
-        >
-          {isSeedPending ? (
-            <Loader2 className="size-3 animate-spin" />
-          ) : (
-            <Sparkles className="size-3" />
-          )}
-          {isSeedPending
-            ? "Populating..."
-            : isSeedSuccess
-              ? "Data added!"
-              : "Populate demo data"}
-        </Button>
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+        {demoDataControl}
 
         {datePicker}
 

@@ -1,8 +1,13 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleCalendarCreateEventChannel } from "@/inngest/channels/google-calendar-create-event";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,6 +16,7 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleCalendarCreateEventData = {
+  providerAccountId: string;
   variableName?: string;
   summary: string;
   startDateTime: string;
@@ -20,42 +26,65 @@ type GoogleCalendarCreateEventData = {
   attendees?: string;
 };
 
+type GoogleCalendarEventDateTime = {
+  dateTime: string;
+  timeZone: "UTC";
+};
+
+type GoogleCalendarCreateEventPayload = {
+  summary: string;
+  start: GoogleCalendarEventDateTime;
+  end: GoogleCalendarEventDateTime;
+  description?: string;
+  location?: string;
+  attendees?: Array<{ email: string }>;
+};
+
+const googleCalendarEventResponseSchema = z.object({
+  id: z.string().optional(),
+  htmlLink: z.string().optional(),
+  summary: z.string().optional(),
+  start: z.unknown().optional(),
+  end: z.unknown().optional(),
+  location: z.string().optional(),
+  description: z.string().optional(),
+  attendees: z.unknown().optional(),
+});
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_CALENDAR_CREATE_EVENT,
+);
+
 export const googleCalendarCreateEventExecutor: NodeExecutor<GoogleCalendarCreateEventData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleCalendarCreateEventChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.summary || !data.startDateTime || !data.endDateTime) {
+      if (
+        !data.providerAccountId ||
+        !data.summary ||
+        !data.startDateTime ||
+        !data.endDateTime
+      ) {
         await publish(
           googleCalendarCreateEventChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Calendar: Event title, start date/time, and end date/time are required"
+          "Google Calendar: Account, event title, start date/time, and end date/time are required"
         );
       }
 
-      // Get Google OAuth token
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          googleCalendarCreateEventChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Calendar is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const summary = decode(Handlebars.compile(data.summary)(context));
@@ -81,7 +110,7 @@ export const googleCalendarCreateEventExecutor: NodeExecutor<GoogleCalendarCreat
         : [];
 
       // Create event payload
-      const eventPayload: any = {
+      const eventPayload: GoogleCalendarCreateEventPayload = {
         summary,
         start: {
           dateTime: startDateTime,
@@ -107,7 +136,8 @@ export const googleCalendarCreateEventExecutor: NodeExecutor<GoogleCalendarCreat
 
       // Create calendar event
       const response = await step.run("create-calendar-event", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           "https://www.googleapis.com/calendar/v3/calendars/primary/events",
           {
             method: "POST",
@@ -120,11 +150,11 @@ export const googleCalendarCreateEventExecutor: NodeExecutor<GoogleCalendarCreat
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Calendar API error: ${error}`);
+          throw new Error(`Google Calendar API rejected the request with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return googleCalendarEventResponseSchema.parse(payload);
       });
 
       await publish(

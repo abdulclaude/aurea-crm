@@ -1,7 +1,12 @@
 import { type NextRequest } from "next/server";
 import { db } from "@/db";
 import { instructor } from "@/db/schema";
-import { validateApiKey, requireScope, apiError } from "@/lib/api-auth";
+import {
+  apiError,
+  requireApiKeyLocation,
+  requireScope,
+  validateApiKey,
+} from "@/lib/api-auth";
 import { asc, and, eq } from "drizzle-orm";
 
 export const runtime = "nodejs";
@@ -12,6 +17,8 @@ export async function GET(req: NextRequest) {
 
   const scope = requireScope(auth.apiKey.scopes, "instructors:read");
   if (!scope.ok) return apiError(scope.error, 403);
+  const keyLocation = requireApiKeyLocation(auth.apiKey);
+  if (!keyLocation.ok) return apiError(keyLocation.error, 403);
 
   const instructors = await db
     .select({
@@ -30,8 +37,9 @@ export async function GET(req: NextRequest) {
     .where(
       and(
         eq(instructor.organizationId, auth.apiKey.organizationId),
-        eq(instructor.isActive, true)
-      )
+        eq(instructor.locationId, keyLocation.locationId),
+        eq(instructor.isActive, true),
+      ),
     )
     .orderBy(asc(instructor.name));
 

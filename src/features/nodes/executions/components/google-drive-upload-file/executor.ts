@@ -1,8 +1,13 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleDriveUploadFileChannel } from "@/inngest/channels/google-drive-upload-file";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,6 +16,7 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleDriveUploadFileData = {
+  providerAccountId: string;
   variableName?: string;
   fileName: string;
   content: string;
@@ -18,42 +24,48 @@ type GoogleDriveUploadFileData = {
   parentFolderId?: string;
 };
 
+type GoogleDriveFileMetadata = {
+  name: string;
+  mimeType: string;
+  parents?: string[];
+};
+
+const googleDriveFileResponseSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  mimeType: z.string().optional(),
+  webViewLink: z.string().optional(),
+});
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_DRIVE_UPLOAD_FILE,
+);
+
 export const googleDriveUploadFileExecutor: NodeExecutor<GoogleDriveUploadFileData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleDriveUploadFileChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.fileName || !data.content) {
+      if (!data.providerAccountId || !data.fileName || !data.content) {
         await publish(
           googleDriveUploadFileChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Drive: File name and content are required"
+          "Google Drive: Account, file name, and content are required"
         );
       }
 
-      // Get Google OAuth token
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          googleDriveUploadFileChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Drive is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const fileName = decode(Handlebars.compile(data.fileName)(context));
@@ -66,7 +78,7 @@ export const googleDriveUploadFileExecutor: NodeExecutor<GoogleDriveUploadFileDa
         : undefined;
 
       // Create metadata
-      const metadata: any = {
+      const metadata: GoogleDriveFileMetadata = {
         name: fileName,
         mimeType,
       };
@@ -90,7 +102,8 @@ export const googleDriveUploadFileExecutor: NodeExecutor<GoogleDriveUploadFileDa
         closeDelim;
 
       const response = await step.run("upload-file", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
           {
             method: "POST",
@@ -103,11 +116,11 @@ export const googleDriveUploadFileExecutor: NodeExecutor<GoogleDriveUploadFileDa
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Drive API error: ${error}`);
+          throw new Error(`Google Drive API rejected the upload with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return googleDriveFileResponseSchema.parse(payload);
       });
 
       await publish(

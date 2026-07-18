@@ -1,6 +1,8 @@
 "use server";
 
 import { NonRetriableError } from "inngest";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import type { ResolvedOAuthGrant } from "@/features/provider-accounts/server/oauth-resolver";
 
 export type GmailTriggerConfig = {
   variableName?: string;
@@ -43,12 +45,13 @@ const headerValue = (
     ?.value;
 
 export async function fetchGmailMessages({
-  accessToken,
+  grant,
   config,
 }: {
-  accessToken: string;
+  grant: ResolvedOAuthGrant;
   config: GmailTriggerConfig;
 }): Promise<GmailMessageBundle> {
+  const { accessToken } = grant;
   const labelId = config.labelId?.trim() || "INBOX";
   const maxResults = clampNumber(Number(config.maxResults) || 5, 1, 50);
   const includeSpamTrash = Boolean(config.includeSpamTrash);
@@ -56,6 +59,7 @@ export async function fetchGmailMessages({
 
   const messages = await listMessages({
     accessToken,
+    grant,
     labelId,
     maxResults,
     includeSpamTrash,
@@ -72,12 +76,14 @@ export async function fetchGmailMessages({
 
 async function listMessages({
   accessToken,
+  grant,
   labelId,
   maxResults,
   includeSpamTrash,
   query,
 }: {
   accessToken: string;
+  grant: ResolvedOAuthGrant;
   labelId: string;
   maxResults: number;
   includeSpamTrash: boolean;
@@ -93,16 +99,15 @@ async function listMessages({
     url.searchParams.set("includeSpamTrash", "true");
   }
 
-  const listResponse = await fetch(url, {
+  const listResponse = await oauthAuthenticatedFetch(grant, url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
 
   if (!listResponse.ok) {
-    const errorText = await listResponse.text();
     throw new NonRetriableError(
-      `Failed to list Gmail messages (${listResponse.status}): ${errorText}`
+      `Failed to list Gmail messages with status ${listResponse.status}.`,
     );
   }
 
@@ -114,49 +119,60 @@ async function listMessages({
     return [];
   }
 
-  const detailRequests = messageSummaries.map(async (summary) => {
-    const messageUrl = new URL(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${summary.id}`
-    );
-    messageUrl.searchParams.set("format", "metadata");
-    ["Subject", "From", "To", "Date", "Cc", "Bcc"].forEach((header) =>
-      messageUrl.searchParams.append("metadataHeaders", header)
-    );
-
-    const detailResponse = await fetch(messageUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!detailResponse.ok) {
-      const err = await detailResponse.text();
-      throw new NonRetriableError(
-        `Failed to fetch Gmail message ${summary.id}: ${detailResponse.status} ${err}`
-      );
-    }
-
-    const detailPayload = await detailResponse.json();
-    const headers = Array.isArray(detailPayload?.payload?.headers)
-      ? detailPayload.payload.headers
-      : [];
-
-    return {
-      id: summary.id,
-      threadId: detailPayload?.threadId,
-      snippet: detailPayload?.snippet,
-      labelIds: detailPayload?.labelIds,
-      headers: {
-        subject: headerValue(headers, "Subject"),
-        from: headerValue(headers, "From"),
-        to: headerValue(headers, "To"),
-        date: headerValue(headers, "Date"),
-        cc: headerValue(headers, "Cc"),
-        bcc: headerValue(headers, "Bcc"),
-      },
-    } as GmailMessage;
-  });
+  const detailRequests = messageSummaries.map((summary) =>
+    fetchGmailMessageById(grant, summary.id),
+  );
 
   return Promise.all(detailRequests);
 }
 
+export async function fetchGmailMessageById(
+  grant: ResolvedOAuthGrant,
+  messageId: string,
+): Promise<GmailMessage> {
+  const messageUrl = new URL(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`,
+  );
+  messageUrl.searchParams.set("format", "metadata");
+  ["Subject", "From", "To", "Date", "Cc", "Bcc"].forEach((header) =>
+    messageUrl.searchParams.append("metadataHeaders", header),
+  );
+
+  const detailResponse = await oauthAuthenticatedFetch(grant, messageUrl, {
+    headers: { Authorization: `Bearer ${grant.accessToken}` },
+  });
+  if (!detailResponse.ok) {
+    throw new NonRetriableError(
+      `Failed to fetch a Gmail message with status ${detailResponse.status}.`,
+    );
+  }
+
+  const detailPayload = (await detailResponse.json()) as Record<string, unknown>;
+  const payload =
+    typeof detailPayload.payload === "object" && detailPayload.payload !== null
+      ? (detailPayload.payload as Record<string, unknown>)
+      : {};
+  const headers = Array.isArray(payload.headers)
+    ? (payload.headers as { name?: string; value?: string }[])
+    : [];
+  return {
+    id: messageId,
+    threadId:
+      typeof detailPayload.threadId === "string"
+        ? detailPayload.threadId
+        : undefined,
+    snippet:
+      typeof detailPayload.snippet === "string" ? detailPayload.snippet : undefined,
+    labelIds: Array.isArray(detailPayload.labelIds)
+      ? detailPayload.labelIds.filter((value): value is string => typeof value === "string")
+      : undefined,
+    headers: {
+      subject: headerValue(headers, "Subject"),
+      from: headerValue(headers, "From"),
+      to: headerValue(headers, "To"),
+      date: headerValue(headers, "Date"),
+      cc: headerValue(headers, "Cc"),
+      bcc: headerValue(headers, "Bcc"),
+    },
+  };
+}

@@ -8,11 +8,21 @@ import type {
 } from "@tanstack/react-table";
 import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
-import { Copy, Gift, Plus } from "lucide-react";
+import { Ban, Copy, Gift, MoreHorizontal, Plus } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
 import { DataTable } from "@/components/data-table/data-table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,9 +32,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { StudioTableToolbar } from "@/features/studio/components/studio-table-toolbar";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
@@ -49,15 +68,15 @@ function getStatus(card: GiftCardRow): GiftCardStatus {
   return "inactive";
 }
 
-function statusTone(status: GiftCardStatus) {
-  if (status === "active") return "border-emerald-500/40 text-emerald-500";
-  if (status === "expired") return "border-rose-500/40 text-rose-500";
-  if (status === "redeemed") return "border-blue-500/40 text-blue-500";
-  return "border-primary/20 text-primary/40";
+function statusColor(status: GiftCardStatus): string {
+  if (status === "active") return "#10b981";
+  if (status === "expired") return "#f43f5e";
+  if (status === "redeemed") return "#3b82f6";
+  return "#94a3b8";
 }
 
 function buildColumns(
-  onDeactivate: (id: string) => void,
+  onDeactivate: (card: GiftCardRow) => void,
   deactivatePending: boolean,
 ): ColumnDef<GiftCardRow>[] {
   return [
@@ -76,6 +95,7 @@ function buildColumns(
             variant="ghost"
             size="icon"
             className="size-7"
+            aria-label={`Copy gift card code ${row.original.code}`}
             onClick={async () => {
               await navigator.clipboard.writeText(row.original.code);
               toast.success("Code copied");
@@ -93,8 +113,18 @@ function buildColumns(
       meta: { label: "Status" },
       cell: ({ row }) => {
         const s = getStatus(row.original);
+        const color = statusColor(s);
         return (
-          <Badge variant="outline" className={statusTone(s)}>
+          <Badge
+            variant="outline"
+            className="text-[10px] ring-0"
+            style={{
+              backgroundColor: `${color}18`,
+              borderColor: `${color}66`,
+              color,
+              boxShadow: `0 0 0 1px ${color}66`,
+            }}
+          >
             {s.charAt(0).toUpperCase() + s.slice(1)}
           </Badge>
         );
@@ -172,17 +202,30 @@ function buildColumns(
       enableHiding: false,
       cell: ({ row }) =>
         getStatus(row.original) === "active" ? (
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 text-xs text-primary/40 hover:text-rose-500"
-              disabled={deactivatePending}
-              onClick={() => onDeactivate(row.original.id)}
-            >
-              Deactivate
-            </Button>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+              >
+                <span className="sr-only">Open gift card actions</span>
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuLabel className="text-xs">Actions</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="cursor-pointer text-xs text-destructive focus:text-destructive"
+                disabled={deactivatePending}
+                onSelect={() => onDeactivate(row.original)}
+              >
+                <Ban className="size-3.5" /> Deactivate
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null,
     },
   ];
@@ -195,6 +238,9 @@ export default function GiftCardsPage() {
   const [issueOpen, setIssueOpen] = React.useState(false);
   const [value, setValue] = React.useState("50");
   const [notes, setNotes] = React.useState("");
+  const [recordPayment, setRecordPayment] = React.useState(true);
+  const [deactivatingCard, setDeactivatingCard] =
+    React.useState<GiftCardRow | null>(null);
 
   const [search, setSearch] = React.useState("");
   const [sort, setSort] = React.useState("issued.desc");
@@ -215,6 +261,7 @@ export default function GiftCardsPage() {
         setIssueOpen(false);
         setValue("50");
         setNotes("");
+        setRecordPayment(true);
       },
       onError: (error) => toast.error(error.message),
     }),
@@ -225,6 +272,7 @@ export default function GiftCardsPage() {
       onSuccess: async () => {
         await queryClient.invalidateQueries();
         toast.success("Gift card deactivated");
+        setDeactivatingCard(null);
       },
       onError: (error) => toast.error(error.message),
     }),
@@ -233,10 +281,10 @@ export default function GiftCardsPage() {
   const columns = React.useMemo(
     () =>
       buildColumns(
-        (id) => deactivateMutation.mutate({ id }),
+        setDeactivatingCard,
         deactivateMutation.isPending,
       ),
-    [deactivateMutation],
+    [deactivateMutation.isPending],
   );
 
   const COLUMN_IDS = React.useMemo(
@@ -297,12 +345,16 @@ export default function GiftCardsPage() {
       toast.error("Enter a valid amount");
       return;
     }
-    issueMutation.mutate({ value: parsed, notes: notes.trim() || undefined });
+    issueMutation.mutate({
+      value: parsed,
+      notes: notes.trim() || undefined,
+      recordPayment,
+    });
   };
 
   return (
     <div className="space-y-0">
-      <div className="flex flex-wrap items-end justify-between gap-4 p-6">
+      <div className="flex flex-col gap-4 p-6 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-lg font-semibold text-primary">Gift cards</h1>
           <p className="text-xs text-primary/70">
@@ -392,12 +444,51 @@ export default function GiftCardsPage() {
           ),
         }}
         emptyState={
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Gift className="mb-3 size-8 text-primary" />
-            <p className="text-sm text-primary/50">No gift cards found.</p>
+          <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+            <Gift className="size-8 text-primary/20" />
+            <p className="text-sm text-primary/50">
+              No gift cards match this view.
+            </p>
           </div>
         }
       />
+
+      <AlertDialog
+        open={Boolean(deactivatingCard)}
+        onOpenChange={(open) => {
+          if (!open && !deactivateMutation.isPending) setDeactivatingCard(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate gift card?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deactivatingCard
+                ? `${deactivatingCard.code} will no longer be available for redemption. This cannot be undone here.`
+                : "This gift card will no longer be available for redemption."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deactivateMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deactivateMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                if (deactivatingCard) {
+                  deactivateMutation.mutate({ id: deactivatingCard.id });
+                }
+              }}
+            >
+              {deactivateMutation.isPending
+                ? "Deactivating..."
+                : "Deactivate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={issueOpen} onOpenChange={setIssueOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -422,6 +513,18 @@ export default function GiftCardsPage() {
                 placeholder="Birthday gift"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-sm border border-black/10 p-3 dark:border-white/5">
+              <div className="space-y-0.5">
+                <Label>Record sale</Label>
+                <p className="text-[11px] text-primary/50">
+                  Add this issue to revenue and payment reports.
+                </p>
+              </div>
+              <Switch
+                checked={recordPayment}
+                onCheckedChange={setRecordPayment}
               />
             </div>
           </div>

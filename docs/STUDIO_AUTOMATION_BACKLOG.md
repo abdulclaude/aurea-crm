@@ -7,6 +7,8 @@
 - First-class `BIRTHDAY_TRIGGER` node with channel, executor, configuration dialog, node selector entry, and daily trigger job.
 - Birthday starter workflow template.
 - Automation Insights now reads persisted automation events and shows recent events.
+- Automation event explorer with rolling date, event type, workflow, customer name/email, and source-trigger filters.
+- Conversion rate now counts distinct successful runs with at least one conversion signal, so duplicate signals cannot inflate the rate above 100%.
 - Starter workflow templates split into focused modules.
 
 ## Immediate QA
@@ -14,11 +16,20 @@
 - Install studio starter templates from the Templates tab and confirm the new birthday template appears.
 - Open the birthday trigger node in the workflow editor and save its configuration.
 - Run or wait for a birthday-triggered workflow and verify an `AutomationEvent` row is created.
-- Check the Executions → Automation insights tab for aggregate counts and recent events.
+- Check the Executions → Automation insights tab for aggregate counts and filterable event attribution.
+
+## Metric contract
+
+- Scope: the active organization and exact active location. Organization-level context includes only rows whose `locationId` is null.
+- Window: rolling UTC lookback from the current time, selectable from 7 to 365 days.
+- Conversion signal: membership signup, intro-offer redemption/completion, class milestone, or lead conversion.
+- Runs with conversion: distinct successful execution IDs with at least one conversion signal in the selected window.
+- Conversion rate: runs with conversion divided by successful runs in the same scope and window.
+- Signal totals remain event counts and may be higher than converted-run counts when one run produces multiple signals.
+- Deleted or tenant-mismatched workflow/customer references never expose names; their event remains attributable only to its persisted scoped identifiers.
 
 ## Next backlog
 
-- Add a conversion attribution detail page with filters by event type, workflow, contact, date range, and source trigger.
 - Backfill `AutomationEvent` rows from historical successful executions where output is available.
 - Add explicit event instrumentation for SMS sent/delivered/replied once inbound SMS replies are modeled.
 - Add configurable class milestone thresholds instead of hard-coded every 10 classes.

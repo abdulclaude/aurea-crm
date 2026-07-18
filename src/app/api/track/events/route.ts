@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { funnel as funnelTable, funnelSession } from "@/db/schema";
+import { funnel as funnelTable } from "@/db/schema";
 import { inngest } from "@/inngest/client";
+import {
+  externalTelemetryBatchSchema,
+  externalTelemetryTimesAreCurrent,
+  MAX_EXTERNAL_TELEMETRY_BODY_BYTES,
+} from "@/features/external-funnels/lib/external-telemetry-contract";
+import {
+  enforceFunnelTelemetryQuota,
+  FunnelTelemetryQuotaExceededError,
+  FunnelTelemetryQuotaUnavailableError,
+} from "@/features/external-funnels/server/telemetry-quota";
+import {
+  readBoundedRawBody,
+  WebhookPayloadTooLargeError,
+} from "@/features/webhooks/server/bounded-raw-body";
 import { getPrivacyCompliantIp } from "@/lib/gdpr-utils";
 
 // Helper to check if IP is private/localhost
@@ -28,135 +42,14 @@ function isPrivateIP(ip: string): boolean {
   return false;
 }
 
-// Fetch real public IP using external service (only in development)
-async function fetchPublicIP(): Promise<string | null> {
-  try {
-    // Using ipify - simple, reliable, free service
-    const response = await fetch("https://api.ipify.org?format=json", {
-      signal: AbortSignal.timeout(3000), // 3 second timeout
-    });
-    
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    return data.ip || null;
-  } catch (error) {
-    console.error("[Tracking API] Error fetching public IP:", error);
-    return null;
-  }
-}
-
-// UTM schema (reusable for first/last touch)
-const UtmSchema = z.object({
-  source: z.string().optional(),
-  medium: z.string().optional(),
-  campaign: z.string().optional(),
-  term: z.string().optional(),
-  content: z.string().optional(),
-});
-
-// Persisted UTM schema (includes timestamp)
-const PersistedUtmSchema = UtmSchema.extend({
-  timestamp: z.number().optional(),
-});
-
-// Event validation schema
-const EventSchema = z.object({
-  eventId: z.string(),
-  eventName: z.string(),
-  properties: z.record(z.string(), z.unknown()).optional(),
-  context: z.object({
-    page: z.object({
-      url: z.string(),
-      path: z.string(),
-      title: z.string().optional(),
-      referrer: z.string().optional(),
-    }).optional(),
-    utm: UtmSchema.optional(),
-    
-    // First-touch UTM (persisted from first visit with UTM params)
-    firstTouchUtm: PersistedUtmSchema.optional(),
-    
-    // Last-touch UTM (most recent visit with UTM params)
-    lastTouchUtm: PersistedUtmSchema.optional(),
-    
-    clickIds: z.object({
-      fbclid: z.string().optional(),
-      fbadid: z.string().optional(),
-      gclid: z.string().optional(),
-      gbraid: z.string().optional(),
-      wbraid: z.string().optional(),
-      dclid: z.string().optional(),
-      ttclid: z.string().optional(),
-      tt_content: z.string().optional(),
-      msclkid: z.string().optional(),
-      twclid: z.string().optional(),
-      li_fat_id: z.string().optional(),
-      ScCid: z.string().optional(),
-      epik: z.string().optional(),
-      rdt_cid: z.string().optional(),
-    }).optional(),
-    cookies: z.object({
-      fbp: z.string().optional(),
-      fbc: z.string().optional(),
-      ttp: z.string().optional(),
-    }).optional(),
-    gdpr: z.object({
-      consentGiven: z.boolean().optional(),
-      consentVersion: z.string().optional(),
-      consentTimestamp: z.string().optional(),
-    }).optional(),
-    user: z.object({
-      userId: z.string().optional(),
-      anonymousId: z.string().optional(),
-    }).optional(),
-    session: z.object({
-      sessionId: z.string(),
-    }),
-    device: z.object({
-      userAgent: z.string().optional(),
-      screenWidth: z.number().optional(),
-      screenHeight: z.number().optional(),
-      language: z.string().optional(),
-      timezone: z.string().optional(),
-      deviceType: z.string().optional(),
-      browserName: z.string().optional(),
-      browserVersion: z.string().optional(),
-      osName: z.string().optional(),
-      osVersion: z.string().optional(),
-    }).optional(),
-    
-    // Custom dimensions (user-defined key-value pairs)
-    customDimensions: z.record(z.string(), z.unknown()).optional(),
-    
-    // A/B Testing
-    abTests: z.array(z.object({
-      testId: z.string(),
-      variant: z.string(),
-    })).optional(),
-    
-    // Lead Scoring
-    leadScore: z.object({
-      score: z.number(),
-      grade: z.string(),
-    }).optional(),
-    
-    // Engagement Tracking
-    engagement: z.object({
-      score: z.number(),
-      level: z.string(),
-    }).optional(),
-  }),
-  timestamp: z.number(),
-});
-
-const BatchRequestSchema = z.object({
-  events: z.array(EventSchema),
-  batch: z.boolean().optional(),
-});
-
 export async function POST(req: NextRequest) {
   try {
+    if (
+      req.headers.get("sec-gpc") === "1" ||
+      req.headers.get("dnt") === "1"
+    ) {
+      return response("Analytics tracking is not permitted.", 403);
+    }
     // Get headers from request
     const apiKey = req.headers.get("X-Aurea-API-Key");
     const funnelId = req.headers.get("X-Aurea-Funnel-ID");
@@ -200,9 +93,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse request body
-    const body = await req.json();
-    const parsed = BatchRequestSchema.parse(body);
+    const parsed = externalTelemetryBatchSchema.parse(
+      JSON.parse(
+        await readBoundedRawBody(req, MAX_EXTERNAL_TELEMETRY_BODY_BYTES),
+      ),
+    );
+    if (!externalTelemetryTimesAreCurrent(parsed.events.map((event) => event.timestamp))) {
+      return response("Tracking event time is outside the accepted window.", 400);
+    }
+    await enforceFunnelTelemetryQuota({
+      request: req,
+      organizationId: funnel.organizationId,
+      funnelId: funnel.id,
+    });
 
     // Get client IP for geo lookup
     let ip =
@@ -220,52 +123,6 @@ export async function POST(req: NextRequest) {
       }
     }
     
-    // OPTIMIZATION: Only fetch public IP for NEW sessions
-    // Check if any of the events are from a new session
-    const sessionIds = parsed.events.map(e => e.context.session.sessionId);
-    const uniqueSessionIds = [...new Set(sessionIds)];
-    
-    // Check if we already have IP data for these sessions
-    const existingSessions = await db.query.funnelSession.findMany({
-      where: and(
-        inArray(funnelSession.sessionId, uniqueSessionIds),
-        isNotNull(funnelSession.ipAddress)
-      ),
-      columns: {
-        sessionId: true,
-        ipAddress: true,
-      },
-    });
-    
-    const hasExistingSession = existingSessions.length > 0;
-    const existingIP = existingSessions[0]?.ipAddress;
-    
-    // Only fetch public IP if:
-    // 1. We detect a private IP AND
-    // 2. Either it's a NEW session OR the existing session has a private IP
-    const shouldFetchPublicIP = isPrivateIP(ip) && (!hasExistingSession || (existingIP && isPrivateIP(existingIP)));
-    
-    if (shouldFetchPublicIP) {
-      console.log(`[Tracking API] Private IP detected: ${ip}, fetching public IP...`);
-      try {
-        const publicIP = await fetchPublicIP();
-        if (publicIP && !isPrivateIP(publicIP)) {
-          console.log(`[Tracking API] ✓ Using public IP ${publicIP} instead of private IP ${ip}`);
-          ip = publicIP;
-        } else {
-          console.log(`[Tracking API] ✗ Could not fetch valid public IP, using private IP`);
-        }
-      } catch (error) {
-        console.log(`[Tracking API] ✗ Error fetching public IP:`, error);
-      }
-    } else if (hasExistingSession && existingIP && !isPrivateIP(existingIP)) {
-      // Reuse the PUBLIC IP from the existing session
-      console.log(`[Tracking API] Reusing public IP from existing session: ${existingIP}`);
-      ip = existingIP;
-    } else {
-      console.log(`[Tracking API] Using detected IP: ${ip}`);
-    }
-
     // Apply privacy settings to IP (GDPR compliance)
     const trackingConfig =
       funnel.trackingConfig &&
@@ -294,6 +151,7 @@ export async function POST(req: NextRequest) {
         organizationId: funnel.organizationId,
         events: parsed.events,
         ipAddress: ip,
+        trustLevel: "TELEMETRY",
       },
     });
 
@@ -312,30 +170,36 @@ export async function POST(req: NextRequest) {
       }
     );
   } catch (error) {
-    console.error("[Tracking API] Error processing events:", error);
-
-    if (error instanceof z.ZodError) {
+    if (error instanceof FunnelTelemetryQuotaExceededError) {
       return NextResponse.json(
-        { error: "Invalid request format", details: error.issues },
+        { error: "Tracking request limit reached." },
         {
-          status: 400,
+          status: 429,
           headers: {
             "Access-Control-Allow-Origin": "*",
+            "Retry-After": String(error.retryAfterSeconds),
           },
-        }
+        },
       );
     }
-
-    return NextResponse.json(
-      { error: "Internal server error" },
-      {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-        },
-      }
-    );
+    if (error instanceof FunnelTelemetryQuotaUnavailableError) {
+      return response("Tracking is temporarily unavailable.", 503);
+    }
+    if (error instanceof WebhookPayloadTooLargeError) {
+      return response("Tracking batch is too large.", 413);
+    }
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return response("Tracking batch is invalid.", 400);
+    }
+    return response("Tracking is temporarily unavailable.", 503);
   }
+}
+
+function response(message: string, status: number) {
+  return NextResponse.json(
+    { error: message },
+    { status, headers: { "Access-Control-Allow-Origin": "*" } },
+  );
 }
 
 // Handle OPTIONS for CORS

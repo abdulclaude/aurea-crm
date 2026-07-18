@@ -38,6 +38,21 @@ const menuGroups = [
     title: "Overview",
     items: [
       {
+        title: "Overview",
+        icon: Gauge,
+        url: "",
+      },
+      {
+        title: "Performance",
+        icon: BarChart3,
+        url: "/performance",
+      },
+      {
+        title: "Realtime",
+        icon: Zap,
+        url: "/realtime",
+      },
+      {
         title: "Events",
         icon: Activity,
         url: "/events",

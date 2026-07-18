@@ -25,7 +25,6 @@ import { IconEyeSlash as EyeIcon } from "central-icons/IconEyeSlash";
 import { IconSettingsSliderThree as FilterIcon } from "central-icons/IconSettingsSliderThree";
 
 import { IconContacts as ClientTypeIcon } from "central-icons/IconContacts";
-import { IconPeopleCircle as AssigneeIcon } from "central-icons/IconPeopleCircle";
 import { IconCalenderAdd as CreatedAtIcon } from "central-icons/IconCalenderAdd";
 import { IconLiveActivity as LastActivityIcon } from "central-icons/IconLiveActivity";
 import { IconCalendarEdit as LastUpdatedIcon } from "central-icons/IconCalendarEdit";
@@ -37,15 +36,14 @@ import {
   SearchIcon,
 } from "lucide-react";
 import * as React from "react";
+import type { DateRange } from "react-day-picker";
 import { useDebouncedCallback } from "use-debounce";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -54,7 +52,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectTrigger } from "@/components/ui/select";
-import DateRangeFilter from "@/components/ui/date-range-filter";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 
@@ -62,16 +60,8 @@ export interface ClientsToolbarProps {
   search: string;
   onSearchChange: (search: string) => void;
   selectedTypes: string[];
-  onApplyTypes: (types: string[]) => void;
   selectedTags: string[];
-  onApplyTags: (tags: string[]) => void;
-  selectedAssignees: string[];
-  onApplyAssignees: (assignees: string[]) => void;
-  onApplyAllFilters: (
-    types: string[],
-    tags: string[],
-    assignees: string[],
-  ) => void;
+  onApplyAllFilters: (types: string[], tags: string[]) => void;
   sortValue: string;
   onSortChange: (value: string) => void;
   table: Table<any>;
@@ -108,15 +98,15 @@ const sortOptions = [
 
 const PRIMARY_COLUMN_ID = "name";
 
+function selectedDateRange(start?: Date, end?: Date): DateRange | undefined {
+  return start || end ? { from: start, to: end } : undefined;
+}
+
 export function ClientsToolbar({
   search,
   onSearchChange,
   selectedTypes,
-  onApplyTypes,
   selectedTags,
-  onApplyTags,
-  selectedAssignees,
-  onApplyAssignees,
   onApplyAllFilters,
   sortValue,
   onSortChange,
@@ -144,8 +134,15 @@ export function ClientsToolbar({
     React.useState<string[]>(selectedTypes);
   const [tempSelectedTags, setTempSelectedTags] =
     React.useState<string[]>(selectedTags);
-  const [tempSelectedAssignees, setTempSelectedAssignees] =
-    React.useState<string[]>(selectedAssignees);
+  const [tempCreatedAt, setTempCreatedAt] = React.useState<DateRange | undefined>(
+    selectedDateRange(createdAtStart, createdAtEnd),
+  );
+  const [tempLastActivity, setTempLastActivity] = React.useState<
+    DateRange | undefined
+  >(selectedDateRange(lastActivityStart, lastActivityEnd));
+  const [tempUpdatedAt, setTempUpdatedAt] = React.useState<
+    DateRange | undefined
+  >(selectedDateRange(updatedAtStart, updatedAtEnd));
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   const trpc = useTRPC();
@@ -153,11 +150,6 @@ export function ClientsToolbar({
   // Fetch available clients/locations for "all-clients" scope
   const { data: clients = [] } = useSuspenseQuery(
     trpc.organizations.getClients.queryOptions(),
-  );
-
-  // Fetch available members for assignment filter
-  const { data: members = [] } = useSuspenseQuery(
-    trpc.clients.getLocationMembers.queryOptions(),
   );
 
   // Fetch ALL clients (unfiltered) for preview calculation
@@ -200,8 +192,18 @@ export function ClientsToolbar({
   }, [selectedTags]);
 
   React.useEffect(() => {
-    setTempSelectedAssignees(selectedAssignees);
-  }, [selectedAssignees]);
+    setTempCreatedAt(selectedDateRange(createdAtStart, createdAtEnd));
+  }, [createdAtEnd, createdAtStart]);
+
+  React.useEffect(() => {
+    setTempLastActivity(
+      selectedDateRange(lastActivityStart, lastActivityEnd),
+    );
+  }, [lastActivityEnd, lastActivityStart]);
+
+  React.useEffect(() => {
+    setTempUpdatedAt(selectedDateRange(updatedAtStart, updatedAtEnd));
+  }, [updatedAtEnd, updatedAtStart]);
 
   const handleSearchChange = (value: string) => {
     setSearchInput(value);
@@ -224,18 +226,35 @@ export function ClientsToolbar({
     );
   };
 
-  const handleToggleAssignee = (value: string) => {
-    setTempSelectedAssignees((prev) =>
-      prev.includes(value)
-        ? prev.filter((item) => item !== value)
-        : [...prev, value],
-    );
+  const handleDateRangeSelection = (
+    current: DateRange | undefined,
+    next: DateRange | undefined,
+    setRange: React.Dispatch<React.SetStateAction<DateRange | undefined>>,
+    onRangeChange?: (start?: Date, end?: Date) => void,
+  ) => {
+    if (!next) {
+      setRange(undefined);
+      onRangeChange?.();
+      return;
+    }
+
+    if (!current?.from || current.to) {
+      setRange({ from: next.from, to: undefined });
+      return;
+    }
+
+    setRange(next);
+    if (next.from && next.to) {
+      onRangeChange?.(next.from, next.to);
+    }
   };
 
   const hasFiltersApplied =
     tempSelectedTypes.length > 0 ||
     tempSelectedTags.length > 0 ||
-    tempSelectedAssignees.length > 0;
+    Boolean(tempCreatedAt?.from) ||
+    Boolean(tempLastActivity?.from) ||
+    Boolean(tempUpdatedAt?.from);
 
   // Calculate preview count considering ALL staged filters combined
   const previewCount = React.useMemo(() => {
@@ -258,40 +277,32 @@ export function ClientsToolbar({
         }
       }
 
-      // Check assignees filter (if any selected)
-      if (tempSelectedAssignees.length > 0) {
-        const clientAssignees = client.assignees || [];
-        const hasMatchingAssignee = clientAssignees.some((assignee: any) =>
-          tempSelectedAssignees.includes(assignee.id),
-        );
-        if (!hasMatchingAssignee) {
-          return false;
-        }
-      }
-
       return true;
     });
 
     return filtered.length;
-  }, [allClients, tempSelectedTypes, tempSelectedTags, tempSelectedAssignees]);
+  }, [allClients, tempSelectedTypes, tempSelectedTags]);
 
   return (
-    <div className="flex justify-between w-full items-center py-4">
-      <div className="flex items-center gap-2 w-full">
+    <div className="w-full min-w-0 py-4">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         {/* Search with filters inside */}
-        <div className="flex w-128 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 hover:text-black rounded-lg h-8.5">
+        <div className="relative flex h-8.5 min-w-64 basis-full flex-1 items-center rounded-lg bg-background transition duration-250 hover:bg-primary-foreground/50 hover:text-black sm:max-w-128 sm:basis-auto">
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
 
           <Input
             placeholder="Search members by name, email, company..."
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
-            className=" text-xs px-0 border-none bg-transparent! hover:bg-transparent w-128 pl-8"
+            className="w-full border-none bg-transparent! px-0 pl-8 text-xs hover:bg-transparent"
           />
 
           <DropdownMenu open={filtersOpen} onOpenChange={setFiltersOpen}>
             <DropdownMenuTrigger asChild>
-              <Button className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0">
+              <Button
+                aria-label="Filter clients"
+                className="text-[11px] bg-transparent hover:bg-transparent border-none absolute right-0"
+              >
                 <FilterIcon className="text-primary/80 dark:text-white/60 size-4 hover:text-black" />
                 {hasFiltersApplied && (
                   <span className="absolute -top-1 -right-1 size-3 rounded-full bg-blue-500 border-2 border-white" />
@@ -420,77 +431,6 @@ export function ClientsToolbar({
                 </DropdownMenuSub>
               )}
 
-              {/* Assigned To Filter */}
-              {members.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className="text-xs px-3 py-3 hover:bg-primary-foreground! hover:text-black rounded-lg">
-                    <AssigneeIcon className="size-4" />
-                    Assignee
-                  </DropdownMenuSubTrigger>
-
-                  <DropdownMenuSubContent
-                    className="rounded-lg bg-background border border-black/10 dark:border-white/5 w-[280px] ml-2.5 p-1"
-                    alignOffset={-5}
-                  >
-                    <div className="max-h-64 overflow-auto pr-1">
-                      {members.map((member: any) => {
-                        const selected = tempSelectedAssignees.includes(
-                          member.id,
-                        );
-                        const initials = member.name
-                          ? member.name
-                              .split(" ")
-                              .map((part: string) => part[0])
-                              .join("")
-                              .slice(0, 2)
-                              .toUpperCase()
-                          : "U";
-                        return (
-                          <div
-                            key={member.id}
-                            className="flex items-center gap-3 pt-3 pb-2 px-2 text-xs cursor-pointer rounded-lg group"
-                          >
-                            <Checkbox
-                              checked={selected}
-                              onCheckedChange={() =>
-                                handleToggleAssignee(member.id)
-                              }
-                              className="rounded-lg border-black/10 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground/50 hover:text-black data-[state=checked]:bg-primary-foreground/50 data-[state=checked]:text-black"
-                            />
-                            <Avatar className="size-6">
-                              {member.image ? (
-                                <AvatarImage
-                                  src={member.image}
-                                  alt={member.name ?? ""}
-                                />
-                              ) : (
-                                <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
-                                  {initials}
-                                </AvatarFallback>
-                              )}
-                            </Avatar>
-                            <span className="select-none truncate">
-                              {member.name}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="pt-3 flex gap-2">
-                      <Button
-                        className="flex-1 border border-black/10 dark:border-white/5 bg-background hover:bg-primary-foreground/50 hover:text-black text-xs text-black dark:text-white py-3 rounded-lg"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setTempSelectedAssignees([]);
-                        }}
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              )}
-
               {/* Created At Date Filter */}
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="text-xs px-3 py-3 hover:bg-primary-foreground! hover:text-black rounded-lg">
@@ -498,15 +438,22 @@ export function ClientsToolbar({
                   Created Date
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent
-                  className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-4 w-auto ml-2.5"
+                  className="ml-2.5 w-80 rounded-lg border border-black/10 bg-background p-2 dark:border-white/5"
                   alignOffset={-5}
                 >
-                  <DateRangeFilter
+                  <DateRangePicker
                     minDate={dateRange?.minDate || new Date(2020, 0, 1)}
                     maxDate={dateRange?.maxDate || new Date()}
-                    valueStart={createdAtStart}
-                    valueEnd={createdAtEnd}
-                    onChange={(start, end) => onCreatedAtChange?.(start, end)}
+                    value={tempCreatedAt}
+                    onChange={(range) =>
+                      handleDateRangeSelection(
+                        tempCreatedAt,
+                        range,
+                        setTempCreatedAt,
+                        onCreatedAtChange,
+                      )
+                    }
+                    placeholder="Select created date range"
                   />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -518,17 +465,22 @@ export function ClientsToolbar({
                   Last Activity
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent
-                  className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-4 w-auto ml-2.5"
+                  className="ml-2.5 w-80 rounded-lg border border-black/10 bg-background p-2 dark:border-white/5"
                   alignOffset={-5}
                 >
-                  <DateRangeFilter
+                  <DateRangePicker
                     minDate={dateRange?.minDate || new Date(2020, 0, 1)}
                     maxDate={dateRange?.maxDate || new Date()}
-                    valueStart={lastActivityStart}
-                    valueEnd={lastActivityEnd}
-                    onChange={(start, end) =>
-                      onLastActivityChange?.(start, end)
+                    value={tempLastActivity}
+                    onChange={(range) =>
+                      handleDateRangeSelection(
+                        tempLastActivity,
+                        range,
+                        setTempLastActivity,
+                        onLastActivityChange,
+                      )
                     }
+                    placeholder="Select activity date range"
                   />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -540,15 +492,22 @@ export function ClientsToolbar({
                   Last Updated
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent
-                  className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-4 w-auto ml-2.5"
+                  className="ml-2.5 w-80 rounded-lg border border-black/10 bg-background p-2 dark:border-white/5"
                   alignOffset={-5}
                 >
-                  <DateRangeFilter
+                  <DateRangePicker
                     minDate={dateRange?.minDate || new Date(2020, 0, 1)}
                     maxDate={dateRange?.maxDate || new Date()}
-                    valueStart={updatedAtStart}
-                    valueEnd={updatedAtEnd}
-                    onChange={(start, end) => onUpdatedAtChange?.(start, end)}
+                    value={tempUpdatedAt}
+                    onChange={(range) =>
+                      handleDateRangeSelection(
+                        tempUpdatedAt,
+                        range,
+                        setTempUpdatedAt,
+                        onUpdatedAtChange,
+                      )
+                    }
+                    placeholder="Select updated date range"
                   />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
@@ -557,11 +516,7 @@ export function ClientsToolbar({
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onApplyAllFilters(
-                      tempSelectedTypes,
-                      tempSelectedTags,
-                      tempSelectedAssignees,
-                    );
+                    onApplyAllFilters(tempSelectedTypes, tempSelectedTags);
                     setFiltersOpen(false);
                   }}
                   variant="filter"
@@ -581,8 +536,8 @@ export function ClientsToolbar({
                 {selectedLocationId
                   ? clients.find(
                       (c: any) => c.locationId === selectedLocationId,
-                    )?.name || "Select client"
-                  : "All clients"}
+                    )?.name || "Select location"
+                  : "All locations"}
                 <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
               </Button>
             </DropdownMenuTrigger>
@@ -596,7 +551,7 @@ export function ClientsToolbar({
                 onSelect={() => onLocationChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
               >
-                All clients
+                All locations
               </DropdownMenuCheckboxItem>
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />
@@ -642,17 +597,17 @@ export function ClientsToolbar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
 
-      {/* Column visibility and ordering on the right */}
-      <div className="flex gap-1">
-        <ColumnControls
-          table={table}
-          columnVisibility={columnVisibility}
-          columnOrder={columnOrder}
-          onColumnOrderChange={onColumnOrderChange}
-          initialColumnOrder={initialColumnOrder}
-        />
+        {/* Column visibility and ordering on the right */}
+        <div className="ml-auto flex shrink-0 gap-1">
+          <ColumnControls
+            table={table}
+            columnVisibility={columnVisibility}
+            columnOrder={columnOrder}
+            onColumnOrderChange={onColumnOrderChange}
+            initialColumnOrder={initialColumnOrder}
+          />
+        </div>
       </div>
     </div>
   );

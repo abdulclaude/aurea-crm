@@ -174,11 +174,11 @@ export default function InstructorDetailPage({
               </Card>
             )}
 
-            {/* Emergency Client */}
+            {/* Emergency contact */}
             {(instructor.emergencyContactName || instructor.emergencyContactPhone) && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Emergency Client</CardTitle>
+                  <CardTitle>Emergency contact</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {instructor.emergencyContactName && (

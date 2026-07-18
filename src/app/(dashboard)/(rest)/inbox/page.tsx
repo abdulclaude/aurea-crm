@@ -23,19 +23,34 @@ import { ConversationChannel, ConversationStatus } from "@/db/enums";
 import type { InboxConversation, InboxMessage, Client } from "@/db/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { InboxAssigneeSelect } from "@/features/inbox/components/inbox-assignee-select";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ConversationWithMeta = InboxConversation & {
   client: Pick<Client, "id" | "name" | "logo" | "email" | "phone"> | null;
   messages: Pick<InboxMessage, "content" | "direction" | "createdAt">[];
+  assignee: AssigneeSummary;
 };
 
 type ConversationWithMessages = InboxConversation & {
   client: Pick<Client, "id" | "name" | "logo" | "email" | "phone"> | null;
   messages: InboxMessage[];
+  assignee: AssigneeSummary;
 };
+
+type AssigneeSummary = {
+  id: string;
+  displayName: string;
+  email: string | null;
+} | null;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -313,7 +328,7 @@ function NewConversationPanel({
                   onBlur={() => {
                     setTimeout(() => setIsClientDropdownOpen(false), 200);
                   }}
-                  placeholder="Search clients…"
+                  placeholder="Search members…"
                   className="min-w-0 flex-1 bg-transparent text-xs text-black placeholder:text-muted-foreground/50 focus:outline-none"
                 />
               </div>
@@ -443,6 +458,7 @@ function ConversationDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const markedReadKey = useRef<string | null>(null);
 
   const { data: conv, isLoading } = useQuery(
     trpc.inbox.getConversation.queryOptions({ id }),
@@ -478,6 +494,28 @@ function ConversationDetail({ id }: { id: string }) {
       },
     }),
   );
+
+  const markRead = useMutation(
+    trpc.inbox.markRead.mutationOptions({
+      onSuccess: () => {
+        qc.invalidateQueries({
+          queryKey: trpc.inbox.listConversations.queryKey(),
+        });
+        qc.invalidateQueries({ queryKey: trpc.inbox.unreadCount.queryKey() });
+      },
+    }),
+  );
+
+  useEffect(() => {
+    if (!conv?.id) return;
+    const readKey = `${conv.id}:${conv.lastMessageAt?.toISOString() ?? "empty"}`;
+    if (markedReadKey.current === readKey) return;
+    markedReadKey.current = readKey;
+    markRead.mutate({
+      conversationId: conv.id,
+      lastReadMessageId: conv.messages.at(-1)?.id ?? null,
+    });
+  }, [conv?.id, conv?.lastMessageAt, markRead]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -534,6 +572,10 @@ function ConversationDetail({ id }: { id: string }) {
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-1.5">
+          <InboxAssigneeSelect
+            conversationId={id}
+            assignee={typedConv.assignee}
+          />
           {isDone ? (
             <button
               type="button"
@@ -614,11 +656,13 @@ function ConversationDetail({ id }: { id: string }) {
 // ─── Main inbox page ──────────────────────────────────────────────────────────
 
 type FilterMode = "all" | "unread" | "done";
+type AssignmentFilter = "ALL" | "MINE" | "UNASSIGNED";
 
 export default function InboxPage() {
   const trpc = useTRPC();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
+  const [assignment, setAssignment] = useState<AssignmentFilter>("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
 
@@ -631,6 +675,7 @@ export default function InboxPage() {
           : undefined,
     unreadOnly: filter === "unread",
     search: search.trim() || undefined,
+    assignment,
   };
 
   const { data, isLoading } = useQuery(
@@ -688,6 +733,24 @@ export default function InboxPage() {
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+            <Select
+              value={assignment}
+              onValueChange={(value) =>
+                setAssignment(value as AssignmentFilter)
+              }
+            >
+              <SelectTrigger
+                className="mt-2 h-8 w-full text-xs"
+                aria-label="Assignment filter"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All assignments</SelectItem>
+                <SelectItem value="MINE">Assigned to me</SelectItem>
+                <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Conversation list */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type {
   ColumnDef,
   ColumnOrderState,
@@ -10,12 +10,17 @@ import type {
 } from "@tanstack/react-table";
 import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
-import { MoreHorizontal, Users, MapPin } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import * as React from "react";
 import { useQueryState, parseAsString, parseAsInteger } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
@@ -28,7 +33,9 @@ import {
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { ClassesToolbar } from "./classes-toolbar";
+import { ClassCapacityRing } from "./class-capacity-ring";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 type ClassRow = RouterOutput["studioClasses"]["list"]["classes"][number];
@@ -112,21 +119,71 @@ const classColumns: ColumnDef<ClassRow>[] = [
     ),
   },
   {
+    id: "serviceType",
+    header: "Service",
+    meta: { label: "Service" },
+    enableSorting: false,
+    cell: ({ row }) => {
+      const serviceName =
+        row.original.serviceType?.name ?? row.original.classType?.name;
+
+      const serviceColor =
+        row.original.serviceType?.calendarColor ?? row.original.classType?.color;
+
+      return serviceName ? (
+        <Badge
+          variant="outline"
+          className="max-w-44 truncate text-[10px] ring-0"
+          style={
+            serviceColor
+              ? {
+                  backgroundColor: `${serviceColor}18`,
+                  borderColor: `${serviceColor}66`,
+                  color: serviceColor,
+                  boxShadow: `0 0 0 1px ${serviceColor}66`,
+                }
+              : undefined
+          }
+        >
+          {serviceName}
+        </Badge>
+      ) : (
+        <span className="text-xs text-primary/40">Unassigned</span>
+      );
+    },
+  },
+  {
     id: "startTime",
     accessorKey: "startTime",
-    header: "Time",
-    meta: { label: "Start time" },
+    header: "Class booked",
+    meta: { label: "Class booked" },
     enableSorting: true,
     cell: ({ row }) => (
-      <div className="flex flex-col">
-        <span className="text-xs text-primary">
-          {format(new Date(row.original.startTime), "PPp")}
-        </span>
-        <span className="text-[11px] text-primary/75">
-          {format(new Date(row.original.endTime), "p")}
-        </span>
-      </div>
+      <span className="text-xs text-primary">
+        {format(new Date(row.original.startTime), "PPp")}
+      </span>
     ),
+  },
+  {
+    id: "duration",
+    header: "Class duration",
+    meta: { label: "Class duration" },
+    cell: ({ row }) => {
+      const durationMinutes = Math.max(
+        0,
+        Math.round(
+          (new Date(row.original.endTime).getTime() -
+            new Date(row.original.startTime).getTime()) /
+            60_000,
+        ),
+      );
+
+      return (
+        <span className="text-xs tabular-nums text-primary/75">
+          {durationMinutes} min
+        </span>
+      );
+    },
   },
   {
     id: "instructorName",
@@ -134,11 +191,36 @@ const classColumns: ColumnDef<ClassRow>[] = [
     header: "Instructor",
     meta: { label: "Instructor" },
     enableSorting: true,
-    cell: ({ row }) => (
-      <span className="text-xs text-primary">
-        {row.original.instructorName || "—"}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const instructorName =
+        row.original.instructor?.name ?? row.original.instructorName;
+      const initials = instructorName
+        ?.split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join("");
+
+      return instructorName ? (
+        <div className="flex items-center gap-2">
+          <Avatar className="size-7 overflow-hidden rounded-full">
+            {row.original.instructor?.profilePhoto && (
+              <AvatarImage
+                src={row.original.instructor.profilePhoto}
+                alt={instructorName}
+                className="object-cover object-top"
+              />
+            )}
+            <AvatarFallback className="rounded-full bg-primary/10 text-[9px] font-medium text-primary/65">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          <span className="text-xs text-primary">{instructorName}</span>
+        </div>
+      ) : (
+        <span className="text-xs text-primary/40">—</span>
+      );
+    },
   },
   {
     id: "room",
@@ -149,12 +231,9 @@ const classColumns: ColumnDef<ClassRow>[] = [
 
       return (
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            {roomName && <MapPin className="h-3.5 w-3.5 shrink-0" />}
-            <span className="truncate text-xs text-primary">
-              {roomName ?? "Unassigned"}
-            </span>
-          </div>
+          <span className="block truncate text-xs text-primary">
+            {roomName ?? "Unassigned"}
+          </span>
           {row.original.location && (
             <span className="block truncate text-[11px] text-primary/50">
               {row.original.location}
@@ -171,23 +250,7 @@ const classColumns: ColumnDef<ClassRow>[] = [
     cell: ({ row }) => {
       const booked = row.original._count?.studioBooking ?? 0;
       const max = row.original.maxCapacity;
-      const percentage = max ? Math.round((booked / max) * 100) : 0;
-
-      return (
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <div className="text-right">
-            <p className="text-xs font-medium text-primary">
-              {booked} / {max ?? "∞"}
-            </p>
-            {max && (
-              <p className="text-[10px] text-primary/75">
-                {percentage}% full
-              </p>
-            )}
-          </div>
-        </div>
-      );
+      return <ClassCapacityRing booked={booked} capacity={max} />;
     },
   },
   {
@@ -263,14 +326,14 @@ const classColumns: ColumnDef<ClassRow>[] = [
               Actions
             </DropdownMenuLabel>
             <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />
-            <DropdownMenuItem
-              className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
-              onClick={(e) => {
-                e.stopPropagation();
-                // View details action
-              }}
-            >
-              View details
+            <DropdownMenuItem asChild>
+              <Link
+                href={`/studio/classes/${row.original.id}`}
+                className="cursor-pointer text-xs text-primary hover:bg-primary-foreground hover:text-black dark:text-white"
+                onClick={(event) => event.stopPropagation()}
+              >
+                View details
+              </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -285,7 +348,7 @@ const PRIMARY_COLUMN_ID = "select";
 const CLASS_COLUMN_IDS = classColumns.map(
   (column, index) => (column.id ?? `column-${index}`) as string
 );
-const COLUMN_ORDER_STORAGE_KEY = "studio-classes-table.column-order";
+const COLUMN_ORDER_STORAGE_KEY = "studio-classes-table.column-order.v2";
 
 function formatPricing(classItem: ClassRow): string {
   if (classItem.pricingModel === "FREE") return "Free";
@@ -325,6 +388,7 @@ export function ClassesTable() {
   const [startDateStr, setStartDateStr] = useQueryState("startDate", parseAsString.withDefault(""));
   const [endDateStr, setEndDateStr] = useQueryState("endDate", parseAsString.withDefault(""));
   const [instructorFilter, setInstructorFilter] = useQueryState("instructor", parseAsString.withDefault(""));
+  const [serviceTypeFilter, setServiceTypeFilter] = useQueryState("serviceType", parseAsString.withDefault(""));
   const [roomFilter, setRoomFilter] = useQueryState("room", parseAsString.withDefault(""));
 
   // Convert strings to Date objects
@@ -337,7 +401,8 @@ export function ClassesTable() {
     [hiddenColumnsParam]
   );
 
-  const { data, isFetching } = useSuspenseQuery(
+  const [hydrated, setHydrated] = React.useState(false);
+  const classesQuery = useQuery(
     trpc.studioClasses.list.queryOptions({
       page,
       pageSize,
@@ -345,22 +410,49 @@ export function ClassesTable() {
       startDate: startDateStr || undefined,
       endDate: endDateStr || undefined,
       instructorName: instructorFilter || undefined,
+      serviceTypeId: serviceTypeFilter || undefined,
       roomId: roomFilter || undefined,
     })
   );
 
-  const { data: stats } = useSuspenseQuery(trpc.studioClasses.stats.queryOptions());
+  const statsQuery = useQuery(trpc.studioClasses.stats.queryOptions());
 
-  const { data: instructorsData } = useSuspenseQuery(trpc.instructors.list.queryOptions({ pageSize: 100 }));
+  const instructorsQuery = useQuery(
+    trpc.instructors.list.queryOptions({ pageSize: 100 }),
+  );
   const instructors = React.useMemo(
-    () => (instructorsData?.items ?? []).map((w) => ({ id: w.id, name: w.name })),
-    [instructorsData],
+    () =>
+      (instructorsQuery.data?.items ?? []).map((instructor) => ({
+        id: instructor.id,
+        name: instructor.name,
+      })),
+    [instructorsQuery.data],
   );
-  const { data: roomRows } = useSuspenseQuery(trpc.rooms.list.queryOptions());
+  const roomsQuery = useQuery(trpc.rooms.list.queryOptions());
   const rooms = React.useMemo(
-    () => roomRows.map((room) => ({ id: room.id, name: room.name })),
-    [roomRows],
+    () =>
+      (roomsQuery.data ?? []).map((room) => ({
+        id: room.id,
+        name: room.name,
+      })),
+    [roomsQuery.data],
   );
+  const servicesQuery = useQuery(
+    trpc.serviceCatalog.list.queryOptions({
+      includeInactive: false,
+      experienceType: "CLASS",
+    }),
+  );
+  const serviceTypes = React.useMemo(
+    () =>
+      (servicesQuery.data ?? []).map((service) => ({
+        id: service.id,
+        name: service.name,
+      })),
+    [servicesQuery.data],
+  );
+
+  React.useEffect(() => setHydrated(true), []);
 
   const sortingState = React.useMemo(
     () => sortValueToState(sortParam),
@@ -466,14 +558,23 @@ export function ClassesTable() {
     [setRoomFilter, setPage]
   );
 
+  const handleServiceTypeChange = React.useCallback(
+    (value: string) => {
+      void setServiceTypeFilter(value);
+      void setPage(1);
+    },
+    [setServiceTypeFilter, setPage]
+  );
+
   const handleClearFilters = React.useCallback(() => {
     void setSearch("");
     void setStartDateStr("");
     void setEndDateStr("");
     void setInstructorFilter("");
+    void setServiceTypeFilter("");
     void setRoomFilter("");
     void setPage(1);
-  }, [setSearch, setStartDateStr, setEndDateStr, setInstructorFilter, setRoomFilter, setPage]);
+  }, [setSearch, setStartDateStr, setEndDateStr, setInstructorFilter, setServiceTypeFilter, setRoomFilter, setPage]);
 
   const handleColumnVisibilityChange = React.useCallback(
     (state: VisibilityState) => {
@@ -526,12 +627,56 @@ export function ClassesTable() {
     [setPageSize, setPage]
   );
 
+  const relatedQueries = [
+    classesQuery,
+    statsQuery,
+    instructorsQuery,
+    roomsQuery,
+    servicesQuery,
+  ];
+  const failedQuery = relatedQueries.find((query) => query.isError);
+  const data = classesQuery.data;
+
+  if (!hydrated || relatedQueries.some((query) => query.isLoading)) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading studio classes"
+        className="h-64 animate-pulse bg-muted/40"
+      />
+    );
+  }
+
+  if (failedQuery || !data || !statsQuery.data) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p role="alert" className="text-sm font-medium">
+          Studio classes could not be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {failedQuery?.error instanceof Error
+            ? failedQuery.error.message
+            : "Try the request again."}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            void Promise.all(relatedQueries.map((query) => query.refetch()))
+          }
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div>
       <DataTable
         data={data.classes}
         columns={classColumns}
-        isLoading={isFetching}
+        isLoading={relatedQueries.some((query) => query.isFetching)}
         getRowId={(row) => row.id}
         sorting={sortingState}
         onSortingChange={handleSortingChange}
@@ -568,11 +713,14 @@ export function ClassesTable() {
               instructor={instructorFilter}
               onInstructorChange={handleInstructorChange}
               instructors={instructors}
+              serviceTypeId={serviceTypeFilter}
+              onServiceTypeChange={handleServiceTypeChange}
+              serviceTypes={serviceTypes}
               roomId={roomFilter}
               onRoomChange={handleRoomChange}
               rooms={rooms}
               onClearFilters={handleClearFilters}
-              stats={stats}
+              stats={statsQuery.data}
             />
           ),
         }}

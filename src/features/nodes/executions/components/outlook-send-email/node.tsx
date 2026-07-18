@@ -50,7 +50,7 @@ export const OutlookSendEmailNode: React.FC<NodeProps<OutlookSendEmailNodeType>>
       nodeId: props.id,
       channel: OUTLOOK_SEND_EMAIL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookSendEmailRealtimeToken as any,
+      refreshToken: fetchOutlookSendEmailRealtimeToken,
     });
 
     const handleOpenSettings = () => {

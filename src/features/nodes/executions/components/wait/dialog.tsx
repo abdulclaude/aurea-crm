@@ -94,7 +94,7 @@ export const WaitDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Wait Configuration</SheetTitle>
           <SheetDescription>
@@ -102,7 +102,7 @@ export const WaitDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -121,7 +121,7 @@ export const WaitDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "myWait"}.waitedUntil}}`}
                     </span>
                   </FormDescription>

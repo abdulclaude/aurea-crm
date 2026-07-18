@@ -50,7 +50,7 @@ export const SlackUploadFileNode: React.FC<NodeProps<SlackUploadFileNodeType>> =
       nodeId: props.id,
       channel: SLACK_UPLOAD_FILE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchSlackUploadFileRealtimeToken as any,
+      refreshToken: fetchSlackUploadFileRealtimeToken,
     });
 
     const handleOpenSettings = () => {

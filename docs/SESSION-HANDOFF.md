@@ -44,10 +44,10 @@
 - Added "Launchpad" item with Rocket icon to sidebar's General section
 
 ### 6. Floating AI assistant (ported from profitabledge)
-- **Opencode GO API key** added to `.env` (`OPENCODE_GO_API_KEY=sk-ls...`)
-- **API route**: `src/app/api/ai/chat/route.ts` — POST endpoint using Opencode GO (deepseek-v4-pro via OpenAI-compatible base URL `https://opencode.ai/zen/go/v1`)
+- **Provider account boundary**: AI provider keys are encrypted credentials at the exact active organization/location scope; there is no deployment-key fallback.
+- **API route**: `src/app/api/ai/chat/route.ts` — POST endpoint using the active account's Gemini credential.
   - Authenticated (rejects unauthenticated requests)
-  - Studio-aware system prompt (uses locationName from request body)
+  - Studio-aware system prompt (uses the server-resolved active location)
   - Uses `convertToModelMessages` from AI SDK v5 for message conversion
   - Returns `result.toTextStreamResponse()`
 - **Zustand store**: `src/stores/floating-assistant.ts` — `isOpen`, `open(query?)`, `close()`, `toggle()`; persisted to localStorage
@@ -89,6 +89,6 @@ Key tasks:
 5. Instructor payroll calculations
 
 ## Environment Setup Notes
-- `OPENCODE_GO_API_KEY` must be in `.env` for the AI assistant to work
+- Configure the active account's AI provider credential through the CRM before using the assistant.
 - The dashboard uses `date-fns` (already installed) and `recharts` (already installed)
 - The floating assistant uses `@ai-sdk/react` and `ai` (both already installed, v5)

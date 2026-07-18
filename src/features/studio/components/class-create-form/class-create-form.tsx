@@ -59,6 +59,8 @@ export function ClassCreateForm() {
       currency: "GBP",
       bookingWindowHours: "168",
       cancellationWindowHours: "12",
+      bookingWindowPolicyOverrideId: "",
+      waitlistPolicyOverrideId: "",
       waitlistEnabled: false,
       autoPromoteWaitlist: false,
       onlineBookingEnabled: true,
@@ -77,8 +79,31 @@ export function ClassCreateForm() {
     trpc.instructors.list.queryOptions({ pageSize: 100 }),
   );
   const { data: cancellationPolicies = [] } = useQuery(
-    trpc.cancellationPolicy.list.queryOptions(),
+    trpc.cancellationPolicy.listAssignable.queryOptions(),
   );
+  const schedulingPoliciesQuery = useQuery(
+    trpc.schedulingPolicy.listForClass.queryOptions(),
+  );
+  const schedulingPolicies = schedulingPoliciesQuery.data;
+  const previewDate = form.watch("date");
+  const previewStartTime = form.watch("startTime");
+  const previewServiceTypeId = form.watch("serviceTypeId");
+  const previewBookingOverrideId = form.watch("bookingWindowPolicyOverrideId");
+  const previewWaitlistOverrideId = form.watch("waitlistPolicyOverrideId");
+  const previewStartsAt = new Date(`${previewDate}T${previewStartTime}`);
+  const policyPreview = useQuery({
+    ...trpc.schedulingPolicy.previewForClass.queryOptions({
+      serviceTypeId: optionalString(previewServiceTypeId) ?? null,
+      bookingWindowPolicyOverrideId:
+        optionalString(previewBookingOverrideId) ?? null,
+      waitlistPolicyOverrideId:
+        optionalString(previewWaitlistOverrideId) ?? null,
+      startsAt: Number.isNaN(previewStartsAt.getTime())
+        ? new Date()
+        : previewStartsAt,
+    }),
+    enabled: !Number.isNaN(previewStartsAt.getTime()),
+  });
 
   const createClass = useMutation(
     trpc.studioClassesEnhanced.create.mutationOptions({
@@ -125,6 +150,10 @@ export function ClassCreateForm() {
       isVirtual: values.isVirtual,
       bookingWindowHours: optionalInteger(values.bookingWindowHours),
       cancellationWindowHours: optionalInteger(values.cancellationWindowHours),
+      bookingWindowPolicyOverrideId: optionalString(
+        values.bookingWindowPolicyOverrideId,
+      ),
+      waitlistPolicyOverrideId: optionalString(values.waitlistPolicyOverrideId),
       pricingModel: values.pricingModel,
       dropInPrice: optionalString(values.dropInPrice),
       slidingScaleMinPrice: optionalString(values.slidingScaleMinPrice),
@@ -155,11 +184,11 @@ export function ClassCreateForm() {
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pb-6">
         <FormSection title="Class details">
-            <BasicFields
-              form={form}
-              serviceTypes={serviceTypes}
-              classTypes={classTypes}
-              instructors={instructors}
+          <BasicFields
+            form={form}
+            serviceTypes={serviceTypes}
+            classTypes={classTypes}
+            instructors={instructors}
             rooms={rooms}
           />
         </FormSection>
@@ -176,6 +205,14 @@ export function ClassCreateForm() {
           <BookingPolicyFields
             form={form}
             cancellationPolicies={cancellationPolicies}
+            bookingPolicies={schedulingPolicies?.bookingWindows ?? []}
+            waitlistPolicies={schedulingPolicies?.waitlists ?? []}
+            bookingPreview={policyPreview.data?.bookingWindow}
+            waitlistPreview={policyPreview.data?.waitlist}
+            policiesLoading={schedulingPoliciesQuery.isLoading}
+            policiesError={schedulingPoliciesQuery.error?.message}
+            previewLoading={policyPreview.isLoading}
+            previewError={policyPreview.error?.message}
           />
         </FormSection>
 
@@ -183,8 +220,12 @@ export function ClassCreateForm() {
           <Button asChild variant="ghost">
             <Link href="/studio/classes">Cancel</Link>
           </Button>
-          <Button type="submit" disabled={createClass.isPending}>
-            <CalendarPlus className="size-4" />
+          <Button
+            type="submit"
+            variant="gradient"
+            className="w-max"
+            disabled={createClass.isPending}
+          >
             {createClass.isPending ? "Creating..." : "Create class"}
           </Button>
         </div>

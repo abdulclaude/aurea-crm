@@ -6,6 +6,7 @@ import { useTRPC } from "@/trpc/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -25,7 +26,9 @@ export default function LaunchpadFirstClassPage() {
 
   const { data: rooms } = useQuery(trpc.rooms.list.queryOptions());
   const { data: classTypes } = useQuery(trpc.classTypes.list.queryOptions({}));
-  const { data: instructors } = useQuery(trpc.instructors.list.queryOptions({}));
+  const { data: instructors } = useQuery(
+    trpc.instructors.list.queryOptions({}),
+  );
 
   const [name, setName] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -90,19 +93,22 @@ export default function LaunchpadFirstClassPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-3">
               <Label>Start time</Label>
-              <Input
-                type="datetime-local"
+              <DateTimePicker
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={setStartTime}
+                dateAriaLabel="Class start date"
+                timeAriaLabel="Class start time"
                 required
               />
             </div>
             <div className="flex flex-col gap-3">
               <Label>End time</Label>
-              <Input
-                type="datetime-local"
+              <DateTimePicker
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={setEndTime}
+                minDate={startTime ? new Date(startTime) : undefined}
+                dateAriaLabel="Class end date"
+                timeAriaLabel="Class end time"
                 required
               />
             </div>
@@ -169,7 +175,12 @@ export default function LaunchpadFirstClassPage() {
               Cancel
             </Button>
 
-            <Button type="submit" disabled={create.isPending}>
+            <Button
+              type="submit"
+              disabled={
+                create.isPending || !name.trim() || !startTime || !endTime
+              }
+            >
               {create.isPending ? "Scheduling..." : "Schedule class"}
             </Button>
           </div>

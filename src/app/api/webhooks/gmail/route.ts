@@ -1,77 +1,138 @@
-import { Buffer } from "node:buffer";
-
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import { and, eq, isNull, or } from "drizzle-orm";
+import { ZodError } from "zod";
 
-import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { gmailSubscription } from "@/db/schema";
+import { gmailSubscription, providerAccount } from "@/db/schema";
+import {
+  bearerTokenFromHeader,
+  getGmailPubSubAuthConfig,
+  GmailPubSubConfigurationError,
+  parseGmailPubSubNotification,
+  type GmailPubSubAuthConfig,
+  type GmailPubSubNotification,
+  verificationTokenMatches,
+  verifyGmailPubSubOidcToken,
+} from "@/features/gmail/server/pubsub-contract";
 import { enqueueGmailNotification } from "@/features/gmail/server/subscriptions";
+import {
+  readBoundedRawBody,
+  WebhookPayloadTooLargeError,
+} from "@/features/webhooks/server/bounded-raw-body";
 
-const VERIFY_TOKEN = process.env.GMAIL_PUBSUB_VERIFICATION_TOKEN;
+export const runtime = "nodejs";
 
-export async function POST(request: NextRequest) {
+const MAX_GMAIL_PUBSUB_BYTES = 256 * 1024;
+
+export async function POST(request: NextRequest): Promise<Response> {
+  let config: GmailPubSubAuthConfig;
   try {
-    if (VERIFY_TOKEN) {
-      const token = request.nextUrl.searchParams.get("token");
-      if (token !== VERIFY_TOKEN) {
-        return NextResponse.json(
-          { success: false, error: "Invalid verification token." },
-          { status: 401 }
-        );
-      }
-    }
-
-    const body = await request.json().catch(() => null);
-    const message = body?.message;
-
-    if (!message?.data) {
-      return NextResponse.json(
-        { success: false, error: "Missing Pub/Sub message payload." },
-        { status: 400 }
-      );
-    }
-
-    const decoded = decodeMessageData(message.data);
-    const emailAddress = decoded?.emailAddress;
-    const historyId = decoded?.historyId;
-
-    if (!emailAddress) {
-      return NextResponse.json(
-        { success: false, error: "Missing email address in message." },
-        { status: 400 }
-      );
-    }
-
-    const subscription = await db.query.gmailSubscription.findFirst({
-      where: eq(gmailSubscription.emailAddress, emailAddress),
-      columns: { id: true },
-    });
-
-    if (!subscription) {
-      return NextResponse.json({ success: true, ignored: true }, { status: 202 });
-    }
-
-    await enqueueGmailNotification({
-      subscriptionId: subscription.id,
-      historyId: historyId ? String(historyId) : undefined,
-    });
-
-    return NextResponse.json({ success: true });
+    config = getGmailPubSubAuthConfig();
   } catch (error) {
-    console.error("Gmail webhook error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to handle Gmail webhook." },
-      { status: 500 }
+    if (error instanceof GmailPubSubConfigurationError) {
+      return response("Gmail Pub/Sub authentication is unavailable.", 503);
+    }
+    throw error;
+  }
+
+  if (
+    !verificationTokenMatches({
+      expected: config.verificationToken,
+      provided: request.nextUrl.searchParams.get("token"),
+    })
+  ) {
+    return response("Unauthorized.", 401);
+  }
+
+  const bearerToken = bearerTokenFromHeader(
+    request.headers.get("authorization"),
+  );
+  if (!bearerToken) return response("Unauthorized.", 401);
+
+  let rawBody: string;
+  try {
+    rawBody = await readBoundedRawBody(request, MAX_GMAIL_PUBSUB_BYTES);
+  } catch (error) {
+    if (error instanceof WebhookPayloadTooLargeError) {
+      return response("Payload too large.", 413);
+    }
+    return response("Unable to read payload.", 400);
+  }
+
+  try {
+    await verifyGmailPubSubOidcToken({
+      config,
+      token: bearerToken,
+    });
+  } catch {
+    return response("Unauthorized.", 401);
+  }
+
+  let notification: GmailPubSubNotification;
+  try {
+    notification = parseGmailPubSubNotification(rawBody);
+  } catch (error) {
+    if (error instanceof ZodError || error instanceof SyntaxError) {
+      return response("Invalid Pub/Sub payload.", 400);
+    }
+    return response("Invalid Pub/Sub payload.", 400);
+  }
+
+  try {
+    const subscriptions = await db
+      .select({
+        id: gmailSubscription.id,
+        organizationId: gmailSubscription.organizationId,
+        locationId: gmailSubscription.locationId,
+        providerAccountId: gmailSubscription.providerAccountId,
+      })
+      .from(gmailSubscription)
+      .innerJoin(
+        providerAccount,
+        and(
+          eq(providerAccount.id, gmailSubscription.providerAccountId),
+          eq(providerAccount.organizationId, gmailSubscription.organizationId),
+          or(
+            eq(providerAccount.locationId, gmailSubscription.locationId),
+            and(
+              isNull(providerAccount.locationId),
+              isNull(gmailSubscription.locationId),
+            ),
+          ),
+        ),
+      )
+      .where(
+        and(
+          eq(gmailSubscription.emailAddress, notification.emailAddress),
+          eq(providerAccount.provider, "GOOGLE_WORKSPACE"),
+          eq(providerAccount.status, "ACTIVE"),
+        ),
+      );
+    if (subscriptions.length === 0) return new Response(null, { status: 204 });
+
+    await Promise.all(
+      subscriptions.map((subscription) =>
+        enqueueGmailNotification({
+          subscriptionId: subscription.id,
+          organizationId: subscription.organizationId,
+          locationId: subscription.locationId,
+          providerAccountId: subscription.providerAccountId,
+          emailAddress: notification.emailAddress,
+          historyId: notification.historyId,
+          messageId: notification.messageId,
+        }),
+      ),
     );
+    return new Response(null, { status: 204 });
+  } catch {
+    console.error("[Gmail] Pub/Sub notification enqueue failed.", {
+      messageId: notification.messageId,
+    });
+    return response("Webhook processing failed.", 500);
   }
 }
 
-function decodeMessageData(data: string) {
-  try {
-    const buffer = Buffer.from(data, "base64");
-    return JSON.parse(buffer.toString("utf-8"));
-  } catch {
-    return null;
-  }
+function response(message: string, status: number): NextResponse {
+  return NextResponse.json({ error: message }, { status });
 }

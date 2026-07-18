@@ -43,6 +43,9 @@ import { useTRPC } from "@/trpc/client";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/trpc/routers/_app";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
+import { requiredWorkflowProviderBindingSchema } from "@/features/workflows/lib/workflow-provider-binding";
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type CalendarListItem =
@@ -67,6 +70,7 @@ const EVENT_OPTIONS = [
 ];
 
 const formSchema = z.object({
+  providerAccountId: requiredWorkflowProviderBindingSchema.shape.providerAccountId,
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -102,6 +106,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
   const form = useForm<GoogleCalendarTriggerFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues.providerAccountId || "",
       variableName: defaultValues.variableName || "googleCalendar",
       calendarId: defaultValues.calendarId || "",
       calendarName: defaultValues.calendarName || "",
@@ -115,6 +120,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues.providerAccountId || "",
         variableName: defaultValues.variableName || "googleCalendar",
         calendarId: defaultValues.calendarId || "",
         calendarName: defaultValues.calendarName || "",
@@ -124,7 +130,9 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
           : ["created", "updated"],
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.calendarId, defaultValues.calendarName, defaultValues.timezone, defaultValues.listenFor, form]);
+  }, [open, defaultValues.providerAccountId, defaultValues.variableName, defaultValues.calendarId, defaultValues.calendarName, defaultValues.timezone, defaultValues.listenFor, form]);
+
+  const providerAccountId = form.watch("providerAccountId");
 
   const handleSubmit = (values: GoogleCalendarTriggerFormValues) => {
     onSubmit(values);
@@ -148,7 +156,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Google Calendar Trigger</SheetTitle>
           <SheetDescription>
@@ -156,7 +164,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -165,22 +173,42 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
           >
             <FormField
               control={form.control}
+              name="providerAccountId"
+              render={({ field }) => (
+                <FormItem>
+                  <WorkflowProviderAccountSelect
+                    id="google-calendar-trigger-account"
+                    nodeType={NodeType.GOOGLE_CALENDAR_TRIGGER}
+                    value={field.value}
+                    onValueChange={(value) => {
+                      field.onChange(value);
+                      form.setValue("calendarId", "");
+                      form.setValue("calendarName", "");
+                    }}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
               name="variableName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white/50 text-xs">
+                  <FormLabel className="text-muted-foreground text-xs">
                     Variable name
                   </FormLabel>
                   <FormControl>
                     <Input
-                      className="bg-[#202E32] rounded-md placeholder:text-white/50"
+                      className="bg-background rounded-md placeholder:text-muted-foreground"
                       placeholder="googleCalendar"
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs text-white/50">
+                  <FormDescription className="text-xs text-muted-foreground">
                     Reference this trigger later like{" "}
-                    <code className="text-white">
+                    <code className="text-primary">
                       {`{{${field.value || "googleCalendar"}.event.id}}`}
                     </code>
                     .
@@ -195,13 +223,14 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
               name="calendarId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white/50 text-xs">
+                  <FormLabel className="text-muted-foreground text-xs">
                     Calendar
                   </FormLabel>
-                  {open ? (
+                  {open && providerAccountId ? (
                     <FormControl>
                       <Suspense fallback={<CalendarSelectFallback />}>
                         <CalendarSelectField
+                          providerAccountId={providerAccountId}
                           value={field.value}
                           onSelect={(calendar) => {
                             field.onChange(calendar.id);
@@ -211,12 +240,11 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                       </Suspense>
                     </FormControl>
                   ) : (
-                    <div className="mt-3 rounded-md border border-white/5 bg-[#131B1C] p-3 text-xs text-white/50">
-                      Open this dialog to load calendars from your connected
-                      Google account.
+                    <div className="mt-3 rounded-md border border-border bg-muted p-3 text-xs text-muted-foreground">
+                      Select a Google Calendar account to load its calendars.
                     </div>
                   )}
-                  <FormDescription className="text-xs text-white/50">
+                  <FormDescription className="text-xs text-muted-foreground">
                     We’ll list every calendar you can edit. Use refresh if you
                     just added a new calendar in Google.
                   </FormDescription>
@@ -230,17 +258,17 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
               name="calendarName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white/50 text-xs">
+                  <FormLabel className="text-muted-foreground text-xs">
                     Display name
                   </FormLabel>
                   <FormControl>
                     <Input
-                      className="bg-[#202E32] rounded-md placeholder:text-white/50"
+                      className="bg-background rounded-md placeholder:text-muted-foreground"
                       placeholder="Sales Demo Calendar"
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs text-white/50">
+                  <FormDescription className="text-xs text-muted-foreground">
                     Optional label used inside the editor to identify this
                     trigger.
                   </FormDescription>
@@ -254,7 +282,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
               name="listenFor"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white/50 text-xs">
+                  <FormLabel className="text-muted-foreground text-xs">
                     Events to listen for
                   </FormLabel>
                   <div className="space-y-2">
@@ -263,7 +291,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                         <Button
                           type="button"
                           variant="outline"
-                          className="w-full justify-between bg-[#202E32] hover:bg-[#202E32] hover:brightness-110 transition duration-150 border-none hover:text-white text-white text-xs"
+                          className="w-full justify-between bg-background hover:bg-background hover:brightness-110 transition duration-150 border-none hover:text-primary text-primary text-xs"
                         >
                           {field.value?.length
                             ? `${field.value.length} selected`
@@ -271,7 +299,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                         </Button>
                       </DropdownMenuTrigger>
 
-                      <DropdownMenuContent className="w-84 bg-[#1A2326] border-white/10 text-white space-y-1">
+                      <DropdownMenuContent className="w-84 bg-muted border-border text-primary space-y-1">
                         {EVENT_OPTIONS.map((option) => {
                           const checked = field.value?.includes(option.value);
                           return (
@@ -292,13 +320,13 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                                   );
                                 }
                               }}
-                              className="focus:bg-[#202E32] data-[state=checked]:bg-[#202E32] data-[state=checked]:text-white hover:text-white! transition duration-150"
+                              className="focus:bg-background data-[state=checked]:bg-background data-[state=checked]:text-primary hover:text-primary! transition duration-150"
                             >
                               <div className="flex flex-col text-left">
                                 <span className="text-xs font-medium">
                                   {option.label}
                                 </span>
-                                <span className="text-[11px] text-white/60">
+                                <span className="text-[11px] text-muted-foreground">
                                   {option.description}
                                 </span>
                               </div>
@@ -317,7 +345,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                           return (
                             <span
                               key={value}
-                              className="text-[10px]  uppercase bg-[#202E32] px-2.5 py-1 rounded-sm text-white/80"
+                              className="text-[10px]  uppercase bg-background px-2.5 py-1 rounded-sm text-primary/80"
                             >
                               {option?.label || value}
                             </span>
@@ -325,7 +353,7 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
                         })}
                       </div>
                     ) : (
-                      <p className="text-xs text-white/50">
+                      <p className="text-xs text-muted-foreground">
                         Select at least one event type. You can listen to all
                         three for full coverage.
                       </p>
@@ -341,17 +369,17 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
               name="timezone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="text-white/50 text-xs">
+                  <FormLabel className="text-muted-foreground text-xs">
                     Event timezone
                   </FormLabel>
                   <FormControl>
                     <Input
-                      className="bg-[#202E32] rounded-md placeholder:text-white/50"
+                      className="bg-background rounded-md placeholder:text-muted-foreground"
                       placeholder="UTC, America/New_York, ..."
                       {...field}
                     />
                   </FormControl>
-                  <FormDescription className="text-xs text-white/50">
+                  <FormDescription className="text-xs text-muted-foreground">
                     Determines how timestamps are displayed in the workflow log.
                   </FormDescription>
                   <FormMessage />
@@ -375,15 +403,17 @@ export const GoogleCalendarTriggerDialog: React.FC<Props> = ({
 };
 
 const CalendarSelectField = ({
+  providerAccountId,
   value,
   onSelect,
 }: {
+  providerAccountId: string;
   value?: string;
   onSelect: (calendar: CalendarListItem) => void;
 }) => {
   const trpc = useTRPC();
   const query = useSuspenseQuery(
-    trpc.apps.listGoogleCalendars.queryOptions()
+    trpc.apps.listGoogleCalendars.queryOptions({ providerAccountId })
   );
   const calendars = (query.data ??
     []) as RouterOutputs["apps"]["listGoogleCalendars"];
@@ -401,14 +431,14 @@ const CalendarSelectField = ({
   };
 
   return (
-    <div className="mt-3 rounded-md border border-white/5 bg-[#202E32] p-3 space-y-3">
-      <div className="flex items-center justify-between text-xs text-white/60">
+    <div className="mt-3 rounded-md border border-border bg-background p-3 space-y-3">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Calendars with edit access</span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-[11px] text-white/70 hover:text-white bg-[#1A2326] hover:bg-[#1A2326] hover:brightness-110 transition duration-150"
+          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary bg-muted hover:bg-muted hover:brightness-110 transition duration-150"
           onClick={() => query.refetch()}
         >
           Refresh
@@ -416,32 +446,32 @@ const CalendarSelectField = ({
       </div>
 
       {calendars.length === 0 ? (
-        <div className="rounded-md border border-dashed border-white/10 p-3 text-xs text-white/60">
+        <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
           No calendars found. Make sure Google Calendar is connected and that
           you have at least write access to one calendar.
         </div>
       ) : (
         <Select value={value || undefined} onValueChange={handleValueChange}>
-          <SelectTrigger className="bg-[#202E32] border-white/10 text-white min-w-full py-8! h-max">
+          <SelectTrigger className="bg-background border-border text-primary min-w-full py-8! h-max">
             <SelectValue placeholder="Select a calendar" />
           </SelectTrigger>
 
-          <SelectContent className="bg-[#202E32] border-white/10 text-white max-h-60">
+          <SelectContent className="bg-background border-border text-primary max-h-60">
             {calendars.map((calendar: CalendarListItem) => (
               <SelectItem
                 value={calendar.id}
                 key={calendar.id}
-                className="hover:bg-[#1A2326]! focus:bg-[#1A2326]! text-white! hover:text-white hover:brightness-110 transition duration-150"
+                className="hover:bg-muted! focus:bg-muted! text-primary! hover:text-primary hover:brightness-110 transition duration-150"
               >
                 <div className="flex flex-col text-left gap-1.5">
                   <span className="text-xs font-medium">
                     {calendar.summary || calendar.id}
                   </span>
 
-                  <span className="text-[11px] text-white/60 flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground flex items-center gap-2">
                     {calendar.timeZone || "Timezone not set"}
                     {calendar.primary ? (
-                      <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wide text-primary">
                         Primary
                       </span>
                     ) : null}
@@ -454,12 +484,12 @@ const CalendarSelectField = ({
       )}
 
       {selected ? (
-        <div className="rounded-md border border-dashed border-white/10 p-3 text-xs text-white/70 space-y-1">
-          <p className="font-medium text-white">
+        <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-primary">
             {selected.summary || selected.id}
           </p>
           {selected.description ? (
-            <p className="text-white/60">{selected.description}</p>
+            <p className="text-muted-foreground">{selected.description}</p>
           ) : null}
           <p>Timezone: {selected.timeZone || "Not provided"}</p>
         </div>
@@ -469,19 +499,19 @@ const CalendarSelectField = ({
 };
 
 const CalendarSelectFallback = () => (
-  <div className="mt-3 rounded-md border border-white/5 bg-[#1A2326] p-3 space-y-2">
-    <div className="flex items-center justify-between text-xs text-white/60">
+  <div className="mt-3 rounded-md border border-border bg-muted p-3 space-y-2">
+    <div className="flex items-center justify-between text-xs text-muted-foreground">
       <span>Calendars with edit access</span>
       <Button
         type="button"
         variant="ghost"
         size="sm"
-        className="h-6 px-2 text-[11px] text-white/70 hover:text-white"
+        className="h-6 px-2 text-[11px] text-muted-foreground hover:text-primary"
         disabled
       >
         Refresh
       </Button>
     </div>
-    <p className="text-xs text-white/50">Loading calendars...</p>
+    <p className="text-xs text-muted-foreground">Loading calendars...</p>
   </div>
 );

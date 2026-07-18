@@ -43,7 +43,6 @@ export const outlookSendEmailExecutor: NodeExecutor<OutlookSendEmailData> = asyn
     const subject = data.subject ? decode(Handlebars.compile(data.subject)(context)) : undefined;
     const body = data.body ? decode(Handlebars.compile(data.body)(context)) : undefined;
 
-    // TODO: Implement Outlook: Send Email logic here
     const result = await step.run("outlook-send-email", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook: Send Email: Not yet implemented");

@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 
 import { toast } from "sonner";
 
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { getSafeCallbackUrl } from "@/features/auth/lib/callback-url";
 import { authClient } from "@/lib/auth-client";
 
 const loginSchema = z.object({
@@ -39,7 +40,8 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 const LoginForm = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const callbackUrl = getSafeCallbackUrl(searchParams.get("callbackUrl"));
+  const [isGooglePending, setIsGooglePending] = useState(false);
 
   const form = useForm({
     resolver: zodResolver(loginSchema),
@@ -67,13 +69,31 @@ const LoginForm = () => {
     );
   };
 
-  const isPending = form.formState.isSubmitting;
+  const onGoogleSignIn = async () => {
+    setIsGooglePending(true);
+    try {
+      await authClient.signIn.social(
+        { provider: "google", callbackURL: callbackUrl },
+        {
+          onError: (ctx) => {
+            toast.error(ctx.error.message);
+          },
+        },
+      );
+    } finally {
+      setIsGooglePending(false);
+    }
+  };
+
+  const isPending = form.formState.isSubmitting || isGooglePending;
 
   return (
-    <div className="flex flex-col gap-6 items-center justify-center">
-      <Card className="w-lg">
+    <div className="flex w-full flex-col items-center justify-center gap-6">
+      <Card className="w-full max-w-lg">
         <CardHeader className="text-center">
-          <CardTitle> Log in </CardTitle>
+          <CardTitle>
+            <h1>Log in</h1>
+          </CardTitle>
         </CardHeader>
 
         <CardContent>
@@ -90,6 +110,7 @@ const LoginForm = () => {
                         <FormControl>
                           <Input
                             type="email"
+                            autoComplete="email"
                             placeholder="m@example.com"
                             {...field}
                           />
@@ -109,6 +130,7 @@ const LoginForm = () => {
                         <FormControl>
                           <Input
                             type="password"
+                            autoComplete="current-password"
                             placeholder="******"
                             {...field}
                           />
@@ -134,12 +156,13 @@ const LoginForm = () => {
                       className="w-full"
                       type="button"
                       disabled={isPending}
+                      onClick={onGoogleSignIn}
                     >
                       <Image
                         src="/logos/google.svg"
                         height={16}
                         width={16}
-                        alt="google"
+                        alt=""
                       />
                       Continue with Google
                     </Button>

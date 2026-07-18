@@ -11,14 +11,18 @@ export default function PaymentsSettingsPage() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // Handle Stripe Connect callback
     const success = searchParams.get("stripe_success");
     const error = searchParams.get("stripe_error");
+    const onboarding = searchParams.get("stripe_onboarding");
 
     if (success === "true") {
       toast.success("Stripe account connected successfully!");
     } else if (error) {
       toast.error(decodeURIComponent(error));
+    } else if (onboarding === "return") {
+      toast.success("Stripe onboarding returned. Sync the account to confirm readiness.");
+    } else if (onboarding === "refresh") {
+      toast.info("The Stripe onboarding link expired. Start setup again to continue.");
     }
   }, [searchParams]);
 

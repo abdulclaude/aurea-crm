@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { format } from "date-fns";
-import { Users, Clock, ListOrdered } from "lucide-react";
+import { Users, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SectionShell } from "./section-shell";
@@ -69,9 +69,8 @@ export function WaitlistDemand({
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <Badge
                       variant="outline"
-                      className="border-orange-200 bg-orange-50 text-[10px] text-orange-700"
+                      className="bg-orange-50 text-[10px] font-medium normal-case text-orange-600 ring-orange-300"
                     >
-                      <ListOrdered className="mr-1 size-3" />
                       {cls.waitlistCount.toLocaleString()} waiting
                     </Badge>
                     <p className="text-[11px] text-black/40">

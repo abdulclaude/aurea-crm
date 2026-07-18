@@ -45,7 +45,7 @@ export const GmailAddLabelNode: React.FC<
     nodeId: props.id,
     channel: GMAIL_ADD_LABEL_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGmailAddLabelRealtimeToken as any,
+    refreshToken: fetchGmailAddLabelRealtimeToken,
   });
 
   const handleSubmit = (values: GmailAddLabelFormValues) => {

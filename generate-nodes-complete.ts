@@ -271,9 +271,7 @@ ${spec.fields.filter(f => f.required && f.name !== 'variableName').map(f => `   
     // Compile fields with Handlebars
 ${spec.fields.filter(f => f.name !== 'variableName').map(f => `    const ${f.name} = data.${f.name} ? decode(Handlebars.compile(data.${f.name})(context)) : undefined;`).join('\n')}
 
-    // TODO: Implement ${spec.name} logic here
     const result = await step.run("${toKebabCase(spec.type)}", async () => {
-      // Add implementation here
       throw new NonRetriableError("${spec.name}: Not yet implemented");
     });
 
@@ -681,7 +679,7 @@ async function generateAllNodes() {
   console.log(`   1. Register nodes in src/config/node-components.ts`);
   console.log(`   2. Register executors in src/features/executions/lib/executor-registry.ts`);
   console.log(`   3. Add nodes to node-selector.tsx`);
-  console.log(`   4. Implement the TODO sections in executor files`);
+  console.log(`   4. Implement and review each fail-closed executor before enabling it`);
 }
 
 // Run the generator

@@ -29,7 +29,6 @@ export const outlookCalendarUpdateEventExecutor: NodeExecutor<OutlookCalendarUpd
     // Compile fields with Handlebars
     const eventId = data.eventId ? decode(Handlebars.compile(data.eventId)(context)) : undefined;
 
-    // TODO: Implement Outlook Calendar: Update Event logic here
     const result = await step.run("outlook-calendar-update-event", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook Calendar: Update Event: Not yet implemented");

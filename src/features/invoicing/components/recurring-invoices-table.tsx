@@ -1,6 +1,6 @@
 "use client";
 
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   ColumnDef,
   ColumnOrderState,
@@ -36,7 +36,6 @@ import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { RecurringInvoiceStatus, RecurringFrequency } from "@/db/enums";
-import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
@@ -76,7 +75,7 @@ const getStatusBadge = (status: RecurringInvoiceStatus) => {
 
 const getFrequencyLabel = (
   frequency: RecurringFrequency,
-  interval: number
+  interval: number,
 ): string => {
   const labels: Record<RecurringFrequency, string> = {
     DAILY: interval > 1 ? `Every ${interval} days` : "Daily",
@@ -100,46 +99,49 @@ export function RecurringInvoicesTable({
   onEdit,
 }: RecurringInvoicesTableProps) {
   const trpc = useTRPC();
+  const [hydrated, setHydrated] = React.useState(false);
   const [status, setStatus] = useQueryState(
     "status",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
   const [search, setSearch] = useQueryState(
     "search",
-    parseAsString.withDefault("")
+    parseAsString.withDefault(""),
   );
 
-  const { data, refetch } = useSuspenseQuery(
-    trpc.recurringInvoices.list.queryOptions({
-      status: status
-        ? (status as RecurringInvoiceStatus)
-        : undefined,
+  React.useEffect(() => setHydrated(true), []);
+
+  const recurringInvoicesQuery = useQuery({
+    ...trpc.recurringInvoices.list.queryOptions({
+      status: status ? (status as RecurringInvoiceStatus) : undefined,
       search: search || undefined,
-    })
-  );
+    }),
+    enabled: hydrated,
+  });
+  const data = recurringInvoicesQuery.data;
 
   const { mutate: updateStatus } = useMutation(
     trpc.recurringInvoices.updateStatus.mutationOptions({
       onSuccess: () => {
         toast.success("Status updated successfully");
-        refetch();
+        void recurringInvoicesQuery.refetch();
       },
       onError: (error) => {
         toast.error(error.message || "Failed to update status");
       },
-    })
+    }),
   );
 
   const { mutate: deleteRecurringInvoice } = useMutation(
     trpc.recurringInvoices.delete.mutationOptions({
       onSuccess: () => {
         toast.success("Recurring invoice deleted");
-        refetch();
+        void recurringInvoicesQuery.refetch();
       },
       onError: (error) => {
         toast.error(error.message || "Failed to delete recurring invoice");
       },
-    })
+    }),
   );
 
   const columns: ColumnDef<RecurringInvoiceRow>[] = [
@@ -333,6 +335,38 @@ export function RecurringInvoicesTable({
     React.useState<VisibilityState>({});
   const [columnOrder, setColumnOrder] = React.useState<ColumnOrderState>([]);
   const [sorting, setSorting] = React.useState<SortingState>([]);
+
+  if (!hydrated || recurringInvoicesQuery.isPending) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading recurring invoices"
+        className="h-64 animate-pulse bg-muted/40"
+      />
+    );
+  }
+
+  if (recurringInvoicesQuery.isError || !data) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p role="alert" className="text-sm font-medium">
+          Recurring invoices could not be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {recurringInvoicesQuery.error instanceof Error
+            ? recurringInvoicesQuery.error.message
+            : "Try the request again."}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void recurringInvoicesQuery.refetch()}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <DataTable

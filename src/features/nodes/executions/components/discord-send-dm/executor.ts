@@ -36,7 +36,6 @@ export const discordSendDmExecutor: NodeExecutor<DiscordSendDmData> = async ({
     const userId = data.userId ? decode(Handlebars.compile(data.userId)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Discord: Send DM logic here
     const result = await step.run("discord-send-dm", async () => {
       // Add implementation here
       throw new NonRetriableError("Discord: Send DM: Not yet implemented");

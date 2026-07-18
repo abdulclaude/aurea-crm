@@ -6,12 +6,13 @@ import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResizableSheetContent,
+  Sheet,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Form,
   FormControl,
@@ -75,16 +76,19 @@ export const SwitchDialog: React.FC<SwitchDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Configure Switch Node</DialogTitle>
-        </DialogHeader>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto border-border bg-background">
+        <SheetHeader className="gap-1 border-b border-border px-6 pb-5 pt-8">
+          <SheetTitle>Switch paths</SheetTitle>
+          <SheetDescription>
+            Route the workflow to a named path based on one previous value.
+          </SheetDescription>
+        </SheetHeader>
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-4"
+            className="space-y-4 px-6 py-6"
           >
             <FormField
               control={form.control}
@@ -200,12 +204,12 @@ export const SwitchDialog: React.FC<SwitchDialogProps> = ({
               )}
             />
 
-            <DialogFooter>
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="px-0 pt-4">
+              <Button type="submit" className="w-full">Save paths</Button>
+            </SheetFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 };

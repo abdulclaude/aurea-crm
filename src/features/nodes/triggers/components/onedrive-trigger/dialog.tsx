@@ -26,8 +26,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
 
 const formSchema = z.object({
+  providerAccountId: z.string().trim().min(1, "Select a OneDrive account."),
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -38,11 +41,7 @@ const formSchema = z.object({
   folderPath: z
     .string()
     .min(1, { message: "Folder path is required (try / for root)." }),
-  pollIntervalMinutes: z.coerce
-    .number()
-    .min(1, "Must be at least 1.")
-    .max(60, "Must be at most 60 minutes.")
-    .default(5),
+  filePattern: z.string().optional(),
 });
 
 export type OneDriveTriggerFormValues = z.infer<typeof formSchema>;
@@ -63,23 +62,32 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
   variables,
 }) => {
   const form = useForm<OneDriveTriggerFormValues>({
-    resolver: zodResolver(formSchema) as any,
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "oneDriveTrigger",
       folderPath: defaultValues?.folderPath || "/",
-      pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
+      filePattern: defaultValues?.filePattern || "",
     },
   });
 
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "oneDriveTrigger",
         folderPath: defaultValues?.folderPath || "/",
-        pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
+        filePattern: defaultValues?.filePattern || "",
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.folderPath, defaultValues?.pollIntervalMinutes, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.folderPath,
+    defaultValues?.filePattern,
+    form,
+  ]);
 
   const handleSubmit = (values: OneDriveTriggerFormValues) => {
     onSubmit(values);
@@ -88,8 +96,11 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent side="right" className="overflow-y-auto p-0">
-        <div className="sticky top-0 z-10 border-b border-white/5 bg-[#202e32] px-6 py-4">
+      <ResizableSheetContent
+        side="right"
+        className="overflow-y-auto border-border bg-background p-0"
+      >
+        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
           <SheetHeader>
             <SheetTitle>OneDrive Trigger</SheetTitle>
             <SheetDescription>
@@ -104,6 +115,21 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
               onSubmit={form.handleSubmit(handleSubmit)}
               className="space-y-6"
             >
+              <FormField
+                control={form.control}
+                name="providerAccountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <WorkflowProviderAccountSelect
+                      nodeType={NodeType.ONEDRIVE_TRIGGER}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="variableName"
@@ -121,7 +147,7 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
                 )}
               />
 
-              <Separator className="bg-white/5" />
+              <Separator className="bg-border" />
 
               <FormField
                 control={form.control}
@@ -133,7 +159,8 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
                       <Input placeholder="/" {...field} />
                     </FormControl>
                     <FormDescription>
-                      OneDrive folder path to monitor (e.g., / for root, /Documents)
+                      OneDrive folder path to monitor (e.g., / for root,
+                      /Documents)
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -142,22 +169,22 @@ export const OneDriveTriggerDialog: React.FC<Props> = ({
 
               <FormField
                 control={form.control}
-                name="pollIntervalMinutes"
+                name="filePattern"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Poll Interval (Minutes)</FormLabel>
+                    <FormLabel>File Name Filter (Optional)</FormLabel>
                     <FormControl>
-                      <Input type="number" min={1} max={60} {...field} />
+                      <Input placeholder="invoice" {...field} />
                     </FormControl>
                     <FormDescription>
-                      How often to check for file changes
+                      Only trigger for file names containing this text
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <SheetFooter className="sticky bottom-0 border-t border-white/5 bg-[#202e32] px-6 py-4">
+              <SheetFooter className="sticky bottom-0 border-t border-border bg-background px-6 py-4">
                 <Button type="submit">Save Configuration</Button>
               </SheetFooter>
             </form>

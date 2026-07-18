@@ -1,233 +1,172 @@
-import { z } from "zod";
-import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
-import { and, asc, count, desc, eq, ne, or } from "drizzle-orm";
-import { createId } from "@paralleldrive/cuid2";
+import { z } from "zod";
 
-import { db } from "@/db";
-import { classWaitlist, studioBooking, studioClass as studioClassTable } from "@/db/schema";
-import { inngest } from "@/inngest/client";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { createClassBookingCheckout } from "@/features/studio/server/class-booking-checkout";
+import { dispatchClassBookingWorkflow } from "@/features/studio/server/paid-class-booking-workflow-dispatch";
+import {
+  assertClassWaitlistScope,
+  confirmClassWaitlistEntry,
+  declineClassWaitlistEntry,
+  joinClassWaitlist,
+  leaveClassWaitlist,
+  listClassWaitlist,
+  notifyNextClassWaitlistEntry,
+} from "@/features/studio/server/waitlist-service";
+import { dispatchWaitlistSpotOpened } from "@/features/studio/server/waitlist-workflow-dispatch";
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+
+type WaitlistContext = {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+};
+
+function requireWaitlistScope(ctx: WaitlistContext): {
+  organizationId: string;
+  locationId: string;
+} {
+  if (!ctx.orgId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select an organization before managing waitlists",
+    });
+  }
+  if (!ctx.locationId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select a location before managing waitlists",
+    });
+  }
+  return { organizationId: ctx.orgId, locationId: ctx.locationId };
+}
+
+async function requireWaitlistCapability(
+  ctx: WaitlistContext,
+  capability: "schedule.view" | "schedule.manage" | "commerce.checkout.create",
+): Promise<{ organizationId: string; locationId: string }> {
+  const scope = requireWaitlistScope(ctx);
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: scope.organizationId,
+      locationId: scope.locationId,
+    },
+    capability,
+    resource: scope,
+  });
+  return scope;
+}
 
 export const waitlistRouter = createTRPCRouter({
-  /**
-   * Join the waitlist for a class
-   */
   join: protectedProcedure
     .input(z.object({ classId: z.string(), clientId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const studioClass = await db.query.studioClass.findFirst({
-        where: and(eq(studioClassTable.id, input.classId), eq(studioClassTable.organizationId, ctx.orgId)),
-      });
-      if (!studioClass) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
-      if (studioClass.status === "CANCELLED") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot join waitlist for a cancelled class" });
-
-      // Check not already on waitlist
-      const existing = await db.query.classWaitlist.findFirst({
-        where: and(
-          eq(classWaitlist.classId, input.classId),
-          eq(classWaitlist.clientId, input.clientId),
-          or(eq(classWaitlist.status, "WAITING"), eq(classWaitlist.status, "NOTIFIED"))!
-        ),
-      });
-      if (existing) throw new TRPCError({ code: "CONFLICT", message: "Already on the waitlist" });
-
-      // Check not already booked
-      const existingBooking = await db.query.studioBooking.findFirst({
-        where: and(
-          eq(studioBooking.classId, input.classId),
-          eq(studioBooking.clientId, input.clientId),
-          ne(studioBooking.status, "CANCELLED")
-        ),
-      });
-      if (existingBooking) throw new TRPCError({ code: "CONFLICT", message: "Already booked for this class" });
-
-      // Get next position
-      const maxPosition = await db.query.classWaitlist.findFirst({
-        where: eq(classWaitlist.classId, input.classId),
-        orderBy: desc(classWaitlist.position),
-        columns: { position: true },
-      });
-
-      const now = new Date();
-      const [createdEntry] = await db
-        .insert(classWaitlist)
-        .values({
-          id: createId(),
-          classId: input.classId,
-          clientId: input.clientId,
-          position: (maxPosition?.position ?? 0) + 1,
-          joinedAt: now,
-          status: "WAITING",
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning({ id: classWaitlist.id });
-
-      return db.query.classWaitlist.findFirst({
-        where: eq(classWaitlist.id, createdEntry.id),
-        with: { client: { columns: { id: true, name: true, email: true } } },
-      });
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      return joinClassWaitlist({ ...scope, ...input });
     }),
 
   leave: protectedProcedure
     .input(z.object({ waitlistId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const entry = await db.query.classWaitlist.findFirst({
-        where: eq(classWaitlist.id, input.waitlistId),
-        with: { studioClass: { columns: { organizationId: true } } },
-      });
-      if (!entry) throw new TRPCError({ code: "NOT_FOUND", message: "Waitlist entry not found" });
-      if (entry.studioClass.organizationId !== ctx.orgId) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-
-      const [updatedEntry] = await db
-        .update(classWaitlist)
-        .set({ status: "CANCELLED_WAITLIST", updatedAt: new Date() })
-        .where(eq(classWaitlist.id, input.waitlistId))
-        .returning();
-
-      return updatedEntry;
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      return leaveClassWaitlist({ ...scope, ...input });
     }),
 
-  /**
-   * Notify the next person on the waitlist (called when a spot opens)
-   */
   notifyNext: protectedProcedure
     .input(z.object({ classId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const studioClass = await db.query.studioClass.findFirst({
-        where: and(eq(studioClassTable.id, input.classId), eq(studioClassTable.organizationId, ctx.orgId)),
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      const next = await notifyNextClassWaitlistEntry({ ...scope, ...input });
+      if (!next) {
+        return { notified: false as const, message: "No one on the waitlist" };
+      }
+      await dispatchWaitlistSpotOpened({
+        ...scope,
+        waitlistId: next.id,
+        clientId: next.clientId,
+        classId: next.classId,
+        notifiedAt: next.notifiedAt,
       });
-      if (!studioClass) throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
-
-      const nextEntry = await db.query.classWaitlist.findFirst({
-        where: and(eq(classWaitlist.classId, input.classId), eq(classWaitlist.status, "WAITING")),
-        orderBy: asc(classWaitlist.position),
-        with: { client: { columns: { id: true, name: true, email: true } } },
-      });
-
-      if (!nextEntry) return { notified: false, message: "No one on the waitlist" };
-
-      await db
-        .update(classWaitlist)
-        .set({ status: "NOTIFIED", notifiedAt: new Date(), updatedAt: new Date() })
-        .where(eq(classWaitlist.id, nextEntry.id));
-
-      return { notified: true, client: nextEntry.client };
+      return { notified: true as const, client: next.client };
     }),
 
-  /**
-   * Confirm a waitlist notification (member accepts the spot)
-   */
   confirm: protectedProcedure
-    .input(z.object({ waitlistId: z.string() }))
+    .input(
+      z.object({
+        waitlistId: z.string(),
+        slidingScaleAmount: z.string().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const entry = await db.query.classWaitlist.findFirst({
-        where: and(eq(classWaitlist.id, input.waitlistId), eq(classWaitlist.status, "NOTIFIED")),
-        with: {
-          studioClass: {
-            columns: { id: true, organizationId: true, maxCapacity: true },
-          },
-        },
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      await requireWaitlistCapability(ctx, "commerce.checkout.create");
+      const booking = await confirmClassWaitlistEntry({
+        ...scope,
+        ...input,
+        createdBy: ctx.auth.user.id,
       });
-
-      if (!entry) throw new TRPCError({ code: "NOT_FOUND", message: "Waitlist entry not found or not in notified state" });
-      if (entry.studioClass.organizationId !== ctx.orgId) throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
-
-      // Double-check capacity
-      const [bookingCount] = await db
-        .select({ total: count() })
-        .from(studioBooking)
-        .where(eq(studioBooking.classId, entry.studioClass.id));
-      if (entry.studioClass.maxCapacity && (bookingCount?.total ?? 0) >= entry.studioClass.maxCapacity) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Class is still full" });
+      if (!booking.requiresPayment) {
+        await dispatchClassBookingWorkflow(booking.bookingId).catch(
+          (error: unknown) => {
+            console.error("Failed to trigger class-booked workflows", error);
+          },
+        );
+        return { ...booking, checkout: null };
       }
 
-      const booking = await db.transaction(async (tx) => {
-        const [createdBooking] = await tx
-          .insert(studioBooking)
-          .values({
-            id: createId(),
-            classId: entry.classId,
-            clientId: entry.clientId,
-            status: "BOOKED",
-            bookedAt: new Date(),
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .returning();
-
-        await tx
-          .update(classWaitlist)
-          .set({ status: "CONFIRMED", respondedAt: new Date(), updatedAt: new Date() })
-          .where(eq(classWaitlist.id, input.waitlistId));
-
-        return createdBooking;
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+      const checkout = await createClassBookingCheckout({
+        ...scope,
+        bookingId: booking.bookingId,
+        requestedBy: ctx.auth.user.id,
+        successUrl: `${appUrl}/studio/classes/${booking.classId}?payment=success`,
+        cancelUrl: `${appUrl}/studio/classes/${booking.classId}?payment=cancelled`,
       });
-
-      return booking;
+      return { ...booking, checkout };
     }),
 
   triggerAutoPromote: protectedProcedure
     .input(z.object({ classId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      await inngest.send({
-        name: "studio/booking.cancelled",
-        data: { classId: input.classId, organizationId: ctx.orgId },
-      });
-
-      return { triggered: true };
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      await assertClassWaitlistScope({ ...scope, ...input });
+      const next = await notifyNextClassWaitlistEntry({ ...scope, ...input });
+      if (next) {
+        await dispatchWaitlistSpotOpened({
+          ...scope,
+          waitlistId: next.id,
+          clientId: next.clientId,
+          classId: next.classId,
+          notifiedAt: next.notifiedAt,
+        });
+      }
+      return { triggered: Boolean(next) };
     }),
 
   decline: protectedProcedure
     .input(z.object({ waitlistId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const entry = await db.query.classWaitlist.findFirst({
-        where: and(eq(classWaitlist.id, input.waitlistId), eq(classWaitlist.status, "NOTIFIED")),
-        with: { studioClass: { columns: { id: true, organizationId: true } } },
-      });
-      if (!entry) throw new TRPCError({ code: "NOT_FOUND", message: "Waitlist entry not found or not in notified state" });
-      if (entry.studioClass.organizationId !== ctx.orgId) throw new TRPCError({ code: "FORBIDDEN" });
-
-      await db
-        .update(classWaitlist)
-        .set({ status: "EXPIRED", respondedAt: new Date(), updatedAt: new Date() })
-        .where(eq(classWaitlist.id, input.waitlistId));
-
-      await inngest.send({
-        name: "studio/booking.cancelled",
-        data: { classId: entry.studioClass.id, organizationId: ctx.orgId },
-      });
-
-      return { declined: true };
+      const scope = await requireWaitlistCapability(ctx, "schedule.manage");
+      const declined = await declineClassWaitlistEntry({ ...scope, ...input });
+      const next = declined.waitlistOffer;
+      if (next) {
+        await dispatchWaitlistSpotOpened({
+          ...scope,
+          waitlistId: next.id,
+          clientId: next.clientId,
+          classId: next.classId,
+          notifiedAt: next.notifiedAt,
+        });
+      }
+      return { declined: true, nextNotified: Boolean(next) };
     }),
 
   listForClass: protectedProcedure
     .input(z.object({ classId: z.string() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-
-      const studioClass = await db.query.studioClass.findFirst({
-        where: and(eq(studioClassTable.id, input.classId), eq(studioClassTable.organizationId, ctx.orgId)),
-        columns: { id: true },
-      });
-      if (!studioClass) return [];
-
-      return db.query.classWaitlist.findMany({
-        where: eq(classWaitlist.classId, input.classId),
-        with: { client: { columns: { id: true, name: true, email: true, phone: true } } },
-        orderBy: asc(classWaitlist.position),
-      });
+      const scope = await requireWaitlistCapability(ctx, "schedule.view");
+      await assertClassWaitlistScope({ ...scope, ...input });
+      return listClassWaitlist({ ...scope, ...input });
     }),
 });

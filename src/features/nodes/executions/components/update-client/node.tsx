@@ -13,8 +13,14 @@ import { fetchUpdateClientRealtimeToken } from "./actions";
 import { UPDATE_CLIENT_CHANNEL_NAME } from "@/inngest/channels/update-client";
 import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
 import { useWorkflowContext } from "@/features/editor/store/workflow-context";
+import {
+  LifecycleStageDialog,
+  type LifecycleStageActionValues,
+} from "./lifecycle-stage-dialog";
 
-type UpdateClientNodeData = UpdateClientFormValues;
+type UpdateClientNodeData = UpdateClientFormValues & {
+  workflowAction?: "LIFECYCLE_STAGE";
+};
 
 type UpdateClientNodeType = Node<UpdateClientNodeData>;
 
@@ -48,9 +54,15 @@ export const UpdateClientNode: React.FC<NodeProps<UpdateClientNodeType>> =
       });
     }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
-    const description = nodeData?.clientId
-      ? `Update client ID: ${nodeData.clientId.slice(0, 20)}...`
-      : "Not configured";
+    const isLifecycleStageAction =
+      nodeData.workflowAction === "LIFECYCLE_STAGE";
+    const description = isLifecycleStageAction
+      ? nodeData.lifecycleStage
+        ? `Move member to ${humanizeStage(nodeData.lifecycleStage)}`
+        : "Choose a lifecycle stage"
+      : nodeData?.clientId
+        ? `Update client ID: ${nodeData.clientId.slice(0, 20)}...`
+        : "Not configured";
 
     const nodeStatus = useNodeStatus({
       nodeId: props.id,
@@ -63,7 +75,9 @@ export const UpdateClientNode: React.FC<NodeProps<UpdateClientNodeType>> =
       setDialogOpen(true);
     };
 
-    const handleSubmit = (values: UpdateClientFormValues) => {
+    const handleSubmit = (
+      values: UpdateClientFormValues | LifecycleStageActionValues,
+    ) => {
       setNodes((nodes) =>
         nodes.map((node) => {
           if (node.id === props.id) {
@@ -83,19 +97,29 @@ export const UpdateClientNode: React.FC<NodeProps<UpdateClientNodeType>> =
 
     return (
       <>
-        <UpdateClientDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          onSubmit={handleSubmit}
-          defaultValues={currentNodeData}
-          variables={variables}
-        />
+        {isLifecycleStageAction ? (
+          <LifecycleStageDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSubmit={handleSubmit}
+            defaultValues={currentNodeData}
+            variables={variables}
+          />
+        ) : (
+          <UpdateClientDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSubmit={handleSubmit}
+            defaultValues={currentNodeData}
+            variables={variables}
+          />
+        )}
 
         <BaseExecutionNode
           {...props}
           id={props.id}
           icon={UpdateClientIcon}
-          name="Update Client"
+          name={isLifecycleStageAction ? "Lifecycle stage" : "Update Client"}
           description={description}
           status={nodeStatus}
           onSettings={handleOpenSettings}
@@ -106,3 +130,7 @@ export const UpdateClientNode: React.FC<NodeProps<UpdateClientNodeType>> =
   });
 
 UpdateClientNode.displayName = "UpdateClientNode";
+
+function humanizeStage(value: string): string {
+  return value.charAt(0) + value.slice(1).toLowerCase();
+}

@@ -36,7 +36,6 @@ export const outlookReplyToEmailExecutor: NodeExecutor<OutlookReplyToEmailData> 
     const messageId = data.messageId ? decode(Handlebars.compile(data.messageId)(context)) : undefined;
     const body = data.body ? decode(Handlebars.compile(data.body)(context)) : undefined;
 
-    // TODO: Implement Outlook: Reply to Email logic here
     const result = await step.run("outlook-reply-to-email", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook: Reply to Email: Not yet implemented");

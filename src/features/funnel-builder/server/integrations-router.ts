@@ -6,9 +6,13 @@
  */
 
 import { z } from "zod";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { createTRPCRouter } from "@/trpc/init";
+import {
+  publicationManageProcedure,
+  publicationViewProcedure,
+} from "@/features/permissions/server/publication-procedures";
 import { createId } from "@paralleldrive/cuid2";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { funnel, funnelBlock, funnelBlockEvent, funnelPixelIntegration } from "@/db/schema";
 import { PixelProvider } from "@/db/enums";
@@ -19,7 +23,7 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * List all pixel integrations for a funnel
    */
-  listPixelIntegrations: protectedProcedure
+  listPixelIntegrations: publicationViewProcedure
     .input(
       z.object({
         funnelId: z.string(),
@@ -47,7 +51,7 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Create or update a pixel integration
    */
-  upsertPixelIntegration: protectedProcedure
+  upsertPixelIntegration: publicationManageProcedure
     .input(
       z.object({
         funnelId: z.string(),
@@ -98,7 +102,7 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Toggle pixel integration enabled/disabled
    */
-  togglePixelIntegration: protectedProcedure
+  togglePixelIntegration: publicationManageProcedure
     .input(
       z.object({
         id: z.string(),
@@ -140,7 +144,7 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Delete a pixel integration
    */
-  deletePixelIntegration: protectedProcedure
+  deletePixelIntegration: publicationManageProcedure
     .input(
       z.object({
         id: z.string(),
@@ -177,13 +181,14 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Get block tracking event
    */
-  getBlockEvent: protectedProcedure
+  getBlockEvent: publicationViewProcedure
     .input(
       z.object({
         blockId: z.string(),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      await requireScopedBlock(input.blockId, ctx.orgId, ctx.locationId);
       return db.query.funnelBlockEvent.findFirst({
         where: eq(funnelBlockEvent.blockId, input.blockId),
       });
@@ -192,7 +197,7 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Set block tracking event
    */
-  setBlockEvent: protectedProcedure
+  setBlockEvent: publicationManageProcedure
     .input(
       z.object({
         blockId: z.string(),
@@ -202,34 +207,7 @@ export const integrationsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify block access via page -> funnel
-      const block = await db.query.funnelBlock.findFirst({
-        where: eq(funnelBlock.id, input.blockId),
-        with: {
-          funnelPage: {
-            with: {
-              funnel: true,
-            },
-          },
-        },
-      });
-
-      if (!block || !block.funnelPage) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      if (
-        block.funnelPage.funnel.organizationId !== ctx.orgId ||
-        block.funnelPage.funnel.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Access denied",
-        });
-      }
+      await requireScopedBlock(input.blockId, ctx.orgId, ctx.locationId);
 
       const [event] = await db
         .insert(funnelBlockEvent)
@@ -258,41 +236,14 @@ export const integrationsRouter = createTRPCRouter({
   /**
    * Delete block tracking event
    */
-  deleteBlockEvent: protectedProcedure
+  deleteBlockEvent: publicationManageProcedure
     .input(
       z.object({
         blockId: z.string(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify block access via page -> funnel
-      const block = await db.query.funnelBlock.findFirst({
-        where: eq(funnelBlock.id, input.blockId),
-        with: {
-          funnelPage: {
-            with: {
-              funnel: true,
-            },
-          },
-        },
-      });
-
-      if (!block || !block.funnelPage) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Block not found",
-        });
-      }
-
-      if (
-        block.funnelPage.funnel.organizationId !== ctx.orgId ||
-        block.funnelPage.funnel.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Access denied",
-        });
-      }
+      await requireScopedBlock(input.blockId, ctx.orgId, ctx.locationId);
 
       // Check if event exists
       const event = await db.query.funnelBlockEvent.findFirst({
@@ -312,6 +263,24 @@ function funnelAccessWhere(funnelId: string, organizationId: string | null, loca
   return and(
     eq(funnel.id, funnelId),
     eq(funnel.organizationId, organizationId ?? ""),
-    locationId ? eq(funnel.locationId, locationId) : undefined
+    locationId ? eq(funnel.locationId, locationId) : isNull(funnel.locationId),
   );
+}
+
+async function requireScopedBlock(
+  blockId: string,
+  organizationId: string | null,
+  locationId: string | null,
+): Promise<void> {
+  const block = await db.query.funnelBlock.findFirst({
+    where: eq(funnelBlock.id, blockId),
+    with: { funnelPage: { with: { funnel: true } } },
+  });
+  if (
+    !block?.funnelPage?.funnel ||
+    block.funnelPage.funnel.organizationId !== organizationId ||
+    block.funnelPage.funnel.locationId !== locationId
+  ) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Block not found" });
+  }
 }

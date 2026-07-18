@@ -7,6 +7,7 @@ export const GOOGLE_CALENDAR_REQUIRED_SCOPES = [
 export const GMAIL_REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.modify",
 ];
 
 export const GOOGLE_FORMS_REQUIRED_SCOPES = [

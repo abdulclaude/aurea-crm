@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import type { CalendarEvent, CalendarView, EventColor } from "@/features/rotas/components/event-calendar";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type {
+  CalendarEvent,
+  CalendarView,
+  EventColor,
+} from "@/features/rotas/components/event-calendar";
 import { EventCalendar } from "@/features/rotas/components/event-calendar";
 import { CalendarContext } from "@/features/rotas/components/event-calendar/calendar-context";
 import { useTRPC } from "@/trpc/client";
@@ -16,9 +20,16 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DateTimePicker } from "@/components/ui/date-time-picker";
 import {
   Select,
   SelectContent,
@@ -44,6 +55,12 @@ const statusColors: Record<string, EventColor> = {
   COMPLETED: "blue",
 };
 
+const weekStartIndex = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  SATURDAY: 6,
+} as const;
+
 export function BookingCalendar({
   eventTypeId,
   initialView = "week",
@@ -53,15 +70,19 @@ export function BookingCalendar({
 }: BookingCalendarProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [hydrated, setHydrated] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<CalendarView>(initialView);
-  const [createMode, setCreateMode] = useState<"availability" | "holiday">("availability");
+  const [createMode, setCreateMode] = useState<"availability" | "holiday">(
+    "availability",
+  );
   const [selectedEvent, setSelectedEvent] = useState<{
     id: string;
     type: "booking" | "availability" | "holiday";
     title: string;
     start: Date;
     end: Date;
+    policyException?: boolean;
   } | null>(null);
   const [pendingTitleTouched, setPendingTitleTouched] = useState(false);
   const [pendingStartInput, setPendingStartInput] = useState("");
@@ -81,6 +102,15 @@ export function BookingCalendar({
     violet: true,
     orange: true,
   });
+
+  const scheduleSettingsQuery = useQuery({
+    ...trpc.workspaceSettings.getScheduleDisplaySettings.queryOptions(),
+    enabled: hydrated,
+  });
+  const scheduleSettings = scheduleSettingsQuery.data;
+  const weekStartsOn = scheduleSettings
+    ? weekStartIndex[scheduleSettings.weekStart]
+    : 1;
 
   const range = useMemo(() => {
     if (view === "month") {
@@ -102,113 +132,134 @@ export function BookingCalendar({
       };
     }
     return {
-      start: startOfWeek(currentDate, { weekStartsOn: 1 }),
-      end: endOfWeek(currentDate, { weekStartsOn: 1 }),
+      start: startOfWeek(currentDate, { weekStartsOn }),
+      end: endOfWeek(currentDate, { weekStartsOn }),
     };
-  }, [currentDate, view]);
+  }, [currentDate, view, weekStartsOn]);
 
-  const { data } = useSuspenseQuery(
-    trpc.bookings.getCalendar.queryOptions({
+  useEffect(() => setHydrated(true), []);
+
+  const calendarQuery = useQuery({
+    ...trpc.bookings.getCalendar.queryOptions({
       startDate: range.start,
       endDate: range.end,
       eventTypeId: eventTypeId || undefined,
-    })
-  );
+    }),
+    enabled: hydrated,
+  });
+  const data = calendarQuery.data;
 
   const createAvailabilityMutation = useMutation(
     trpc.bookings.createAvailabilityBlock.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const updateAvailabilityMutation = useMutation(
     trpc.bookings.updateAvailabilityBlock.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const deleteAvailabilityMutation = useMutation(
     trpc.bookings.deleteAvailabilityBlock.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const createHolidayMutation = useMutation(
     trpc.bookings.createHoliday.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const updateHolidayMutation = useMutation(
     trpc.bookings.updateHoliday.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const deleteHolidayMutation = useMutation(
     trpc.bookings.deleteHoliday.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries(trpc.bookings.getCalendar.queryOptions({
-          startDate: range.start,
-          endDate: range.end,
-          eventTypeId: eventTypeId || undefined,
-        }));
+        queryClient.invalidateQueries(
+          trpc.bookings.getCalendar.queryOptions({
+            startDate: range.start,
+            endDate: range.end,
+            eventTypeId: eventTypeId || undefined,
+          }),
+        );
       },
-    })
+    }),
   );
 
   const events = useMemo<CalendarEvent[]>(() => {
-    const bookingEvents = data.bookings.map((booking) => ({
+    const bookingEvents = (data?.bookings ?? []).map((booking) => ({
       id: `booking:${booking.id}`,
       title: booking.title,
-      description: `${booking.attendeeName} • ${booking.attendeeEmail}`,
+      description: `${booking.attendeeName} • ${booking.attendeeEmail}${booking.policyStatus === "EXCEPTION" ? " • Policy exception" : ""}`,
       start: new Date(booking.startTime),
       end: new Date(booking.endTime),
-      color: statusColors[booking.status] || "blue",
+      color:
+        booking.policyStatus === "EXCEPTION"
+          ? "orange"
+          : statusColors[booking.status] || "blue",
       label: booking.eventTypeTitle,
     }));
 
-    const availabilityEvents = data.availabilityBlocks.map((block) => ({
-      id: `availability:${block.id}`,
-      title: block.title || "Availability",
-      description: "Available",
-      start: new Date(block.startTime),
-      end: new Date(block.endTime),
-      color: "violet" as EventColor,
-      label: "Availability",
-    }));
+    const availabilityEvents = (data?.availabilityBlocks ?? []).map(
+      (block) => ({
+        id: `availability:${block.id}`,
+        title: block.title || "Availability",
+        description: "Available",
+        start: new Date(block.startTime),
+        end: new Date(block.endTime),
+        color: "violet" as EventColor,
+        label: "Availability",
+      }),
+    );
 
-    const holidayEvents = data.holidayBlocks.map((block) => ({
+    const holidayEvents = (data?.holidayBlocks ?? []).map((block) => ({
       id: `holiday:${block.id}`,
       title: block.name || "Holiday",
       description: "Holiday",
@@ -223,21 +274,50 @@ export function BookingCalendar({
   }, [data]);
 
   const timeBounds = useMemo(() => {
-    if (events.length === 0) {
-      return { startHour: 7, endHour: 24 };
-    }
-
-    let earliestHour = 23;
-    events.forEach((event) => {
-      const startHour = event.start.getHours();
-      earliestHour = Math.min(earliestHour, startHour);
-    });
-
+    const startHour = Math.floor((scheduleSettings?.startMinutes ?? 420) / 60);
+    const endHour = Math.ceil((scheduleSettings?.endMinutes ?? 1440) / 60);
     return {
-      startHour: Math.max(0, earliestHour - 1),
-      endHour: 24,
+      startHour,
+      endHour: Math.max(startHour + 1, endHour),
     };
-  }, [events]);
+  }, [scheduleSettings]);
+
+  if (!hydrated || calendarQuery.isPending || scheduleSettingsQuery.isPending) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading booking calendar"
+        className="h-64 animate-pulse bg-muted/40"
+      />
+    );
+  }
+
+  if (calendarQuery.isError || scheduleSettingsQuery.isError || !data) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p role="alert" className="text-sm font-medium">
+          Booking calendar could not be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {calendarQuery.error instanceof Error
+            ? calendarQuery.error.message
+            : scheduleSettingsQuery.error instanceof Error
+              ? scheduleSettingsQuery.error.message
+              : "Try the request again."}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void calendarQuery.refetch();
+            void scheduleSettingsQuery.refetch();
+          }}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <CalendarContext.Provider
@@ -246,7 +326,8 @@ export function BookingCalendar({
         setCurrentDate,
         colorVisibility,
         setColorVisibility,
-        isColorVisible: (color: EventColor | undefined) => colorVisibility[color ?? "blue"],
+        isColorVisible: (color: EventColor | undefined) =>
+          colorVisibility[color ?? "blue"],
         toggleColorVisibility: (color: EventColor) => {
           setColorVisibility((prev) => ({
             ...prev,
@@ -273,11 +354,14 @@ export function BookingCalendar({
                   start: startOfDay(new Date(block.startDate)),
                   end: endOfDay(new Date(block.endDate)),
                 })),
-              ].some((block) => selectionStart < block.end && selectionEnd > block.start);
+              ].some(
+                (block) =>
+                  selectionStart < block.end && selectionEnd > block.start,
+              );
 
               if (hasBlockedOverlap) {
                 setBlockedMessage(
-                  "That time falls within a blocked availability or holiday window."
+                  "That time falls within a blocked availability or holiday window.",
                 );
                 return;
               }
@@ -324,6 +408,8 @@ export function BookingCalendar({
                 title: event.title,
                 start: event.start,
                 end: event.end,
+                policyException:
+                  event.description?.includes("Policy exception"),
               });
               setEventTitle(event.title);
               return;
@@ -355,6 +441,8 @@ export function BookingCalendar({
           onViewChange={setView}
           initialView={initialView}
           timeBounds={timeBounds}
+          weekStartsOn={weekStartsOn}
+          slotMinutes={scheduleSettings?.slotMinutes ?? 15}
         />
       </div>
 
@@ -387,16 +475,30 @@ export function BookingCalendar({
                 />
               </div>
               <div className="text-xs text-muted-foreground">
-                {selectedEvent.start.toLocaleString()} → {selectedEvent.end.toLocaleString()}
+                {selectedEvent.start.toLocaleString()} →{" "}
+                {selectedEvent.end.toLocaleString()}
               </div>
             </div>
           )}
+
+          {selectedEvent?.type === "booking" &&
+            selectedEvent.policyException && (
+              <p
+                role="alert"
+                className="text-sm text-amber-700 dark:text-amber-300"
+              >
+                This provider booking does not match the current Aurea
+                scheduling policy. It was retained as provider truth and needs
+                review.
+              </p>
+            )}
 
           {selectedEvent && selectedEvent.type === "booking" && (
             <div className="space-y-2 text-xs text-muted-foreground">
               <div>{selectedEvent.title}</div>
               <div>
-                {selectedEvent.start.toLocaleString()} → {selectedEvent.end.toLocaleString()}
+                {selectedEvent.start.toLocaleString()} →{" "}
+                {selectedEvent.end.toLocaleString()}
               </div>
               <div>Bookings can’t be edited from the calendar yet.</div>
             </div>
@@ -404,10 +506,7 @@ export function BookingCalendar({
 
           {selectedEvent && selectedEvent.type !== "booking" && (
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button
-                variant="outline"
-                onClick={() => setSelectedEvent(null)}
-              >
+              <Button variant="outline" onClick={() => setSelectedEvent(null)}>
                 Close
               </Button>
               <Button
@@ -490,7 +589,9 @@ export function BookingCalendar({
                   const nextMode = value as "availability" | "holiday";
                   setCreateMode(nextMode);
                   if (!pendingTitleTouched) {
-                    setEventTitle(nextMode === "holiday" ? "Holiday" : "Availability");
+                    setEventTitle(
+                      nextMode === "holiday" ? "Holiday" : "Availability",
+                    );
                   }
                 }}
               >
@@ -511,24 +612,31 @@ export function BookingCalendar({
                   setEventTitle(e.target.value);
                   setPendingTitleTouched(true);
                 }}
-                placeholder={createMode === "holiday" ? "Holiday" : "Availability"}
+                placeholder={
+                  createMode === "holiday" ? "Holiday" : "Availability"
+                }
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <span className="text-xs text-muted-foreground">Start</span>
-                <Input
-                  type="datetime-local"
+                <DateTimePicker
                   value={pendingStartInput}
-                  onChange={(e) => setPendingStartInput(e.target.value)}
+                  onChange={setPendingStartInput}
+                  dateAriaLabel="Block start date"
+                  timeAriaLabel="Block start time"
                 />
               </div>
               <div className="space-y-2">
                 <span className="text-xs text-muted-foreground">End</span>
-                <Input
-                  type="datetime-local"
+                <DateTimePicker
                   value={pendingEndInput}
-                  onChange={(e) => setPendingEndInput(e.target.value)}
+                  onChange={setPendingEndInput}
+                  minDate={
+                    pendingStartInput ? new Date(pendingStartInput) : undefined
+                  }
+                  dateAriaLabel="Block end date"
+                  timeAriaLabel="Block end time"
                 />
               </div>
             </div>

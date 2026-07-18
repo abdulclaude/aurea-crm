@@ -17,7 +17,13 @@ export const useSuspenseExecutions = () => {
   const trpc = useTRPC();
   const [params] = useExecutionsParams();
 
-  return useSuspenseQuery(trpc.executions.getMany.queryOptions(params));
+  return useSuspenseQuery({
+    ...trpc.executions.getMany.queryOptions(params),
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) => item.status === "RUNNING")
+        ? 3_000
+        : false,
+  });
 };
 
 // hook to fetch a single execution using suspense
@@ -25,7 +31,11 @@ export const useSuspenseExecutions = () => {
 export const useSuspenseExecution = (id: string) => {
   const trpc = useTRPC();
 
-  return useSuspenseQuery(trpc.executions.getOne.queryOptions({ id }));
+  return useSuspenseQuery({
+    ...trpc.executions.getOne.queryOptions({ id }),
+    refetchInterval: (query) =>
+      query.state.data?.status === "RUNNING" ? 2_000 : false,
+  });
 };
 
 // hook to fetch all executions (no pagination) for timeline

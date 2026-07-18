@@ -1,10 +1,11 @@
 "use client";
 
 import { useTRPC } from "@/trpc/client";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { DemoDataControl } from "@/features/demo-data/components/demo-data-control";
 import { useIsInstructor } from "@/features/instructors/hooks/use-is-instructor";
 import { InstructorDashboard } from "@/features/instructors/components/instructor-dashboard";
 import {
@@ -42,6 +43,7 @@ import {
   sanitizeSpan,
   addDisplayLabels,
   formatDashboardLabel,
+  formatDashboardMoney,
 } from "@/features/dashboard/helpers";
 import { CATEGORY_LABELS, MAX_COLS } from "@/features/dashboard/constants";
 import {
@@ -88,11 +90,6 @@ function fmtNum(n: number): string {
   return n.toLocaleString();
 }
 
-function fmtGbp(n: number): string {
-  if (n < 0) return `-£${Math.abs(n).toLocaleString()}`;
-  return `£${n.toLocaleString()}`;
-}
-
 function fmtSigned(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toLocaleString()}`;
 }
@@ -121,7 +118,6 @@ export default function DashboardPage() {
 
 function AdminDashboard() {
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
   const { data: session } = useSession();
   const layout = useDashboardLayout();
   const resetComparisons = useDashboardComparison((s) => s.reset);
@@ -163,12 +159,6 @@ function AdminDashboard() {
     [resetComparisons],
   );
 
-  const seedMutation = useMutation(
-    trpc.seed.populateStudioData.mutationOptions({
-      onSuccess: () => queryClient.invalidateQueries(),
-    }),
-  );
-
   // ─── Comparison ranges ───────────────────────────────────────────────────────
 
   const visitsCompareRange = useMemo(
@@ -201,6 +191,10 @@ function AdminDashboard() {
   const { data: dataRange } = useQuery(
     trpc.studioDashboard.dataRange.queryOptions(),
   );
+  const { data: dashboardLocale } = useQuery(
+    trpc.studioDashboard.locale.queryOptions(),
+  );
+  const currency = dashboardLocale?.currency;
 
   const { data: activeDates } = useQuery(
     trpc.studioDashboard.activeDates.queryOptions(),
@@ -446,14 +440,14 @@ function AdminDashboard() {
     },
     "stat-total-sales": {
       label: `Total sales (${rangeLabel})`,
-      value: totalRevenue ? fmtGbp(totalRevenue.total) : "—",
+      value: totalRevenue ? formatDashboardMoney(totalRevenue.total, currency) : "—",
       change: totalRevenue?.change,
       spark: sparklines?.revenue,
       color: "#f59e0b",
     },
     "stat-arpm": {
       label: "Avg. revenue / member",
-      value: fitnessKpis ? fmtGbp(fitnessKpis.arpm) : "—",
+      value: fitnessKpis ? formatDashboardMoney(fitnessKpis.arpm, currency) : "—",
       change: fitnessKpis?.arpmChange,
       spark: sparklines?.revenue,
       color: "#8b5cf6",
@@ -583,6 +577,7 @@ function AdminDashboard() {
       case "chart-revenue":
         return (
           <ChartRevenue
+            currency={currency}
             data={revenueData}
             comparisonData={revenueCompareRange ? revenueCompare : null}
             range={dashboardRange}
@@ -593,6 +588,7 @@ function AdminDashboard() {
       case "chart-revenue-category":
         return (
           <ChartRevenueCategory
+            currency={currency}
             data={categoryData}
             comparisonData={revCatCompareRange ? revCatCompare : null}
             range={dashboardRange}
@@ -603,6 +599,7 @@ function AdminDashboard() {
       case "chart-revenue-weekday":
         return (
           <ChartRevenueWeekday
+            currency={currency}
             data={revenueByWeekday ?? []}
             comparisonData={revWeekdayCompareRange ? revWeekdayCompare : null}
             range={dashboardRange}
@@ -671,6 +668,7 @@ function AdminDashboard() {
           <AutomationAttribution
             data={automationAttribution}
             isEditing={editing}
+            currency={currency}
           />
         );
       case "bottom-campaign-performance":
@@ -692,9 +690,7 @@ function AdminDashboard() {
         userName={session?.user?.name}
         userImage={session?.user?.image}
         isEditing={isEditing}
-        isSeedPending={seedMutation.isPending}
-        isSeedSuccess={seedMutation.isSuccess}
-        onSeed={() => seedMutation.mutate()}
+        demoDataControl={<DemoDataControl />}
         onToggleEdit={layout.toggleEditing}
         onReset={layout.resetAll}
         datePicker={

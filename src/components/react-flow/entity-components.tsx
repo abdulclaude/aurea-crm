@@ -164,27 +164,27 @@ export const EntityPagination: React.FC<EntityPaginationProps> = ({
   disabled,
 }) => {
   return (
-    <div className="flex items-center justify-between gap-x-2 w-full max-w-7xl mx-auto">
+    <div className="flex items-center justify-between gap-x-2 w-full mx-auto">
       {totalPages > 1 && (
         <>
-          <div className=" text-xs text-primary/50 bg-background w-max rounded-sm px-4 py-2">
+          <div className=" text-xs text-primary/50 bg-background w-max rounded-sm px-2 py-2">
             <span className="text-primary"> {page} </span> / {totalPages || 1}{" "}
           </div>
 
           <div className="flex items-center justify-end space-x-2 py-4">
             <Button
               disabled={page === 1 || disabled}
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => onPageChange(Math.max(1, page - 1))}
-              className="bg-background rounded-sm hover:bg-primary-foreground hover:text-black! transition duration-150 border-none text-xs"
+              className="bg-background hover:bg-primary-foreground hover:text-black! transition duration-150 border-none text-xs"
             >
               Previous
             </Button>
 
             <Button
               disabled={page === totalPages || totalPages === 0 || disabled}
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() => onPageChange(Math.min(totalPages, page + 1))}
               className="bg-background hover:bg-primary-foreground hover:text-black! transition duration-150 border-none text-xs"

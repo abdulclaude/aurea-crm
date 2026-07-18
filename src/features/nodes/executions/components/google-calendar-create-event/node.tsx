@@ -45,7 +45,7 @@ export const GoogleCalendarCreateEventNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_CALENDAR_CREATE_EVENT_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleCalendarCreateEventRealtimeToken as any,
+    refreshToken: fetchGoogleCalendarCreateEventRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleCalendarCreateEventFormValues) => {

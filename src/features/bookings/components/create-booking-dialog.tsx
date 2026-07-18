@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +38,12 @@ interface CreateBookingDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogProps) {
+type BookingLocationType = keyof typeof BOOKING_LOCATION_LABELS;
+
+export function CreateBookingDialog({
+  open,
+  onOpenChange,
+}: CreateBookingDialogProps) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +56,8 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
   const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
-  const [locationType, setLocationType] = useState("GOOGLE_MEET");
+  const [locationType, setLocationType] =
+    useState<BookingLocationType>("GOOGLE_MEET");
   const [notes, setNotes] = useState("");
   const [syncToCalCom, setSyncToCalCom] = useState(false);
   const [messageDialog, setMessageDialog] = useState<{
@@ -53,15 +68,15 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
 
   // Get event types
   const { data: eventTypes } = useSuspenseQuery(
-    trpc.eventTypes.getMany.queryOptions({})
+    trpc.eventTypes.getMany.queryOptions({}),
   );
 
   // Get Cal.com credential to check if sync is available
   const { data: calComCredential } = useSuspenseQuery(
-    trpc.calComCredentials.get.queryOptions()
+    trpc.calComCredentials.get.queryOptions(),
   );
   const { data: stripeConnection } = useSuspenseQuery(
-    trpc.stripeConnect.getConnection.queryOptions()
+    trpc.stripeConnect.getConnection.queryOptions(),
   );
 
   const createMutation = useMutation(
@@ -71,11 +86,11 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
         resetForm();
         onOpenChange(false);
       },
-    })
+    }),
   );
 
   const paymentSessionMutation = useMutation(
-    trpc.bookings.createPaymentSession.mutationOptions()
+    trpc.bookings.createPaymentSession.mutationOptions(),
   );
 
   const resetForm = () => {
@@ -91,14 +106,13 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
     setSyncToCalCom(false);
   };
 
-  const selectedEventType = eventTypes.find((eventType) => eventType.id === eventTypeId);
-  const durationOptions =
-    selectedEventType?.availableDurations || [];
+  const selectedEventType = eventTypes.find(
+    (eventType) => eventType.id === eventTypeId,
+  );
+  const durationOptions = selectedEventType?.availableDurations || [];
 
   const resolvedDuration =
-    durationMinutes ??
-    durationOptions?.[0] ??
-    selectedEventType?.length;
+    durationMinutes ?? durationOptions?.[0] ?? selectedEventType?.length;
 
   useEffect(() => {
     if (!selectedEventType) {
@@ -116,7 +130,13 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
   }, [selectedEventType, durationOptions]);
 
   const handleCreate = async () => {
-    if (!eventTypeId || !attendeeName || !attendeeEmail || !startDate || !startTime) {
+    if (
+      !eventTypeId ||
+      !attendeeName ||
+      !attendeeEmail ||
+      !startDate ||
+      !startTime
+    ) {
       setMessageDialog({
         open: true,
         title: "Missing required fields",
@@ -155,7 +175,7 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
         attendeeTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         startTime: startDateTime,
         duration: resolvedDuration,
-        locationType: locationType as any,
+        locationType,
         additionalNotes: notes || undefined,
         syncToCalCom: syncToCalCom && !!calComCredential,
       });
@@ -173,6 +193,7 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
 
         const paymentSession = await paymentSessionMutation.mutateAsync({
           bookingId: createdBooking.id,
+          checkoutRequestId: crypto.randomUUID(),
         });
 
         if (paymentSession?.url) {
@@ -202,16 +223,16 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Create New Booking</DialogTitle>
-          <DialogDescription>
-            Schedule a new appointment or booking
-          </DialogDescription>
-        </DialogHeader>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create New Booking</DialogTitle>
+            <DialogDescription>
+              Schedule a new appointment or booking
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4">
             {/* Event Type */}
             <div className="space-y-2">
               <Label htmlFor="eventType">Event Type *</Label>
@@ -277,11 +298,13 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startDate">Date *</Label>
-                <Input
+                <DatePicker
                   id="startDate"
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  date={parseDateValue(startDate)}
+                  onSelect={(date) => setStartDate(formatDateValue(date))}
+                  placeholder="Pick a date"
+                  ariaLabel="Booking date"
+                  required
                 />
               </div>
 
@@ -299,16 +322,25 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
             {/* Location Type */}
             <div className="space-y-2">
               <Label htmlFor="locationType">Location Type</Label>
-              <Select value={locationType} onValueChange={setLocationType}>
+              <Select
+                value={locationType}
+                onValueChange={(value) => {
+                  if (value in BOOKING_LOCATION_LABELS) {
+                    setLocationType(value as BookingLocationType);
+                  }
+                }}
+              >
                 <SelectTrigger id="locationType">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(BOOKING_LOCATION_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
+                  {Object.entries(BOOKING_LOCATION_LABELS).map(
+                    ([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ),
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -340,24 +372,26 @@ export function CreateBookingDialog({ open, onOpenChange }: CreateBookingDialogP
                 </Label>
               </div>
             )}
-        </div>
+          </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button onClick={handleCreate} disabled={isLoading}>
-            {isLoading ? "Creating..." : "Create Booking"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleCreate} disabled={isLoading}>
+              {isLoading ? "Creating..." : "Create Booking"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={messageDialog.open}
-        onOpenChange={(open) =>
-          setMessageDialog((prev) => ({ ...prev, open }))
-        }
+        onOpenChange={(open) => setMessageDialog((prev) => ({ ...prev, open }))}
       >
         <DialogContent>
           <DialogHeader>

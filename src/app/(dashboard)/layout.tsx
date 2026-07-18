@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DashboardLayoutWrapper } from "@/components/dashboard-layout-wrapper";
+import { UnauthenticatedRedirect } from "@/features/auth/components/unauthenticated-redirect";
 import { HydrateClient, prefetch, trpc } from "@/trpc/server";
 import { count, eq } from "drizzle-orm";
 
@@ -13,7 +14,7 @@ export const metadata: Metadata = { title: "Dashboard" };
 const Layout = async ({ children }: { children: React.ReactNode }) => {
   // Ensure the user has at least one organization or location membership
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
+  if (!session) return <UnauthenticatedRedirect />;
 
   // Check for organization membership
   const [{ count: organizationMembershipCount }] = await db

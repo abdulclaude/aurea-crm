@@ -4,12 +4,12 @@ export const metadata: Metadata = {
   title: "Aurea Studio — Class Schedule",
 };
 
-export default function EmbedLayout({ children }: { children: React.ReactNode }) {
+export default function EmbedLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body className="bg-transparent antialiased">
-        {children}
-      </body>
-    </html>
+    <div className="min-h-screen bg-transparent antialiased">{children}</div>
   );
 }

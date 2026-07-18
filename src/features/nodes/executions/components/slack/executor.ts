@@ -7,10 +7,11 @@ import { slackChannel } from "@/inngest/channels/slack";
 
 import { decode } from "html-entities";
 import ky from "ky";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { webhook as webhookTable } from "@/db/schema";
+import { decrypt } from "@/lib/encryption";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -28,7 +29,7 @@ type SlackData = {
 export const slackExecutor: NodeExecutor<SlackData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -52,7 +53,7 @@ export const slackExecutor: NodeExecutor<SlackData> = async ({
       );
     }
 
-    const resolvedWebhookUrl = await resolveWebhookUrl(data, userId);
+    const resolvedWebhookUrl = await resolveWebhookUrl(data, scope);
 
     const rawContent = Handlebars.compile(data.content)(context);
     const content = decode(rawContent);
@@ -85,23 +86,27 @@ export const slackExecutor: NodeExecutor<SlackData> = async ({
 
 const resolveWebhookUrl = async (
   data: SlackData,
-  userId: string
+  scope: { organizationId: string; locationId: string | null },
 ): Promise<string> => {
-  if (data.webhookId) {
-    const webhook = await db.query.webhook.findFirst({
-      where: and(eq(webhookTable.id, data.webhookId), eq(webhookTable.userId, userId)),
-    });
-    if (!webhook) {
-      throw new NonRetriableError(
-        "Saved Slack webhook could not be found. Re-select it or create a new one."
-      );
-    }
-    return webhook.url;
+  if (!data.webhookId) {
+    throw new NonRetriableError(
+      "Slack Node error: Select a workspace-scoped webhook.",
+    );
   }
-
-  if (!data.webhookUrl) {
-    throw new NonRetriableError("Slack Node error: No webhook url has been set.");
+  const webhook = await db.query.webhook.findFirst({
+    where: and(
+      eq(webhookTable.id, data.webhookId),
+      eq(webhookTable.organizationId, scope.organizationId),
+      scope.locationId
+        ? eq(webhookTable.locationId, scope.locationId)
+        : isNull(webhookTable.locationId),
+      eq(webhookTable.provider, "SLACK"),
+    ),
+  });
+  if (!webhook) {
+    throw new NonRetriableError(
+      "Saved Slack webhook could not be found in this workspace.",
+    );
   }
-
-  return data.webhookUrl;
+  return decrypt(webhook.url);
 };

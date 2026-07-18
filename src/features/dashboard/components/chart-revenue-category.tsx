@@ -16,9 +16,41 @@ import { CATEGORY_COLOURS, DASHBOARD_COMPARE_COLOUR } from "../constants";
 import { DashboardCategoricalTooltip } from "./dashboard-chart-tooltip";
 import { ChartLoadingState } from "./chart-loading-state";
 import {
+  formatDashboardMoney,
   getCategoricalAxisLabel,
+  getCategoricalAxisLabelLines,
   getCategoricalBarSize,
 } from "../helpers";
+
+type CategoryAxisTickProps = {
+  payload?: { value?: string };
+  x?: number;
+  y?: number;
+};
+
+function CategoryAxisTick({
+  payload,
+  x = 0,
+  y = 0,
+}: CategoryAxisTickProps): React.ReactNode {
+  const lines = getCategoricalAxisLabelLines(payload?.value ?? "");
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        fill="rgba(0,0,0,0.35)"
+        fontSize={9}
+        textAnchor="middle"
+      >
+        {lines.map((line, index) => (
+          <tspan key={`${line}-${index}`} x={0} dy={11}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+}
 
 export function ChartRevenueCategory({
   data,
@@ -26,12 +58,14 @@ export function ChartRevenueCategory({
   range,
   isEditing,
   isLoading,
+  currency,
 }: {
   data: { category: string; label: string; revenue: number }[];
   comparisonData?: { category: string; label: string; revenue: number }[] | null;
   range: { start: Date; end: Date };
   isEditing?: boolean;
   isLoading?: boolean;
+  currency?: string;
 }) {
   const merged = useMemo(() => {
     const withLabels = data.map((item, index) => ({
@@ -62,7 +96,7 @@ export function ChartRevenueCategory({
       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <BarChart
           data={merged}
-          margin={{ top: 4, right: 10, left: 10, bottom: 20 }}
+          margin={{ top: 4, right: 10, left: 10, bottom: 0 }}
           barCategoryGap={merged.length > 12 ? "42%" : "24%"}
         >
           <defs>
@@ -78,10 +112,11 @@ export function ChartRevenueCategory({
           />
           <XAxis
             dataKey="axisLabel"
-            tick={{ fontSize: 9, fill: "rgba(0,0,0,0.35)" }}
+            tick={<CategoryAxisTick />}
             axisLine={false}
             tickLine={false}
-            tickMargin={10}
+            tickMargin={8}
+            height={36}
             interval={0}
             minTickGap={merged.length > 10 ? 12 : 4}
           />
@@ -94,7 +129,7 @@ export function ChartRevenueCategory({
                 compareKey="compareRevenue"
                 range={range}
                 color="#94a3b8"
-                valueFormatter={(value) => `£${value.toLocaleString()}`}
+                valueFormatter={(value) => formatDashboardMoney(value, currency)}
               />
             }
             animationDuration={200}

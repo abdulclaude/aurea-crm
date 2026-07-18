@@ -3,6 +3,8 @@
  * These are the default templates available to all users
  */
 
+import { z } from 'zod';
+
 export interface InvoiceTemplatePreset {
   name: string;
   description: string;
@@ -41,6 +43,53 @@ export interface TemplateStyles {
     radius: string;
   };
 }
+
+const templateLayoutSchema = z.object({
+  sections: z.array(
+    z.object({
+      id: z.string().min(1),
+      type: z.enum([
+        'header',
+        'client-info',
+        'line-items',
+        'totals',
+        'notes',
+        'footer',
+      ]),
+      config: z.record(z.string(), z.unknown()),
+    }),
+  ),
+});
+
+const templateStylesSchema = z.object({
+  fontFamily: z.string().min(1),
+  primaryColor: z.string().min(1),
+  secondaryColor: z.string().min(1),
+  accentColor: z.string().min(1),
+  fontSize: z.object({
+    base: z.string().min(1),
+    heading: z.string().min(1),
+    large: z.string().min(1),
+    small: z.string().min(1),
+  }),
+  spacing: z.object({
+    section: z.string().min(1),
+    content: z.string().min(1),
+  }),
+  borders: z.object({
+    width: z.string().min(1),
+    color: z.string().min(1),
+    radius: z.string().min(1),
+  }),
+});
+
+export const invoiceTemplatePresetSchema: z.ZodType<InvoiceTemplatePreset> =
+  z.object({
+    name: z.string().min(1),
+    description: z.string(),
+    layout: templateLayoutSchema,
+    styles: templateStylesSchema,
+  });
 
 /**
  * Minimal Template - Clean, modern, minimal design

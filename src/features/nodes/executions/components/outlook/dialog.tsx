@@ -34,10 +34,12 @@ import {
 } from "@/components/ui/select";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
 
 const emailListSchema = z
   .string()
-  .transform((value) => value?.trim() || "")
+  .trim()
   .refine(
     (value) =>
       !value ||
@@ -45,10 +47,11 @@ const emailListSchema = z
         .split(",")
         .map((item) => item.trim())
         .every((item) => item.length > 0),
-    "Enter comma-separated email addresses."
+    "Enter comma-separated email addresses.",
   );
 
 const formSchema = z.object({
+  providerAccountId: z.string().trim().min(1, "Select an Outlook account."),
   variableName: z
     .string()
     .min(1, "Variable name is required.")
@@ -60,11 +63,11 @@ const formSchema = z.object({
     .string()
     .min(1, "At least one recipient is required.")
     .transform((value) => value.trim()),
-  cc: emailListSchema.default(""),
-  bcc: emailListSchema.default(""),
+  cc: emailListSchema,
+  bcc: emailListSchema,
   subject: z.string().min(1, "Subject is required."),
   body: z.string().min(1, "Body content is required."),
-  bodyFormat: z.enum(["text", "html"]).default("text"),
+  bodyFormat: z.enum(["text", "html"]),
 });
 
 export type OutlookExecutionFormValues = z.infer<typeof formSchema>;
@@ -85,8 +88,9 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
   variables,
 }) => {
   const form = useForm<OutlookExecutionFormValues>({
-    resolver: zodResolver(formSchema) as any,
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "outlookMessage",
       to: defaultValues?.to || "",
       cc: defaultValues?.cc || "",
@@ -100,6 +104,7 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "outlookMessage",
         to: defaultValues?.to || "",
         cc: defaultValues?.cc || "",
@@ -109,7 +114,18 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
         bodyFormat: defaultValues?.bodyFormat || "text",
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.to, defaultValues?.cc, defaultValues?.bcc, defaultValues?.subject, defaultValues?.body, defaultValues?.bodyFormat, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.to,
+    defaultValues?.cc,
+    defaultValues?.bcc,
+    defaultValues?.subject,
+    defaultValues?.body,
+    defaultValues?.bodyFormat,
+    form,
+  ]);
 
   const handleSubmit = (values: OutlookExecutionFormValues) => {
     onSubmit(values);
@@ -118,8 +134,11 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent side="right" className="overflow-y-auto p-0">
-        <div className="sticky top-0 z-10 border-b border-white/5 bg-[#202e32] px-6 py-4">
+      <ResizableSheetContent
+        side="right"
+        className="overflow-y-auto border-border bg-background p-0"
+      >
+        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
           <SheetHeader>
             <SheetTitle>Send Outlook Email</SheetTitle>
             <SheetDescription>
@@ -134,6 +153,21 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
               onSubmit={form.handleSubmit(handleSubmit)}
               className="space-y-6"
             >
+              <FormField
+                control={form.control}
+                name="providerAccountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <WorkflowProviderAccountSelect
+                      nodeType={NodeType.OUTLOOK_EXECUTION}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="variableName"
@@ -151,7 +185,7 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
                 )}
               />
 
-              <Separator className="bg-white/5" />
+              <Separator className="bg-border" />
 
               <FormField
                 control={form.control}
@@ -187,9 +221,7 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
                         {...field}
                       />
                     </FormControl>
-                    <FormDescription>
-                      Carbon copy recipients
-                    </FormDescription>
+                    <FormDescription>Carbon copy recipients</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -258,10 +290,7 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Body Format</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select format" />
@@ -277,7 +306,7 @@ export const OutlookExecutionDialog: React.FC<Props> = ({
                 )}
               />
 
-              <SheetFooter className="sticky bottom-0 border-t border-white/5 bg-[#202e32] px-6 py-4">
+              <SheetFooter className="sticky bottom-0 border-t border-border bg-background px-6 py-4">
                 <Button type="submit">Save Configuration</Button>
               </SheetFooter>
             </form>

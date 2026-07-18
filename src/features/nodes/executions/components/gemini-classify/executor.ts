@@ -36,7 +36,6 @@ export const geminiClassifyExecutor: NodeExecutor<GeminiClassifyData> = async ({
     const text = data.text ? decode(Handlebars.compile(data.text)(context)) : undefined;
     const categories = data.categories ? decode(Handlebars.compile(data.categories)(context)) : undefined;
 
-    // TODO: Implement Gemini: Classify logic here
     const result = await step.run("gemini-classify", async () => {
       // Add implementation here
       throw new NonRetriableError("Gemini: Classify: Not yet implemented");

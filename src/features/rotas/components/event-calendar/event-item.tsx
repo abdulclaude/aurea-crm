@@ -3,8 +3,9 @@
 import { useMemo } from "react";
 import type { DraggableAttributes } from "@dnd-kit/core";
 import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities";
-import { differenceInMinutes, format, getMinutes, isPast } from "date-fns";
+import { differenceInMinutes, format, isPast } from "date-fns";
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   getBorderRadiusClasses,
   getEventColorClasses,
@@ -12,13 +13,31 @@ import {
 } from "@/features/rotas/components/event-calendar";
 import { cn } from "@/lib/utils";
 
-// Using date-fns format with custom formatting:
-// 'h' - hours (1-12)
-// 'a' - am/pm
-// ':mm' - minutes with leading zero (only if the token 'mm' is present)
-const formatTimeWithOptionalMinutes = (date: Date) => {
-  return format(date, getMinutes(date) === 0 ? "ha" : "h:mma").toLowerCase();
-};
+const formatCalendarTime = (date: Date) => format(date, "H:mm");
+
+function EventMetadata({ event }: { event: CalendarEvent }) {
+  if (!event.person) return null;
+
+  return (
+    <div className="mt-1 flex min-w-0 items-center overflow-hidden text-[9px] font-normal opacity-85">
+      {event.person && (
+        <span className="flex w-full min-w-0 items-center gap-1 truncate">
+          <Avatar className="size-4 shrink-0 overflow-hidden rounded-full">
+            <AvatarImage
+              src={event.person.imageUrl ?? undefined}
+              alt={`${event.person.name} profile`}
+              className="size-full object-cover object-center"
+            />
+            <AvatarFallback className="rounded-full text-[8px]">
+              {event.person.name.slice(0, 1).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <span className="truncate">{event.person.name}</span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 interface EventWrapperProps {
   event: CalendarEvent;
@@ -62,8 +81,9 @@ function EventWrapper({
 
   return (
     <button
+      data-calendar-event="true"
       className={cn(
-        "focus-visible:border-ring focus-visible:ring-ring/50 flex h-full w-full overflow-hidden px-1 text-left font-medium transition outline-none select-none focus-visible:ring-[3px] data-dragging:cursor-grabbing data-dragging:shadow-lg data-past-event:line-through sm:px-2",
+        "focus-visible:border-ring focus-visible:ring-ring/50 flex h-full w-full overflow-hidden px-1 text-left font-medium transition outline-none select-none focus-visible:ring-[3px] data-dragging:cursor-grabbing data-dragging:shadow-lg data-past-event:opacity-60 data-past-event:line-through sm:px-2",
         getEventColorClasses(event.color),
         getBorderRadiusClasses(isFirstDay, isLastDay),
         className,
@@ -140,11 +160,11 @@ export function EventItem({
 
     // For short events (less than 45 minutes), only show start time
     if (durationMinutes < 45) {
-      return formatTimeWithOptionalMinutes(displayStart);
+      return formatCalendarTime(displayStart);
     }
 
     // For longer events, show both start and end time
-    return `${formatTimeWithOptionalMinutes(displayStart)} - ${formatTimeWithOptionalMinutes(displayEnd)}`;
+    return `${formatCalendarTime(displayStart)} - ${formatCalendarTime(displayEnd)}`;
   };
 
   if (view === "month") {
@@ -169,7 +189,7 @@ export function EventItem({
           <span className="truncate">
             {!event.allDay && (
               <span className="truncate sm:text-xs font-normal opacity-70 uppercase">
-                {formatTimeWithOptionalMinutes(displayStart)}{" "}
+                {formatCalendarTime(displayStart)}{" "}
               </span>
             )}
             {event.title}
@@ -188,7 +208,7 @@ export function EventItem({
         isDragging={isDragging}
         onClick={onClick}
         className={cn(
-          "py-1",
+          "p-1.5",
           durationMinutes < 45 ? "items-center" : "flex-col",
           view === "week" ? "text-[10px] sm:text-[13px]" : "text-[13px]",
           className,
@@ -204,18 +224,29 @@ export function EventItem({
             {event.title}{" "}
             {showTime && (
               <span className="opacity-70">
-                {formatTimeWithOptionalMinutes(displayStart)}
+                {formatCalendarTime(displayStart)}
               </span>
             )}
           </div>
         ) : (
           <>
-            <div className="truncate font-medium">{event.title}</div>
+            <div className="flex min-w-0 items-start justify-between gap-1">
+              <div className="min-w-0 truncate font-medium">{event.title}</div>
+              {event.attendance && (
+                <span
+                  className="shrink-0 text-[9px] font-normal tabular-nums opacity-75"
+                  aria-label={`${event.attendance.booked} booked out of ${event.attendance.capacity ?? "unlimited"}`}
+                >
+                  {event.attendance.booked}/{event.attendance.capacity ?? "∞"}
+                </span>
+              )}
+            </div>
             {showTime && (
-              <div className="truncate font-normal opacity-70 sm:text-xs uppercase">
+              <div className="truncate text-[9px] font-normal tabular-nums opacity-70">
                 {getEventTime()}
               </div>
             )}
+            <EventMetadata event={event} />
           </>
         )}
       </EventWrapper>
@@ -237,14 +268,24 @@ export function EventItem({
       {...dndListeners}
       {...dndAttributes}
     >
-      <div className="text-sm font-medium">{event.title}</div>
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-medium">{event.title}</div>
+        {event.attendance && (
+          <span
+            className="shrink-0 text-[10px] tabular-nums opacity-75"
+            aria-label={`${event.attendance.booked} booked out of ${event.attendance.capacity ?? "unlimited"}`}
+          >
+            {event.attendance.booked}/{event.attendance.capacity ?? "∞"}
+          </span>
+        )}
+      </div>
       <div className="text-xs opacity-70">
         {event.allDay ? (
           <span>All day</span>
         ) : (
-          <span className="uppercase">
-            {formatTimeWithOptionalMinutes(displayStart)} -{" "}
-            {formatTimeWithOptionalMinutes(displayEnd)}
+          <span className="tabular-nums">
+            {formatCalendarTime(displayStart)} -{" "}
+            {formatCalendarTime(displayEnd)}
           </span>
         )}
         {event.location && (
@@ -257,6 +298,7 @@ export function EventItem({
       {event.description && (
         <div className="my-1 text-xs opacity-90">{event.description}</div>
       )}
+      <EventMetadata event={event} />
     </button>
   );
 }

@@ -8,7 +8,6 @@ import {
   useSuspenseCredential,
   useUpdateCredential,
 } from "../hooks/use-credentials";
-import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import z from "zod";
@@ -22,6 +21,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -40,11 +40,13 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   type: z.enum(CredentialType),
-  value: z.string().min(1, "API key is required"),
+  value: z.string(),
+  isDefault: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -78,6 +80,7 @@ interface CredentialFormProps {
     name: string;
     type: CredentialType;
     value: string;
+    isDefault: boolean;
   };
 }
 
@@ -85,7 +88,6 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
   const router = useRouter();
   const createCredential = useCreateCredential();
   const updateCredential = useUpdateCredential();
-  const { handleError, modal } = useUpgradeModal();
 
   const isEdit = !!initialData?.id;
 
@@ -95,10 +97,15 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
       name: "",
       type: CredentialType.GEMINI,
       value: "",
+      isDefault: false,
     },
   });
 
   const selectedType = form.watch("type");
+  const isAiCredential =
+    selectedType === CredentialType.GEMINI ||
+    selectedType === CredentialType.OPENAI ||
+    selectedType === CredentialType.ANTHROPIC;
   const valueLabel =
     selectedType === CredentialType.TELEGRAM_BOT ? "Bot token" : "API Key";
   const valuePlaceholder =
@@ -107,6 +114,10 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
       : "AIza...";
 
   const onSubmit = async (values: FormValues) => {
+    if (!isEdit && !values.value.trim()) {
+      form.setError("value", { message: `${valueLabel} is required` });
+      return;
+    }
     if (isEdit && initialData?.id) {
       await updateCredential.mutateAsync({
         id: initialData.id,
@@ -118,16 +129,13 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
           toast.success(`Credential "${data.name}" successfully created.`);
           router.push(`/credentials/${data.id}`);
         },
-        onError: (error) => {
-          handleError(error);
-        },
+        onError: (error) => toast.error(error.message),
       });
     }
   };
 
   return (
     <>
-      {modal}
       <Card className="shadow-none px-0">
         <CardHeader>
           <CardTitle>
@@ -210,7 +218,11 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
                     <FormControl>
                       <Input
                         type="password"
-                        placeholder={valuePlaceholder}
+                        placeholder={
+                          isEdit
+                            ? `Leave blank to keep the current ${valueLabel.toLowerCase()}`
+                            : valuePlaceholder
+                        }
                         {...field}
                       />
                     </FormControl>
@@ -219,9 +231,33 @@ const CredentialForm: React.FC<CredentialFormProps> = ({ initialData }) => {
                 )}
               />
 
+              {isAiCredential ? (
+                <FormField
+                  control={form.control}
+                  name="isDefault"
+                  render={({ field }) => (
+                    <FormItem className="flex items-center justify-between gap-4 border-y py-4">
+                      <div className="space-y-1">
+                        <FormLabel>Default for this account</FormLabel>
+                        <FormDescription>
+                          Use this credential for Aurea AI in the active account.
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          aria-label="Use as the default AI credential"
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
               <div className="flex gap-2">
                 <Button type="button" variant="outline" asChild>
-                  <Link href="/credentials" prefetch>
+                  <Link href="/settings/credentials" prefetch>
                     Cancel
                   </Link>
                 </Button>

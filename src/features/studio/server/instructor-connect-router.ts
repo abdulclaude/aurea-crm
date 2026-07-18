@@ -1,22 +1,61 @@
-import { randomUUID } from "crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { instructor, instructorPayout } from "@/db/schema";
-import { getStripeInstance } from "@/lib/stripe";
+import { getStripePlatformClient } from "@/lib/stripe";
+import type { Capability } from "@/features/permissions/capabilities";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 const APP_URL = process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
+async function authorizeInstructorConnect(input: {
+  userId: string;
+  organizationId: string | null;
+  locationId: string | null;
+  capability: Capability;
+}): Promise<string> {
+  if (!input.organizationId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select an organization before managing Stripe Connect.",
+    });
+  }
+  await requireCapability({
+    actor: {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      locationId: input.locationId,
+    },
+    capability: input.capability,
+    resource: {
+      organizationId: input.organizationId,
+      locationId: input.locationId,
+    },
+  });
+  return input.organizationId;
+}
 
 export const instructorConnectRouter = createTRPCRouter({
   createOnboardingLink: protectedProcedure
     .input(z.object({ instructorId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeInstructorConnect({
+        userId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        capability: "provider.manage",
+      });
 
       const targetInstructor = await db.query.instructor.findFirst({
-        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
+        where: and(
+          eq(instructor.id, input.instructorId),
+          eq(instructor.organizationId, organizationId),
+          ctx.locationId
+            ? eq(instructor.locationId, ctx.locationId)
+            : isNull(instructor.locationId),
+        ),
         columns: {
           id: true,
           name: true,
@@ -27,7 +66,7 @@ export const instructorConnectRouter = createTRPCRouter({
       });
       if (!targetInstructor) throw new TRPCError({ code: "NOT_FOUND", message: "Instructor not found" });
 
-      const stripe = getStripeInstance();
+      const stripe = getStripePlatformClient();
 
       let accountId = targetInstructor.stripeAccountId;
 
@@ -42,7 +81,11 @@ export const instructorConnectRouter = createTRPCRouter({
               transfers: { requested: true },
             },
             business_type: "individual",
-            metadata: { instructorId: targetInstructor.id, organizationId: ctx.orgId },
+            metadata: {
+              instructorId: targetInstructor.id,
+              organizationId,
+              ...(ctx.locationId ? { locationId: ctx.locationId } : {}),
+            },
           },
           { idempotencyKey: `connect_account_${targetInstructor.id}` }
         );
@@ -71,10 +114,21 @@ export const instructorConnectRouter = createTRPCRouter({
   getAccountStatus: protectedProcedure
     .input(z.object({ instructorId: z.string() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeInstructorConnect({
+        userId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        capability: "provider.manage",
+      });
 
       const targetInstructor = await db.query.instructor.findFirst({
-        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
+        where: and(
+          eq(instructor.id, input.instructorId),
+          eq(instructor.organizationId, organizationId),
+          ctx.locationId
+            ? eq(instructor.locationId, ctx.locationId)
+            : isNull(instructor.locationId),
+        ),
         columns: {
           id: true,
           stripeAccountId: true,
@@ -88,7 +142,7 @@ export const instructorConnectRouter = createTRPCRouter({
         return { connected: false, chargesEnabled: false, payoutsEnabled: false };
       }
 
-      const stripe = getStripeInstance();
+      const stripe = getStripePlatformClient();
       const account = await stripe.accounts.retrieve(targetInstructor.stripeAccountId);
 
       const status = {
@@ -116,10 +170,21 @@ export const instructorConnectRouter = createTRPCRouter({
   createDashboardLink: protectedProcedure
     .input(z.object({ instructorId: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeInstructorConnect({
+        userId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        capability: "provider.manage",
+      });
 
       const targetInstructor = await db.query.instructor.findFirst({
-        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
+        where: and(
+          eq(instructor.id, input.instructorId),
+          eq(instructor.organizationId, organizationId),
+          ctx.locationId
+            ? eq(instructor.locationId, ctx.locationId)
+            : isNull(instructor.locationId),
+        ),
         columns: { stripeAccountId: true, stripeOnboardingComplete: true },
       });
       if (!targetInstructor) throw new TRPCError({ code: "NOT_FOUND", message: "Instructor not found" });
@@ -130,7 +195,7 @@ export const instructorConnectRouter = createTRPCRouter({
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Instructor onboarding not complete" });
       }
 
-      const stripe = getStripeInstance();
+      const stripe = getStripePlatformClient();
       const loginLink = await stripe.accounts.createLoginLink(targetInstructor.stripeAccountId);
       return { url: loginLink.url };
     }),
@@ -146,71 +211,12 @@ export const instructorConnectRouter = createTRPCRouter({
         notes: z.string().optional(),
       })
     )
-    .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
-
-      const targetInstructor = await db.query.instructor.findFirst({
-        where: and(eq(instructor.id, input.instructorId), eq(instructor.organizationId, ctx.orgId)),
-        columns: {
-          id: true,
-          stripeAccountId: true,
-          stripeOnboardingComplete: true,
-          stripeAccountStatus: true,
-        },
+    .mutation(() => {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          "Manual transfers are disabled. Stripe Express pays out destination-charge earnings using the connected account's payout schedule.",
       });
-      if (!targetInstructor) throw new TRPCError({ code: "NOT_FOUND", message: "Instructor not found" });
-      if (!targetInstructor.stripeAccountId || !targetInstructor.stripeOnboardingComplete) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Instructor payout account not ready. Complete Stripe onboarding first.",
-        });
-      }
-
-      const stripe = getStripeInstance();
-      const account = await stripe.accounts.retrieve(targetInstructor.stripeAccountId);
-      if (!account.charges_enabled || !account.payouts_enabled) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Instructor Stripe account is not fully enabled for payouts",
-        });
-      }
-
-      const transfer = await stripe.transfers.create(
-        {
-          amount: input.amountPence,
-          currency: "gbp",
-          destination: targetInstructor.stripeAccountId,
-          metadata: {
-            instructorId: targetInstructor.id,
-            organizationId: ctx.orgId,
-            periodStart: input.periodStart,
-            periodEnd: input.periodEnd,
-          },
-        },
-        { idempotencyKey: `payout_${targetInstructor.id}_${input.periodStart}_${input.periodEnd}` }
-      );
-
-      const [payout] = await db
-        .insert(instructorPayout)
-        .values({
-          id: randomUUID(),
-          instructorId: targetInstructor.id,
-          organizationId: ctx.orgId,
-          locationId: ctx.locationId ?? null,
-          stripeTransferId: transfer.id,
-          amount: String(input.amountPence / 100),
-          currency: "GBP",
-          status: "PAID",
-          periodStart: new Date(input.periodStart),
-          periodEnd: new Date(input.periodEnd),
-          classesCount: input.classesCount,
-          notes: input.notes,
-          paidAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning({ id: instructorPayout.id });
-
-      return { payoutId: payout.id, transferId: transfer.id };
     }),
 
   getPayoutHistory: protectedProcedure
@@ -222,19 +228,32 @@ export const instructorConnectRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeInstructorConnect({
+        userId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        capability: "commerce.view",
+      });
 
       const cursorPayout = input.cursor
         ? await db.query.instructorPayout.findFirst({
-            where: and(eq(instructorPayout.id, input.cursor), eq(instructorPayout.organizationId, ctx.orgId)),
+            where: and(
+              eq(instructorPayout.id, input.cursor),
+              eq(instructorPayout.organizationId, organizationId),
+              ctx.locationId
+                ? eq(instructorPayout.locationId, ctx.locationId)
+                : isNull(instructorPayout.locationId),
+            ),
             columns: { createdAt: true },
           })
         : null;
 
       const payouts = await db.query.instructorPayout.findMany({
         where: and(
-          eq(instructorPayout.organizationId, ctx.orgId),
-          ctx.locationId ? eq(instructorPayout.locationId, ctx.locationId) : undefined,
+          eq(instructorPayout.organizationId, organizationId),
+          ctx.locationId
+            ? eq(instructorPayout.locationId, ctx.locationId)
+            : isNull(instructorPayout.locationId),
           input.instructorId ? eq(instructorPayout.instructorId, input.instructorId) : undefined,
           isNull(instructorPayout.deletedAt),
           cursorPayout ? lt(instructorPayout.createdAt, cursorPayout.createdAt) : undefined

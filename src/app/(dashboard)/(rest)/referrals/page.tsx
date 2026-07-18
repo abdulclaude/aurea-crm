@@ -16,26 +16,46 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Gift, Plus, LoaderCircle } from "lucide-react";
+import { Gift, Plus, LoaderCircle, Settings2 } from "lucide-react";
 import { ReferralsTable } from "@/features/referrals/components/referrals-table";
+import {
+  ReferralClientPicker,
+  type ReferralClientOption,
+} from "@/features/referrals/components/referral-client-picker";
+import {
+  ReferralProgramSettingsDialog,
+  type ReferralProgramSettingsInput,
+} from "@/features/referrals/components/referral-program-settings-dialog";
 
 function ReferralsContent() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [referrerClientId, setReferrerClientId] = useState("");
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<ReferralClientOption | null>(null);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
   const [refereeEmail, setRefereeEmail] = useState("");
 
   const { data: program, isLoading: programLoading } = useQuery(
     trpc.referrals.getProgram.queryOptions(),
   );
+  const clientsQuery = useQuery({
+    ...trpc.clients.list.queryOptions({
+      search: clientSearch || undefined,
+      limit: 10,
+      pageSize: 10,
+    }),
+    enabled: showCreateDialog,
+  });
 
   const setupProgram = useMutation(
     trpc.referrals.setupProgram.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: trpc.referrals.getProgram.queryOptions().queryKey });
-        toast.success("Referral program created");
+        setShowSettingsDialog(false);
+        toast.success(program ? "Referral program updated" : "Referral program created");
       },
       onError: (err) => toast.error(err.message),
     }),
@@ -56,7 +76,8 @@ function ReferralsContent() {
       onSuccess: (data) => {
         queryClient.invalidateQueries();
         setShowCreateDialog(false);
-        setReferrerClientId("");
+        setSelectedClient(null);
+        setClientSearch("");
         setRefereeEmail("");
         toast.success(`Referral created. Code: ${data.code}`);
       },
@@ -117,6 +138,15 @@ function ReferralsContent() {
               onCheckedChange={(v) => toggleProgram.mutate({ isActive: v })}
             />
           </div>
+          <Button
+            size="icon"
+            variant="outline"
+            aria-label="Edit referral program settings"
+            title="Edit referral program settings"
+            onClick={() => setShowSettingsDialog(true)}
+          >
+            <Settings2 className="size-3.5" />
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setShowCreateDialog(true)}>
             <Plus className="size-3.5" />
             New Referral
@@ -143,12 +173,15 @@ function ReferralsContent() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="referrer-id">Referrer Client ID</Label>
-              <Input
-                id="referrer-id"
-                placeholder="Client ID of the referrer"
-                value={referrerClientId}
-                onChange={(e) => setReferrerClientId(e.target.value)}
+              <Label>Referring client</Label>
+              <ReferralClientPicker
+                clients={clientsQuery.data?.items ?? []}
+                open={clientPickerOpen}
+                search={clientSearch}
+                selectedClient={selectedClient}
+                onOpenChange={setClientPickerOpen}
+                onSearchChange={setClientSearch}
+                onSelect={setSelectedClient}
               />
             </div>
             <div className="space-y-2">
@@ -165,8 +198,14 @@ function ReferralsContent() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button>
             <Button
-              onClick={() => createReferral.mutate({ referrerClientId, refereeEmail })}
-              disabled={!referrerClientId || !refereeEmail || createReferral.isPending}
+              onClick={() => {
+                if (!selectedClient) return;
+                createReferral.mutate({
+                  referrerClientId: selectedClient.id,
+                  refereeEmail,
+                });
+              }}
+              disabled={!selectedClient || !refereeEmail || createReferral.isPending}
             >
               {createReferral.isPending && <LoaderCircle className="size-3.5 animate-spin" />}
               Generate Referral
@@ -174,6 +213,14 @@ function ReferralsContent() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReferralProgramSettingsDialog
+        open={showSettingsDialog}
+        program={program}
+        pending={setupProgram.isPending}
+        onOpenChange={setShowSettingsDialog}
+        onSave={(input: ReferralProgramSettingsInput) => setupProgram.mutate(input)}
+      />
     </div>
   );
 }

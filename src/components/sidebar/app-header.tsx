@@ -10,6 +10,24 @@ import { usePathname, useRouter } from "next/navigation";
 
 const BACK_BUTTON_PREFIXES = ["/reports", "/inbox"];
 
+function getBackButton(pathname: string): {
+  href?: string;
+  label: string;
+} | null {
+  if (
+    pathname === "/studio/service-types/new" ||
+    /^\/studio\/service-types\/[^/]+\/edit$/.test(pathname)
+  ) {
+    return { href: "/studio/service-types", label: "Service types" };
+  }
+
+  if (/^\/clients\/[^/]+$/.test(pathname)) {
+    return { href: "/clients", label: "Clients" };
+  }
+
+  return shouldShowBackButton(pathname) ? { label: "Go back" } : null;
+}
+
 function shouldShowBackButton(pathname: string): boolean {
   if (BACK_BUTTON_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return true;
@@ -25,7 +43,7 @@ function shouldShowBackButton(pathname: string): boolean {
       lastSegment === "editor" ||
       !["page", "layout"].includes(lastSegment) &&
         /^[a-z0-9_-]{10,}$/.test(lastSegment) &&
-        !/^(dashboard|clients|deals|workflows|executions|credentials|webhooks|studio|classes|instructors|funnels|pipelines|campaigns|builder|reports|settings)$/.test(
+        !/^(dashboard|clients|deals|workflows|executions|credentials|webhooks|studio|classes|service-types|instructors|funnels|pipelines|campaigns|builder|reports|settings)$/.test(
           lastSegment,
         )
     ) {
@@ -39,7 +57,7 @@ function shouldShowBackButton(pathname: string): boolean {
 const AppHeader = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const showBack = shouldShowBackButton(pathname);
+  const backButton = getBackButton(pathname);
 
   return (
     <header
@@ -49,15 +67,19 @@ const AppHeader = () => {
     >
       <div className="flex items-center">
         <SidebarTrigger className="mr-2 md:hidden" />
-        {showBack && (
+        {backButton && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.back()}
+            onClick={() =>
+              backButton.href
+                ? router.push(backButton.href)
+                : router.back()
+            }
             className="gap-2 border-none"
           >
             <ChevronLeftIcon className="size-3" />
-            Go back
+            {backButton.label}
           </Button>
         )}
       </div>

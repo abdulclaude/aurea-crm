@@ -36,7 +36,6 @@ export const telegramSendPhotoExecutor: NodeExecutor<TelegramSendPhotoData> = as
     const chatId = data.chatId ? decode(Handlebars.compile(data.chatId)(context)) : undefined;
     const photoUrl = data.photoUrl ? decode(Handlebars.compile(data.photoUrl)(context)) : undefined;
 
-    // TODO: Implement Telegram: Send Photo logic here
     const result = await step.run("telegram-send-photo", async () => {
       // Add implementation here
       throw new NonRetriableError("Telegram: Send Photo: Not yet implemented");

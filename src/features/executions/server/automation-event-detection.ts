@@ -96,6 +96,23 @@ function createTriggerEventDrafts(
           clientId,
         ),
       ];
+    case NodeType.REFERRAL_CONVERTED_TRIGGER:
+      return [
+        {
+          ...event(
+            "REFERRAL_CONVERTED",
+            "Referral converted",
+            "referral",
+            triggerData.referralId,
+            clientId,
+          ),
+          metadata: {
+            programId: firstString(triggerData.programId) ?? "",
+            referrerClientId:
+              firstString(triggerData.referrerClientId) ?? "",
+          },
+        },
+      ];
     case NodeType.MEMBER_CHECKED_IN_TRIGGER:
       return getCheckInEvents(triggerData, clientId);
     case NodeType.MEMBER_CLASS_COUNT_TRIGGER:

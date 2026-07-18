@@ -3,6 +3,12 @@ import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import db from "./drizzle-repository";
 import { TRPCError } from "@trpc/server";
 import { generateApiKey } from "@/lib/encryption";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { visitorPrivacyInputSchema } from "@/features/external-funnels/lib/visitor-privacy-contract";
+import {
+  eraseVisitorData,
+  exportVisitorData,
+} from "@/features/external-funnels/server/visitor-privacy-service";
 
 export const externalFunnelsRouter = createTRPCRouter({
   /**
@@ -1677,10 +1683,14 @@ export const externalFunnelsRouter = createTRPCRouter({
 
       const lifecycleCandidates = await db.anonymousUserProfile.findMany({
         where: {
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? null,
+          deletionRequestedAt: null,
           lifecycleStage: null,
           sessions: {
             some: {
               funnelId: input.funnelId,
+              locationId: ctx.locationId ?? null,
             },
           },
         },
@@ -1708,7 +1718,7 @@ export const externalFunnelsRouter = createTRPCRouter({
       }
 
       // Build where clause
-      const where: any = {};
+      const where: Record<string, unknown> = {};
 
       if (input.filters?.lifecycleStage) {
         where.lifecycleStage = input.filters.lifecycleStage;
@@ -1732,10 +1742,14 @@ export const externalFunnelsRouter = createTRPCRouter({
       // Get profiles with pagination - ONLY for visitors who have sessions in this funnel
       const profiles = await db.anonymousUserProfile.findMany({
         where: {
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? null,
+          deletionRequestedAt: null,
           ...where,
           sessions: {
             some: {
               funnelId: input.funnelId,
+              locationId: ctx.locationId ?? null,
             },
           },
         },
@@ -1747,7 +1761,10 @@ export const externalFunnelsRouter = createTRPCRouter({
         orderBy: { lastSeen: "desc" },
         include: {
           sessions: {
-            where: { funnelId: input.funnelId },
+            where: {
+              funnelId: input.funnelId,
+              locationId: ctx.locationId ?? null,
+            },
             orderBy: { startedAt: "desc" },
             take: 1,
             select: {
@@ -1800,8 +1817,19 @@ export const externalFunnelsRouter = createTRPCRouter({
         });
       }
 
-      const profile = await db.anonymousUserProfile.findUnique({
-        where: { id: input.anonymousId },
+      const profile = await db.anonymousUserProfile.findFirst({
+        where: {
+          id: input.anonymousId,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? null,
+          deletionRequestedAt: null,
+          sessions: {
+            some: {
+              funnelId: input.funnelId,
+              locationId: ctx.locationId ?? null,
+            },
+          },
+        },
       });
 
       if (!profile) {
@@ -1814,8 +1842,12 @@ export const externalFunnelsRouter = createTRPCRouter({
       // Get all sessions for this visitor in this funnel
       const sessions = await db.funnelSession.findMany({
         where: {
-          anonymousId: input.anonymousId,
           funnelId: input.funnelId,
+          locationId: ctx.locationId ?? null,
+          OR: [
+            { profileId: profile.id },
+            { anonymousId: profile.anonymousId },
+          ],
         },
         orderBy: { startedAt: "desc" },
       });
@@ -1873,8 +1905,12 @@ export const externalFunnelsRouter = createTRPCRouter({
       }
 
       // Get session
-      const session = await db.funnelSession.findUnique({
-        where: { sessionId: input.sessionId },
+      const session = await db.funnelSession.findFirst({
+        where: {
+          sessionId: input.sessionId,
+          funnelId: input.funnelId,
+          locationId: ctx.locationId ?? null,
+        },
       });
 
       if (!session) {
@@ -1889,6 +1925,7 @@ export const externalFunnelsRouter = createTRPCRouter({
         where: {
           sessionId: input.sessionId,
           funnelId: input.funnelId,
+          locationId: ctx.locationId ?? null,
         },
         orderBy: { timestamp: "asc" },
       });
@@ -1922,176 +1959,58 @@ export const externalFunnelsRouter = createTRPCRouter({
    * GDPR: Export visitor data
    */
   exportVisitorData: protectedProcedure
-    .input(
-      z.object({
-        funnelId: z.string(),
-        anonymousId: z.string().optional(),
-        email: z.string().email().optional(),
-      })
-    )
+    .input(visitorPrivacyInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId!,
-          locationId: ctx.locationId ?? null,
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
         },
+        capability: "privacy.export",
+        resource: ctx.orgId
+          ? { organizationId: ctx.orgId, locationId: ctx.locationId }
+          : undefined,
       });
-
-      if (!funnel) {
+      if (!ctx.orgId) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
+          code: "PRECONDITION_FAILED",
+          message: "Select an organization before exporting visitor data.",
         });
       }
-
-      // Find profile by anonymousId or email
-      let profile;
-      if (input.anonymousId) {
-        profile = await db.anonymousUserProfile.findUnique({
-          where: { id: input.anonymousId },
-        });
-      } else if (input.email) {
-        profile = await db.anonymousUserProfile.findFirst({
-          where: { identifiedUserId: input.email },
-        });
-      }
-
-      if (!profile) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Visitor profile not found",
-        });
-      }
-
-      // Get all sessions
-      const sessions = await db.funnelSession.findMany({
-        where: {
-          anonymousId: profile.id,
-          funnelId: input.funnelId,
-        },
-        orderBy: { startedAt: "desc" },
-      });
-
-      // Get all events
-      const events = await db.funnelEvent.findMany({
-        where: {
-          anonymousId: profile.id,
-          funnelId: input.funnelId,
-        },
-        orderBy: { timestamp: "desc" },
-      });
-
-      // Return all data in GDPR-compliant format
-      return {
-        profile: {
-          anonymousId: profile.id,
-          displayName: profile.displayName,
-          identifiedUserId: profile.identifiedUserId,
-          userProperties: profile.userProperties,
-          firstSeen: profile.firstSeen,
-          lastSeen: profile.lastSeen,
-          totalSessions: profile.totalSessions,
-          totalEvents: profile.totalEvents,
-        },
-        sessions: sessions.map(s => ({
-          sessionId: s.sessionId,
-          startedAt: s.startedAt,
-          endedAt: s.endedAt,
-          durationSeconds: s.durationSeconds,
-          pageViews: s.pageViews,
-          ipAddress: s.ipAddress,
-          userAgent: s.userAgent,
-          deviceType: s.deviceType,
-          browserName: s.browserName,
-          countryCode: s.countryCode,
-          city: s.city,
-          converted: s.converted,
-          conversionValue: s.conversionValue,
-        })),
-        events: events.map(e => ({
-          eventId: e.eventId,
-          eventName: e.eventName,
-          timestamp: e.timestamp,
-          pageUrl: e.pageUrl,
-          pageTitle: e.pageTitle,
-          ipAddress: e.ipAddress,
-          userAgent: e.userAgent,
-          deviceType: e.deviceType,
-          countryCode: e.countryCode,
-          city: e.city,
-        })),
-      };
+      return exportVisitorData(
+        { organizationId: ctx.orgId, locationId: ctx.locationId },
+        input,
+      );
     }),
 
   /**
    * GDPR: Delete visitor data
    */
   deleteVisitorData: protectedProcedure
-    .input(
-      z.object({
-        funnelId: z.string(),
-        anonymousId: z.string().optional(),
-        email: z.string().email().optional(),
-      })
-    )
+    .input(visitorPrivacyInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const funnel = await db.funnel.findFirst({
-        where: {
-          id: input.funnelId,
-          organizationId: ctx.orgId!,
-          locationId: ctx.locationId ?? null,
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
         },
+        capability: "privacy.erase",
+        resource: ctx.orgId
+          ? { organizationId: ctx.orgId, locationId: ctx.locationId }
+          : undefined,
       });
-
-      if (!funnel) {
+      if (!ctx.orgId) {
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Funnel not found",
+          code: "PRECONDITION_FAILED",
+          message: "Select an organization before erasing visitor data.",
         });
       }
-
-      // Find profile by anonymousId or email
-      let profile;
-      if (input.anonymousId) {
-        profile = await db.anonymousUserProfile.findUnique({
-          where: { id: input.anonymousId },
-        });
-      } else if (input.email) {
-        profile = await db.anonymousUserProfile.findFirst({
-          where: { identifiedUserId: input.email },
-        });
-      }
-
-      if (!profile) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Visitor profile not found",
-        });
-      }
-
-      // Delete all events
-      await db.funnelEvent.deleteMany({
-        where: {
-          anonymousId: profile.id,
-          funnelId: input.funnelId,
-        },
-      });
-
-      // Delete all sessions
-      await db.funnelSession.deleteMany({
-        where: {
-          anonymousId: profile.id,
-          funnelId: input.funnelId,
-        },
-      });
-
-      // Delete profile
-      await db.anonymousUserProfile.delete({
-        where: { id: profile.id },
-      });
-
-      return { success: true, deletedProfileId: profile.id };
+      return eraseVisitorData(
+        { organizationId: ctx.orgId, locationId: ctx.locationId },
+        input,
+      );
     }),
 
   /**

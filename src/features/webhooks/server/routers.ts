@@ -2,18 +2,19 @@ import { PAGINATION } from "@/config/constants";
 import { db } from "@/db";
 import { WebhookProvider } from "@/db/enums";
 import { webhook as webhookTable } from "@/db/schema";
-import { decrypt, encrypt } from "@/lib/encryption";
+import { encrypt } from "@/lib/encryption";
 import {
   createTRPCRouter,
-  premiumProcedure,
   protectedProcedure,
 } from "@/trpc/init";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, ilike, isNull, type SQL } from "drizzle-orm";
 import z from "zod";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 type WebhookScopeContext = {
   auth: { user: { id: string } };
+  orgId: string | null;
   locationId?: string | null;
 };
 
@@ -25,13 +26,29 @@ type JsonValue =
   | null
   | JsonValue[]
   | { [key: string]: JsonValue };
-type SerializedWebhook = Omit<WebhookRow, "metadata" | "signingSecret"> & {
+type SerializedWebhook = Omit<
+  WebhookRow,
+  "metadata" | "signingSecret" | "url"
+> & {
   metadata: JsonValue;
-  signingSecret: string | null;
+  url: "";
+  signingSecret: null;
+  hasUrl: boolean;
+  hasSigningSecret: boolean;
+};
+
+const requireOrganization = (ctx: WebhookScopeContext): string => {
+  if (!ctx.orgId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select an organization before managing webhooks.",
+    });
+  }
+  return ctx.orgId;
 };
 
 const webhookScopeConditions = (ctx: WebhookScopeContext): SQL[] => [
-  eq(webhookTable.userId, ctx.auth.user.id),
+  eq(webhookTable.organizationId, requireOrganization(ctx)),
   ctx.locationId
     ? eq(webhookTable.locationId, ctx.locationId)
     : isNull(webhookTable.locationId),
@@ -76,8 +93,11 @@ const toJsonValue = (value: unknown): JsonValue => {
 
 const serializeWebhook = (webhook: WebhookRow): SerializedWebhook => ({
   ...webhook,
+  url: "",
   metadata: toJsonValue(webhook.metadata),
-  signingSecret: webhook.signingSecret ? decrypt(webhook.signingSecret) : null,
+  signingSecret: null,
+  hasUrl: Boolean(webhook.url),
+  hasSigningSecret: Boolean(webhook.signingSecret),
 });
 
 const getScopedWebhookOrThrow = async (
@@ -101,16 +121,26 @@ const getScopedWebhookOrThrow = async (
 };
 
 export const webhooksRouter = createTRPCRouter({
-  create: premiumProcedure
+  create: protectedProcedure
     .input(webhookSchema)
     .mutation(async ({ ctx, input }) => {
+      const organizationId = requireOrganization(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+      });
       const [webhook] = await db
         .insert(webhookTable)
         .values({
           id: crypto.randomUUID(),
+          organizationId,
           name: input.name,
           provider: input.provider,
-          url: input.url,
+          url: encrypt(input.url),
           description: input.description || null,
           signingSecret: input.signingSecret
             ? encrypt(input.signingSecret)
@@ -125,19 +155,34 @@ export const webhooksRouter = createTRPCRouter({
       return serializeWebhook(webhook);
     }),
   update: protectedProcedure
-    .input(webhookSchema.extend({ id: z.string() }))
+    .input(
+      webhookSchema.extend({
+        id: z.string(),
+        url: z.string().url("Webhook URL must be a valid URL").or(z.literal("")),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: requireOrganization(ctx),
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+      });
       const { id, ...rest } = input;
-      await getScopedWebhookOrThrow(ctx, id);
+      const existing = await getScopedWebhookOrThrow(ctx, id);
 
       const [webhook] = await db
         .update(webhookTable)
         .set({
           name: rest.name,
           provider: rest.provider,
-          url: rest.url,
+          url: rest.url ? encrypt(rest.url) : existing.url,
           description: rest.description || undefined,
-          signingSecret: rest.signingSecret ? encrypt(rest.signingSecret) : null,
+          signingSecret: rest.signingSecret
+            ? encrypt(rest.signingSecret)
+            : existing.signingSecret,
           updatedAt: new Date(),
         })
         .where(eq(webhookTable.id, id))
@@ -155,6 +200,14 @@ export const webhooksRouter = createTRPCRouter({
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: requireOrganization(ctx),
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+      });
       const [webhook] = await db
         .delete(webhookTable)
         .where(scopedWebhookWhere(ctx, input.id))
@@ -167,7 +220,7 @@ export const webhooksRouter = createTRPCRouter({
         });
       }
 
-      return webhook;
+      return serializeWebhook(webhook);
     }),
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))

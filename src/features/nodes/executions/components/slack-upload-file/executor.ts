@@ -43,7 +43,6 @@ export const slackUploadFileExecutor: NodeExecutor<SlackUploadFileData> = async 
     const file = data.file ? decode(Handlebars.compile(data.file)(context)) : undefined;
     const filename = data.filename ? decode(Handlebars.compile(data.filename)(context)) : undefined;
 
-    // TODO: Implement Slack: Upload File logic here
     const result = await step.run("slack-upload-file", async () => {
       // Add implementation here
       throw new NonRetriableError("Slack: Upload File: Not yet implemented");

@@ -1,8 +1,12 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleDriveDeleteFileChannel } from "@/inngest/channels/google-drive-delete-file";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,53 +15,48 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleDriveDeleteFileData = {
+  providerAccountId: string;
   variableName?: string;
   fileId: string;
 };
 
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_DRIVE_DELETE_FILE,
+);
+
 export const googleDriveDeleteFileExecutor: NodeExecutor<GoogleDriveDeleteFileData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleDriveDeleteFileChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.fileId) {
+      if (!data.providerAccountId || !data.fileId) {
         await publish(
           googleDriveDeleteFileChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Drive: File ID is required"
+          "Google Drive: Account and file ID are required"
         );
       }
 
-      // Get Google OAuth token
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          googleDriveDeleteFileChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Drive is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const fileId = decode(Handlebars.compile(data.fileId)(context));
 
       // Delete file
       await step.run("delete-file", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://www.googleapis.com/drive/v3/files/${fileId}`,
           {
             method: "DELETE",
@@ -68,8 +67,7 @@ export const googleDriveDeleteFileExecutor: NodeExecutor<GoogleDriveDeleteFileDa
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Drive API error: ${error}`);
+          throw new Error(`Google Drive API rejected the request with status ${res.status}.`);
         }
       });
 

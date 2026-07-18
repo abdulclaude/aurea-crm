@@ -3,17 +3,13 @@ import { createId } from "@paralleldrive/cuid2";
 import { db } from "@/db";
 import { ClientType, StudioMembershipStatus } from "@/db/enums";
 import { client, membershipPlan, studioMembership } from "@/db/schema";
-import { validateApiKey, requireScope, apiError } from "@/lib/api-auth";
 import {
-  and,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  lt,
-  or,
-  type SQL,
-} from "drizzle-orm";
+  apiError,
+  requireApiKeyLocation,
+  requireScope,
+  validateApiKey,
+} from "@/lib/api-auth";
+import { and, desc, eq, ilike, inArray, lt, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -30,6 +26,8 @@ export async function GET(req: NextRequest) {
 
   const scope = requireScope(auth.apiKey.scopes, "members:read");
   if (!scope.ok) return apiError(scope.error, 403);
+  const keyLocation = requireApiKeyLocation(auth.apiKey);
+  if (!keyLocation.ok) return apiError(keyLocation.error, 403);
 
   const { searchParams } = req.nextUrl;
   const email = searchParams.get("email") ?? undefined;
@@ -38,6 +36,7 @@ export async function GET(req: NextRequest) {
 
   const conditions: SQL[] = [
     eq(client.organizationId, auth.apiKey.organizationId),
+    eq(client.locationId, keyLocation.locationId),
   ];
   if (email) {
     conditions.push(ilike(client.email, email));
@@ -49,8 +48,9 @@ export async function GET(req: NextRequest) {
       .where(
         and(
           eq(client.id, cursor),
-          eq(client.organizationId, auth.apiKey.organizationId)
-        )
+          eq(client.organizationId, auth.apiKey.organizationId),
+          eq(client.locationId, keyLocation.locationId),
+        ),
       )
       .limit(1);
 
@@ -59,8 +59,8 @@ export async function GET(req: NextRequest) {
         lt(client.createdAt, cursorClient.createdAt),
         and(
           eq(client.createdAt, cursorClient.createdAt),
-          lt(client.id, cursorClient.id)
-        )
+          lt(client.id, cursorClient.id),
+        ),
       );
 
       if (cursorCondition) {
@@ -106,12 +106,17 @@ export async function GET(req: NextRequest) {
             },
           })
           .from(studioMembership)
-          .leftJoin(membershipPlan, eq(studioMembership.planId, membershipPlan.id))
+          .leftJoin(
+            membershipPlan,
+            eq(studioMembership.planId, membershipPlan.id),
+          )
           .where(
             and(
               inArray(studioMembership.clientId, clientIds),
-              eq(studioMembership.status, StudioMembershipStatus.ACTIVE)
-            )
+              eq(studioMembership.organizationId, auth.apiKey.organizationId),
+              eq(studioMembership.locationId, keyLocation.locationId),
+              eq(studioMembership.status, StudioMembershipStatus.ACTIVE),
+            ),
           )
           .orderBy(desc(studioMembership.createdAt))
       : [];
@@ -154,6 +159,8 @@ export async function POST(req: NextRequest) {
 
   const writeScope = requireScope(auth.apiKey.scopes, "members:write");
   if (!writeScope.ok) return apiError(writeScope.error, 403);
+  const keyLocation = requireApiKeyLocation(auth.apiKey);
+  if (!keyLocation.ok) return apiError(keyLocation.error, 403);
 
   let body: unknown;
   try {
@@ -165,9 +172,12 @@ export async function POST(req: NextRequest) {
   const parsedBody = CreateMemberSchema.safeParse(body);
   if (!parsedBody.success) {
     const missingEmail = parsedBody.error.issues.some((issue) =>
-      issue.path.includes("email")
+      issue.path.includes("email"),
     );
-    return apiError(missingEmail ? "email is required" : "name is required", 400);
+    return apiError(
+      missingEmail ? "email is required" : "name is required",
+      400,
+    );
   }
   const data = parsedBody.data;
 
@@ -177,8 +187,9 @@ export async function POST(req: NextRequest) {
     .where(
       and(
         eq(client.organizationId, auth.apiKey.organizationId),
-        ilike(client.email, data.email)
-      )
+        eq(client.locationId, keyLocation.locationId),
+        ilike(client.email, data.email),
+      ),
     )
     .limit(1);
   if (existing) {
@@ -190,6 +201,7 @@ export async function POST(req: NextRequest) {
     .values({
       id: createId(),
       organizationId: auth.apiKey.organizationId,
+      locationId: keyLocation.locationId,
       name: data.name,
       email: data.email,
       phone: data.phone ?? null,

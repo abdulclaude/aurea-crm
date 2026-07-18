@@ -495,7 +495,7 @@ export default function BrandingSettingsPage() {
                 Saving...
               </>
             ) : (
-              "Save Changes"
+              "Save changes"
             )}
           </Button>
         </div>

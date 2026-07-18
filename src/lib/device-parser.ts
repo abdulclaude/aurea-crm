@@ -84,11 +84,7 @@ function isPrivateIP(ip: string): boolean {
 }
 
 export async function parseIPAddress(ip: string) {
-	console.log(`[Device Parser] parseIPAddress called with IP: ${ip}`);
-	
-	// Handle localhost/private IPs - mark as Localhost instead of Unknown
-	if (isPrivateIP(ip)) {
-		console.log(`[Device Parser] ✗ Private IP detected: ${ip} - returning Localhost (this shouldn't happen if API route works)`);
+	if (ip && ip !== "unknown" && isPrivateIP(ip)) {
 		return {
 			countryCode: "LOCAL",
 			countryName: "Localhost",
@@ -97,49 +93,14 @@ export async function parseIPAddress(ip: string) {
 		};
 	}
 
-	// Use ip-api.com for geo lookup (free, reliable, no dependencies)
-	try {
-		const response = await fetch(
-			`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city`,
-			{
-				signal: AbortSignal.timeout(3000), // 3 second timeout
-			}
-		);
-
-		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}`);
-		}
-
-		const data = await response.json();
-
-		if (data.status === "fail") {
-			console.log(`[Device Parser] ✗ Geo lookup failed for ${ip}: ${data.message}`);
-			return {
-				countryCode: "Unknown",
-				countryName: "Unknown",
-				region: "Unknown",
-				city: "Unknown",
-			};
-		}
-
-		// Successfully parsed geo data
-		console.log(`[Device Parser] ✓ Geo lookup successful for ${ip}: ${data.country} (${data.countryCode}) - ${data.city || "Unknown city"}`);
-
-		return {
-			countryCode: data.countryCode || "Unknown",
-			countryName: data.country || "Unknown",
-			region: data.regionName || "Unknown",
-			city: data.city || "Unknown",
-		};
-	} catch (error) {
-		console.error(`[Device Parser] ✗ Error performing geo lookup for ${ip}:`, error);
-		return {
-			countryCode: "Unknown",
-			countryName: "Unknown",
-			region: "Unknown",
-			city: "Unknown",
-		};
-	}
+	// Geo enrichment requires an explicitly scoped provider. Until one is
+	// configured, do not transmit visitor IP addresses to a global service.
+	return {
+		countryCode: "Unknown",
+		countryName: "Unknown",
+		region: "Unknown",
+		city: "Unknown",
+	};
 }
 
 // Helper to convert country codes to names

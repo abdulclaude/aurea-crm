@@ -94,6 +94,7 @@ export interface DataTableProps<TData, TValue> {
   onRowSelectionChange?: (state: RowSelectionState) => void;
   initialRowSelection?: RowSelectionState;
   pagination?: DataTablePaginationConfig;
+  footer?: React.ReactNode;
 }
 
 const resolveUpdater = <T,>(updater: Updater<T>, previous: T) => {
@@ -129,6 +130,7 @@ export function DataTable<TData, TValue>({
   onRowSelectionChange,
   initialRowSelection = {},
   pagination,
+  footer,
 }: DataTableProps<TData, TValue>) {
   const [sortingState, setSortingState] =
     React.useState<SortingState>(initialSorting);
@@ -164,11 +166,12 @@ export function DataTable<TData, TValue>({
   const [rowSelectionState, setRowSelectionState] =
     React.useState<RowSelectionState>(initialRowSelection);
   const rowSelection = rowSelectionProp ?? rowSelectionState;
-  const [paginationState, setPaginationState] =
-    React.useState<PaginationState>({
+  const [paginationState, setPaginationState] = React.useState<PaginationState>(
+    {
       pageIndex: 0,
       pageSize: 20,
-    });
+    },
+  );
   const skeletonRowKeys = React.useMemo(
     () =>
       Array.from({ length: skeletonRowCount }).map(
@@ -331,22 +334,28 @@ export function DataTable<TData, TValue>({
     toolbar?.filters || toolbar?.sort || toolbar?.view || toolbar?.search;
 
   const hasRows = table.getRowModel().rows.length > 0;
+  const clientTotalItems = table.getPrePaginationRowModel().rows.length;
 
   const resolvedPagination = React.useMemo<DataTablePaginationConfig>(() => {
     if (pagination) return pagination;
 
-    const totalItems = table.getPrePaginationRowModel().rows.length;
     const totalPages = Math.max(1, table.getPageCount());
 
     return {
       currentPage: paginationState.pageIndex + 1,
       totalPages,
       pageSize: paginationState.pageSize,
-      totalItems,
+      totalItems: clientTotalItems,
       onPageChange: (page) => table.setPageIndex(Math.max(0, page - 1)),
       onPageSizeChange: (size) => table.setPageSize(size),
     };
-  }, [pagination, paginationState.pageIndex, paginationState.pageSize, table]);
+  }, [
+    clientTotalItems,
+    pagination,
+    paginationState.pageIndex,
+    paginationState.pageSize,
+    table,
+  ]);
 
   React.useEffect(() => {
     if (!toolbar?.search) return;
@@ -376,7 +385,12 @@ export function DataTable<TData, TValue>({
         </div>
       )}
 
-      <div className="border-y border-black/5 dark:border-white/5 overflow-x-auto w-full max-w-screen">
+      <div
+        role="region"
+        aria-label="Scrollable data table"
+        tabIndex={0}
+        className="border-y border-black/5 dark:border-white/5 overflow-x-auto w-full max-w-screen"
+      >
         <UiTable className="w-max min-w-full">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -407,62 +421,67 @@ export function DataTable<TData, TValue>({
           </TableHeader>
 
           <TableBody>
-            {isLoading ? (
-              skeletonRowKeys.map((key) => (
-                <TableRow key={key}>
-                  <TableCell colSpan={columnCount}>
-                    <Skeleton className="h-16 rounded-sm w-full bg-primary-foreground border-black/5 dark:border-white/5" />
-                  </TableCell>
-                </TableRow>
-              ))
-            ) : hasRows ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() ? "selected" : undefined}
-                  className={cn(
-                    "h-14 text-xs hover:bg-primary-foreground/50 hover:text-black border-y border-black/5",
-                    onRowClick && "cursor-pointer",
-                  )}
-                  onClick={() => onRowClick?.(row.original)}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      className={cn(
-                        cell.column.id === "select" ? "p-6 px-6" : "p-6 py-6",
-                      )}
-                      style={
-                        cell.column.id === "select"
-                          ? {
-                              width: "40px",
-                              minWidth: "40px",
-                              maxWidth: "40px",
-                            }
-                          : { minWidth: "150px" }
-                      }
-                    >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
+            {isLoading
+              ? skeletonRowKeys.map((key) => (
+                  <TableRow key={key}>
+                    <TableCell colSpan={columnCount}>
+                      <Skeleton className="h-16 rounded-sm w-full bg-primary-foreground border-black/5 dark:border-white/5" />
                     </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell colSpan={columnCount}>
-                  {emptyState ?? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-sm text-primary/80 dark:text-white/50">
-                      No results found.
-                    </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            )}
+                  </TableRow>
+                ))
+              : hasRows
+                ? table.getRowModel().rows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      data-state={row.getIsSelected() ? "selected" : undefined}
+                      className={cn(
+                        "h-14 text-xs hover:bg-primary-foreground/50 hover:text-black border-y border-black/5",
+                        onRowClick && "cursor-pointer",
+                      )}
+                      onClick={() => onRowClick?.(row.original)}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell
+                          key={cell.id}
+                          className={cn(
+                            cell.column.id === "select"
+                              ? "p-6 px-6"
+                              : "p-6 py-6",
+                          )}
+                          style={
+                            cell.column.id === "select"
+                              ? {
+                                  width: "40px",
+                                  minWidth: "40px",
+                                  maxWidth: "40px",
+                                }
+                              : { minWidth: "150px" }
+                          }
+                        >
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                : null}
           </TableBody>
         </UiTable>
+        {!isLoading && !hasRows ? (
+          <div
+            role="status"
+            className="flex min-h-40 w-full items-center justify-center"
+          >
+            {emptyState ?? (
+              <div className="flex flex-col items-center justify-center px-6 py-12 text-center text-sm text-primary/80 dark:text-white/50">
+                No results found.
+              </div>
+            )}
+          </div>
+        ) : null}
+        {!isLoading && footer ? footer : null}
       </div>
 
       {/* Pagination */}

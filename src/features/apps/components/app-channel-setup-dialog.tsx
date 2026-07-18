@@ -34,6 +34,7 @@ type AppChannelSetupDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   provider: SupportedAppProvider;
+  providerAccountId: string;
   onSuccess?: () => void;
 };
 
@@ -41,6 +42,7 @@ export const AppChannelSetupDialog = ({
   open,
   onOpenChange,
   provider,
+  providerAccountId,
   onSuccess,
 }: AppChannelSetupDialogProps) => {
   const [selectedGuildId, setSelectedGuildId] = useState<string>("");
@@ -49,14 +51,19 @@ export const AppChannelSetupDialog = ({
   const isDiscord = provider === "DISCORD";
 
   // Discord queries - only fetch when Discord is selected
-  const { data: discordGuilds, isLoading: isLoadingGuilds } =
-    useDiscordGuilds(isDiscord && open);
+  const { data: discordGuilds, isLoading: isLoadingGuilds } = useDiscordGuilds(
+    providerAccountId,
+    isDiscord && open,
+  );
   const { data: discordChannels, isLoading: isLoadingDiscordChannels } =
-    useDiscordChannels(isDiscord && selectedGuildId ? selectedGuildId : null);
+    useDiscordChannels(
+      providerAccountId,
+      isDiscord && selectedGuildId ? selectedGuildId : null,
+    );
 
   // Slack queries - only fetch when Slack is selected
   const { data: slackChannels, isLoading: isLoadingSlackChannels } =
-    useSlackChannels(!isDiscord && open);
+    useSlackChannels(providerAccountId, !isDiscord && open);
 
   // Mutations
   const { mutate: updateDiscordMetadata, isPending: isUpdatingDiscord } =
@@ -78,6 +85,7 @@ export const AppChannelSetupDialog = ({
 
       updateDiscordMetadata(
         {
+          providerAccountId,
           guildId: selectedGuildId,
           channelId: selectedChannelId,
         },
@@ -90,7 +98,7 @@ export const AppChannelSetupDialog = ({
           onError: () => {
             toast.error("Failed to save Discord configuration");
           },
-        }
+        },
       );
     } else {
       if (!selectedChannelId) {
@@ -100,6 +108,7 @@ export const AppChannelSetupDialog = ({
 
       updateSlackMetadata(
         {
+          providerAccountId,
           channelId: selectedChannelId,
         },
         {
@@ -111,7 +120,7 @@ export const AppChannelSetupDialog = ({
           onError: () => {
             toast.error("Failed to save Slack configuration");
           },
-        }
+        },
       );
     }
   };
@@ -145,9 +154,7 @@ export const AppChannelSetupDialog = ({
                 <SelectTrigger id="guild">
                   <SelectValue
                     placeholder={
-                      isLoadingGuilds
-                        ? "Loading servers..."
-                        : "Select a server"
+                      isLoadingGuilds ? "Loading servers..." : "Select a server"
                     }
                   />
                 </SelectTrigger>
@@ -187,7 +194,15 @@ export const AppChannelSetupDialog = ({
                         # {channel.name}
                       </SelectItem>
                     ))
-                  : (slackChannels as Array<{ id: string; name: string; isPrivate: boolean }> | undefined)?.map((channel) => (
+                  : (
+                      slackChannels as
+                        | Array<{
+                            id: string;
+                            name: string;
+                            isPrivate: boolean;
+                          }>
+                        | undefined
+                    )?.map((channel) => (
                       <SelectItem key={channel.id} value={channel.id}>
                         {channel.isPrivate ? "🔒" : "#"} {channel.name}
                       </SelectItem>

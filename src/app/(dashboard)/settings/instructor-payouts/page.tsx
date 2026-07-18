@@ -3,37 +3,13 @@
 import { useState } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useQueryClient } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { CheckCircle, AlertCircle, ExternalLink, Send } from "lucide-react";
+import { CheckCircle, AlertCircle, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
-
-type Instructor = {
-  id: string;
-  name: string;
-  email: string | null;
-  stripeAccountId: string | null;
-  stripeOnboardingComplete: boolean;
-  stripeAccountStatus: string | null;
-};
-
-type PayoutDialogState = {
-  open: boolean;
-  instructor: Instructor | null;
-};
 
 function payoutStatusBadge(status: string) {
   const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
@@ -49,10 +25,6 @@ function payoutStatusBadge(status: string) {
 
 export default function InstructorPayoutsPage() {
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const [payoutDialog, setPayoutDialog] = useState<PayoutDialogState>({ open: false, instructor: null });
-  const [payoutAmount, setPayoutAmount] = useState("");
-  const [payoutNotes, setPayoutNotes] = useState("");
   const [connectingId, setConnectingId] = useState<string | null>(null);
 
   const instructorsQuery = useQuery(
@@ -76,19 +48,11 @@ export default function InstructorPayoutsPage() {
     })
   );
 
-  const payoutMutation = useMutation(
-    trpc.instructorConnect.transferPayout.mutationOptions({
-      onSuccess: () => {
-        toast.success("Payout transferred successfully");
-        queryClient.invalidateQueries({ queryKey: trpc.instructorConnect.getPayoutHistory.queryOptions({}).queryKey });
-        setPayoutDialog({ open: false, instructor: null });
-        setPayoutAmount("");
-        setPayoutNotes("");
-      },
-      onError: (err) => {
-        toast.error(err.message);
-      },
-    })
+  const dashboardMutation = useMutation(
+    trpc.instructorConnect.createDashboardLink.mutationOptions({
+      onSuccess: (data) => window.open(data.url, "_blank", "noopener,noreferrer"),
+      onError: (error) => toast.error(error.message),
+    }),
   );
 
   const handleConnectStripe = (instructorId: string) => {
@@ -96,27 +60,7 @@ export default function InstructorPayoutsPage() {
     onboardingMutation.mutate({ instructorId });
   };
 
-  const handleSendPayout = () => {
-    if (!payoutDialog.instructor) return;
-    const amountNum = parseFloat(payoutAmount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
-
-    const now = new Date();
-    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-    payoutMutation.mutate({
-      instructorId: payoutDialog.instructor.id,
-      amountPence: Math.round(amountNum * 100),
-      periodStart: periodStart.toISOString(),
-      periodEnd: now.toISOString(),
-      notes: payoutNotes || undefined,
-    });
-  };
-
-  const instructors: Instructor[] = (instructorsQuery.data ?? []) as Instructor[];
+  const instructors = instructorsQuery.data?.items ?? [];
 
   return (
     <div className="container mx-auto py-8 px-6 max-w-4xl space-y-8">
@@ -178,10 +122,13 @@ export default function InstructorPayoutsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setPayoutDialog({ open: true, instructor })}
+                        onClick={() =>
+                          dashboardMutation.mutate({ instructorId: instructor.id })
+                        }
+                        disabled={dashboardMutation.isPending}
                       >
-                        <Send className="h-3 w-3 mr-1.5" />
-                        Pay out
+                        <ExternalLink className="h-3 w-3 mr-1.5" />
+                        Stripe dashboard
                       </Button>
                     ) : (
                       <Button
@@ -239,60 +186,6 @@ export default function InstructorPayoutsPage() {
         )}
       </Card>
 
-      {/* Payout Dialog */}
-      <Dialog
-        open={payoutDialog.open}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPayoutDialog({ open: false, instructor: null });
-            setPayoutAmount("");
-            setPayoutNotes("");
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Send Payout — {payoutDialog.instructor?.name}</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Amount (£)</Label>
-              <Input
-                type="number"
-                min="0.01"
-                step="0.01"
-                placeholder="e.g. 250.00"
-                value={payoutAmount}
-                onChange={(e) => setPayoutAmount(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Notes (optional)</Label>
-              <Input
-                placeholder="e.g. Classes taught in May"
-                value={payoutNotes}
-                onChange={(e) => setPayoutNotes(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setPayoutDialog({ open: false, instructor: null })}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSendPayout}
-              disabled={payoutMutation.isPending || !payoutAmount}
-            >
-              {payoutMutation.isPending ? "Sending…" : "Send payout"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

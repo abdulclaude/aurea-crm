@@ -9,6 +9,8 @@ import {
   classCredit,
   classType,
   client,
+  clientAccountBalance,
+  clientAccountCreditTransaction,
   clientDocument,
   clientHousehold,
   clientHouseholdMember,
@@ -3926,10 +3928,61 @@ async function importAccountBalances(
 
   for (const chunk of chunks(balancePaymentInserts, IMPORT_WRITE_CHUNK_SIZE)) {
     try {
-      await db
-        .insert(studioPayment)
-        .values(chunk.map((item) => item.values))
-        .onConflictDoNothing();
+      await db.transaction(async (tx) => {
+        await tx
+          .insert(studioPayment)
+          .values(chunk.map((item) => item.values))
+          .onConflictDoNothing();
+        for (const item of chunk) {
+          const balance = await tx.query.clientAccountBalance.findFirst({
+            where: and(
+              eq(clientAccountBalance.organizationId, state.organizationId),
+              eq(clientAccountBalance.clientId, item.values.clientId ?? ""),
+              item.values.locationId
+                ? eq(clientAccountBalance.locationId, item.values.locationId)
+                : sql`${clientAccountBalance.locationId} IS NULL`,
+            ),
+            columns: { id: true },
+          });
+          const balanceId = balance?.id ?? createId();
+          if (balance) {
+            await tx
+              .update(clientAccountBalance)
+              .set({
+                balance: sql`${clientAccountBalance.balance} + ${item.values.amount}`,
+                updatedAt: now(),
+              })
+              .where(eq(clientAccountBalance.id, balance.id));
+          } else {
+            await tx.insert(clientAccountBalance).values({
+              id: balanceId,
+              organizationId: state.organizationId,
+              locationId: item.values.locationId ?? null,
+              clientId: item.values.clientId ?? "",
+              balance: item.values.amount,
+              currency: item.values.currency ?? "GBP",
+              metadata: { source: "mindbody_import" },
+              createdAt: now(),
+              updatedAt: now(),
+            });
+          }
+          await tx.insert(clientAccountCreditTransaction).values({
+            id: createId(),
+            organizationId: state.organizationId,
+            locationId: item.values.locationId ?? null,
+            clientId: item.values.clientId ?? "",
+            balanceId,
+            paymentId: item.id,
+            type: "IMPORT",
+            amount: item.values.amount,
+            currency: item.values.currency ?? "GBP",
+            description: "Imported Mindbody payment on account balance",
+            metadata: { externalId: item.externalId },
+            createdAt: now(),
+            updatedAt: now(),
+          });
+        }
+      });
       for (const item of chunk) {
         state.paymentIdsByExternalId.set(item.externalId, item.id);
         markProcessed(state, "accountBalances");
@@ -3938,7 +3991,56 @@ async function importAccountBalances(
     } catch (error) {
       await runWithConcurrency(chunk, IMPORT_WRITE_CONCURRENCY, async (item) => {
         try {
-          await db.insert(studioPayment).values(item.values).onConflictDoNothing();
+          await db.transaction(async (tx) => {
+            await tx.insert(studioPayment).values(item.values).onConflictDoNothing();
+            const balance = await tx.query.clientAccountBalance.findFirst({
+              where: and(
+                eq(clientAccountBalance.organizationId, state.organizationId),
+                eq(clientAccountBalance.clientId, item.values.clientId ?? ""),
+                item.values.locationId
+                  ? eq(clientAccountBalance.locationId, item.values.locationId)
+                  : sql`${clientAccountBalance.locationId} IS NULL`,
+              ),
+              columns: { id: true },
+            });
+            const balanceId = balance?.id ?? createId();
+            if (balance) {
+              await tx
+                .update(clientAccountBalance)
+                .set({
+                  balance: sql`${clientAccountBalance.balance} + ${item.values.amount}`,
+                  updatedAt: now(),
+                })
+                .where(eq(clientAccountBalance.id, balance.id));
+            } else {
+              await tx.insert(clientAccountBalance).values({
+                id: balanceId,
+                organizationId: state.organizationId,
+                locationId: item.values.locationId ?? null,
+                clientId: item.values.clientId ?? "",
+                balance: item.values.amount,
+                currency: item.values.currency ?? "GBP",
+                metadata: { source: "mindbody_import" },
+                createdAt: now(),
+                updatedAt: now(),
+              });
+            }
+            await tx.insert(clientAccountCreditTransaction).values({
+              id: createId(),
+              organizationId: state.organizationId,
+              locationId: item.values.locationId ?? null,
+              clientId: item.values.clientId ?? "",
+              balanceId,
+              paymentId: item.id,
+              type: "IMPORT",
+              amount: item.values.amount,
+              currency: item.values.currency ?? "GBP",
+              description: "Imported Mindbody payment on account balance",
+              metadata: { externalId: item.externalId },
+              createdAt: now(),
+              updatedAt: now(),
+            });
+          });
           state.paymentIdsByExternalId.set(item.externalId, item.id);
           markProcessed(state, "accountBalances");
         } catch (rowError) {

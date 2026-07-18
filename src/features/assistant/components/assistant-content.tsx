@@ -1,10 +1,10 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { ChatEditor, type ChatEditorHandle } from "@/components/ai/chat-editor";
 import type { EntityReference, SuggestionItem } from "@/components/ai/types";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -125,6 +125,8 @@ export function AssistantContent({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const editorRef = useRef<ChatEditorHandle>(null);
+  const [showExpandedLogs, setShowExpandedLogs] = useState(showAllLogs);
+  const effectiveShowAllLogs = showAllLogs || showExpandedLogs;
 
   // Get active organization info - must be fetched early to use in other hooks
   const activeOrgQuery = useQuery(trpc.organizations.getActive.queryOptions());
@@ -134,14 +136,8 @@ export function AssistantContent({
 
   // Fetch logs from database
   const logsQuery = useQuery(
-    trpc.ai.getLogs.queryOptions({ limit: showAllLogs ? 100 : logsLimit })
-  );
-
-  const deleteLogMutation = useMutation(
-    trpc.ai.deleteLog.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: trpc.ai.getLogs.queryKey() });
-      },
+    trpc.ai.getLogs.queryOptions({
+      limit: effectiveShowAllLogs ? 100 : logsLimit,
     })
   );
 
@@ -208,7 +204,7 @@ export function AssistantContent({
   const currentOrg = myOrgsQuery.data?.find(
     (org) => org.id === activeOrgQuery.data?.activeOrganizationId
   );
-  const agencyName = currentOrg?.name || "Agency";
+  const agencyName = currentOrg?.name || "Studio";
 
   // Check if user is a member of the main organization (not just location)
   const isAgencyMember = currentOrg?.role !== undefined;
@@ -229,7 +225,7 @@ export function AssistantContent({
       orgClientsQuery.data?.find(
         (c) => c.locationId === activeOrgQuery.data?.activeLocationId
       )?.name ||
-      "Client"
+      "Location"
     : agencyName;
 
   const handleClientSelect = (id: string) => {
@@ -405,10 +401,6 @@ export function AssistantContent({
     [sendMessage, isLoading, activeLocationId]
   );
 
-  const removeLog = (logId: string) => {
-    deleteLogMutation.mutate({ id: logId });
-  };
-
   return (
     <div className="flex flex-col h-full p-6 space-y-6">
       {/* Header */}
@@ -529,7 +521,7 @@ export function AssistantContent({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-sm font-semibold text-primary">
-              {showAllLogs ? "All logs" : "Recent logs"}
+              {effectiveShowAllLogs ? "All logs" : "Recent logs"}
             </h2>
             <p className="text-xs text-primary/60">
               Your AI command history and status
@@ -539,16 +531,16 @@ export function AssistantContent({
             {logsQuery.isLoading && (
               <LoaderIcon className="h-4 w-4 animate-spin text-primary/40" />
             )}
-            {!showAllLogs && logs.length > 0 && (
-              <Link
-                href="/logs"
-                className={cn(
-                  buttonVariants({ variant: "ghost" }),
-                  "text-xs text-sky-500 hover:text-white font-medium border-none hover:bg-sky-500 py-1! h-max px-2"
-                )}
+            {!effectiveShowAllLogs && logs.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowExpandedLogs(true)}
+                className="h-auto border-none px-2 py-1 text-xs font-medium text-sky-500 hover:bg-sky-500 hover:text-white"
               >
                 View all
-              </Link>
+              </Button>
             )}
           </div>
         </div>
@@ -621,12 +613,6 @@ export function AssistantContent({
                     >
                       {log.status.toLowerCase()}
                     </span>
-                    {/* <button
-                      onClick={() => removeLog(log.id)}
-                      className="text-primary/40 hover:text-primary"
-                    >
-                      <X className="h-4 w-4" />
-                    </button> */}
                   </div>
                 </div>
 

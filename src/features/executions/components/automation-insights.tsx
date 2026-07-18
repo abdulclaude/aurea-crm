@@ -1,11 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   Activity,
   BadgeCheck,
   ChartNoAxesColumn,
+  HeartPulse,
   Repeat2,
+  Share2,
   Trophy,
   Users,
 } from "lucide-react";
@@ -22,7 +25,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useTRPC } from "@/trpc/client";
-import { AutomationEventsTable } from "./automation-events-table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AutomationEventExplorer } from "./automation-event-explorer";
 
 const formatter = new Intl.NumberFormat("en-GB", {
   maximumFractionDigits: 0,
@@ -30,8 +40,9 @@ const formatter = new Intl.NumberFormat("en-GB", {
 
 export function AutomationInsights() {
   const trpc = useTRPC();
+  const [days, setDays] = useState(30);
   const insights = useQuery(
-    trpc.executions.getAutomationInsights.queryOptions({ days: 30 }),
+    trpc.executions.getAutomationInsights.queryOptions({ days }),
   );
 
   if (insights.isLoading) {
@@ -50,11 +61,31 @@ export function AutomationInsights() {
     );
   }
 
-  const { recentEvents, summary, workflows } = insights.data;
+  const { summary, workflows } = insights.data;
 
   return (
     <div className="space-y-6 p-6">
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Automation performance</h2>
+          <p className="text-xs text-primary/50">Conversion and recovery signals</p>
+        </div>
+        <Select
+          value={String(days)}
+          onValueChange={(value) => setDays(Number(value))}
+        >
+          <SelectTrigger className="h-8 w-32 text-xs shadow-none">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7">Last 7 days</SelectItem>
+            <SelectItem value="30">Last 30 days</SelectItem>
+            <SelectItem value="90">Last 90 days</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           title="Membership signups"
           value={summary.membershipSignupAutomations}
@@ -80,9 +111,21 @@ export function AutomationInsights() {
           icon={ChartNoAxesColumn}
         />
         <MetricCard
-          title="Conversion rate"
+          title="Referral conversions"
+          value={summary.referralConversions}
+          helper="Converted referral signals"
+          icon={Share2}
+        />
+        <MetricCard
+          title="Recovery signals"
+          value={summary.recoverySignals}
+          helper="Failed payment, no-show, and cancellation signals"
+          icon={HeartPulse}
+        />
+        <MetricCard
+          title="Runs with conversion"
           value={`${summary.conversionRate.toFixed(1)}%`}
-          helper={`${formatter.format(summary.conversionSignals)} conversion signals`}
+          helper={`${formatter.format(summary.convertedExecutions)} of ${formatter.format(summary.successfulExecutions)} successful runs`}
           icon={Repeat2}
         />
         <MetricCard
@@ -140,7 +183,7 @@ export function AutomationInsights() {
         </CardContent>
       </Card>
 
-      <AutomationEventsTable events={recentEvents} />
+      <AutomationEventExplorer />
     </div>
   );
 }

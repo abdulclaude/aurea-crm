@@ -23,6 +23,7 @@ export function useReportDateFilter(
   dateBounds: ReportDateBounds | null;
   dateFilter: ReportDateFilter | undefined;
   dateRange: DateRange | null;
+  applyDateRange: (range: { start: string; end: string } | null) => void;
 } {
   const dateBounds = useMemo(() => getDateBounds(rows, fields), [fields, rows]);
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
@@ -64,5 +65,20 @@ export function useReportDateFilter(
     };
   }, [dateBounds, dateRange]);
 
-  return { dateBounds, dateFilter, dateRange };
+  const applyDateRange = (range: { start: string; end: string } | null) => {
+    if (!dateBounds || !range) {
+      setDateRange(
+        dateBounds
+          ? { start: dateBounds.minDate, end: dateBounds.maxDate }
+          : null,
+      );
+      return;
+    }
+    setDateRange({
+      start: new Date(`${range.start}T00:00:00`),
+      end: new Date(`${range.end}T00:00:00`),
+    });
+  };
+
+  return { applyDateRange, dateBounds, dateFilter, dateRange };
 }

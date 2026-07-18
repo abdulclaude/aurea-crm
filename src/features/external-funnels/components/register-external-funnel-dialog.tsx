@@ -330,8 +330,8 @@ export function RegisterExternalFunnelDialog({
                     <li>Start tracking events and conversions</li>
                   </ol>
                   <p className="mt-3 text-muted-foreground">
-                    See the <a href="/docs/tracking-sdk" className="underline">documentation</a> for integration
-                    instructions.
+                    Use the installation and initialization snippets above to
+                    start sending events.
                   </p>
                 </AlertDescription>
               </Alert>

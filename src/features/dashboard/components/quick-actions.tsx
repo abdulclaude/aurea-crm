@@ -9,13 +9,14 @@ import {
   Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { APP_ROUTES } from "@/lib/app-routes";
 
 const ACTIONS = [
-  { label: "New member", href: "/clients/new", icon: UserPlus },
-  { label: "New booking", href: "/studio/bookings/new", icon: CalendarPlus },
-  { label: "Check in", href: "/studio/check-in", icon: UserCheck },
-  { label: "Record payment", href: "/studio/payments/new", icon: CreditCard },
-  { label: "Send campaign", href: "/marketing/campaigns/new", icon: Send },
+  { label: "New member", href: APP_ROUTES.membersNew, icon: UserPlus },
+  { label: "New booking", href: APP_ROUTES.schedule, icon: CalendarPlus },
+  { label: "Check in", href: APP_ROUTES.checkIn, icon: UserCheck },
+  { label: "Record payment", href: APP_ROUTES.invoices, icon: CreditCard },
+  { label: "Send campaign", href: APP_ROUTES.campaignsNew, icon: Send },
 ] as const;
 
 export function QuickActions() {

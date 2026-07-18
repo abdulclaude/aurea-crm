@@ -1,27 +1,52 @@
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
-import { and, arrayOverlaps, count, desc, eq, inArray, isNotNull, isNull, type SQL } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+} from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { db } from "@/db";
-import { campaign as campaignTable, campaignRecipient, client } from "@/db/schema";
-import { inngest } from "@/inngest/client";
-import type { SegmentFilter } from "../types";
-import type { CampaignSegmentType, ClientType, LifecycleStage } from "@/db/enums";
+import {
+  campaign as campaignTable,
+  campaignRecipient,
+  campaignRun,
+  client,
+  emailDomain,
+  emailTemplate,
+  outboundDelivery,
+} from "@/db/schema";
 import type { JsonValue } from "@/db/json";
 import { ActivityAction } from "@/db/enums";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { createNotification } from "@/lib/notifications";
+import { campaignEmailContentSchema } from "@/features/campaigns/lib/email-content-schema";
+import { campaignSegmentTypeSchema } from "@/features/campaigns/lib/campaign-audience-contracts";
+import { getActiveScopedAudienceDefinition } from "@/features/audiences/server/audience-access";
+import {
+  buildClientWhereClause,
+  buildSavedAudienceWhereClause,
+} from "@/features/campaigns/server/audience";
+import { prepareCampaignRun } from "@/features/campaigns/server/services/prepare-campaign-run";
+import { requestDeliveryDispatch } from "@/features/delivery/server/request-dispatch";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 const jsonSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(jsonSchema), z.record(z.string(), jsonSchema)])
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonSchema),
+    z.record(z.string(), jsonSchema),
+  ]),
 );
-
-const emailContentSchema = z.object({
-  subject: z.string(),
-  preheader: z.string().optional(),
-  sections: z.array(jsonSchema),
-});
 
 const emailDesignSchema = z.object({
   primaryColor: z.string().optional(),
@@ -32,33 +57,51 @@ const emailDesignSchema = z.object({
   logoUrl: z.string().optional(),
   fontFamily: z.string().optional(),
   footerText: z.string().optional(),
-  socialLinks: z.object({
-    facebook: z.string().optional(),
-    twitter: z.string().optional(),
-    instagram: z.string().optional(),
-    linkedin: z.string().optional(),
-    youtube: z.string().optional(),
-  }).optional(),
+  socialLinks: z
+    .object({
+      facebook: z.string().optional(),
+      twitter: z.string().optional(),
+      instagram: z.string().optional(),
+      linkedin: z.string().optional(),
+      youtube: z.string().optional(),
+    })
+    .optional(),
 });
 
 export const campaignsRouter = createTRPCRouter({
   // List all campaigns
   list: protectedProcedure
     .input(
-      z.object({
-        status: z.enum(["DRAFT", "SCHEDULED", "QUEUED", "SENDING", "SENT", "PAUSED", "FAILED", "CANCELLED"]).optional(),
-        limit: z.number().min(1).max(100).default(20),
-        cursor: z.string().optional(),
-      }).optional()
+      z
+        .object({
+          status: z
+            .enum([
+              "DRAFT",
+              "SCHEDULED",
+              "QUEUED",
+              "SENDING",
+              "SENT",
+              "PAUSED",
+              "FAILED",
+              "CANCELLED",
+            ])
+            .optional(),
+          limit: z.number().min(1).max(100).default(20),
+          cursor: z.string().optional(),
+        })
+        .optional(),
     )
     .query(async ({ ctx, input }) => {
+      await requireCampaignCapability(ctx, "messaging.view");
       const limit = input?.limit ?? 20;
 
       const campaigns = await db.query.campaign.findMany({
         where: and(
           eq(campaignTable.organizationId, ctx.orgId!),
-          ctx.locationId ? eq(campaignTable.locationId, ctx.locationId) : isNull(campaignTable.locationId),
-          input?.status ? eq(campaignTable.status, input.status) : undefined
+          ctx.locationId
+            ? eq(campaignTable.locationId, ctx.locationId)
+            : isNull(campaignTable.locationId),
+          input?.status ? eq(campaignTable.status, input.status) : undefined,
         ),
         with: {
           emailDomain: true,
@@ -87,6 +130,7 @@ export const campaignsRouter = createTRPCRouter({
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      await requireCampaignCapability(ctx, "messaging.view");
       const selectedCampaign = await db.query.campaign.findFirst({
         where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
         with: {
@@ -118,6 +162,7 @@ export const campaignsRouter = createTRPCRouter({
   getStats: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
+      await requireCampaignCapability(ctx, "messaging.view");
       const selectedCampaign = await db.query.campaign.findFirst({
         where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
         columns: {
@@ -141,15 +186,27 @@ export const campaignsRouter = createTRPCRouter({
 
       return {
         ...selectedCampaign,
-        openRate: selectedCampaign.delivered > 0
-          ? ((selectedCampaign.opened / selectedCampaign.delivered) * 100).toFixed(1)
-          : "0.0",
-        clickRate: selectedCampaign.opened > 0
-          ? ((selectedCampaign.clicked / selectedCampaign.opened) * 100).toFixed(1)
-          : "0.0",
-        bounceRate: selectedCampaign.totalRecipients > 0
-          ? ((selectedCampaign.bounced / selectedCampaign.totalRecipients) * 100).toFixed(1)
-          : "0.0",
+        openRate:
+          selectedCampaign.delivered > 0
+            ? (
+                (selectedCampaign.opened / selectedCampaign.delivered) *
+                100
+              ).toFixed(1)
+            : "0.0",
+        clickRate:
+          selectedCampaign.opened > 0
+            ? (
+                (selectedCampaign.clicked / selectedCampaign.opened) *
+                100
+              ).toFixed(1)
+            : "0.0",
+        bounceRate:
+          selectedCampaign.totalRecipients > 0
+            ? (
+                (selectedCampaign.bounced / selectedCampaign.totalRecipients) *
+                100
+              ).toFixed(1)
+            : "0.0",
       };
     }),
 
@@ -160,19 +217,36 @@ export const campaignsRouter = createTRPCRouter({
         name: z.string().min(1, "Name is required"),
         subject: z.string().min(1, "Subject is required"),
         preheaderText: z.string().optional(),
-        content: emailContentSchema,
+        content: campaignEmailContentSchema,
         design: emailDesignSchema.optional(),
         templateId: z.string().optional(),
         emailDomainId: z.string().optional(),
         fromName: z.string().optional(),
         fromEmail: z.string().optional(),
         replyTo: z.string().email().optional(),
-        segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]).default("ALL"),
+        savedAudienceId: z.string().min(1).max(128).nullable().optional(),
+        segmentType: campaignSegmentTypeSchema.default("ALL"),
         segmentFilter: jsonSchema.optional(),
         resendTemplateId: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
+      await requireCampaignCapability(ctx, "messaging.manage");
+      await validateCampaignReferences({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        templateId: input.templateId,
+        emailDomainId: input.emailDomainId,
+      });
+      if (input.savedAudienceId) {
+        await getActiveScopedAudienceDefinition({
+          id: input.savedAudienceId,
+          scope: {
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? null,
+          },
+        });
+      }
       const [createdCampaign] = await db
         .insert(campaignTable)
         .values({
@@ -189,8 +263,9 @@ export const campaignsRouter = createTRPCRouter({
           fromName: input.fromName,
           fromEmail: input.fromEmail,
           replyTo: input.replyTo,
-          segmentType: input.segmentType,
-          segmentFilter: input.segmentFilter,
+          savedAudienceId: input.savedAudienceId ?? null,
+          segmentType: input.savedAudienceId ? "ALL" : input.segmentType,
+          segmentFilter: input.savedAudienceId ? null : input.segmentFilter,
           status: "DRAFT",
           updatedAt: new Date(),
         })
@@ -235,20 +310,26 @@ export const campaignsRouter = createTRPCRouter({
         name: z.string().min(1).optional(),
         subject: z.string().min(1).optional(),
         preheaderText: z.string().optional(),
-        content: emailContentSchema.optional(),
+        content: campaignEmailContentSchema.optional(),
         design: emailDesignSchema.optional(),
         templateId: z.string().optional().nullable(),
         emailDomainId: z.string().optional().nullable(),
         fromName: z.string().optional(),
         fromEmail: z.string().optional(),
         replyTo: z.string().email().optional().nullable(),
-        segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]).optional(),
+        savedAudienceId: z.string().min(1).max(128).nullable().optional(),
+        segmentType: campaignSegmentTypeSchema.optional(),
         segmentFilter: jsonSchema.optional(),
         resendTemplateId: z.string().optional().nullable(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      const existingCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
+      await requireCampaignCapability(ctx, "messaging.manage");
+      const existingCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!existingCampaign) {
         throw new TRPCError({
@@ -264,13 +345,32 @@ export const campaignsRouter = createTRPCRouter({
         });
       }
 
+      if (input.savedAudienceId) {
+        await getActiveScopedAudienceDefinition({
+          id: input.savedAudienceId,
+          scope: {
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? null,
+          },
+        });
+      }
+      await validateCampaignReferences({
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        templateId: input.templateId,
+        emailDomainId: input.emailDomainId,
+      });
+
       const { id, ...updateData } = input;
+      const normalizedUpdateData = input.savedAudienceId
+        ? { ...updateData, segmentType: "ALL" as const, segmentFilter: null }
+        : updateData;
 
       const changes = getChangedFields(existingCampaign, input);
 
       const [updatedCampaign] = await db
         .update(campaignTable)
-        .set({ ...updateData, updatedAt: new Date() })
+        .set({ ...normalizedUpdateData, updatedAt: new Date() })
         .where(eq(campaignTable.id, id))
         .returning();
 
@@ -314,10 +414,22 @@ export const campaignsRouter = createTRPCRouter({
       z.object({
         id: z.string(),
         scheduledAt: z.string().datetime(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "messaging.send",
+      });
+      const selectedCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!selectedCampaign) {
         throw new TRPCError({
@@ -341,30 +453,22 @@ export const campaignsRouter = createTRPCRouter({
         });
       }
 
-      const [updatedCampaign] = await db
-        .update(campaignTable)
-        .set({
-          scheduledAt,
-          status: "SCHEDULED",
-          updatedAt: new Date(),
-        })
-        .where(eq(campaignTable.id, input.id))
-        .returning();
-
-      if (!updatedCampaign) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to schedule campaign",
-        });
-      }
+      const run = await prepareCampaignRun({
+        campaignId: input.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        requestedBy: ctx.auth.user.id,
+        mode: "SCHEDULED",
+        scheduledFor: scheduledAt,
+      });
 
       await logAnalytics({
         organizationId: ctx.orgId!,
         locationId: ctx.locationId ?? null,
         userId: ctx.auth.user.id,
         entityType: "campaign",
-        entityId: updatedCampaign.id,
-        entityName: updatedCampaign.name,
+        entityId: selectedCampaign.id,
+        entityName: selectedCampaign.name,
         action: ActivityAction.STATUS_CHANGED,
         metadata: { status: "SCHEDULED" },
       });
@@ -372,25 +476,34 @@ export const campaignsRouter = createTRPCRouter({
       await createNotification({
         type: "CAMPAIGN_SCHEDULED",
         title: "Campaign scheduled",
-        message: `${ctx.auth.user.name} scheduled campaign ${updatedCampaign.name}.`,
+        message: `${ctx.auth.user.name} scheduled campaign ${selectedCampaign.name}.`,
         actorId: ctx.auth.user.id,
         entityType: "campaign",
-        entityId: updatedCampaign.id,
+        entityId: selectedCampaign.id,
         organizationId: ctx.orgId!,
         locationId: ctx.locationId ?? undefined,
       });
 
-      return updatedCampaign;
+      return run;
     }),
 
   // Send a campaign immediately
   send: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const selectedCampaign = await db.query.campaign.findFirst({
-        where: campaignOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
-        with: { emailDomain: true },
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "messaging.send",
       });
+      const selectedCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!selectedCampaign) {
         throw new TRPCError({
@@ -406,10 +519,13 @@ export const campaignsRouter = createTRPCRouter({
         });
       }
 
-      await db
-        .update(campaignTable)
-        .set({ status: "QUEUED", updatedAt: new Date() })
-        .where(eq(campaignTable.id, input.id));
+      const run = await prepareCampaignRun({
+        campaignId: input.id,
+        organizationId: ctx.orgId!,
+        locationId: ctx.locationId ?? null,
+        requestedBy: ctx.auth.user.id,
+        mode: "IMMEDIATE",
+      });
 
       await logAnalytics({
         organizationId: ctx.orgId!,
@@ -433,24 +549,28 @@ export const campaignsRouter = createTRPCRouter({
         locationId: ctx.locationId ?? undefined,
       });
 
-      // Trigger the Inngest function to send the campaign
-      await inngest.send({
-        name: "campaign/send",
-        data: {
-          campaignId: input.id,
-          organizationId: ctx.orgId!,
-          locationId: ctx.locationId ?? null,
-        },
-      });
+      await requestDeliveryDispatch(ctx.orgId!);
 
-      return { success: true, message: "Campaign queued for sending" };
+      return { success: true, message: "Campaign queued for sending", run };
     }),
 
   // Cancel a scheduled campaign
   cancel: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "messaging.send",
+      });
+      const selectedCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!selectedCampaign) {
         throw new TRPCError({
@@ -466,15 +586,76 @@ export const campaignsRouter = createTRPCRouter({
         });
       }
 
-      const [updatedCampaign] = await db
-        .update(campaignTable)
-        .set({
-          status: "CANCELLED",
-          scheduledAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(campaignTable.id, input.id))
-        .returning();
+      const activeRuns = await db
+        .select({ id: campaignRun.id })
+        .from(campaignRun)
+        .where(
+          and(
+            eq(campaignRun.campaignId, input.id),
+            eq(campaignRun.organizationId, ctx.orgId!),
+            inArray(campaignRun.status, ["PREPARING", "QUEUED"]),
+          ),
+        );
+      const runIds = activeRuns.map((run) => run.id);
+      const updatedCampaign = await db.transaction(async (tx) => {
+        const now = new Date();
+        if (runIds.length > 0) {
+          await tx
+            .update(outboundDelivery)
+            .set({
+              status: "CANCELLED",
+              cancelledAt: now,
+              claimToken: null,
+              leaseExpiresAt: null,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                inArray(
+                  outboundDelivery.id,
+                  tx
+                    .select({ id: campaignRecipient.deliveryId })
+                    .from(campaignRecipient)
+                    .where(inArray(campaignRecipient.runId, runIds)),
+                ),
+                eq(outboundDelivery.status, "QUEUED"),
+              ),
+            );
+          await tx
+            .update(campaignRecipient)
+            .set({
+              status: "FAILED",
+              suppressionReason: "CAMPAIGN_CANCELLED",
+              updatedAt: now,
+            })
+            .where(
+              and(
+                inArray(campaignRecipient.runId, runIds),
+                eq(campaignRecipient.status, "PENDING"),
+              ),
+            );
+          await tx
+            .update(campaignRun)
+            .set({ status: "CANCELLED", cancelledAt: now, updatedAt: now })
+            .where(inArray(campaignRun.id, runIds));
+        }
+
+        const [updated] = await tx
+          .update(campaignTable)
+          .set({
+            status: "CANCELLED",
+            scheduledAt: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(campaignTable.id, input.id),
+              eq(campaignTable.organizationId, ctx.orgId!),
+            ),
+          )
+          .returning();
+        return updated;
+      });
 
       if (!updatedCampaign) {
         throw new TRPCError({
@@ -512,7 +693,12 @@ export const campaignsRouter = createTRPCRouter({
   duplicate: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
+      await requireCampaignCapability(ctx, "messaging.manage");
+      const selectedCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!selectedCampaign) {
         throw new TRPCError({
@@ -536,6 +722,7 @@ export const campaignsRouter = createTRPCRouter({
           fromName: selectedCampaign.fromName,
           fromEmail: selectedCampaign.fromEmail,
           replyTo: selectedCampaign.replyTo,
+          savedAudienceId: selectedCampaign.savedAudienceId,
           segmentType: selectedCampaign.segmentType,
           segmentFilter: selectedCampaign.segmentFilter,
           status: "DRAFT",
@@ -557,7 +744,12 @@ export const campaignsRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const selectedCampaign = await getOwnedCampaign(input.id, ctx.orgId!, ctx.locationId ?? null);
+      await requireCampaignCapability(ctx, "messaging.manage");
+      const selectedCampaign = await getOwnedCampaign(
+        input.id,
+        ctx.orgId!,
+        ctx.locationId ?? null,
+      );
 
       if (!selectedCampaign) {
         throw new TRPCError({
@@ -582,85 +774,136 @@ export const campaignsRouter = createTRPCRouter({
   getRecipientCount: protectedProcedure
     .input(
       z.object({
-        segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]),
+        savedAudienceId: z.string().min(1).max(128).nullable().optional(),
+        segmentType: campaignSegmentTypeSchema,
         segmentFilter: jsonSchema.optional(),
-      })
+      }),
     )
     .query(async ({ ctx, input }) => {
-      const where = buildClientWhereClause(
-        ctx.orgId!,
-        ctx.locationId ?? null,
-        input.segmentType,
-        input.segmentFilter as SegmentFilter | undefined
-      );
+      await requireCampaignCapability(ctx, "messaging.view");
+      const savedAudience = input.savedAudienceId
+        ? await getActiveScopedAudienceDefinition({
+            id: input.savedAudienceId,
+            scope: {
+              organizationId: ctx.orgId!,
+              locationId: ctx.locationId ?? null,
+            },
+          })
+        : null;
+      const where = savedAudience
+        ? buildSavedAudienceWhereClause({
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? null,
+            definition: savedAudience.definition,
+          })
+        : buildClientWhereClause(
+            ctx.orgId!,
+            ctx.locationId ?? null,
+            input.segmentType,
+            input.segmentFilter,
+          );
 
-      const [result] = await db.select({ value: count() }).from(client).where(where);
+      const [result] = await db
+        .select({ value: count() })
+        .from(client)
+        .where(where);
 
       return { count: result?.value ?? 0 };
     }),
 });
 
-// Helper function to build client where clause based on segment
-function buildClientWhereClause(
-  organizationId: string,
-  locationId: string | null,
-  segmentType: CampaignSegmentType,
-  segmentFilter?: SegmentFilter
-): SQL | undefined {
-  const baseConditions = [
-    eq(client.organizationId, organizationId),
-    locationId ? eq(client.locationId, locationId) : isNull(client.locationId),
-    isNotNull(client.email),
-    eq(client.emailUnsubscribed, false),
-  ];
+type CampaignContext = {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+};
 
-  switch (segmentType) {
-    case "ALL":
-      return and(...baseConditions);
+async function requireCampaignCapability(
+  ctx: CampaignContext,
+  capability: "messaging.view" | "messaging.manage",
+): Promise<void> {
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability,
+  });
+}
 
-    case "BY_TYPE": {
-      const types = (segmentFilter?.types ?? []) as ClientType[];
-      return and(...baseConditions, types.length > 0 ? inArray(client.type, types) : undefined);
+async function validateCampaignReferences(input: {
+  organizationId: string;
+  locationId: string | null;
+  templateId?: string | null;
+  emailDomainId?: string | null;
+}): Promise<void> {
+  if (input.templateId) {
+    const template = await db.query.emailTemplate.findFirst({
+      where: and(
+        eq(emailTemplate.id, input.templateId),
+        eq(emailTemplate.organizationId, input.organizationId),
+        input.locationId
+          ? or(
+              isNull(emailTemplate.locationId),
+              eq(emailTemplate.locationId, input.locationId),
+            )
+          : isNull(emailTemplate.locationId),
+      ),
+      columns: { id: true },
+    });
+    if (!template) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Email template not found in this workspace.",
+      });
     }
-
-    case "BY_TAGS": {
-      const tags = segmentFilter?.tags ?? [];
-      return and(...baseConditions, tags.length > 0 ? arrayOverlaps(client.tags, tags) : undefined);
+  }
+  if (input.emailDomainId) {
+    const domain = await db.query.emailDomain.findFirst({
+      where: and(
+        eq(emailDomain.id, input.emailDomainId),
+        eq(emailDomain.organizationId, input.organizationId),
+        input.locationId
+          ? or(
+              isNull(emailDomain.locationId),
+              eq(emailDomain.locationId, input.locationId),
+            )
+          : isNull(emailDomain.locationId),
+      ),
+      columns: { id: true },
+    });
+    if (!domain) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Email domain not found in this workspace.",
+      });
     }
-
-    case "BY_LIFECYCLE": {
-      const lifecycleStages = (segmentFilter?.lifecycleStages ?? []) as LifecycleStage[];
-      return and(
-        ...baseConditions,
-        lifecycleStages.length > 0 ? inArray(client.lifecycleStage, lifecycleStages) : undefined
-      );
-    }
-
-    case "BY_COUNTRY": {
-      const countries = segmentFilter?.countries ?? [];
-      return and(...baseConditions, countries.length > 0 ? inArray(client.country, countries) : undefined);
-    }
-
-    case "CUSTOM":
-      return and(...baseConditions);
-
-    default:
-      return and(...baseConditions);
   }
 }
 
-function campaignOwnerWhere(id: string, organizationId: string, locationId: string | null): SQL | undefined {
+function campaignOwnerWhere(
+  id: string,
+  organizationId: string,
+  locationId: string | null,
+): SQL | undefined {
   return and(
     eq(campaignTable.id, id),
     eq(campaignTable.organizationId, organizationId),
-    locationId ? eq(campaignTable.locationId, locationId) : isNull(campaignTable.locationId)
+    locationId
+      ? eq(campaignTable.locationId, locationId)
+      : isNull(campaignTable.locationId),
   );
 }
 
-async function getOwnedCampaign(id: string, organizationId: string, locationId: string | null) {
+async function getOwnedCampaign(
+  id: string,
+  organizationId: string,
+  locationId: string | null,
+) {
   return db.query.campaign.findFirst({
     where: campaignOwnerWhere(id, organizationId, locationId),
   });
 }
 
-export { buildClientWhereClause };
+export { buildClientWhereClause } from "@/features/campaigns/server/audience";

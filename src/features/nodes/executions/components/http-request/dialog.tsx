@@ -98,7 +98,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>HTTP Request</SheetTitle>
           <SheetDescription>
@@ -106,7 +106,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -127,7 +127,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.httpResponse.data}}`}
                     </span>{" "}
                   </FormDescription>
@@ -165,7 +165,7 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2">
                     The{" "}
-                    <span className="text-white font-medium">
+                    <span className="text-primary font-medium">
                       {" "}
                       HTTP method{" "}
                     </span>{" "}
@@ -196,12 +196,12 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Static URL or use{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.
@@ -231,12 +231,12 @@ export const HttpRequestDialog: React.FC<Props> = ({
 
                     <FormDescription className="text-xs mt-2 leading-5">
                       JSON with template variabes. <br /> Use{" "}
-                      <span className="text-white font-medium tracking-wide">
+                      <span className="text-primary font-medium tracking-wide">
                         {"{{variables}}"}
                       </span>{" "}
                       for simple values.
                       <br /> Alternatively, use{" "}
-                      <span className="text-white font-medium tracking-wide">
+                      <span className="text-primary font-medium tracking-wide">
                         {"{{json variable}}"}
                       </span>{" "}
                       to stringify objects.

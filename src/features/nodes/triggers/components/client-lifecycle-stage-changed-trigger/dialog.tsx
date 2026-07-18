@@ -3,16 +3,6 @@
 import { useForm } from "react-hook-form";
 import { useEffect } from "react";
 
-import {
-  Sheet,
-  ResizableSheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Separator } from "@/components/ui/separator";
-
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -26,7 +16,6 @@ import {
 } from "@/components/ui/form";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import {
   Select,
@@ -35,6 +24,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  StudioNodeDialogFooter,
+  StudioNodeDialogLayout,
+} from "@/features/nodes/studio/components/studio-node-dialog-layout";
 
 const LIFECYCLE_STAGES = [
   { value: "SUBSCRIBER", label: "Subscriber" },
@@ -75,7 +68,6 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
   onOpenChange,
   onSubmit,
   defaultValues = {},
-  variables,
 }) => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -102,20 +94,13 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
-        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
-          <SheetTitle>
-            Client Lifecycle Stage Changed Trigger Configuration
-          </SheetTitle>
-          <SheetDescription>
-            This workflow will trigger when a client lifecycle stage changes.
-          </SheetDescription>
-        </SheetHeader>
-
-        <Separator className="my-5 bg-white/5" />
-
-        <Form {...form}>
+    <StudioNodeDialogLayout
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Lifecycle stage trigger"
+      description="Start when a client moves from or into selected lifecycle stages."
+    >
+      <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 px-6"
@@ -125,19 +110,13 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
               name="variableName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Variable Name</FormLabel>
+                <FormLabel>Variable name</FormLabel>
                   <FormControl>
                     <Input placeholder="clientStageChange" {...field} />
                   </FormControl>
-                  <FormDescription className="text-xs mt-2 leading-5">
-                    Access the stage change data in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
-                      {`{{${field.value || "clientStageChange"}.oldStage}}`}
-                    </span>
-                    {", "}
-                    <span className="text-white font-medium tracking-wide">
-                      {`{{${field.value || "clientStageChange"}.newStage}}`}
-                    </span>
+                  <FormDescription>
+                    Later steps can use the client, previous stage, and new
+                    stage from this variable.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -149,7 +128,7 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
               name="fromStage"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>From Stage (Optional)</FormLabel>
+                  <FormLabel>From stage</FormLabel>
                   <Select
                     value={field.value || ""}
                     onValueChange={(val) => field.onChange(val || undefined)}
@@ -167,8 +146,8 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FormDescription className="text-xs">
-                    Leave empty to trigger from any stage
+                  <FormDescription>
+                    Leave empty to accept transitions from any stage.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -180,7 +159,7 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
               name="toStage"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>To Stage (Optional)</FormLabel>
+                  <FormLabel>To stage</FormLabel>
                   <Select
                     value={field.value || ""}
                     onValueChange={(val) => field.onChange(val || undefined)}
@@ -198,33 +177,17 @@ export const ClientLifecycleStageChangedTriggerDialog: React.FC<Props> = ({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FormDescription className="text-xs">
-                    Leave empty to trigger to any stage
+                  <FormDescription>
+                    Leave empty to accept transitions into any stage.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
-            <div className="bg-blue-500/10 border border-blue-500/20 rounded p-4">
-              <p className="text-sm text-blue-200">
-                Perfect for tracking client progression through your sales funnel.
-                Trigger workflows when clients move from LEAD to MQL, MQL to SQL, or
-                SQL to CUSTOMER.
-              </p>
-            </div>
-
-            <SheetFooter className="mt-6 px-0 pb-4">
-              <Button
-                type="submit"
-                className="brightness-120! hover:brightness-130! w-full py-5"
-              >
-                Save changes
-              </Button>
-            </SheetFooter>
+            <StudioNodeDialogFooter />
           </form>
         </Form>
-      </ResizableSheetContent>
-    </Sheet>
+    </StudioNodeDialogLayout>
   );
 };

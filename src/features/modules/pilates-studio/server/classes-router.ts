@@ -26,6 +26,7 @@ export const studioClassesRouter = createTRPCRouter({
         startDate: z.string().optional(),
         endDate: z.string().optional(),
         instructorName: z.string().optional(),
+        serviceTypeId: z.string().optional(),
         roomId: z.string().optional(),
       })
     )
@@ -37,6 +38,7 @@ export const studioClassesRouter = createTRPCRouter({
         startDate,
         endDate,
         instructorName,
+        serviceTypeId,
         roomId,
       } = input;
 
@@ -48,6 +50,7 @@ export const studioClassesRouter = createTRPCRouter({
           startDate ? gte(studioClassTable.startTime, new Date(startDate)) : undefined,
           endDate ? lte(studioClassTable.startTime, new Date(endDate)) : undefined,
           instructorName ? ilike(studioClassTable.instructorName, `%${instructorName}%`) : undefined,
+          serviceTypeId ? eq(studioClassTable.serviceTypeId, serviceTypeId) : undefined,
           roomId ? eq(studioClassTable.roomId, roomId) : undefined
         )
       );
@@ -63,6 +66,15 @@ export const studioClassesRouter = createTRPCRouter({
         with: {
           room: {
             columns: { id: true, name: true, capacity: true },
+          },
+          classType: {
+            columns: { id: true, name: true, color: true },
+          },
+          serviceType: {
+            columns: { id: true, name: true, calendarColor: true, categoryId: true },
+          },
+          instructor: {
+            columns: { id: true, name: true, profilePhoto: true },
           },
           studioBookings: {
             columns: { id: true },

@@ -45,7 +45,7 @@ export const GoogleDriveDeleteFileNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_DRIVE_DELETE_FILE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleDriveDeleteFileRealtimeToken as any,
+    refreshToken: fetchGoogleDriveDeleteFileRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleDriveDeleteFileFormValues) => {

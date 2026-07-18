@@ -139,9 +139,9 @@ export function GlobalStylesManager() {
             Style presets are used across funnels, forms, and other builders to
             maintain brand consistency
           </p>
-          <Button onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Preset
+          <Button variant="outline" onClick={() => setCreateDialogOpen(true)}>
+            <Plus className=" size-3.5" />
+            Create preset
           </Button>
         </div>
 
@@ -157,11 +157,11 @@ export function GlobalStylesManager() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <CardTitle className="line-clamp-1">
+                        <CardTitle className="">
                           {preset.name}
                         </CardTitle>
                         {preset.isDefault && (
-                          <Badge variant="default" className="gap-1">
+                          <Badge variant="favourite" className="gap-1">
                             <Star className="h-3 w-3" />
                             Default
                           </Badge>
@@ -173,15 +173,16 @@ export function GlobalStylesManager() {
                         </CardDescription>
                       )}
                     </div>
+
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon">
-                          <MoreVertical className="h-4 w-4" />
+                          <MoreVertical className="size-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem>
-                          <Edit className="mr-2 h-4 w-4" />
+                          <Edit className=" size-3" />
                           Edit
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -192,15 +193,15 @@ export function GlobalStylesManager() {
                             })
                           }
                         >
-                          <Copy className="mr-2 h-4 w-4" />
+                          <Copy className="size-3" />
                           Duplicate
                         </DropdownMenuItem>
                         {!preset.isDefault && (
                           <DropdownMenuItem
                             onClick={() => handleSetDefault(preset.id)}
                           >
-                            <Star className="mr-2 h-4 w-4" />
-                            Set as Default
+                            <Star className="size-3" />
+                            Set as default
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
@@ -208,7 +209,7 @@ export function GlobalStylesManager() {
                           onClick={() => handleDelete(preset.id, preset.name)}
                           className="text-destructive"
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
+                          <Trash2 className="size-3" />
                           Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -266,9 +267,9 @@ export function GlobalStylesManager() {
                 Create a preset to maintain brand consistency across your builders
               </p>
             </div>
-            <Button onClick={() => setCreateDialogOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Create Preset
+            <Button variant="gradient" className="w-max" onClick={() => setCreateDialogOpen(true)}>
+              <Plus className=" size-3.5" />
+              Create preset
             </Button>
           </div>
         )}
@@ -277,18 +278,19 @@ export function GlobalStylesManager() {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Style Preset</DialogTitle>
+            <DialogTitle>Create style preset</DialogTitle>
             <DialogDescription>
               Create a new global style preset with default brand colors and
               typography settings
             </DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Preset Name</Label>
+            <div className="space-y-3">
+              <Label htmlFor="name">Preset name</Label>
               <Input
                 id="name"
-                placeholder="e.g., Brand Colors 2024"
+                placeholder="e.g., Brand colors 2026"
                 value={newPresetName}
                 onChange={(e) => setNewPresetName(e.target.value)}
                 onKeyDown={(e) => {
@@ -309,8 +311,8 @@ export function GlobalStylesManager() {
             >
               Cancel
             </Button>
-            <Button onClick={handleCreatePreset} disabled={isCreating}>
-              {isCreating ? "Creating..." : "Create Preset"}
+            <Button variant="gradient" className="w-max" onClick={handleCreatePreset} disabled={isCreating}>
+              {isCreating ? "Creating..." : "Create preset"}
             </Button>
           </DialogFooter>
         </DialogContent>

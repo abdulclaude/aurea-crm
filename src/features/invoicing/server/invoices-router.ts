@@ -1,8 +1,26 @@
 import { TRPCError } from "@trpc/server";
 import z from "zod";
-import { InvoiceStatus, InvoiceType, BillingModel, PaymentMethod, ActivityAction, BankTransferStatus } from "@/db/enums";
+import {
+  InvoiceStatus,
+  InvoiceType,
+  BillingModel,
+  PaymentMethod,
+  ActivityAction,
+  BankTransferStatus,
+} from "@/db/enums";
 import { format } from "date-fns";
-import { eq, and, or, ilike, isNull, inArray, desc, asc, gt, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  or,
+  ilike,
+  isNull,
+  inArray,
+  desc,
+  asc,
+  gt,
+  sql,
+} from "drizzle-orm";
 
 import { db } from "@/db";
 import {
@@ -11,17 +29,77 @@ import {
   invoicePayment,
   invoiceReminder,
   invoiceTemplate,
+  organization,
   stripeConnection,
   bankTransferSettings,
   location,
   timeLog,
 } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure, baseProcedure } from "@/trpc/init";
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
 import { generateInvoiceNumber } from "@/features/invoicing/lib/invoice-number-generator";
+import { invoiceAccessPurposeSchema } from "@/features/invoicing/lib/public-invoice-access";
 import { createNotification } from "@/lib/notifications";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { assertInvoiceScopeAccess } from "./invoice-scope";
+import {
+  buildPublicInvoiceUrl,
+  issueInvoiceAccessToken,
+  PublicInvoiceAccessNotFoundError,
+  revokeInvoiceAccessTokens,
+} from "./invoice-access-tokens";
+import {
+  createPublicInvoiceCheckout,
+  PublicInvoicePaymentError,
+} from "./public-invoice-checkout";
+import {
+  currencyExponent,
+  decimalToMinorUnits,
+  minorUnitsToDecimal,
+  normalizeCurrency,
+} from "@/features/commerce/lib/money";
+import { resolvePaymentRecoveryCases } from "@/features/commerce/server/recovery/payment-recovery-case-service";
+import {
+  invoiceTemplatePresetSchema,
+  PRESET_TEMPLATES,
+} from "@/features/invoicing/lib/template-presets";
 
 const INVOICE_PAGE_SIZE = 20;
+
+function getPublicAppBaseUrl(): string {
+  return (
+    process.env.APP_URL ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    "http://localhost:3000"
+  );
+}
+
+function mapInvoicePaymentLinkError(error: unknown): TRPCError {
+  if (error instanceof PublicInvoiceAccessNotFoundError) {
+    return new TRPCError({
+      code: "NOT_FOUND",
+      message: "Invoice not found",
+    });
+  }
+  if (error instanceof PublicInvoicePaymentError) {
+    if (error.code !== "CHECKOUT_UNAVAILABLE") {
+      return new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: error.message,
+      });
+    }
+    return new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Failed to create the secure payment link",
+      cause: error.originalCause ?? error,
+    });
+  }
+  return new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "Failed to create the invoice link",
+    cause: error,
+  });
+}
 
 const invoiceWith = {
   invoiceLineItems: true,
@@ -75,9 +153,13 @@ async function getAvailablePaymentMethods(params: {
   return methods;
 }
 
-type InvoiceQueryResult = Awaited<ReturnType<typeof db.query.invoice.findFirst<{
-  with: typeof invoiceWith;
-}>>>;
+type InvoiceQueryResult = Awaited<
+  ReturnType<
+    typeof db.query.invoice.findFirst<{
+      with: typeof invoiceWith;
+    }>
+  >
+>;
 
 const mapInvoice = (inv: NonNullable<InvoiceQueryResult>) => {
   return {
@@ -172,11 +254,19 @@ export const invoicesRouter = createTRPCRouter({
         search: z.string().optional(),
         sortBy: z.enum(["issueDate", "dueDate", "total"]).default("issueDate"),
         sortOrder: z.enum(["asc", "desc"]).default("desc"),
-      })
+      }),
     )
     .query(async ({ ctx, input }) => {
-      const { cursor, limit, status, type, clientId, search, sortBy, sortOrder } =
-        input;
+      const {
+        cursor,
+        limit,
+        status,
+        type,
+        clientId,
+        search,
+        sortBy,
+        sortOrder,
+      } = input;
 
       // Require either organizationId or locationId
       if (!ctx.orgId && !ctx.locationId) {
@@ -186,11 +276,12 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      const sortColumn = sortBy === "issueDate"
-        ? invoice.issueDate
-        : sortBy === "dueDate"
-          ? invoice.dueDate
-          : invoice.total;
+      const sortColumn =
+        sortBy === "issueDate"
+          ? invoice.issueDate
+          : sortBy === "dueDate"
+            ? invoice.dueDate
+            : invoice.total;
       const orderFn = sortOrder === "asc" ? asc : desc;
 
       const invoices = await db.query.invoice.findMany({
@@ -198,7 +289,8 @@ export const invoicesRouter = createTRPCRouter({
           const conditions = [];
 
           if (ctx.orgId) conditions.push(ops.eq(t.organizationId, ctx.orgId));
-          if (ctx.locationId) conditions.push(ops.eq(t.locationId, ctx.locationId));
+          if (ctx.locationId)
+            conditions.push(ops.eq(t.locationId, ctx.locationId));
           if (status) conditions.push(ops.eq(t.status, status));
           if (type) conditions.push(ops.eq(t.type, type));
           if (clientId) conditions.push(ops.eq(t.clientId, clientId));
@@ -251,16 +343,10 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       return mapInvoice(inv);
     }),
@@ -292,7 +378,7 @@ export const invoicesRouter = createTRPCRouter({
             quantity: z.number().positive(),
             unitPrice: z.number(),
             timeLogId: z.string().optional(),
-          })
+          }),
         ),
         taxRate: z.number().min(0).max(100).optional(),
         discountAmount: z.number().min(0).optional(),
@@ -300,7 +386,7 @@ export const invoicesRouter = createTRPCRouter({
         internalNotes: z.string().optional(),
         termsConditions: z.string().optional(),
         documentUrl: z.string().url().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -313,19 +399,17 @@ export const invoicesRouter = createTRPCRouter({
       // Calculate line items totals
       const subtotal = input.lineItems.reduce(
         (sum, item) => sum + item.quantity * item.unitPrice,
-        0
+        0,
       );
 
-      const taxAmount = input.taxRate
-        ? (subtotal * input.taxRate) / 100
-        : 0;
+      const taxAmount = input.taxRate ? (subtotal * input.taxRate) / 100 : 0;
       const discountAmount = input.discountAmount ?? 0;
       const total = subtotal + taxAmount - discountAmount;
 
       // Generate invoice number
       const invoiceNumber = await generateInvoiceNumber(
         ctx.orgId,
-        ctx.locationId ?? undefined
+        ctx.locationId ?? undefined,
       );
 
       // Get available payment methods
@@ -339,35 +423,41 @@ export const invoicesRouter = createTRPCRouter({
         const invoiceId = crypto.randomUUID();
         const now = new Date();
 
-        const [inv] = await tx.insert(invoice).values({
-          id: invoiceId,
-          organizationId: ctx.orgId!,
-          locationId: ctx.locationId ?? undefined,
-          invoiceNumber,
-          clientId: input.clientId,
-          clientName: input.clientName,
-          clientEmail: input.clientEmail,
-          clientAddress: input.clientAddress,
-          title: input.title,
-          type: input.type,
-          billingModel: input.billingModel,
-          templateId: input.templateId && input.templateId !== "__default__" ? input.templateId : undefined,
-          dueDate: input.dueDate,
-          subtotal: String(subtotal),
-          taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
-          taxAmount: String(taxAmount),
-          discountAmount: String(discountAmount),
-          total: String(total),
-          amountDue: String(total),
-          amountPaid: "0",
-          notes: input.notes,
-          internalNotes: input.internalNotes,
-          termsConditions: input.termsConditions,
-          documentUrl: input.documentUrl,
-          paymentMethods,
-          createdAt: now,
-          updatedAt: now,
-        }).returning();
+        const [inv] = await tx
+          .insert(invoice)
+          .values({
+            id: invoiceId,
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? undefined,
+            invoiceNumber,
+            clientId: input.clientId,
+            clientName: input.clientName,
+            clientEmail: input.clientEmail,
+            clientAddress: input.clientAddress,
+            title: input.title,
+            type: input.type,
+            billingModel: input.billingModel,
+            templateId:
+              input.templateId && input.templateId !== "__default__"
+                ? input.templateId
+                : undefined,
+            dueDate: input.dueDate,
+            subtotal: String(subtotal),
+            taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
+            taxAmount: String(taxAmount),
+            discountAmount: String(discountAmount),
+            total: String(total),
+            amountDue: String(total),
+            amountPaid: "0",
+            notes: input.notes,
+            internalNotes: input.internalNotes,
+            termsConditions: input.termsConditions,
+            documentUrl: input.documentUrl,
+            paymentMethods,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
 
         if (input.lineItems.length > 0) {
           await tx.insert(invoiceLineItem).values(
@@ -439,7 +529,7 @@ export const invoicesRouter = createTRPCRouter({
               quantity: z.number().positive(),
               unitPrice: z.number(),
               timeLogId: z.string().optional(),
-            })
+            }),
           )
           .optional(),
         taxRate: z.number().min(0).max(100).optional(),
@@ -448,15 +538,16 @@ export const invoicesRouter = createTRPCRouter({
         internalNotes: z.string().optional(),
         termsConditions: z.string().optional(),
         documentUrl: z.string().url().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const { id, lineItems, templateId, ...updateData } = input;
 
       // Handle template ID - null out if "__default__" is selected
-      const templateUpdate = templateId !== undefined
-        ? { templateId: templateId === "__default__" ? null : templateId }
-        : {};
+      const templateUpdate =
+        templateId !== undefined
+          ? { templateId: templateId === "__default__" ? null : templateId }
+          : {};
 
       // Fetch existing invoice
       const existingInvoice = await db.query.invoice.findFirst({
@@ -471,16 +562,10 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        existingInvoice.organizationId !== ctx.orgId &&
-        existingInvoice.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(existingInvoice, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       // Calculate totals if line items are updated
       let financialUpdate: Record<string, unknown> = {};
@@ -488,10 +573,14 @@ export const invoicesRouter = createTRPCRouter({
       if (lineItems) {
         const subtotal = lineItems.reduce(
           (sum, item) => sum + item.quantity * item.unitPrice,
-          0
+          0,
         );
 
-        const taxRate = updateData.taxRate ?? (existingInvoice.taxRate ? parseFloat(existingInvoice.taxRate) : undefined);
+        const taxRate =
+          updateData.taxRate ??
+          (existingInvoice.taxRate
+            ? parseFloat(existingInvoice.taxRate)
+            : undefined);
         const taxAmount = taxRate ? (subtotal * taxRate) / 100 : 0;
         const discountAmount =
           updateData.discountAmount ??
@@ -514,25 +603,37 @@ export const invoicesRouter = createTRPCRouter({
         ...templateUpdate,
         ...financialUpdate,
       };
-      if (updateData.clientId !== undefined) updateSet.clientId = updateData.clientId;
-      if (updateData.clientName !== undefined) updateSet.clientName = updateData.clientName;
-      if (updateData.clientEmail !== undefined) updateSet.clientEmail = updateData.clientEmail;
-      if (updateData.clientAddress !== undefined) updateSet.clientAddress = updateData.clientAddress;
+      if (updateData.clientId !== undefined)
+        updateSet.clientId = updateData.clientId;
+      if (updateData.clientName !== undefined)
+        updateSet.clientName = updateData.clientName;
+      if (updateData.clientEmail !== undefined)
+        updateSet.clientEmail = updateData.clientEmail;
+      if (updateData.clientAddress !== undefined)
+        updateSet.clientAddress = updateData.clientAddress;
       if (updateData.title !== undefined) updateSet.title = updateData.title;
       if (updateData.status !== undefined) updateSet.status = updateData.status;
-      if (updateData.dueDate !== undefined) updateSet.dueDate = updateData.dueDate;
-      if (updateData.taxRate !== undefined) updateSet.taxRate = String(updateData.taxRate);
-      if (updateData.discountAmount !== undefined) updateSet.discountAmount = String(updateData.discountAmount);
+      if (updateData.dueDate !== undefined)
+        updateSet.dueDate = updateData.dueDate;
+      if (updateData.taxRate !== undefined)
+        updateSet.taxRate = String(updateData.taxRate);
+      if (updateData.discountAmount !== undefined)
+        updateSet.discountAmount = String(updateData.discountAmount);
       if (updateData.notes !== undefined) updateSet.notes = updateData.notes;
-      if (updateData.internalNotes !== undefined) updateSet.internalNotes = updateData.internalNotes;
-      if (updateData.termsConditions !== undefined) updateSet.termsConditions = updateData.termsConditions;
-      if (updateData.documentUrl !== undefined) updateSet.documentUrl = updateData.documentUrl;
+      if (updateData.internalNotes !== undefined)
+        updateSet.internalNotes = updateData.internalNotes;
+      if (updateData.termsConditions !== undefined)
+        updateSet.termsConditions = updateData.termsConditions;
+      if (updateData.documentUrl !== undefined)
+        updateSet.documentUrl = updateData.documentUrl;
 
       // Update invoice in a transaction
       await db.transaction(async (tx) => {
         // Delete old line items if updating
         if (lineItems) {
-          await tx.delete(invoiceLineItem).where(eq(invoiceLineItem.invoiceId, id));
+          await tx
+            .delete(invoiceLineItem)
+            .where(eq(invoiceLineItem.invoiceId, id));
 
           // Insert new line items
           if (lineItems.length > 0) {
@@ -593,7 +694,7 @@ export const invoicesRouter = createTRPCRouter({
         id: z.string(),
         documentUrl: z.string().url().nullable(),
         documentName: z.string().nullable().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const { id, documentUrl, documentName } = input;
@@ -610,22 +711,19 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        existingInvoice.organizationId !== ctx.orgId &&
-        existingInvoice.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(existingInvoice, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       // Update invoice document
-      await db.update(invoice).set({
-        documentUrl,
-        documentName,
-      }).where(eq(invoice.id, id));
+      await db
+        .update(invoice)
+        .set({
+          documentUrl,
+          documentName,
+        })
+        .where(eq(invoice.id, id));
 
       // Re-fetch the full invoice
       const updatedInvoice = await db.query.invoice.findFirst({
@@ -638,7 +736,7 @@ export const invoicesRouter = createTRPCRouter({
         organizationId: ctx.orgId!,
         locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
-        type: "INVOICE" as any,
+        type: "INVOICE",
         action: ActivityAction.UPDATED,
         entityType: "invoice",
         entityId: updatedInvoice!.id,
@@ -648,7 +746,7 @@ export const invoicesRouter = createTRPCRouter({
             old: existingInvoice.documentUrl,
             new: documentUrl,
           },
-        } as any,
+        },
       });
 
       return mapInvoice(updatedInvoice!);
@@ -668,23 +766,27 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+
+      if (inv.status === InvoiceStatus.PAID) {
         throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
+          code: "PRECONDITION_FAILED",
+          message: "Paid invoices must be refunded or credited, not cancelled.",
         });
       }
 
-      await db.delete(invoice).where(eq(invoice.id, input.id));
+      await db
+        .update(invoice)
+        .set({ status: InvoiceStatus.CANCELLED, updatedAt: new Date() })
+        .where(eq(invoice.id, input.id));
 
       await createNotification({
-        type: "INVOICE_DELETED",
-        title: "Invoice deleted",
-        message: `${ctx.auth.user.name} deleted invoice ${inv.invoiceNumber}`,
+        type: "INVOICE_CANCELLED",
+        title: "Invoice cancelled",
+        message: `${ctx.auth.user.name} cancelled invoice ${inv.invoiceNumber}`,
         actorId: ctx.auth.user.id,
         entityType: "invoice",
         entityId: inv.id,
@@ -698,13 +800,13 @@ export const invoicesRouter = createTRPCRouter({
         locationId: ctx.locationId ?? undefined,
         userId: ctx.auth.user.id,
         type: "INVOICE",
-        action: ActivityAction.DELETED,
+        action: ActivityAction.UPDATED,
         entityType: "invoice",
         entityId: inv.id,
         entityName: `${inv.invoiceNumber} - ${inv.clientName}`,
       });
 
-      return { success: true };
+      return { success: true, cancelled: true };
     }),
 
   recordPayment: protectedProcedure
@@ -718,7 +820,7 @@ export const invoicesRouter = createTRPCRouter({
         notes: z.string().optional(),
         stripePaymentId: z.string().optional(),
         xeroPaymentId: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const { invoiceId, ...paymentData } = input;
@@ -734,54 +836,89 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+
+      const currency = normalizeCurrency(inv.currency);
+      const exponent = currencyExponent(currency);
+      const paymentMinor = decimalToMinorUnits(
+        String(paymentData.amount),
+        exponent,
+      );
+      const amountDueMinor = decimalToMinorUnits(inv.amountDue, exponent);
+      if (paymentMinor > amountDueMinor) {
         throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
+          code: "BAD_REQUEST",
+          message: "Payment amount cannot exceed the outstanding balance",
         });
       }
 
       // Create payment and update invoice
-      const payment = await db.transaction(async (tx) => {
+      const paymentResult = await db.transaction(async (tx) => {
         const now = new Date();
-        const [payment] = await tx.insert(invoicePayment).values({
-          id: crypto.randomUUID(),
-          invoiceId,
-          amount: String(paymentData.amount),
-          method: paymentData.method,
-          paidAt: paymentData.paidAt,
-          stripePaymentId: paymentData.stripePaymentId,
-          xeroPaymentId: paymentData.xeroPaymentId,
-          referenceNumber: paymentData.referenceNumber,
-          notes: paymentData.notes,
-          createdAt: now,
-          updatedAt: now,
-        }).returning();
+        const [payment] = await tx
+          .insert(invoicePayment)
+          .values({
+            id: crypto.randomUUID(),
+            invoiceId,
+            amount: minorUnitsToDecimal(paymentMinor, exponent),
+            currency,
+            method: paymentData.method,
+            paidAt: paymentData.paidAt,
+            stripePaymentId: paymentData.stripePaymentId,
+            xeroPaymentId: paymentData.xeroPaymentId,
+            referenceNumber: paymentData.referenceNumber,
+            notes: paymentData.notes,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
 
-        const newAmountPaid =
-          parseFloat(inv.amountPaid) + paymentData.amount;
-        const newAmountDue = parseFloat(inv.total) - newAmountPaid;
+        const newAmountPaidMinor =
+          decimalToMinorUnits(inv.amountPaid, exponent) + paymentMinor;
+        const newAmountDueMinor =
+          decimalToMinorUnits(inv.total, exponent) - newAmountPaidMinor;
+        const newAmountPaid = minorUnitsToDecimal(newAmountPaidMinor, exponent);
+        const newAmountDue = minorUnitsToDecimal(newAmountDueMinor, exponent);
 
         // Determine new status
         let newStatus = inv.status;
-        if (newAmountDue <= 0) {
+        if (newAmountDueMinor === 0) {
           newStatus = InvoiceStatus.PAID;
-        } else if (newAmountPaid > 0) {
+        } else if (newAmountPaidMinor > 0) {
           newStatus = InvoiceStatus.PARTIALLY_PAID;
         }
 
-        await tx.update(invoice).set({
-          amountPaid: String(newAmountPaid),
-          amountDue: String(newAmountDue),
-          status: newStatus,
-          paidAt: newAmountDue <= 0 ? new Date() : inv.paidAt,
-        }).where(eq(invoice.id, invoiceId));
+        await tx
+          .update(invoice)
+          .set({
+            amountPaid: newAmountPaid,
+            amountDue: newAmountDue,
+            status: newStatus,
+            paidAt: newAmountDueMinor === 0 ? paymentData.paidAt : inv.paidAt,
+          })
+          .where(eq(invoice.id, invoiceId));
 
-        return payment!;
+        if (newAmountDueMinor === 0 && payment) {
+          await resolvePaymentRecoveryCases({
+            tx,
+            organizationId: inv.organizationId,
+            locationId: inv.locationId,
+            target: "INVOICE",
+            resource: { invoiceId: inv.id },
+            sourceEventId: null,
+            occurredAt: paymentData.paidAt,
+            attemptKey: `invoice-payment:${payment.id}`,
+            provider: "AUREA",
+            providerAccountRef: null,
+            stripeConnectionId: null,
+            providerObjectId: payment.id,
+          });
+        }
+
+        return { payment: payment!, newAmountPaid };
       });
 
       // Log activity
@@ -797,7 +934,7 @@ export const invoicesRouter = createTRPCRouter({
         changes: {
           payment: {
             old: inv.amountPaid,
-            new: String(parseFloat(inv.amountPaid) + paymentData.amount),
+            new: paymentResult.newAmountPaid,
           },
         },
       });
@@ -818,10 +955,10 @@ export const invoicesRouter = createTRPCRouter({
       });
 
       return {
-        id: payment.id,
-        amount: payment.amount,
-        method: payment.method,
-        paidAt: payment.paidAt,
+        id: paymentResult.payment.id,
+        amount: paymentResult.payment.amount,
+        method: paymentResult.payment.method,
+        paidAt: paymentResult.payment.paidAt,
       };
     }),
 
@@ -832,7 +969,7 @@ export const invoicesRouter = createTRPCRouter({
         subject: z.string().min(1),
         message: z.string().min(1),
         sendTo: z.string().email().optional(), // Override invoice email
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const inv = await db.query.invoice.findFirst({
@@ -847,16 +984,10 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       const sendTo = input.sendTo ?? inv.clientEmail;
       if (!sendTo) {
@@ -866,101 +997,78 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Generate payment link to include in email
-      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${inv.id}`;
+      const paymentAccess = await issueInvoiceAccessToken({
+        invoiceId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        purpose: "PAY",
+        createdBy: ctx.auth.user.id,
+      });
+      const paymentLink = buildPublicInvoiceUrl({
+        baseUrl: getPublicAppBaseUrl(),
+        token: paymentAccess.token,
+        purpose: "PAY",
+      });
 
-      // Create reminder record
-      const reminder = await db.transaction(async (tx) => {
-        const now = new Date();
-        const [reminder] = await tx.insert(invoiceReminder).values({
+      const now = new Date();
+      const [reminder] = await db
+        .insert(invoiceReminder)
+        .values({
           id: crypto.randomUUID(),
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
           invoiceId: input.invoiceId,
           sentTo: sendTo,
           subject: input.subject,
           message: input.message,
-          sentAt: now,
+          deliveryStatus: "QUEUED",
+          queuedAt: now,
           createdAt: now,
-        }).returning();
-
-        await tx.update(invoice).set({
-          lastReminderSentAt: now,
-          reminderCount: sql`${invoice.reminderCount} + 1`,
-        }).where(eq(invoice.id, input.invoiceId));
-
-        return reminder!;
-      });
-
-      // Generate PDF attachment
-      let pdfBuffer: Buffer | null = null;
-      try {
-        const { generatePDF } = await import("@/features/invoicing/lib/pdf-generator");
-        const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
-
-        // Get template
-        const template = inv.invoiceTemplate
-          ? {
-              name: inv.invoiceTemplate.name,
-              description: inv.invoiceTemplate.description || "",
-              layout: inv.invoiceTemplate.layout as any,
-              styles: inv.invoiceTemplate.styles as any,
-            }
-          : PRESET_TEMPLATES.minimal;
-
-        // Prepare invoice data
-        const invoiceData = {
-          invoiceNumber: inv.invoiceNumber,
-          issueDate: inv.issueDate,
-          dueDate: inv.dueDate,
-          clientName: inv.clientName,
-          clientEmail: inv.clientEmail,
-          clientAddress: inv.clientAddress as Record<string, unknown> | null,
-          lineItems: inv.invoiceLineItems.map((item) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            amount: item.amount,
-          })),
-          subtotal: inv.subtotal,
-          taxRate: inv.taxRate ?? undefined,
-          taxAmount: inv.taxAmount,
-          discountAmount: inv.discountAmount,
-          total: inv.total,
-          currency: inv.currency,
-          notes: inv.notes,
-          termsConditions: inv.termsConditions,
-          // TODO: Get from organization
-          businessName: "Your Business",
-          businessEmail: "client@yourbusiness.com",
-        };
-
-        // Generate PDF
-        pdfBuffer = await generatePDF(invoiceData, template);
-      } catch (error) {
-        console.error("Failed to generate PDF attachment:", error);
-        // Continue without PDF - email will still be sent
-      }
-
-      // Send email with Resend
-      try {
-        const { sendInvoiceReminder } = await import("@/lib/email");
-
-        const result = await sendInvoiceReminder({
-          to: sendTo,
-          subject: input.subject,
-          message: input.message,
-          invoiceNumber: inv.invoiceNumber,
-          pdfBuffer: pdfBuffer || undefined,
-          paymentLink,
+        })
+        .returning();
+      if (!reminder) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create the invoice reminder",
         });
-
-        if (!result.success) {
-          console.error("Failed to send reminder email:", result.error);
-          // Don't throw - we've already created the reminder record
-        }
-      } catch (error) {
-        console.error("Failed to send reminder email:", error);
-        // Don't throw - we've already created the reminder record
       }
+
+      const { sendInvoiceReminder } = await import("@/lib/email");
+      const delivery = await sendInvoiceReminder({
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        clientId: inv.clientId,
+        invoiceId: inv.id,
+        reminderId: reminder.id,
+        to: sendTo,
+        subject: input.subject,
+        message: input.message,
+        invoiceNumber: inv.invoiceNumber,
+        paymentLink,
+      });
+      if (!delivery.success) {
+        await db
+          .update(invoiceReminder)
+          .set({
+            deliveryStatus:
+              delivery.status === "SUPPRESSED" ? "SUPPRESSED" : "DEAD_LETTER",
+            failedAt: new Date(),
+            failureMessage: delivery.error,
+          })
+          .where(eq(invoiceReminder.id, reminder.id));
+        throw new TRPCError({
+          code:
+            delivery.status === "SUPPRESSED"
+              ? "PRECONDITION_FAILED"
+              : "INTERNAL_SERVER_ERROR",
+          message: delivery.error,
+        });
+      }
+
+      await db
+        .update(invoiceReminder)
+        .set({ outboundDeliveryId: delivery.deliveryId })
+        .where(eq(invoiceReminder.id, reminder.id));
 
       // Log activity
       await logAnalytics({
@@ -971,13 +1079,13 @@ export const invoicesRouter = createTRPCRouter({
         action: ActivityAction.UPDATED,
         entityType: "invoice",
         entityId: inv.id,
-        entityName: `${inv.invoiceNumber} - Reminder sent to ${sendTo}`,
+        entityName: `${inv.invoiceNumber} - Reminder queued for ${sendTo}`,
       });
 
       await createNotification({
         type: "INVOICE_REMINDER_SENT",
-        title: "Invoice reminder sent",
-        message: `${ctx.auth.user.name} sent a reminder for invoice ${inv.invoiceNumber}`,
+        title: "Invoice reminder queued",
+        message: `${ctx.auth.user.name} queued a reminder for invoice ${inv.invoiceNumber}`,
         actorId: ctx.auth.user.id,
         entityType: "invoice",
         entityId: inv.id,
@@ -990,8 +1098,10 @@ export const invoicesRouter = createTRPCRouter({
 
       return {
         id: reminder.id,
-        sentAt: reminder.sentAt,
+        sentAt: null,
         sentTo: reminder.sentTo,
+        queued: true,
+        deliveryId: delivery.deliveryId,
       };
     }),
 
@@ -1011,16 +1121,10 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       // Require email
       if (!inv.clientEmail) {
@@ -1030,8 +1134,18 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Generate payment link
-      const paymentLink = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/invoices/pay/${inv.id}`;
+      const paymentAccess = await issueInvoiceAccessToken({
+        invoiceId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        purpose: "PAY",
+        createdBy: ctx.auth.user.id,
+      });
+      const paymentLink = buildPublicInvoiceUrl({
+        baseUrl: getPublicAppBaseUrl(),
+        token: paymentAccess.token,
+        purpose: "PAY",
+      });
 
       // Fetch location if available for business name
       let businessName = "Your Business";
@@ -1045,94 +1159,43 @@ export const invoicesRouter = createTRPCRouter({
         }
       }
 
-      // Generate PDF
-      let pdfBuffer: Buffer | null = null;
-      try {
-        const { generatePDF } = await import("@/features/invoicing/lib/pdf-generator");
-        const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
-
-        const template = inv.invoiceTemplate
-          ? {
-              name: inv.invoiceTemplate.name,
-              description: inv.invoiceTemplate.description || "",
-              layout: inv.invoiceTemplate.layout as any,
-              styles: inv.invoiceTemplate.styles as any,
-            }
-          : PRESET_TEMPLATES.minimal;
-
-        const invoiceData = {
-          invoiceNumber: inv.invoiceNumber,
-          issueDate: inv.issueDate,
-          dueDate: inv.dueDate,
-          clientName: inv.clientName,
-          clientEmail: inv.clientEmail,
-          clientAddress: inv.clientAddress as Record<string, unknown> | null,
-          lineItems: inv.invoiceLineItems.map((item) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            amount: item.amount,
-          })),
-          subtotal: inv.subtotal,
-          taxRate: inv.taxRate ?? undefined,
-          taxAmount: inv.taxAmount,
-          discountAmount: inv.discountAmount,
-          total: inv.total,
-          currency: inv.currency,
-          notes: inv.notes,
-          termsConditions: inv.termsConditions,
-          businessName,
-          businessEmail: "client@yourbusiness.com",
-        };
-
-        pdfBuffer = await generatePDF(invoiceData, template);
-      } catch (error) {
-        console.error("Failed to generate PDF:", error);
+      const { sendInvoiceEmail } = await import("@/lib/email");
+      const delivery = await sendInvoiceEmail({
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        clientId: inv.clientId,
+        invoiceId: inv.id,
+        to: inv.clientEmail,
+        invoiceNumber: inv.invoiceNumber,
+        clientName: inv.clientName,
+        total: inv.total,
+        currency: inv.currency,
+        dueDate: inv.dueDate,
+        paymentLink,
+        businessName,
+      });
+      if (!delivery.success) {
         throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to generate invoice PDF",
+          code:
+            delivery.status === "SUPPRESSED"
+              ? "PRECONDITION_FAILED"
+              : "INTERNAL_SERVER_ERROR",
+          message: delivery.error,
         });
       }
 
-      // Send email
-      try {
-        const { sendInvoiceEmail } = await import("@/lib/email");
-
-        const result = await sendInvoiceEmail({
-          to: inv.clientEmail,
-          invoiceNumber: inv.invoiceNumber,
-          clientName: inv.clientName,
-          total: inv.total,
-          currency: inv.currency,
-          dueDate: inv.dueDate,
-          pdfBuffer,
-          paymentLink,
-          businessName,
-        });
-
-        if (!result.success) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: result.error || "Failed to send invoice email",
-          });
-        }
-      } catch (error) {
-        console.error("Failed to send invoice email:", error);
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: error instanceof Error ? error.message : "Failed to send invoice email",
-        });
-      }
-
-      // Update invoice status to SENT
-      await db.update(invoice).set({
-        status: InvoiceStatus.SENT,
-      }).where(eq(invoice.id, input.invoiceId));
+      // Issued status is recorded when durable delivery is accepted by the outbox.
+      await db
+        .update(invoice)
+        .set({
+          status: InvoiceStatus.SENT,
+        })
+        .where(eq(invoice.id, input.invoiceId));
 
       await createNotification({
         type: "INVOICE_SENT",
-        title: "Invoice sent",
-        message: `${ctx.auth.user.name} sent invoice ${inv.invoiceNumber}`,
+        title: "Invoice queued",
+        message: `${ctx.auth.user.name} queued invoice ${inv.invoiceNumber} for delivery`,
         actorId: ctx.auth.user.id,
         entityType: "invoice",
         entityId: inv.id,
@@ -1155,7 +1218,7 @@ export const invoicesRouter = createTRPCRouter({
           action: ActivityAction.UPDATED,
           entityType: "invoice",
           entityId: inv.id,
-          entityName: `${inv.invoiceNumber} - Sent to ${inv.clientEmail}`,
+          entityName: `${inv.invoiceNumber} - Queued for ${inv.clientEmail}`,
         });
       } catch (error) {
         console.error("Failed to log analytics:", error);
@@ -1165,13 +1228,17 @@ export const invoicesRouter = createTRPCRouter({
       return {
         success: true,
         sentTo: inv.clientEmail,
+        queued: true,
+        deliveryId: delivery.deliveryId,
       };
     }),
 
   generateFromTimeLogs: protectedProcedure
     .input(
       z.object({
-        timeLogIds: z.array(z.string()).min(1, "At least one time log is required"),
+        timeLogIds: z
+          .array(z.string())
+          .min(1, "At least one time log is required"),
         clientId: z.string().optional(),
         clientName: z.string().min(1).optional(),
         clientEmail: z.string().email().optional().or(z.literal("")),
@@ -1182,7 +1249,7 @@ export const invoicesRouter = createTRPCRouter({
         notes: z.string().optional(),
         termsConditions: z.string().optional(),
         groupBy: z.enum(["instructor", "date", "all"]).default("instructor"),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -1241,7 +1308,8 @@ export const invoicesRouter = createTRPCRouter({
       if (clientIds.size > 1) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Cannot generate invoice: Selected time logs belong to different clients (clients). Please select time logs for only one client at a time.",
+          message:
+            "Cannot generate invoice: Selected time logs belong to different clients (clients). Please select time logs for only one client at a time.",
         });
       }
 
@@ -1255,23 +1323,27 @@ export const invoicesRouter = createTRPCRouter({
 
       if (input.groupBy === "instructor") {
         // Group by instructor
-        const instructorGroups = timeLogs.reduce((acc, log) => {
-          const instructorId = log.instructorId || "no-instructor";
-          if (!acc[instructorId]) acc[instructorId] = [];
-          acc[instructorId].push(log);
-          return acc;
-        }, {} as Record<string, typeof timeLogs>);
+        const instructorGroups = timeLogs.reduce(
+          (acc, log) => {
+            const instructorId = log.instructorId || "no-instructor";
+            if (!acc[instructorId]) acc[instructorId] = [];
+            acc[instructorId].push(log);
+            return acc;
+          },
+          {} as Record<string, typeof timeLogs>,
+        );
 
         Object.entries(instructorGroups).forEach(([_instructorId, logs]) => {
           const instructor = logs[0]?.instructor;
           const totalHours = logs.reduce(
             (sum, log) => sum + (log.duration || 0) / 60,
-            0
+            0,
           );
           const avgRate =
             logs.reduce(
-              (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
-              0
+              (sum, log) =>
+                sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
+              0,
             ) / logs.length;
 
           lineItems.push({
@@ -1283,22 +1355,26 @@ export const invoicesRouter = createTRPCRouter({
         });
       } else if (input.groupBy === "date") {
         // Group by date
-        const dateGroups = timeLogs.reduce((acc, log) => {
-          const date = format(new Date(log.startTime), "yyyy-MM-dd");
-          if (!acc[date]) acc[date] = [];
-          acc[date].push(log);
-          return acc;
-        }, {} as Record<string, typeof timeLogs>);
+        const dateGroups = timeLogs.reduce(
+          (acc, log) => {
+            const date = format(new Date(log.startTime), "yyyy-MM-dd");
+            if (!acc[date]) acc[date] = [];
+            acc[date].push(log);
+            return acc;
+          },
+          {} as Record<string, typeof timeLogs>,
+        );
 
         Object.entries(dateGroups).forEach(([date, logs]) => {
           const totalHours = logs.reduce(
             (sum, log) => sum + (log.duration || 0) / 60,
-            0
+            0,
           );
           const avgRate =
             logs.reduce(
-              (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
-              0
+              (sum, log) =>
+                sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
+              0,
             ) / logs.length;
 
           lineItems.push({
@@ -1312,12 +1388,13 @@ export const invoicesRouter = createTRPCRouter({
         // All time logs as one line item
         const totalHours = timeLogs.reduce(
           (sum, log) => sum + (log.duration || 0) / 60,
-          0
+          0,
         );
         const avgRate =
           timeLogs.reduce(
-            (sum, log) => sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
-            0
+            (sum, log) =>
+              sum + (log.hourlyRate ? parseFloat(log.hourlyRate) : 0),
+            0,
           ) / timeLogs.length;
 
         lineItems.push({
@@ -1331,7 +1408,7 @@ export const invoicesRouter = createTRPCRouter({
       // Calculate totals
       const subtotal = lineItems.reduce(
         (sum, item) => sum + item.quantity * item.unitPrice,
-        0
+        0,
       );
       const taxAmount = input.taxRate ? (subtotal * input.taxRate) / 100 : 0;
       const discountAmount = input.discountAmount ?? 0;
@@ -1342,7 +1419,8 @@ export const invoicesRouter = createTRPCRouter({
       if (!timeLogClient) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Client information not found. Please ensure all time logs have a client assigned.",
+          message:
+            "Client information not found. Please ensure all time logs have a client assigned.",
         });
       }
 
@@ -1358,7 +1436,7 @@ export const invoicesRouter = createTRPCRouter({
 
       // Check if all time logs are from the same instructor
       const allSameInstructor = timeLogs.every(
-        (log) => log.instructorId === timeLogs[0]?.instructorId
+        (log) => log.instructorId === timeLogs[0]?.instructorId,
       );
 
       if (allSameInstructor) {
@@ -1375,7 +1453,7 @@ export const invoicesRouter = createTRPCRouter({
       const invoiceNumber = await generateInvoiceNumber(
         ctx.orgId,
         ctx.locationId ?? undefined,
-        nameForInvoice
+        nameForInvoice,
       );
 
       // Get available payment methods
@@ -1389,30 +1467,35 @@ export const invoicesRouter = createTRPCRouter({
         const invoiceId = crypto.randomUUID();
         const now = new Date();
 
-        const [inv] = await tx.insert(invoice).values({
-          id: invoiceId,
-          organizationId: ctx.orgId!,
-          locationId: ctx.locationId ?? undefined,
-          invoiceNumber,
-          clientId,
-          clientName,
-          clientEmail,
-          title: input.title ?? `Time Tracking Invoice - ${format(new Date(), "MMM yyyy")}`,
-          billingModel: "HOURLY",
-          dueDate: input.dueDate,
-          subtotal: String(subtotal),
-          taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
-          taxAmount: String(taxAmount),
-          discountAmount: String(discountAmount),
-          total: String(total),
-          amountDue: String(total),
-          amountPaid: "0",
-          notes: input.notes,
-          termsConditions: input.termsConditions,
-          paymentMethods,
-          createdAt: now,
-          updatedAt: now,
-        }).returning();
+        const [inv] = await tx
+          .insert(invoice)
+          .values({
+            id: invoiceId,
+            organizationId: ctx.orgId!,
+            locationId: ctx.locationId ?? undefined,
+            invoiceNumber,
+            clientId,
+            clientName,
+            clientEmail,
+            title:
+              input.title ??
+              `Time Tracking Invoice - ${format(new Date(), "MMM yyyy")}`,
+            billingModel: "HOURLY",
+            dueDate: input.dueDate,
+            subtotal: String(subtotal),
+            taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
+            taxAmount: String(taxAmount),
+            discountAmount: String(discountAmount),
+            total: String(total),
+            amountDue: String(total),
+            amountPaid: "0",
+            notes: input.notes,
+            termsConditions: input.termsConditions,
+            paymentMethods,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning();
 
         if (lineItems.length > 0) {
           await tx.insert(invoiceLineItem).values(
@@ -1432,10 +1515,13 @@ export const invoicesRouter = createTRPCRouter({
         }
 
         // Update all time logs to mark them as invoiced
-        await tx.update(timeLog).set({
-          invoiceId,
-          status: "INVOICED",
-        }).where(inArray(timeLog.id, input.timeLogIds));
+        await tx
+          .update(timeLog)
+          .set({
+            invoiceId,
+            status: "INVOICED",
+          })
+          .where(inArray(timeLog.id, input.timeLogIds));
 
         return inv!;
       });
@@ -1461,18 +1547,17 @@ export const invoicesRouter = createTRPCRouter({
       return mapInvoice(fullInvoice!);
     }),
 
-  // Generate payment link for invoice (Stripe or hosted page)
+  // Generate an opaque, expiring payment link. Raw invoice IDs are never public authorization.
   generatePaymentLink: protectedProcedure
     .input(
       z.object({
         invoiceId: z.string(),
         provider: z.enum(["STRIPE", "HOSTED"]).default("HOSTED"),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const inv = await db.query.invoice.findFirst({
         where: (t, { eq }) => eq(t.id, input.invoiceId),
-        with: { invoiceLineItems: true },
       });
 
       if (!inv) {
@@ -1482,115 +1567,144 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Note: Payment links are public, so we don't verify access here
-      // The invoice ID itself acts as the authentication token
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "commerce.manage",
+        resource: {
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
+        },
+      });
 
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const access = await issueInvoiceAccessToken({
+        invoiceId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        purpose: "PAY",
+        createdBy: ctx.auth.user.id,
+      });
+      const hostedLink = buildPublicInvoiceUrl({
+        baseUrl: getPublicAppBaseUrl(),
+        token: access.token,
+        purpose: "PAY",
+      });
 
-      if (input.provider === "STRIPE") {
-        // Fetch Stripe Connect account for this location/organization
-        const stripeConn = await db.query.stripeConnection.findFirst({
-          where: (t, { and, eq, isNull }) =>
-            and(
-              eq(t.isActive, true),
-              inv.locationId
-                ? eq(t.locationId, inv.locationId)
-                : and(eq(t.organizationId, inv.organizationId), isNull(t.locationId)),
-            ),
-        });
-
-        if (!stripeConn) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Stripe Connect is not set up for this account. Please connect your Stripe account in payment settings.",
-          });
-        }
-
-        if (!stripeConn.chargesEnabled) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "This Stripe account cannot accept charges yet. Please complete your Stripe account setup.",
-          });
-        }
-
-        // Create Stripe Checkout Session using Connect account
-        try {
-          const { createStripeCheckoutSessionForConnect } = await import("@/lib/stripe");
-
-          // Convert amount to cents
-          const amountInCents = Math.round(parseFloat(inv.amountDue) * 100);
-
-          // Validate amount
-          if (amountInCents < 1) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: "Invoice amount must be at least $0.01 to process payment.",
-            });
-          }
-
-          // Calculate application fee if configured
-          let applicationFeeAmount: number | undefined;
-          if (stripeConn.applicationFeePercent || stripeConn.applicationFeeFixed) {
-            const feePercent = stripeConn.applicationFeePercent
-              ? parseFloat(stripeConn.applicationFeePercent)
-              : 0;
-            const feeFixed = stripeConn.applicationFeeFixed
-              ? Math.round(parseFloat(stripeConn.applicationFeeFixed) * 100) // Convert to cents and ensure integer
-              : 0;
-
-            applicationFeeAmount = Math.round((amountInCents * feePercent) / 100 + feeFixed);
-          }
-
-          const result = await createStripeCheckoutSessionForConnect({
-            invoiceId: inv.id,
-            invoiceNumber: inv.invoiceNumber,
-            amount: amountInCents,
-            currency: inv.currency,
-            clientEmail: inv.clientEmail || "",
-            clientName: inv.clientName,
-            lineItems: inv.invoiceLineItems.map((item) => {
-              const quantity = Math.max(1, Math.round(parseFloat(item.quantity))); // Ensure at least 1
-              const amount = Math.max(1, Math.round(parseFloat(item.unitPrice) * 100)); // Ensure at least 1 cent
-              return {
-                name: item.description,
-                quantity,
-                amount,
-              };
-            }),
-            successUrl: `${baseUrl}/invoices/pay/${inv.id}?success=true&session_id={CHECKOUT_SESSION_ID}`,
-            cancelUrl: `${baseUrl}/invoices/pay/${inv.id}?canceled=true`,
-            stripeAccountId: stripeConn.stripeAccountId,
-            applicationFeeAmount,
-          });
-
-          if (!result.success) {
-            throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: result.error || "Failed to create Stripe payment session",
-            });
-          }
-
-          return {
-            paymentLink: result.url || "",
-            provider: "STRIPE",
-            sessionId: result.sessionId,
-          };
-        } catch (error) {
-          console.error("Stripe payment link creation failed:", error);
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: error instanceof Error ? error.message : "Failed to create Stripe payment link",
-          });
-        }
+      if (input.provider === "HOSTED") {
+        return { paymentLink: hostedLink, provider: "HOSTED" as const };
       }
 
-      // Generate hosted payment page link
-      const paymentLink = `${baseUrl}/invoices/pay/${inv.id}`;
+      try {
+        const checkout = await createPublicInvoiceCheckout({
+          token: access.token,
+        });
+        return {
+          paymentLink: checkout.checkoutUrl,
+          provider: "STRIPE" as const,
+          sessionId: checkout.sessionId,
+        };
+      } catch (error) {
+        throw mapInvoicePaymentLinkError(error);
+      }
+    }),
+
+  generateViewLink: protectedProcedure
+    .input(z.object({ invoiceId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+      });
+      if (!inv) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invoice not found",
+        });
+      }
+
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "commerce.manage",
+        resource: {
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
+        },
+      });
+      const access = await issueInvoiceAccessToken({
+        invoiceId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        purpose: "VIEW",
+        createdBy: ctx.auth.user.id,
+      });
 
       return {
-        paymentLink,
-        provider: "HOSTED",
+        viewLink: buildPublicInvoiceUrl({
+          baseUrl: getPublicAppBaseUrl(),
+          token: access.token,
+          purpose: "VIEW",
+        }),
+        expiresAt: access.expiresAt,
       };
+    }),
+
+  revokePublicLinks: protectedProcedure
+    .input(
+      z.object({
+        invoiceId: z.string(),
+        purpose: invoiceAccessPurposeSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const inv = await db.query.invoice.findFirst({
+        where: (t, { eq }) => eq(t.id, input.invoiceId),
+      });
+      if (!inv) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invoice not found",
+        });
+      }
+
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "commerce.manage",
+        resource: {
+          organizationId: inv.organizationId,
+          locationId: inv.locationId,
+        },
+      });
+      const revokedCount = await revokeInvoiceAccessTokens({
+        invoiceId: inv.id,
+        organizationId: inv.organizationId,
+        locationId: inv.locationId,
+        purpose: input.purpose,
+        revokedBy: ctx.auth.user.id,
+      });
+
+      return { revokedCount };
     }),
 
   // Generate PDF invoice
@@ -1609,31 +1723,46 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       try {
         // Import PDF generator and template presets
-        const { generatePDF } = await import("@/features/invoicing/lib/pdf-generator");
-        const { PRESET_TEMPLATES } = await import("@/features/invoicing/lib/template-presets");
-
-        // Get template
+        const { generatePDF } =
+          await import("@/features/invoicing/lib/pdf-generator");
+        // Get and validate the stored template before rendering.
         const template = inv.invoiceTemplate
-          ? {
+          ? invoiceTemplatePresetSchema.parse({
               name: inv.invoiceTemplate.name,
               description: inv.invoiceTemplate.description || "",
-              layout: inv.invoiceTemplate.layout as any,
-              styles: inv.invoiceTemplate.styles as any,
-            }
+              layout: inv.invoiceTemplate.layout,
+              styles: inv.invoiceTemplate.styles,
+            })
           : PRESET_TEMPLATES.minimal;
+
+        const [org, loc] = await Promise.all([
+          db.query.organization.findFirst({
+            where: eq(organization.id, inv.organizationId),
+            columns: { name: true, businessEmail: true },
+          }),
+          inv.locationId
+            ? db.query.location.findFirst({
+                where: and(
+                  eq(location.id, inv.locationId),
+                  eq(location.organizationId, inv.organizationId),
+                ),
+                columns: { companyName: true, businessEmail: true },
+              })
+            : Promise.resolve(undefined),
+        ]);
+        if (!org) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Invoice organization could not be resolved",
+          });
+        }
 
         // Prepare invoice data
         const invoiceData = {
@@ -1657,9 +1786,8 @@ export const invoicesRouter = createTRPCRouter({
           currency: inv.currency,
           notes: inv.notes,
           termsConditions: inv.termsConditions,
-          // TODO: Get from organization
-          businessName: "Your Business",
-          businessEmail: "client@yourbusiness.com",
+          businessName: loc?.companyName ?? org.name,
+          businessEmail: loc?.businessEmail ?? org.businessEmail ?? undefined,
         };
 
         // Generate PDF using React-PDF
@@ -1677,7 +1805,8 @@ export const invoicesRouter = createTRPCRouter({
         console.error("PDF generation error:", error);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: error instanceof Error ? error.message : "Failed to generate PDF",
+          message:
+            error instanceof Error ? error.message : "Failed to generate PDF",
         });
       }
     }),
@@ -1688,7 +1817,7 @@ export const invoicesRouter = createTRPCRouter({
       z.object({
         limit: z.number().min(1).max(100).default(20),
         cursor: z.string().optional(),
-      })
+      }),
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -1700,10 +1829,7 @@ export const invoicesRouter = createTRPCRouter({
 
       const templates = await db.query.invoiceTemplate.findMany({
         where: (t, { or, eq }) =>
-          or(
-            eq(t.organizationId, ctx.orgId!),
-            eq(t.isSystem, true),
-          ),
+          or(eq(t.organizationId, ctx.orgId!), eq(t.isSystem, true)),
         limit: input.limit + 1,
         orderBy: (t, { desc }) => desc(t.createdAt),
       });
@@ -1788,22 +1914,61 @@ export const invoicesRouter = createTRPCRouter({
 
       // Create duplicate
       const now = new Date();
-      const [duplicate] = await db.insert(invoiceTemplate).values({
-        id: crypto.randomUUID(),
-        organizationId: ctx.orgId,
-        locationId: ctx.locationId ?? undefined,
-        name: `${template.name} (Copy)`,
-        description: template.description,
-        isDefault: false,
-        isSystem: false,
-        layout: template.layout as any,
-        styles: template.styles as any,
-        variables: template.variables as any,
-        createdAt: now,
-        updatedAt: now,
-      }).returning();
+      const [duplicate] = await db
+        .insert(invoiceTemplate)
+        .values({
+          id: crypto.randomUUID(),
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId ?? undefined,
+          name: `${template.name} (Copy)`,
+          description: template.description,
+          isDefault: false,
+          isSystem: false,
+          layout: template.layout,
+          styles: template.styles,
+          variables: template.variables,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
 
       return duplicate!;
+    }),
+
+  duplicatePreset: protectedProcedure
+    .input(z.object({ preset: z.enum(["minimal", "corporate"]) }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Organization context required",
+        });
+      }
+      const preset = PRESET_TEMPLATES[input.preset];
+      const now = new Date();
+      const [created] = await db
+        .insert(invoiceTemplate)
+        .values({
+          id: crypto.randomUUID(),
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+          name: `${preset.name} (Copy)`,
+          description: preset.description,
+          isDefault: false,
+          isSystem: false,
+          layout: preset.layout,
+          styles: preset.styles,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      if (!created) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create invoice template",
+        });
+      }
+      return created;
     }),
 
   // Upload bank transfer proof of payment
@@ -1813,7 +1978,7 @@ export const invoicesRouter = createTRPCRouter({
         invoiceId: z.string(),
         proofUrl: z.string().url(),
         notes: z.string().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const inv = await db.query.invoice.findFirst({
@@ -1827,12 +1992,21 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+
       // Update invoice with bank transfer proof
-      const [updated] = await db.update(invoice).set({
-        bankTransferStatus: BankTransferStatus.PROOF_UPLOADED,
-        bankTransferProof: input.proofUrl,
-        bankTransferNotes: input.notes,
-      }).where(eq(invoice.id, input.invoiceId)).returning();
+      const [updated] = await db
+        .update(invoice)
+        .set({
+          bankTransferStatus: BankTransferStatus.PROOF_UPLOADED,
+          bankTransferProof: input.proofUrl,
+          bankTransferNotes: input.notes,
+        })
+        .where(eq(invoice.id, input.invoiceId))
+        .returning();
 
       // Log activity
       await logAnalytics({
@@ -1866,7 +2040,7 @@ export const invoicesRouter = createTRPCRouter({
         verified: z.boolean(),
         notes: z.string().optional(),
         amount: z.string().optional(), // Optional partial payment amount
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
       const inv = await db.query.invoice.findFirst({
@@ -1881,56 +2055,94 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Verify access
-      if (
-        inv.organizationId !== ctx.orgId &&
-        inv.locationId !== ctx.locationId
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have access to this invoice",
-        });
-      }
+      assertInvoiceScopeAccess(inv, {
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
 
       if (input.verified) {
-        // Calculate payment amount (default to full amount due)
-        const paymentAmount = input.amount
-          ? parseFloat(input.amount)
-          : parseFloat(inv.amountDue);
+        const currency = normalizeCurrency(inv.currency);
+        const exponent = currencyExponent(currency);
+        const paymentMinor = decimalToMinorUnits(
+          input.amount ?? inv.amountDue,
+          exponent,
+        );
+        const amountDueMinor = decimalToMinorUnits(inv.amountDue, exponent);
+        if (paymentMinor <= 0 || paymentMinor > amountDueMinor) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Payment amount must be positive and cannot exceed the outstanding balance",
+          });
+        }
+        const paymentAmount = minorUnitsToDecimal(paymentMinor, exponent);
 
         // Create payment record and update invoice
         const result = await db.transaction(async (tx) => {
           const now = new Date();
           // Create payment record
-          await tx.insert(invoicePayment).values({
-            id: crypto.randomUUID(),
-            invoiceId: input.invoiceId,
-            amount: String(paymentAmount),
-            currency: inv.currency,
-            method: PaymentMethod.BANK_TRANSFER,
-            referenceNumber: inv.invoiceNumber,
-            notes: input.notes,
-            paidAt: now,
-            createdAt: now,
-            updatedAt: now,
-          });
+          const [payment] = await tx
+            .insert(invoicePayment)
+            .values({
+              id: crypto.randomUUID(),
+              invoiceId: input.invoiceId,
+              amount: paymentAmount,
+              currency,
+              method: PaymentMethod.BANK_TRANSFER,
+              referenceNumber: inv.invoiceNumber,
+              notes: input.notes,
+              paidAt: now,
+              createdAt: now,
+              updatedAt: now,
+            })
+            .returning();
 
           // Calculate new amounts
-          const newAmountPaid = parseFloat(inv.amountPaid) + paymentAmount;
-          const newAmountDue = parseFloat(inv.total) - newAmountPaid;
-          const isPaid = newAmountDue <= 0;
+          const newAmountPaidMinor =
+            decimalToMinorUnits(inv.amountPaid, exponent) + paymentMinor;
+          const newAmountDueMinor =
+            decimalToMinorUnits(inv.total, exponent) - newAmountPaidMinor;
+          const newAmountPaid = minorUnitsToDecimal(
+            newAmountPaidMinor,
+            exponent,
+          );
+          const newAmountDue = minorUnitsToDecimal(newAmountDueMinor, exponent);
+          const isPaid = newAmountDueMinor === 0;
 
           // Update invoice
-          const [updated] = await tx.update(invoice).set({
-            bankTransferStatus: BankTransferStatus.VERIFIED,
-            bankTransferVerifiedAt: now,
-            bankTransferVerifiedBy: ctx.auth.user.id,
-            bankTransferNotes: input.notes,
-            amountPaid: String(newAmountPaid),
-            amountDue: String(newAmountDue),
-            status: isPaid ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID,
-            paidAt: isPaid ? now : inv.paidAt,
-          }).where(eq(invoice.id, input.invoiceId)).returning();
+          const [updated] = await tx
+            .update(invoice)
+            .set({
+              bankTransferStatus: BankTransferStatus.VERIFIED,
+              bankTransferVerifiedAt: now,
+              bankTransferVerifiedBy: ctx.auth.user.id,
+              bankTransferNotes: input.notes,
+              amountPaid: newAmountPaid,
+              amountDue: newAmountDue,
+              status: isPaid
+                ? InvoiceStatus.PAID
+                : InvoiceStatus.PARTIALLY_PAID,
+              paidAt: isPaid ? now : inv.paidAt,
+            })
+            .where(eq(invoice.id, input.invoiceId))
+            .returning();
+
+          if (isPaid && payment) {
+            await resolvePaymentRecoveryCases({
+              tx,
+              organizationId: inv.organizationId,
+              locationId: inv.locationId,
+              target: "INVOICE",
+              resource: { invoiceId: inv.id },
+              sourceEventId: null,
+              occurredAt: now,
+              attemptKey: `invoice-bank-transfer:${payment.id}`,
+              provider: "AUREA",
+              providerAccountRef: null,
+              stripeConnectionId: null,
+              providerObjectId: payment.id,
+            });
+          }
 
           return { invoice: updated! };
         });
@@ -1970,10 +2182,14 @@ export const invoicesRouter = createTRPCRouter({
         };
       } else {
         // Reject the proof
-        const [updated] = await db.update(invoice).set({
-          bankTransferStatus: BankTransferStatus.REJECTED,
-          bankTransferNotes: input.notes,
-        }).where(eq(invoice.id, input.invoiceId)).returning();
+        const [updated] = await db
+          .update(invoice)
+          .set({
+            bankTransferStatus: BankTransferStatus.REJECTED,
+            bankTransferNotes: input.notes,
+          })
+          .where(eq(invoice.id, input.invoiceId))
+          .returning();
 
         // Log activity
         await logAnalytics({
@@ -1998,60 +2214,5 @@ export const invoicesRouter = createTRPCRouter({
           bankTransferStatus: updated!.bankTransferStatus,
         };
       }
-    }),
-
-  // Get bank transfer details for public invoice page (no auth required)
-  getBankTransferDetails: baseProcedure
-    .input(z.object({ invoiceId: z.string() }))
-    .query(async ({ input }) => {
-      const inv = await db.query.invoice.findFirst({
-        where: (t, { eq }) => eq(t.id, input.invoiceId),
-        columns: {
-          organizationId: true,
-          locationId: true,
-          paymentMethods: true,
-        },
-      });
-
-      if (!inv) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Invoice not found",
-        });
-      }
-
-      // Check if bank transfer is enabled for this invoice
-      if (!inv.paymentMethods?.includes(PaymentMethod.BANK_TRANSFER)) {
-        return null;
-      }
-
-      // Get bank transfer settings
-      const settings = await db.query.bankTransferSettings.findFirst({
-        where: (t, { and, eq, isNull }) =>
-          and(
-            eq(t.organizationId, inv.organizationId),
-            inv.locationId ? eq(t.locationId, inv.locationId) : isNull(t.locationId),
-            eq(t.enabled, true),
-          ),
-      });
-
-      if (!settings) {
-        return null;
-      }
-
-      return {
-        bankName: settings.bankName,
-        accountName: settings.accountName,
-        accountNumber: settings.accountNumber,
-        sortCode: settings.sortCode,
-        routingNumber: settings.routingNumber,
-        iban: settings.iban,
-        swiftBic: settings.swiftBic,
-        bankAddress: settings.bankAddress,
-        accountType: settings.accountType,
-        currency: settings.currency,
-        instructions: settings.instructions,
-        referenceFormat: settings.referenceFormat,
-      };
     }),
 });

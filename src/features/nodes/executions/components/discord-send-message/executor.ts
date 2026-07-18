@@ -36,7 +36,6 @@ export const discordSendMessageExecutor: NodeExecutor<DiscordSendMessageData> = 
     const channelId = data.channelId ? decode(Handlebars.compile(data.channelId)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Discord: Send Message logic here
     const result = await step.run("discord-send-message", async () => {
       // Add implementation here
       throw new NonRetriableError("Discord: Send Message: Not yet implemented");

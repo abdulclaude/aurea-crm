@@ -29,7 +29,6 @@ export const cancelAppointmentExecutor: NodeExecutor<CancelAppointmentData> = as
     // Compile fields with Handlebars
     const appointmentId = data.appointmentId ? decode(Handlebars.compile(data.appointmentId)(context)) : undefined;
 
-    // TODO: Implement Cancel Appointment logic here
     const result = await step.run("cancel-appointment", async () => {
       // Add implementation here
       throw new NonRetriableError("Cancel Appointment: Not yet implemented");

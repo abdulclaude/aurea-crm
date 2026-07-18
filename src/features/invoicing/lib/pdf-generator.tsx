@@ -394,8 +394,8 @@ export async function generatePDF(
   invoice: InvoiceData,
   template: InvoiceTemplatePreset
 ): Promise<Buffer> {
-  const doc = React.createElement(InvoicePDFDocument, { invoice, template });
-  const asPdf = pdf(doc as any);
+  const doc = InvoicePDFDocument({ invoice, template });
+  const asPdf = pdf(doc);
   const blob = await asPdf.toBlob();
   const arrayBuffer = await blob.arrayBuffer();
   return Buffer.from(arrayBuffer);

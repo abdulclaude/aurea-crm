@@ -5,6 +5,7 @@ import {
   exampleContexts,
 } from "@/components/tiptap/build-variable-tree";
 import { NodeType } from "@/db/enums";
+import { getStudioNodeOutputExample } from "./studio-node-output-examples";
 
 /**
  * Builds the available workflow context for a given node
@@ -24,10 +25,10 @@ export function buildNodeContext(
     }>;
     bundleWorkflowName?: string;
     parentWorkflowContext?: Record<string, Record<string, any>>;
-  }
+  },
 ): VariableItem[] {
-  // Find all upstream nodes (nodes that come before the current node)
-  const upstreamNodeIds = getUpstreamNodes(currentNodeId, nodes, edges);
+  // Only expose nodes that execute on every path into the current node.
+  const upstreamNodeIds = getGuaranteedUpstreamNodes(currentNodeId, edges);
 
   // Build context object from upstream nodes
   const context: Record<string, any> = {};
@@ -70,7 +71,7 @@ export function buildNodeContext(
     ) {
       // Merge parent workflow contexts directly into the root context
       for (const [workflowName, workflowVariables] of Object.entries(
-        options.parentWorkflowContext
+        options.parentWorkflowContext,
       )) {
         context[workflowName] = workflowVariables;
       }
@@ -121,32 +122,44 @@ function getExampleValueForType(type: string): any {
 /**
  * Get all node IDs that are upstream from the current node
  */
-function getUpstreamNodes(
+export function getGuaranteedUpstreamNodes(
   currentNodeId: string,
-  nodes: Node[],
-  edges: Edge[]
+  edges: Edge[],
 ): string[] {
-  const upstreamNodes = new Set<string>();
-  const queue: string[] = [currentNodeId];
-  const visited = new Set<string>();
+  const memo = new Map<string, Set<string>>();
+  const visiting = new Set<string>();
 
-  while (queue.length > 0) {
-    const nodeId = queue.shift()!;
+  const visit = (nodeId: string): Set<string> => {
+    const cached = memo.get(nodeId);
+    if (cached) return cached;
+    if (visiting.has(nodeId)) return new Set();
+    visiting.add(nodeId);
 
-    if (visited.has(nodeId)) continue;
-    visited.add(nodeId);
-
-    // Find all edges that end at this node
-    const incomingEdges = edges.filter((edge) => edge.target === nodeId);
-
-    for (const edge of incomingEdges) {
-      const sourceNodeId = edge.source;
-      upstreamNodes.add(sourceNodeId);
-      queue.push(sourceNodeId);
+    const predecessors = edges
+      .filter((edge) => edge.target === nodeId)
+      .map((edge) => edge.source);
+    if (predecessors.length === 0) {
+      visiting.delete(nodeId);
+      const empty = new Set<string>();
+      memo.set(nodeId, empty);
+      return empty;
     }
-  }
 
-  return Array.from(upstreamNodes);
+    const predecessorSets = predecessors.map((predecessor) =>
+      new Set([predecessor, ...visit(predecessor)]),
+    );
+    const guaranteed = new Set(
+      [...(predecessorSets[0] || [])].filter((candidate) =>
+        predecessorSets.every((set) => set.has(candidate)),
+      ),
+    );
+
+    visiting.delete(nodeId);
+    memo.set(nodeId, guaranteed);
+    return guaranteed;
+  };
+
+  return [...visit(currentNodeId)];
 }
 
 /**
@@ -154,9 +167,12 @@ function getUpstreamNodes(
  */
 export function getExampleContextForNodeType(
   nodeType: string | undefined,
-  nodeData: any
+  nodeData: any,
 ): any {
   if (!nodeType) return null;
+
+  const studioExample = getStudioNodeOutputExample(nodeType);
+  if (studioExample) return studioExample;
 
   // Triggers
   if (nodeType === NodeType.GOOGLE_FORM_TRIGGER) {
@@ -221,6 +237,47 @@ export function getExampleContextForNodeType(
     return {
       triggeredAt: "2025-01-01T00:00:00.000Z",
       userId: "user-id",
+    };
+  }
+
+  if (nodeType === NodeType.FORM_SUBMITTED_TRIGGER) {
+    return {
+      submission: {
+        id: "submission-id",
+        formId: nodeData?.formId || "form-id",
+        formName: "Lead capture form",
+        clientId: "client-id",
+        submittedAt: "2026-07-16T12:00:00.000Z",
+      },
+      values: { email: "member@example.com", firstName: "Alex" },
+    };
+  }
+
+  if (nodeType === NodeType.PRICING_OPTION_PURCHASED_TRIGGER) {
+    return {
+      purchase: {
+        pricingOptionId: nodeData?.pricingOptionIds?.[0] || "pricing-option-id",
+        pricingOptionName: "Unlimited monthly",
+        paymentId: "payment-id",
+        membershipId: "membership-id",
+        clientId: "client-id",
+        amount: "99.00",
+        currency: "GBP",
+        purchasedAt: "2026-07-16T12:00:00.000Z",
+      },
+    };
+  }
+
+  if (nodeType === NodeType.CLIENT_INACTIVITY_TRIGGER) {
+    return {
+      client: {
+        id: "client-id",
+        name: "Alex Member",
+        email: "member@example.com",
+      },
+      daysInactive: nodeData?.days || 30,
+      lastActivityAt: "2026-06-16T12:00:00.000Z",
+      activityDimensions: nodeData?.activityDimensions || ["CRM_INTERACTION"],
     };
   }
 

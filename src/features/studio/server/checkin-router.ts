@@ -1,19 +1,20 @@
-import { randomUUID } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, count, eq, gte, lt, ne, sql } from "drizzle-orm";
+import { and, count, eq, gte, isNull, lt, ne } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import { NodeType } from "@/db/enums";
 import { db } from "@/db";
-import {
-  checkIn,
-  client,
-  introOfferRedemption,
-  studioBooking,
-  studioClass,
-} from "@/db/schema";
+import { checkIn, client, studioBooking, studioClass } from "@/db/schema";
 import { triggerWorkflowsForNodeType } from "@/lib/workflow-triggers";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { matchesMemberCheckedInTrigger } from "@/features/nodes/studio/lib/studio-node-config";
+import { verifyMemberCheckInPass } from "@/features/studio/lib/member-checkin-pass";
+import {
+  performMemberCheckIn,
+  type IntroOfferUsage,
+} from "./member-checkin-service";
 
 type MemberCheckInClient = {
   id: string;
@@ -30,16 +31,6 @@ type MemberCheckInClass = {
   id: string;
   name: string;
   startTime: Date;
-};
-
-type IntroOfferUsage = {
-  id: string;
-  offerId: string;
-  offerName: string;
-  classesUsed: number;
-  classCredits: number | null;
-  completed: boolean;
-  status: string;
 };
 
 const checkInClientReturning = {
@@ -63,75 +54,25 @@ function requireOrg(ctx: { orgId: string | null }) {
   return ctx.orgId;
 }
 
-async function incrementIntroOfferUsage({
-  organizationId,
-  locationId,
-  clientId,
-}: {
-  organizationId: string;
-  locationId: string | null;
-  clientId: string;
-}): Promise<IntroOfferUsage[]> {
-  const redemptions = await db.query.introOfferRedemption.findMany({
-    where: and(
-      eq(introOfferRedemption.clientId, clientId),
-      eq(introOfferRedemption.status, "ACTIVE")
-    ),
-    with: {
-      introOffer: {
-        columns: {
-          id: true,
-          name: true,
-          classCredits: true,
-          organizationId: true,
-          locationId: true,
-        },
-      },
+function requireAttendanceAccess(
+  ctx: {
+    auth: { user: { id: string } };
+    orgId: string | null;
+    locationId: string | null;
+  },
+  capability: "schedule.view" | "attendance.manage",
+) {
+  return requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
     },
+    capability,
   });
-
-  const scopedRedemptions = redemptions.filter(
-    (redemption) =>
-      redemption.introOffer.organizationId === organizationId &&
-      redemption.introOffer.locationId === locationId
-  );
-
-  const updatedRedemptions: IntroOfferUsage[] = [];
-  for (const redemption of scopedRedemptions) {
-    const [updated] = await db
-      .update(introOfferRedemption)
-      .set({ classesUsed: sql`${introOfferRedemption.classesUsed} + 1` })
-      .where(eq(introOfferRedemption.id, redemption.id))
-      .returning({
-        id: introOfferRedemption.id,
-        classesUsed: introOfferRedemption.classesUsed,
-        status: introOfferRedemption.status,
-      });
-
-    if (!updated) {
-      continue;
-    }
-
-    const completed =
-      redemption.introOffer.classCredits !== null &&
-      redemption.classesUsed < redemption.introOffer.classCredits &&
-      updated.classesUsed >= redemption.introOffer.classCredits;
-
-    updatedRedemptions.push({
-      id: updated.id,
-      offerId: redemption.introOffer.id,
-      offerName: redemption.introOffer.name,
-      classesUsed: updated.classesUsed,
-      classCredits: redemption.introOffer.classCredits,
-      completed,
-      status: updated.status,
-    });
-  }
-
-  return updatedRedemptions;
 }
 
-async function dispatchMemberCheckInWorkflows({
+export async function dispatchMemberCheckInWorkflows({
   organizationId,
   locationId,
   checkInId,
@@ -170,8 +111,10 @@ async function dispatchMemberCheckInWorkflows({
         redemptions: introOffers,
       },
     },
-  }).catch((error: unknown) => {
-    console.error("Failed to trigger member check-in workflows", error);
+    shouldTriggerNode: (node) =>
+      matchesMemberCheckedInTrigger(node.data, checkedInClient.attendanceCount),
+  }).catch(() => {
+    console.error("Failed to trigger member check-in workflows", { checkInId });
   });
 
   await triggerWorkflowsForNodeType({
@@ -193,10 +136,15 @@ async function dispatchMemberCheckInWorkflows({
     },
     shouldTriggerNode: (node) => {
       const targetCount = getNumberFromJson(node.data, "targetCount");
-      return targetCount === undefined || checkedInClient.attendanceCount === targetCount;
+      return (
+        targetCount === undefined ||
+        checkedInClient.attendanceCount === targetCount
+      );
     },
-  }).catch((error: unknown) => {
-    console.error("Failed to trigger member class milestone workflows", error);
+  }).catch(() => {
+    console.error("Failed to trigger member class milestone workflows", {
+      checkInId,
+    });
   });
 
   if (completedIntroOffer) {
@@ -217,11 +165,16 @@ async function dispatchMemberCheckInWorkflows({
         introOffer: completedIntroOffer,
       },
       shouldTriggerNode: (node) => {
+        if (getNumberFromJson(node.data, "creditThreshold") !== undefined) {
+          return false;
+        }
         const offerId = getStringFromJson(node.data, "offerId");
         return !offerId || offerId === completedIntroOffer.offerId;
       },
-    }).catch((error: unknown) => {
-      console.error("Failed to trigger intro offer completion workflows", error);
+    }).catch(() => {
+      console.error("Failed to trigger intro offer completion workflows", {
+        checkInId,
+      });
     });
   }
 }
@@ -248,6 +201,10 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function exactLocation(column: AnyPgColumn, locationId: string | null) {
+  return locationId === null ? isNull(column) : eq(column, locationId);
+}
+
 export const checkinRouter = createTRPCRouter({
   manualCheckIn: protectedProcedure
     .input(
@@ -261,94 +218,23 @@ export const checkinRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
-      const locationId = ctx.locationId ?? null;
-
-      const targetClass = await db.query.studioClass.findFirst({
-        where: and(
-          eq(studioClass.id, input.classId),
-          eq(studioClass.organizationId, organizationId)
-        ),
-      });
-      if (!targetClass) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
-      }
-
-      const existingCheckIn = await db.query.checkIn.findFirst({
-        where: and(
-          eq(checkIn.classId, input.classId),
-          eq(checkIn.clientId, input.clientId)
-        ),
-      });
-      if (existingCheckIn) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Already checked in" });
-      }
-
-      const now = new Date();
-      const booking = await db.query.studioBooking.findFirst({
-        where: and(
-          eq(studioBooking.classId, input.classId),
-          eq(studioBooking.clientId, input.clientId),
-          ne(studioBooking.status, "CANCELLED")
-        ),
-      });
-
-      const result = await db.transaction(async (tx) => {
-        const [checkInRecord] = await tx
-          .insert(checkIn)
-          .values({
-            id: randomUUID(),
-            clientId: input.clientId,
-            classId: input.classId,
-            method: input.method,
-            checkedInAt: now,
-            checkedInBy: ctx.auth.user.id,
-            isLateArrival: now > targetClass.startTime,
-            organizationId,
-            locationId,
-            createdAt: now,
-          })
-          .returning();
-
-        const [updatedClient] = await tx
-          .update(client)
-          .set({
-            attendanceCount: sql`${client.attendanceCount} + 1`,
-            currentStreak: sql`${client.currentStreak} + 1`,
-            updatedAt: now,
-          })
-          .where(eq(client.id, input.clientId))
-          .returning(checkInClientReturning);
-
-        if (!checkInRecord || !updatedClient) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to check in member",
-          });
-        }
-
-        if (booking) {
-          await tx
-            .update(studioBooking)
-            .set({ checkedInAt: now, status: "ATTENDED", updatedAt: now })
-            .where(eq(studioBooking.id, booking.id));
-        }
-
-        return { checkInRecord, client: updatedClient };
-      });
-
-      const introOffers = await incrementIntroOfferUsage({
+      await requireAttendanceAccess(ctx, "attendance.manage");
+      const result = await performMemberCheckIn({
+        actorUserId: ctx.auth.user.id,
         organizationId,
-        locationId,
+        activeLocationId: ctx.locationId,
+        classId: input.classId,
         clientId: input.clientId,
+        method: input.method,
       });
 
       await dispatchMemberCheckInWorkflows({
         organizationId,
-        locationId,
+        locationId: result.studioClass.locationId,
         checkInId: result.checkInRecord.id,
         client: result.client,
-        studioClass: targetClass,
-        introOffers,
+        studioClass: result.studioClass,
+        introOffers: result.introOffers,
       });
 
       return result.checkInRecord;
@@ -358,89 +244,41 @@ export const checkinRouter = createTRPCRouter({
     .input(z.object({ classId: z.string(), qrToken: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
-      const locationId = ctx.locationId ?? null;
-      const clientId = input.qrToken;
-
-      const targetClient = await db.query.client.findFirst({
-        where: and(eq(client.id, clientId), eq(client.organizationId, organizationId)),
-      });
-      if (!targetClient) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Invalid QR code" });
+      await requireAttendanceAccess(ctx, "attendance.manage");
+      const memberPass = verifyMemberCheckInPass(input.qrToken);
+      if (!memberPass) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "This member pass is invalid or has expired.",
+        });
       }
-
-      const targetClass = await db.query.studioClass.findFirst({
-        where: and(
-          eq(studioClass.id, input.classId),
-          eq(studioClass.organizationId, organizationId)
-        ),
-      });
-      if (!targetClass) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
+      if (
+        memberPass.organizationId !== organizationId ||
+        (ctx.locationId !== null && memberPass.locationId !== ctx.locationId)
+      ) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
       }
-
-      const existingCheckIn = await db.query.checkIn.findFirst({
-        where: and(eq(checkIn.classId, input.classId), eq(checkIn.clientId, clientId)),
-      });
-      if (existingCheckIn) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Already checked in" });
-      }
-
-      const now = new Date();
-      const result = await db.transaction(async (tx) => {
-        const [checkInRecord] = await tx
-          .insert(checkIn)
-          .values({
-            id: randomUUID(),
-            clientId,
-            classId: input.classId,
-            method: "QR_CODE",
-            checkedInAt: now,
-            checkedInBy: ctx.auth.user.id,
-            isLateArrival: now > targetClass.startTime,
-            organizationId,
-            locationId,
-            createdAt: now,
-          })
-          .returning();
-
-        const [updatedClient] = await tx
-          .update(client)
-          .set({
-            attendanceCount: sql`${client.attendanceCount} + 1`,
-            currentStreak: sql`${client.currentStreak} + 1`,
-            updatedAt: now,
-          })
-          .where(eq(client.id, clientId))
-          .returning(checkInClientReturning);
-
-        if (!checkInRecord || !updatedClient) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to check in member",
-          });
-        }
-
-        return { checkInRecord, client: updatedClient };
-      });
-
-      const introOffers = await incrementIntroOfferUsage({
+      const result = await performMemberCheckIn({
+        actorUserId: ctx.auth.user.id,
         organizationId,
-        locationId,
-        clientId,
+        activeLocationId: ctx.locationId,
+        classId: input.classId,
+        clientId: memberPass.clientId,
+        method: "QR_CODE",
       });
 
       await dispatchMemberCheckInWorkflows({
         organizationId,
-        locationId,
+        locationId: result.studioClass.locationId,
         checkInId: result.checkInRecord.id,
         client: result.client,
-        studioClass: targetClass,
-        introOffers,
+        studioClass: result.studioClass,
+        introOffers: result.introOffers,
       });
 
       return {
         checkIn: result.checkInRecord,
-        client: { id: targetClient.id, name: targetClient.name },
+        client: { id: result.client.id, name: result.client.name },
       };
     }),
 
@@ -448,13 +286,25 @@ export const checkinRouter = createTRPCRouter({
     .input(z.object({ classId: z.string() }))
     .query(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
+      await requireAttendanceAccess(ctx, "schedule.view");
 
       const targetClass = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, input.classId),
-          eq(studioClass.organizationId, organizationId)
+          eq(studioClass.organizationId, organizationId),
+          ctx.locationId
+            ? eq(studioClass.locationId, ctx.locationId)
+            : undefined,
         ),
-        columns: { id: true, name: true, startTime: true, endTime: true, maxCapacity: true },
+        columns: {
+          id: true,
+          name: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+          maxCapacity: true,
+          locationId: true,
+        },
       });
       if (!targetClass) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
@@ -463,7 +313,7 @@ export const checkinRouter = createTRPCRouter({
       const bookings = await db.query.studioBooking.findMany({
         where: and(
           eq(studioBooking.classId, input.classId),
-          ne(studioBooking.status, "CANCELLED")
+          ne(studioBooking.status, "CANCELLED"),
         ),
         with: {
           client: {
@@ -481,7 +331,11 @@ export const checkinRouter = createTRPCRouter({
       });
 
       const checkIns = await db.query.checkIn.findMany({
-        where: eq(checkIn.classId, input.classId),
+        where: and(
+          eq(checkIn.classId, input.classId),
+          eq(checkIn.organizationId, organizationId),
+          exactLocation(checkIn.locationId, targetClass.locationId),
+        ),
         columns: {
           clientId: true,
           checkedInAt: true,
@@ -490,8 +344,14 @@ export const checkinRouter = createTRPCRouter({
         },
       });
 
-      const checkInMap = new Map(checkIns.map((record) => [record.clientId, record]));
+      const checkInMap = new Map(
+        checkIns.map((record) => [record.clientId, record]),
+      );
       const hasClassEnded = targetClass.endTime <= new Date();
+      const checkInOpen =
+        !hasClassEnded &&
+        targetClass.status !== "CANCELLED" &&
+        targetClass.status !== "COMPLETED";
 
       return {
         class: targetClass,
@@ -499,13 +359,18 @@ export const checkinRouter = createTRPCRouter({
           bookingId: booking.id,
           client: booking.client,
           bookedAt: booking.bookedAt,
-          status: !hasClassEnded && booking.status === "NO_SHOW" ? "BOOKED" : booking.status,
+          status:
+            !hasClassEnded && booking.status === "NO_SHOW"
+              ? "BOOKED"
+              : booking.status,
           checkIn: checkInMap.get(booking.clientId) ?? null,
           isCheckedIn: checkInMap.has(booking.clientId),
         })),
         totalBooked: bookings.length,
         totalCheckedIn: checkIns.length,
         maxCapacity: targetClass.maxCapacity,
+        checkInOpen,
+        hasClassEnded,
       };
     }),
 
@@ -513,6 +378,7 @@ export const checkinRouter = createTRPCRouter({
     .input(z.object({ bookingId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
+      await requireAttendanceAccess(ctx, "attendance.manage");
 
       const booking = await db.query.studioBooking.findFirst({
         where: eq(studioBooking.id, input.bookingId),
@@ -542,10 +408,28 @@ export const checkinRouter = createTRPCRouter({
         },
       });
       if (!booking) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Booking not found",
+        });
       }
       if (booking.studioClass.organizationId !== organizationId) {
         throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+      if (ctx.locationId && booking.studioClass.locationId !== ctx.locationId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Access denied" });
+      }
+      if (booking.checkedInAt || booking.status === "ATTENDED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Checked-in members cannot be marked as no-shows.",
+        });
+      }
+      if (booking.status !== "BOOKED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Only active bookings can be marked as no-shows.",
+        });
       }
       if (booking.studioClass.endTime > new Date()) {
         throw new TRPCError({
@@ -559,16 +443,33 @@ export const checkinRouter = createTRPCRouter({
         const [updatedClient] = await tx
           .update(client)
           .set({ currentStreak: 0, updatedAt: now })
-          .where(eq(client.id, booking.clientId))
+          .where(
+            and(
+              eq(client.id, booking.clientId),
+              eq(client.organizationId, organizationId),
+              exactLocation(client.locationId, booking.studioClass.locationId),
+            ),
+          )
           .returning(checkInClientReturning);
 
         const [updatedBooking] = await tx
           .update(studioBooking)
           .set({ status: "NO_SHOW", updatedAt: now })
-          .where(eq(studioBooking.id, input.bookingId))
+          .where(
+            and(
+              eq(studioBooking.id, input.bookingId),
+              eq(studioBooking.status, "BOOKED"),
+            ),
+          )
           .returning();
 
-        if (!updatedClient || !updatedBooking) {
+        if (!updatedBooking) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "This booking was already updated.",
+          });
+        }
+        if (!updatedClient) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: "Failed to mark no-show",
@@ -581,7 +482,7 @@ export const checkinRouter = createTRPCRouter({
       await triggerWorkflowsForNodeType({
         nodeType: NodeType.MEMBER_NO_SHOW_TRIGGER,
         organizationId,
-        locationId: ctx.locationId ?? null,
+        locationId: booking.studioClass.locationId,
         triggerData: {
           bookingId: result.booking.id,
           clientId: result.client.id,
@@ -593,8 +494,10 @@ export const checkinRouter = createTRPCRouter({
             startTime: booking.studioClass.startTime.toISOString(),
           },
         },
-      }).catch((error: unknown) => {
-        console.error("Failed to trigger no-show workflows", error);
+      }).catch(() => {
+        console.error("Failed to trigger no-show workflows", {
+          bookingId: result.booking.id,
+        });
       });
 
       return result.booking;
@@ -602,6 +505,7 @@ export const checkinRouter = createTRPCRouter({
 
   todayStats: protectedProcedure.query(async ({ ctx }) => {
     const organizationId = requireOrg(ctx);
+    await requireAttendanceAccess(ctx, "schedule.view");
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today.getTime() + 86_400_000);
@@ -615,8 +519,8 @@ export const checkinRouter = createTRPCRouter({
             eq(checkIn.organizationId, organizationId),
             ctx.locationId ? eq(checkIn.locationId, ctx.locationId) : undefined,
             gte(checkIn.checkedInAt, today),
-            lt(checkIn.checkedInAt, tomorrow)
-          )
+            lt(checkIn.checkedInAt, tomorrow),
+          ),
         ),
       db
         .select({ total: count() })
@@ -624,10 +528,12 @@ export const checkinRouter = createTRPCRouter({
         .where(
           and(
             eq(studioClass.organizationId, organizationId),
-            ctx.locationId ? eq(studioClass.locationId, ctx.locationId) : undefined,
+            ctx.locationId
+              ? eq(studioClass.locationId, ctx.locationId)
+              : undefined,
             gte(studioClass.startTime, today),
-            lt(studioClass.startTime, tomorrow)
-          )
+            lt(studioClass.startTime, tomorrow),
+          ),
         ),
     ]);
 

@@ -50,7 +50,7 @@ export const SlackUpdateMessageNode: React.FC<NodeProps<SlackUpdateMessageNodeTy
       nodeId: props.id,
       channel: SLACK_UPDATE_MESSAGE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchSlackUpdateMessageRealtimeToken as any,
+      refreshToken: fetchSlackUpdateMessageRealtimeToken,
     });
 
     const handleOpenSettings = () => {

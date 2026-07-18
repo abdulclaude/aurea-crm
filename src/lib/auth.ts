@@ -2,9 +2,10 @@ import { betterAuth } from "better-auth";
 import { organization } from "better-auth/plugins";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 
-import { polar, checkout, portal } from "@polar-sh/better-auth";
+import { polar, checkout, portal, webhooks } from "@polar-sh/better-auth";
 import { db, dbSchema } from "@/db";
 import { polarClient } from "@/lib/polar";
+import { applyPolarCommunicationSubscription } from "@/features/communications/server/profile-service";
 
 const parseScopes = (value?: string) =>
   value
@@ -19,6 +20,32 @@ const FACEBOOK_DEFAULT_SCOPES = parseScopes(
 const FACEBOOK_OPTIONAL_SCOPES = parseScopes(
   process.env.FACEBOOK_OPTIONAL_SCOPES
 );
+
+const polarWebhookHandlers = process.env.POLAR_WEBHOOK_SECRET
+  ? [
+      webhooks({
+        secret: process.env.POLAR_WEBHOOK_SECRET,
+        onSubscriptionActive: async ({ data }) => {
+          await applyPolarCommunicationSubscription(data);
+        },
+        onSubscriptionUpdated: async ({ data }) => {
+          await applyPolarCommunicationSubscription(data);
+        },
+        onSubscriptionCanceled: async ({ data }) => {
+          await applyPolarCommunicationSubscription(data);
+        },
+        onSubscriptionRevoked: async ({ data }) => {
+          await applyPolarCommunicationSubscription({
+            ...data,
+            status: "unpaid",
+          });
+        },
+        onSubscriptionUncanceled: async ({ data }) => {
+          await applyPolarCommunicationSubscription(data);
+        },
+      }),
+    ]
+  : [];
 
 // process.env.APP_URL ||
 // process.env.BETTER_AUTH_URL,
@@ -54,6 +81,7 @@ export const auth = betterAuth({
         "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/forms.responses.readonly",
         "https://www.googleapis.com/auth/forms.body.readonly",
         "https://www.googleapis.com/auth/drive.file",
@@ -99,6 +127,7 @@ export const auth = betterAuth({
     },
   },
   account: {
+    encryptOAuthTokens: true,
     accountLinking: {
       enabled: true,
       allowDifferentEmails: true,
@@ -121,6 +150,7 @@ export const auth = betterAuth({
           authenticatedUsersOnly: true,
         }),
         portal(),
+        ...polarWebhookHandlers,
       ],
     }),
   ],

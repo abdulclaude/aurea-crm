@@ -577,7 +577,7 @@ export default function DealDetailPage() {
                 disabled={updateDeal.isPending}
                 className="bg-background hover:bg-primary-foreground/50 hover:text-black text-xs rounded-lg border border-black/10 dark:border-white/5 transition duration-150"
               >
-                {updateDeal.isPending ? "Saving..." : "Save Changes"}
+                {updateDeal.isPending ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </form>

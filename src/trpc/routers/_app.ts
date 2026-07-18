@@ -30,6 +30,7 @@ import { studioClassesRouter } from "@/features/modules/pilates-studio/server/cl
 import { classTypesRouter } from "@/features/studio/server/class-types-router";
 import { roomsRouter } from "@/features/studio/server/rooms-router";
 import { serviceCatalogRouter } from "@/features/studio/server/service-catalog-router";
+import { classSeriesRouter } from "@/features/studio/server/class-series-router";
 import { studioClassesEnhancedRouter } from "@/features/studio/server/classes-router";
 import { studioBookingsRouter } from "@/features/studio/server/bookings-router";
 import { waitlistRouter } from "@/features/studio/server/waitlist-router";
@@ -48,6 +49,7 @@ import { apiKeysRouter } from "@/features/studio/server/api-keys-router";
 import { widgetsRouter } from "@/features/studio/server/widgets-router";
 import { importRouter } from "@/features/studio/server/import-router";
 import { invoicesRouter } from "@/features/invoicing/server/invoices-router";
+import { publicInvoicesRouter } from "@/features/invoicing/server/public-invoices-router";
 import { recurringInvoicesRouter } from "@/features/invoicing/server/recurring-invoices-router";
 import { invoiceAnalyticsRouter } from "@/features/invoicing/server/analytics-router";
 import { bankTransferSettingsRouter } from "@/features/invoicing/server/bank-transfer-settings-router";
@@ -64,16 +66,17 @@ import { bookingsRouter } from "@/features/bookings/server/bookings-router";
 import { eventTypesRouter } from "@/features/bookings/server/event-types-router";
 import { calComCredentialsRouter } from "@/features/bookings/server/calcom-credentials-router";
 import { inboxRouter } from "@/features/inbox/server/router";
-import { seedRouter } from "@/features/studio/server/seed-router";
+import { seedRouter } from "@/features/demo-data/server/router";
 import { launchpadRouter } from "@/features/studio/server/launchpad-router";
 // Phase 6 — SMS, Waivers, Spots, Policies, Retention, Intro Offers, Reports, Revenue
 import { smsRouter } from "@/features/sms/server/router";
 import { waiversRouter } from "@/features/waivers/server/router";
 import { spotBookingRouter } from "@/features/spot-booking/server/router";
-import { cancellationPolicyRouter } from "@/features/cancellation-policy/server/router";
+import { cancellationPolicyRouter } from "@/features/studio/server/cancellation-policy-router";
 import { retentionRouter } from "@/features/retention/server/router";
 import { introOffersRouter } from "@/features/intro-offers/server/router";
 import { reportsRouter } from "@/features/reports/server/router";
+import { reportFoundationRouter } from "@/features/reports/server/foundation-router";
 import { revenueRouter } from "@/features/revenue/server/router";
 // Phase 7 — Churn prediction, referrals, loyalty
 import { churnRouter } from "@/features/churn/server/router";
@@ -84,6 +87,22 @@ import { acquisitionRouter } from "@/features/acquisition/server/router";
 import { instructorSubstitutionsRouter } from "@/features/instructor-substitutions/server/router";
 import { studioAddOnsRouter } from "@/features/studio-add-ons/server/router";
 import { staffRouter } from "@/features/staff/server/router";
+import { staffIdentitiesRouter } from "@/features/staff-identities/server/router";
+import { permissionsRouter } from "@/features/permissions/server/router";
+import { savedAudiencesRouter } from "@/features/audiences/server/router";
+import { commerceReconciliationRouter } from "@/features/commerce/server/reconciliation-router";
+import { commerceRefundRouter } from "@/features/commerce/server/refund-router";
+import { deliveryOperationsRouter } from "@/features/delivery/server/operations-router";
+import { customerTimelineRouter } from "@/features/customer-timeline/server/router";
+import { publicationsRouter } from "@/features/publications/server/router";
+import { providerAccountsRouter } from "@/features/provider-accounts/server/router";
+import { paymentRecoveryRouter } from "@/features/commerce/server/recovery/payment-recovery-router";
+import { workspaceSettingsRouter } from "@/features/workspace-settings/server/router";
+import { schedulingPolicyRouter } from "@/features/studio/server/scheduling-policy-router";
+import { communicationsRouter } from "@/features/communications/server/router";
+import { commerceSettingsRouter } from "@/features/commerce-settings/server/router";
+import { customerSettingsRouter } from "@/features/customer-settings/server/router";
+import { staffSettingsRouter } from "@/features/staff-settings/server/router";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -117,6 +136,7 @@ export const appRouter = createTRPCRouter({
   mindbody: mindbodyRouter,
   studioClasses: studioClassesRouter,
   invoices: invoicesRouter,
+  publicInvoices: publicInvoicesRouter,
   recurringInvoices: recurringInvoicesRouter,
   invoiceAnalytics: invoiceAnalyticsRouter,
   bankTransferSettings: bankTransferSettingsRouter,
@@ -135,6 +155,7 @@ export const appRouter = createTRPCRouter({
   // Studio (Phase 1)
   classTypes: classTypesRouter,
   serviceCatalog: serviceCatalogRouter,
+  classSeries: classSeriesRouter,
   rooms: roomsRouter,
   studioClassesEnhanced: studioClassesEnhancedRouter,
   studioBookings: studioBookingsRouter,
@@ -169,6 +190,7 @@ export const appRouter = createTRPCRouter({
   retention: retentionRouter,
   introOffers: introOffersRouter,
   reports: reportsRouter,
+  reportFoundation: reportFoundationRouter,
   revenue: revenueRouter,
   // Phase 7 — Churn, Referrals, Loyalty
   churn: churnRouter,
@@ -179,6 +201,22 @@ export const appRouter = createTRPCRouter({
   instructorSubstitutions: instructorSubstitutionsRouter,
   studioAddOns: studioAddOnsRouter,
   staff: staffRouter,
+  staffIdentities: staffIdentitiesRouter,
+  permissions: permissionsRouter,
+  savedAudiences: savedAudiencesRouter,
+  commerceReconciliation: commerceReconciliationRouter,
+  commerceRefunds: commerceRefundRouter,
+  deliveryOperations: deliveryOperationsRouter,
+  customerTimeline: customerTimelineRouter,
+  publications: publicationsRouter,
+  providerAccounts: providerAccountsRouter,
+  paymentRecovery: paymentRecoveryRouter,
+  workspaceSettings: workspaceSettingsRouter,
+  schedulingPolicy: schedulingPolicyRouter,
+  communications: communicationsRouter,
+  commerceSettings: commerceSettingsRouter,
+  customerSettings: customerSettingsRouter,
+  staffSettings: staffSettingsRouter,
 });
 
 // export type definition of API

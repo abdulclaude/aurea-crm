@@ -1,11 +1,15 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
 
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { outlookChannel } from "@/inngest/channels/outlook";
-import { auth } from "@/lib/auth";
 
 export type OutlookExecutionData = {
+  providerAccountId?: string;
   variableName?: string;
   to?: string;
   cc?: string;
@@ -15,9 +19,13 @@ export type OutlookExecutionData = {
   bodyFormat?: "text" | "html";
 };
 
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.OUTLOOK_EXECUTION,
+);
+
 const compileTemplate = (
   template: string | undefined,
-  context: Record<string, unknown>
+  context: Record<string, unknown>,
 ) => {
   if (!template) {
     return undefined;
@@ -32,7 +40,10 @@ const compileTemplate = (
       const path = match.slice(2, -2).trim();
 
       // Try to get value from context.variables first, then root context
-      let value = getNestedValue(context.variables as Record<string, unknown>, path);
+      let value = getNestedValue(
+        context.variables as Record<string, unknown>,
+        path,
+      );
       if (value === undefined) {
         value = getNestedValue(context, path);
       }
@@ -72,7 +83,7 @@ const formatAddressList = (value?: string) =>
 export const outlookExecutor: NodeExecutor<OutlookExecutionData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -83,7 +94,13 @@ export const outlookExecutor: NodeExecutor<OutlookExecutionData> = async ({
 
   try {
     if (!data.variableName) {
-      throw new NonRetriableError("Variable name is required for Outlook nodes.");
+      throw new NonRetriableError(
+        "Variable name is required for Outlook nodes.",
+      );
+    }
+
+    if (!data.providerAccountId) {
+      throw new NonRetriableError("Select an Outlook account for this node.");
     }
 
     if (!data.to) {
@@ -108,23 +125,20 @@ export const outlookExecutor: NodeExecutor<OutlookExecutionData> = async ({
 
     if (!to || !subject || !body) {
       throw new NonRetriableError(
-        "Unable to resolve dynamic values. Check your templates."
+        "Unable to resolve dynamic values. Check your templates.",
       );
     }
 
-    const tokenResponse = await auth.api.getAccessToken({
-      body: {
-        providerId: "microsoft",
-        userId,
+    const grant = await resolveOAuthProviderGrant({
+      providerAccountId: data.providerAccountId,
+      provider: providerBinding.provider,
+      scope: {
+        organizationId: scope.organizationId,
+        locationId: scope.locationId,
       },
+      requiredScopes: providerBinding.requiredScopes,
     });
-
-    const accessToken = tokenResponse?.accessToken;
-    if (!accessToken) {
-      throw new NonRetriableError(
-        "Outlook is not connected. Please connect Microsoft account."
-      );
-    }
+    const { accessToken } = grant;
 
     const message = {
       subject,
@@ -138,7 +152,8 @@ export const outlookExecutor: NodeExecutor<OutlookExecutionData> = async ({
     };
 
     const result = await step.run("outlook-send-message", async () => {
-      const response = await fetch(
+      const response = await oauthAuthenticatedFetch(
+        grant,
         "https://graph.microsoft.com/v1.0/me/sendMail",
         {
           method: "POST",
@@ -147,13 +162,12 @@ export const outlookExecutor: NodeExecutor<OutlookExecutionData> = async ({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ message }),
-        }
+        },
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
         throw new NonRetriableError(
-          `Microsoft Graph API error (${response.status}): ${errorText}`
+          `Microsoft Graph API rejected the request with status ${response.status}.`,
         );
       }
 

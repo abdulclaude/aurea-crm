@@ -846,8 +846,8 @@ export function PipelinesToolbar({
                 {selectedLocationId
                   ? orgClients.find(
                       (client) => client.locationId === selectedLocationId,
-                    )?.name || "Select client"
-                  : "All clients"}
+                    )?.name || "Select location"
+                  : "All locations"}
                 <ChevronDown className="size-3 text-primary/60 dark:text-white/60 mt-0.5" />
               </Button>
             </DropdownMenuTrigger>
@@ -861,7 +861,7 @@ export function PipelinesToolbar({
                 onSelect={() => onLocationChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
               >
-                All clients
+                All locations
               </DropdownMenuCheckboxItem>
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5" />

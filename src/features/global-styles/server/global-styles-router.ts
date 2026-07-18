@@ -9,21 +9,39 @@ import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { form, funnel, globalStylePreset } from "@/db/schema";
-import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { createTRPCRouter } from "@/trpc/init";
+import {
+  publicationManageProcedure,
+  publicationViewProcedure,
+} from "@/features/permissions/server/publication-procedures";
 
 const jsonRecord = z.record(z.string(), z.unknown());
+
+const styleLocationWhere = (locationId: string | null) =>
+  locationId
+    ? eq(globalStylePreset.locationId, locationId)
+    : isNull(globalStylePreset.locationId);
+
+const styleScopeWhere = (
+  id: string,
+  organizationId: string,
+  locationId: string | null,
+) =>
+  and(
+    eq(globalStylePreset.id, id),
+    eq(globalStylePreset.organizationId, organizationId),
+    styleLocationWhere(locationId),
+  );
 
 export const globalStylesRouter = createTRPCRouter({
   /**
    * List all style presets for the current organization/location
    */
-  list: protectedProcedure.query(async ({ ctx }) => {
+  list: publicationViewProcedure.query(async ({ ctx }) => {
     return await db.query.globalStylePreset.findMany({
       where: and(
         eq(globalStylePreset.organizationId, ctx.orgId!),
-        ctx.locationId
-          ? eq(globalStylePreset.locationId, ctx.locationId)
-          : isNull(globalStylePreset.locationId)
+        styleLocationWhere(ctx.locationId),
       ),
       orderBy: [desc(globalStylePreset.isDefault), desc(globalStylePreset.createdAt)],
     });
@@ -32,14 +50,11 @@ export const globalStylesRouter = createTRPCRouter({
   /**
    * Get a specific style preset
    */
-  get: protectedProcedure
+  get: publicationViewProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const preset = await db.query.globalStylePreset.findFirst({
-        where: and(
-          eq(globalStylePreset.id, input.id),
-          eq(globalStylePreset.organizationId, ctx.orgId!)
-        ),
+        where: styleScopeWhere(input.id, ctx.orgId!, ctx.locationId),
       });
 
       if (!preset) {
@@ -52,7 +67,7 @@ export const globalStylesRouter = createTRPCRouter({
   /**
    * Create a new style preset
    */
-  create: protectedProcedure
+  create: publicationManageProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -112,7 +127,7 @@ export const globalStylesRouter = createTRPCRouter({
   /**
    * Update an existing style preset
    */
-  update: protectedProcedure
+  update: publicationManageProcedure
     .input(
       z.object({
         id: z.string(),
@@ -142,10 +157,7 @@ export const globalStylesRouter = createTRPCRouter({
 
       // Verify ownership
       const preset = await db.query.globalStylePreset.findFirst({
-        where: and(
-          eq(globalStylePreset.id, id),
-          eq(globalStylePreset.organizationId, ctx.orgId!)
-        ),
+        where: styleScopeWhere(id, ctx.orgId!, ctx.locationId),
       });
 
       if (!preset) {
@@ -182,15 +194,12 @@ export const globalStylesRouter = createTRPCRouter({
   /**
    * Delete a style preset
    */
-  delete: protectedProcedure
+  delete: publicationManageProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       // Verify ownership
       const preset = await db.query.globalStylePreset.findFirst({
-        where: and(
-          eq(globalStylePreset.id, input.id),
-          eq(globalStylePreset.organizationId, ctx.orgId!)
-        ),
+        where: styleScopeWhere(input.id, ctx.orgId!, ctx.locationId),
       });
 
       if (!preset) {
@@ -224,14 +233,11 @@ export const globalStylesRouter = createTRPCRouter({
   /**
    * Duplicate a style preset
    */
-  duplicate: protectedProcedure
+  duplicate: publicationManageProcedure
     .input(z.object({ id: z.string(), newName: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const original = await db.query.globalStylePreset.findFirst({
-        where: and(
-          eq(globalStylePreset.id, input.id),
-          eq(globalStylePreset.organizationId, ctx.orgId!)
-        ),
+        where: styleScopeWhere(input.id, ctx.orgId!, ctx.locationId),
       });
 
       if (!original) {

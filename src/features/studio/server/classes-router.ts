@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server";
+import { createId } from "@paralleldrive/cuid2";
 import {
   and,
   asc,
@@ -8,6 +9,7 @@ import {
   gte,
   ilike,
   inArray,
+  isNull,
   lt,
   lte,
   ne,
@@ -19,16 +21,25 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   checkIn,
+  classSeries,
   classType,
   cancellationPolicy,
   classWaitlist,
   instructor,
+  organization,
   room,
   serviceType,
   studioBooking,
   studioClass,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { materializeSchedulingPoliciesForOccurrences } from "@/features/studio/server/scheduling-policy-materializer";
+import {
+  supportsWaitlistRuntime,
+  type WaitlistValues,
+} from "@/features/studio/scheduling/contracts";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { requireSchedulingPolicyAccess } from "@/features/studio/server/scheduling-policy-access";
 
 const classStatusSchema = z.enum([
   "SCHEDULED",
@@ -87,19 +98,38 @@ function baseConditions(orgId: string, locationId: string | null) {
 function classRelations() {
   return {
     classType: { columns: { id: true, name: true, color: true } },
-    instructor: { columns: { id: true, name: true, email: true } },
+    serviceType: { columns: { id: true, name: true, calendarColor: true } },
+    instructor: {
+      columns: { id: true, name: true, email: true, profilePhoto: true },
+    },
     room: { columns: { id: true, name: true, capacity: true } },
     studioBookings: {
       columns: {
         id: true,
+        classId: true,
         status: true,
+        notes: true,
         bookedAt: true,
         checkedInAt: true,
         cancelledAt: true,
         clientId: true,
       },
       with: {
-        client: { columns: { id: true, name: true, email: true, phone: true } },
+        client: {
+          columns: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            tags: true,
+          },
+          with: {
+            studioMemberships: {
+              columns: { id: true, name: true, status: true },
+              with: { membershipPlan: { columns: { id: true, name: true } } },
+            },
+          },
+        },
       },
       orderBy: desc(studioBooking.bookedAt),
     },
@@ -172,6 +202,22 @@ function moneyToPence(amount: string): number {
   return Number(pounds) * 100 + Number(pennies.padEnd(2, "0"));
 }
 
+function datePart(value: Date): Date {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function timePart(value: Date): string {
+  return value.toTimeString().slice(0, 5);
+}
+
+function recurrenceDays(startTime: Date, recurrenceRule?: string | null) {
+  if (!recurrenceRule) return [];
+  const day = startTime
+    .toLocaleDateString("en-GB", { weekday: "long" })
+    .toUpperCase();
+  return [day];
+}
+
 function validateClassOptions(input: {
   pricingModel?: z.infer<typeof pricingModelSchema>;
   dropInPrice?: string;
@@ -238,7 +284,7 @@ function validateClassOptions(input: {
 function buildClassOccurrences(
   startTime: Date,
   endTime: Date,
-  recurrenceRule?: string | null
+  recurrenceRule?: string | null,
 ): Array<{ startTime: Date; endTime: Date }> {
   if (!recurrenceRule) return [{ startTime, endTime }];
 
@@ -246,7 +292,7 @@ function buildClassOccurrences(
     recurrenceRule.split(";").map((part) => {
       const [key, value = ""] = part.split("=");
       return [key, value];
-    })
+    }),
   );
   const frequency = parts.FREQ;
   const interval = Number(parts.INTERVAL ?? "1");
@@ -296,7 +342,8 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         classTypeId: z.string().optional(),
         roomId: z.string().optional(),
         status: classStatusSchema.optional(),
-      })
+        sortDirection: z.enum(["ASC", "DESC"]).default("ASC"),
+      }),
     )
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
@@ -308,7 +355,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
 
       const conditions: (SQL | undefined)[] = baseConditions(
         ctx.orgId,
-        ctx.locationId
+        ctx.locationId,
       );
 
       if (input.search) {
@@ -316,8 +363,8 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         conditions.push(
           or(
             ilike(studioClass.name, pattern),
-            ilike(studioClass.description, pattern)
-          )
+            ilike(studioClass.description, pattern),
+          ),
         );
       }
 
@@ -351,7 +398,10 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         db.query.studioClass.findMany({
           where,
           with: classRelations(),
-          orderBy: asc(studioClass.startTime),
+          orderBy:
+            input.sortDirection === "DESC"
+              ? desc(studioClass.startTime)
+              : asc(studioClass.startTime),
           offset: (input.page - 1) * input.pageSize,
           limit: input.pageSize,
         }),
@@ -382,7 +432,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       const cls = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, input.classId),
-          ...baseConditions(ctx.orgId, ctx.locationId)
+          ...baseConditions(ctx.orgId, ctx.locationId),
         ),
         with: classRelations(),
       });
@@ -390,8 +440,13 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       if (!cls) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
       }
+      const [org] = await db
+        .select({ slug: organization.slug })
+        .from(organization)
+        .where(eq(organization.id, ctx.orgId))
+        .limit(1);
 
-      return mapClass(cls);
+      return { ...mapClass(cls), organizationSlug: org?.slug ?? null };
     }),
 
   getSchedule: protectedProcedure
@@ -409,7 +464,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
           ...baseConditions(ctx.orgId, ctx.locationId),
           gte(studioClass.startTime, new Date(input.startDate)),
           lte(studioClass.startTime, new Date(input.endDate)),
-          ne(studioClass.status, "CANCELLED")
+          ne(studioClass.status, "CANCELLED"),
         ),
         with: classRelations(),
         orderBy: asc(studioClass.startTime),
@@ -419,7 +474,9 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
     }),
 
   upcoming: protectedProcedure
-    .input(z.object({ limit: z.number().min(1).max(50).default(10) }).optional())
+    .input(
+      z.object({ limit: z.number().min(1).max(50).default(10) }).optional(),
+    )
     .query(async ({ ctx, input }) => {
       if (!ctx.orgId) {
         throw new TRPCError({
@@ -435,7 +492,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
           ...baseConditions(ctx.orgId, ctx.locationId),
           gte(studioClass.startTime, now),
           lte(studioClass.startTime, nextWeek),
-          ne(studioClass.status, "CANCELLED")
+          ne(studioClass.status, "CANCELLED"),
         ),
         with: classRelations(),
         orderBy: asc(studioClass.startTime),
@@ -461,7 +518,10 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
 
     const [totalClasses, upcomingClasses, todayClasses, totalCheckIns] =
       await Promise.all([
-        db.select({ total: count() }).from(studioClass).where(and(...scope)),
+        db
+          .select({ total: count() })
+          .from(studioClass)
+          .where(and(...scope)),
         db
           .select({ total: count() })
           .from(studioClass)
@@ -470,8 +530,8 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
               ...scope,
               gte(studioClass.startTime, now),
               lte(studioClass.startTime, nextWeek),
-              eq(studioClass.status, "SCHEDULED")
-            )
+              eq(studioClass.status, "SCHEDULED"),
+            ),
           ),
         db
           .select({ total: count() })
@@ -480,8 +540,8 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
             and(
               ...scope,
               gte(studioClass.startTime, today),
-              lt(studioClass.startTime, tomorrow)
-            )
+              lt(studioClass.startTime, tomorrow),
+            ),
           ),
         db
           .select({ total: count() })
@@ -489,8 +549,10 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
           .where(
             and(
               eq(checkIn.organizationId, ctx.orgId),
-              ctx.locationId ? eq(checkIn.locationId, ctx.locationId) : undefined
-            )
+              ctx.locationId
+                ? eq(checkIn.locationId, ctx.locationId)
+                : undefined,
+            ),
           ),
       ]);
 
@@ -519,21 +581,18 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         equipmentNeeded: z.array(z.string()).optional(),
         bookingWindowHours: z.number().int().min(1).optional(),
         cancellationWindowHours: z.number().int().min(0).optional(),
+        bookingWindowPolicyOverrideId: z.string().min(1).optional(),
+        waitlistPolicyOverrideId: z.string().min(1).optional(),
         isVirtual: z.boolean().optional(),
         color: z.string().max(20).optional(),
         ...classOptionsSchema,
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No active organization",
-        });
-      }
-      const organizationId = ctx.orgId;
+      const scope = await requireSchedulingPolicyAccess(ctx, "schedule.manage");
+      const organizationId = scope.organizationId;
 
-      await assertClassReferences(organizationId, {
+      await assertClassReferences(organizationId, scope.locationId, {
         instructorId: input.instructorId,
         roomId: input.roomId,
         serviceTypeId: input.serviceTypeId,
@@ -552,52 +611,147 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       const occurrences = buildClassOccurrences(
         input.startTime,
         input.endTime,
-        input.isRecurring ? input.recurrenceRule : undefined
+        input.isRecurring ? input.recurrenceRule : undefined,
       );
       const firstId = crypto.randomUUID();
-      const rows = occurrences.map((occurrence, index) => ({
-        id: index === 0 ? firstId : crypto.randomUUID(),
-        name: input.name,
-        description: input.description,
-        startTime: occurrence.startTime,
-        endTime: occurrence.endTime,
-        maxCapacity: input.maxCapacity,
-        minCapacity: input.minCapacity,
-        serviceTypeId: input.serviceTypeId,
-        classTypeId: input.classTypeId,
-        instructorId: input.instructorId,
-        roomId: input.roomId,
-        difficulty: input.difficulty,
-        equipmentNeeded: input.equipmentNeeded ?? [],
-        bookingWindowHours: input.bookingWindowHours,
-        cancellationWindowHours: input.cancellationWindowHours,
-        isVirtual: input.isVirtual ?? false,
-        color: input.color,
-        pricingModel: input.pricingModel ?? "PACKAGE_ONLY",
-        dropInPrice: input.dropInPrice,
-        slidingScaleMinPrice: input.slidingScaleMinPrice,
-        slidingScaleMaxPrice: input.slidingScaleMaxPrice,
-        currency: input.currency ?? "GBP",
-        waitlistEnabled: input.waitlistEnabled ?? false,
-        autoPromoteWaitlist: input.waitlistEnabled
-          ? (input.autoPromoteWaitlist ?? false)
-          : false,
-        onlineBookingEnabled: input.onlineBookingEnabled ?? true,
-        onlineCapacity: input.onlineCapacity,
-        walkInCapacity: input.walkInCapacity,
-        spotPickingEnabled: input.spotPickingEnabled ?? false,
-        imageUrl: input.imageUrl,
-        cancellationPolicyId: input.cancellationPolicyId,
-        isRecurring: input.isRecurring ?? false,
-        recurrenceRule: input.isRecurring ? input.recurrenceRule : undefined,
-        status: "SCHEDULED" as const,
-        organizationId,
-        locationId: ctx.locationId ?? null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      const seriesId = input.isRecurring ? createId() : null;
 
-      await db.insert(studioClass).values(rows);
+      await db.transaction(async (tx) => {
+        const resolvedPolicies =
+          await materializeSchedulingPoliciesForOccurrences({
+            tx,
+            organizationId,
+            locationId: scope.locationId,
+            serviceTypeId: input.serviceTypeId,
+            bookingWindowPolicyOverrideId: input.bookingWindowPolicyOverrideId,
+            waitlistPolicyOverrideId: input.waitlistPolicyOverrideId,
+            startsAt: occurrences.map((occurrence) => occurrence.startTime),
+            legacy: {
+              bookingWindowHours: input.bookingWindowHours,
+              cancellationWindowHours: input.cancellationWindowHours,
+              waitlistEnabled: input.waitlistEnabled,
+              autoPromoteWaitlist: input.autoPromoteWaitlist,
+            },
+          });
+        const resolvedAt = new Date();
+        const rows = occurrences.map((occurrence, index) => {
+          const policies = resolvedPolicies[index];
+          if (!policies) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Scheduling policies could not be resolved.",
+            });
+          }
+          const bookingValues = policies.bookingWindow.values;
+          const waitlistValues = policies.waitlist.values;
+          assertSupportedWaitlistRuntime(waitlistValues);
+          return {
+            id: index === 0 ? firstId : crypto.randomUUID(),
+            name: input.name,
+            description: input.description,
+            startTime: occurrence.startTime,
+            endTime: occurrence.endTime,
+            maxCapacity: input.maxCapacity,
+            minCapacity: input.minCapacity,
+            serviceTypeId: input.serviceTypeId,
+            classTypeId: input.classTypeId,
+            instructorId: input.instructorId,
+            roomId: input.roomId,
+            difficulty: input.difficulty,
+            equipmentNeeded: input.equipmentNeeded ?? [],
+            bookingWindowHours: Math.ceil(
+              bookingValues.opensMinutesBeforeStart / 60,
+            ),
+            cancellationWindowHours: Math.ceil(
+              bookingValues.cancellationsCloseMinutesBeforeStart / 60,
+            ),
+            bookingWindowPolicyOverrideId: input.bookingWindowPolicyOverrideId,
+            resolvedBookingWindowPolicyId: policies.bookingWindow.policyId,
+            resolvedBookingWindowPolicyVersionId:
+              policies.bookingWindow.versionId,
+            bookingWindowPolicySource: policies.bookingWindow.source,
+            bookingOpensMinutesBeforeStart:
+              bookingValues.opensMinutesBeforeStart,
+            bookingClosesMinutesBeforeStart:
+              bookingValues.closesMinutesBeforeStart,
+            cancellationsCloseMinutesBeforeStart:
+              bookingValues.cancellationsCloseMinutesBeforeStart,
+            blockClientCancellations: bookingValues.blockClientCancellations,
+            isVirtual: input.isVirtual ?? false,
+            color: input.color,
+            pricingModel: input.pricingModel ?? "PACKAGE_ONLY",
+            dropInPrice: input.dropInPrice,
+            slidingScaleMinPrice: input.slidingScaleMinPrice,
+            slidingScaleMaxPrice: input.slidingScaleMaxPrice,
+            currency: input.currency ?? "GBP",
+            waitlistEnabled: waitlistValues.mode !== "DISABLED",
+            autoPromoteWaitlist: waitlistValues.mode === "OFFER_NEXT",
+            waitlistPolicyOverrideId: input.waitlistPolicyOverrideId,
+            resolvedWaitlistPolicyId: policies.waitlist.policyId,
+            resolvedWaitlistPolicyVersionId: policies.waitlist.versionId,
+            waitlistPolicySource: policies.waitlist.source,
+            waitlistMode: waitlistValues.mode,
+            waitlistAutomationClosesMinutesBeforeStart:
+              waitlistValues.automationClosesMinutesBeforeStart,
+            waitlistMaxEntries: waitlistValues.maxEntries,
+            waitlistAllowOverlappingReservations:
+              waitlistValues.allowOverlappingReservations,
+            waitlistCreditHoldPolicy: waitlistValues.creditHoldPolicy,
+            waitlistOfferExpiryMinutes: waitlistValues.offerExpiryMinutes,
+            waitlistFailureFallback: waitlistValues.failureFallback,
+            schedulingPolicySchemaVersion: 1,
+            schedulingPolicyResolvedAt: resolvedAt,
+            onlineBookingEnabled: input.onlineBookingEnabled ?? true,
+            onlineCapacity: input.onlineCapacity,
+            walkInCapacity: input.walkInCapacity,
+            spotPickingEnabled: input.spotPickingEnabled ?? false,
+            imageUrl: input.imageUrl,
+            cancellationPolicyId: input.cancellationPolicyId,
+            isRecurring: input.isRecurring ?? false,
+            recurrenceRule: input.isRecurring
+              ? input.recurrenceRule
+              : undefined,
+            metadata: seriesId ? { classSeriesId: seriesId } : undefined,
+            status: "SCHEDULED" as const,
+            organizationId,
+            locationId: scope.locationId,
+            createdAt: resolvedAt,
+            updatedAt: resolvedAt,
+          };
+        });
+        if (seriesId && input.recurrenceRule) {
+          await tx.insert(classSeries).values({
+            id: seriesId,
+            organizationId,
+            locationId: ctx.locationId ?? null,
+            serviceTypeId: input.serviceTypeId,
+            classTypeId: input.classTypeId,
+            roomId: input.roomId,
+            name: input.name,
+            description: input.description,
+            startDate: datePart(input.startTime),
+            endDate: datePart(occurrences.at(-1)?.startTime ?? input.startTime),
+            startTime: timePart(input.startTime),
+            endTime: timePart(input.endTime),
+            recurrenceRule: input.recurrenceRule,
+            recurrenceDays: recurrenceDays(
+              input.startTime,
+              input.recurrenceRule,
+            ),
+            instructorIds: input.instructorId ? [input.instructorId] : [],
+            capacity: input.maxCapacity,
+            status: "ACTIVE",
+            metadata: {
+              pricingModel: input.pricingModel ?? "PACKAGE_ONLY",
+              difficulty: input.difficulty,
+            },
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        await tx.insert(studioClass).values(rows);
+      });
 
       const cls = await getClassWithRelations(firstId);
       if (!cls) {
@@ -616,8 +770,14 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().min(1).max(200).optional(),
         description: z.string().max(2000).optional().nullable(),
-        startTime: z.string().transform((value) => new Date(value)).optional(),
-        endTime: z.string().transform((value) => new Date(value)).optional(),
+        startTime: z
+          .string()
+          .transform((value) => new Date(value))
+          .optional(),
+        endTime: z
+          .string()
+          .transform((value) => new Date(value))
+          .optional(),
         maxCapacity: z.number().int().min(1).optional().nullable(),
         minCapacity: z.number().int().min(0).optional().nullable(),
         classTypeId: z.string().optional().nullable(),
@@ -646,21 +806,16 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         cancellationPolicyId: z.string().optional().nullable(),
         isRecurring: z.boolean().optional(),
         recurrenceRule: z.string().max(200).optional().nullable(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No active organization",
-        });
-      }
+      const scope = await requireSchedulingPolicyAccess(ctx, "schedule.manage");
 
       const { id, ...data } = input;
       const existing = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, id),
-          ...baseConditions(ctx.orgId, ctx.locationId)
+          ...baseConditions(scope.organizationId, scope.locationId),
         ),
       });
 
@@ -668,7 +823,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
       }
 
-      await assertClassReferences(ctx.orgId, {
+      await assertClassReferences(scope.organizationId, existing.locationId, {
         instructorId: data.instructorId ?? undefined,
         roomId: data.roomId ?? undefined,
         serviceTypeId: data.serviceTypeId ?? undefined,
@@ -720,10 +875,100 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
             : (data.recurrenceRule ?? undefined),
       });
 
-      await db
-        .update(studioClass)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(studioClass.id, id));
+      const policyAffectingUpdate =
+        data.startTime !== undefined ||
+        data.serviceTypeId !== undefined ||
+        data.bookingWindowHours !== undefined ||
+        data.cancellationWindowHours !== undefined ||
+        data.waitlistEnabled !== undefined ||
+        data.autoPromoteWaitlist !== undefined;
+      await db.transaction(async (tx) => {
+        const schedulingData: Partial<typeof studioClass.$inferInsert> = {};
+        if (policyAffectingUpdate) {
+          const [policies] = await materializeSchedulingPoliciesForOccurrences({
+            tx,
+            organizationId: existing.organizationId,
+            locationId: existing.locationId,
+            serviceTypeId:
+              data.serviceTypeId === undefined
+                ? existing.serviceTypeId
+                : data.serviceTypeId,
+            bookingWindowPolicyOverrideId:
+              existing.bookingWindowPolicyOverrideId,
+            waitlistPolicyOverrideId: existing.waitlistPolicyOverrideId,
+            startsAt: [nextStartTime],
+            legacy: {
+              bookingWindowHours:
+                data.bookingWindowHours === undefined
+                  ? existing.bookingWindowHours
+                  : data.bookingWindowHours,
+              cancellationWindowHours:
+                data.cancellationWindowHours === undefined
+                  ? existing.cancellationWindowHours
+                  : data.cancellationWindowHours,
+              waitlistEnabled: data.waitlistEnabled ?? existing.waitlistEnabled,
+              autoPromoteWaitlist:
+                data.autoPromoteWaitlist ?? existing.autoPromoteWaitlist,
+            },
+          });
+          if (!policies) {
+            throw new TRPCError({
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Scheduling policies could not be resolved.",
+            });
+          }
+          const bookingValues = policies.bookingWindow.values;
+          const waitlistValues = policies.waitlist.values;
+          assertSupportedWaitlistRuntime(waitlistValues);
+          Object.assign(schedulingData, {
+            bookingWindowHours: Math.ceil(
+              bookingValues.opensMinutesBeforeStart / 60,
+            ),
+            cancellationWindowHours: Math.ceil(
+              bookingValues.cancellationsCloseMinutesBeforeStart / 60,
+            ),
+            resolvedBookingWindowPolicyId: policies.bookingWindow.policyId,
+            resolvedBookingWindowPolicyVersionId:
+              policies.bookingWindow.versionId,
+            bookingWindowPolicySource: policies.bookingWindow.source,
+            bookingOpensMinutesBeforeStart:
+              bookingValues.opensMinutesBeforeStart,
+            bookingClosesMinutesBeforeStart:
+              bookingValues.closesMinutesBeforeStart,
+            cancellationsCloseMinutesBeforeStart:
+              bookingValues.cancellationsCloseMinutesBeforeStart,
+            blockClientCancellations: bookingValues.blockClientCancellations,
+            waitlistEnabled: waitlistValues.mode !== "DISABLED",
+            autoPromoteWaitlist: waitlistValues.mode === "OFFER_NEXT",
+            resolvedWaitlistPolicyId: policies.waitlist.policyId,
+            resolvedWaitlistPolicyVersionId: policies.waitlist.versionId,
+            waitlistPolicySource: policies.waitlist.source,
+            waitlistMode: waitlistValues.mode,
+            waitlistAutomationClosesMinutesBeforeStart:
+              waitlistValues.automationClosesMinutesBeforeStart,
+            waitlistMaxEntries: waitlistValues.maxEntries,
+            waitlistAllowOverlappingReservations:
+              waitlistValues.allowOverlappingReservations,
+            waitlistCreditHoldPolicy: waitlistValues.creditHoldPolicy,
+            waitlistOfferExpiryMinutes: waitlistValues.offerExpiryMinutes,
+            waitlistFailureFallback: waitlistValues.failureFallback,
+            schedulingPolicySchemaVersion: 1,
+            schedulingPolicyResolvedAt: new Date(),
+          });
+        }
+        await tx
+          .update(studioClass)
+          .set({ ...data, ...schedulingData, updatedAt: new Date() })
+          .where(
+            and(
+              eq(studioClass.id, id),
+              eq(studioClass.organizationId, scope.organizationId),
+              existing.locationId
+                ? eq(studioClass.locationId, existing.locationId)
+                : isNull(studioClass.locationId),
+            ),
+          );
+      });
 
       const cls = await getClassWithRelations(id);
       if (!cls) {
@@ -746,7 +991,7 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       const existing = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, input.id),
-          eq(studioClass.organizationId, ctx.orgId)
+          eq(studioClass.organizationId, ctx.orgId),
         ),
       });
 
@@ -755,28 +1000,39 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       }
 
       if (existing.status === "CANCELLED") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Already cancelled" });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Already cancelled",
+        });
       }
 
+      const cancelledAt = new Date();
       await db.transaction(async (tx) => {
         await tx
           .update(studioClass)
-          .set({ status: "CANCELLED", updatedAt: new Date() })
+          .set({ status: "CANCELLED", updatedAt: cancelledAt })
           .where(eq(studioClass.id, input.id));
         await tx
           .update(studioBooking)
           .set({ status: "CANCELLED" })
           .where(
-            and(eq(studioBooking.classId, input.id), eq(studioBooking.status, "BOOKED"))
+            and(
+              eq(studioBooking.classId, input.id),
+              eq(studioBooking.status, "BOOKED"),
+            ),
           );
         await tx
           .update(classWaitlist)
-          .set({ status: "CANCELLED_WAITLIST" })
+          .set({
+            status: "CANCELLED_WAITLIST",
+            respondedAt: cancelledAt,
+            updatedAt: cancelledAt,
+          })
           .where(
             and(
               eq(classWaitlist.classId, input.id),
-              eq(classWaitlist.status, "WAITING")
-            )
+              inArray(classWaitlist.status, ["WAITING", "NOTIFIED"]),
+            ),
           );
       });
 
@@ -787,14 +1043,8 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       return mapClass(cls);
     }),
 
-  duplicate: protectedProcedure
-    .input(
-      z.object({
-        classId: z.string(),
-        newStartTime: z.string().transform((value) => new Date(value)),
-        newEndTime: z.string().transform((value) => new Date(value)),
-      })
-    )
+  delete: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.orgId) {
         throw new TRPCError({
@@ -802,11 +1052,83 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
           message: "No active organization",
         });
       }
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "schedule.manage",
+        resource: { organizationId: ctx.orgId, locationId: ctx.locationId },
+      });
+      const existing = await db.query.studioClass.findFirst({
+        where: and(
+          eq(studioClass.id, input.id),
+          ...baseConditions(ctx.orgId, ctx.locationId),
+        ),
+        columns: { id: true, status: true },
+      });
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Class not found" });
+      }
+      if (existing.status !== "CANCELLED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Cancel this class before deleting it.",
+        });
+      }
+      const [bookings, checkIns, waitlist] = await Promise.all([
+        db
+          .select({ total: count() })
+          .from(studioBooking)
+          .where(eq(studioBooking.classId, input.id)),
+        db
+          .select({ total: count() })
+          .from(checkIn)
+          .where(eq(checkIn.classId, input.id)),
+        db
+          .select({ total: count() })
+          .from(classWaitlist)
+          .where(eq(classWaitlist.classId, input.id)),
+      ]);
+      if (
+        (bookings[0]?.total ?? 0) +
+          (checkIns[0]?.total ?? 0) +
+          (waitlist[0]?.total ?? 0) >
+        0
+      ) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            "This class has booking or attendance history and cannot be deleted.",
+        });
+      }
+      await db
+        .delete(studioClass)
+        .where(
+          and(
+            eq(studioClass.id, input.id),
+            ...baseConditions(ctx.orgId, ctx.locationId),
+          ),
+        );
+      return { id: existing.id };
+    }),
+
+  duplicate: protectedProcedure
+    .input(
+      z.object({
+        classId: z.string(),
+        newStartTime: z.string().transform((value) => new Date(value)),
+        newEndTime: z.string().transform((value) => new Date(value)),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const scope = await requireSchedulingPolicyAccess(ctx, "schedule.manage");
 
       const original = await db.query.studioClass.findFirst({
         where: and(
           eq(studioClass.id, input.classId),
-          eq(studioClass.organizationId, ctx.orgId)
+          ...baseConditions(scope.organizationId, scope.locationId),
         ),
       });
 
@@ -815,45 +1137,102 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
       }
 
       const id = crypto.randomUUID();
-      await db.insert(studioClass).values({
-        id,
-        name: original.name,
-        description: original.description,
-        startTime: input.newStartTime,
-        endTime: input.newEndTime,
-        maxCapacity: original.maxCapacity,
-        minCapacity: original.minCapacity,
-        classTypeId: original.classTypeId,
-        serviceTypeId: original.serviceTypeId,
-        instructorId: original.instructorId,
-        roomId: original.roomId,
-        roomName: original.roomName,
-        difficulty: original.difficulty,
-        equipmentNeeded: original.equipmentNeeded,
-        bookingWindowHours: original.bookingWindowHours,
-        cancellationWindowHours: original.cancellationWindowHours,
-        isVirtual: original.isVirtual,
-        color: original.color,
-        pricingModel: original.pricingModel,
-        dropInPrice: original.dropInPrice,
-        slidingScaleMinPrice: original.slidingScaleMinPrice,
-        slidingScaleMaxPrice: original.slidingScaleMaxPrice,
-        currency: original.currency,
-        waitlistEnabled: original.waitlistEnabled,
-        autoPromoteWaitlist: original.autoPromoteWaitlist,
-        onlineBookingEnabled: original.onlineBookingEnabled,
-        onlineCapacity: original.onlineCapacity,
-        walkInCapacity: original.walkInCapacity,
-        spotPickingEnabled: original.spotPickingEnabled,
-        imageUrl: original.imageUrl,
-        cancellationPolicyId: original.cancellationPolicyId,
-        isRecurring: original.isRecurring,
-        recurrenceRule: original.recurrenceRule,
-        status: "SCHEDULED",
-        organizationId: original.organizationId,
-        locationId: original.locationId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+      await db.transaction(async (tx) => {
+        const [policies] = await materializeSchedulingPoliciesForOccurrences({
+          tx,
+          organizationId: original.organizationId,
+          locationId: original.locationId,
+          serviceTypeId: original.serviceTypeId,
+          bookingWindowPolicyOverrideId: original.bookingWindowPolicyOverrideId,
+          waitlistPolicyOverrideId: original.waitlistPolicyOverrideId,
+          startsAt: [input.newStartTime],
+          legacy: {
+            bookingWindowHours: original.bookingWindowHours,
+            cancellationWindowHours: original.cancellationWindowHours,
+            waitlistEnabled: original.waitlistEnabled,
+            autoPromoteWaitlist: original.autoPromoteWaitlist,
+          },
+        });
+        if (!policies) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Scheduling policies could not be resolved.",
+          });
+        }
+        assertSupportedWaitlistRuntime(policies.waitlist.values);
+        const bookingValues = policies.bookingWindow.values;
+        const waitlistValues = policies.waitlist.values;
+        const now = new Date();
+        await tx.insert(studioClass).values({
+          id,
+          name: original.name,
+          description: original.description,
+          startTime: input.newStartTime,
+          endTime: input.newEndTime,
+          maxCapacity: original.maxCapacity,
+          minCapacity: original.minCapacity,
+          classTypeId: original.classTypeId,
+          serviceTypeId: original.serviceTypeId,
+          instructorId: original.instructorId,
+          roomId: original.roomId,
+          roomName: original.roomName,
+          difficulty: original.difficulty,
+          equipmentNeeded: original.equipmentNeeded,
+          bookingWindowHours: Math.ceil(
+            bookingValues.opensMinutesBeforeStart / 60,
+          ),
+          cancellationWindowHours: Math.ceil(
+            bookingValues.cancellationsCloseMinutesBeforeStart / 60,
+          ),
+          bookingWindowPolicyOverrideId: original.bookingWindowPolicyOverrideId,
+          resolvedBookingWindowPolicyId: policies.bookingWindow.policyId,
+          resolvedBookingWindowPolicyVersionId:
+            policies.bookingWindow.versionId,
+          bookingWindowPolicySource: policies.bookingWindow.source,
+          bookingOpensMinutesBeforeStart: bookingValues.opensMinutesBeforeStart,
+          bookingClosesMinutesBeforeStart:
+            bookingValues.closesMinutesBeforeStart,
+          cancellationsCloseMinutesBeforeStart:
+            bookingValues.cancellationsCloseMinutesBeforeStart,
+          blockClientCancellations: bookingValues.blockClientCancellations,
+          isVirtual: original.isVirtual,
+          color: original.color,
+          pricingModel: original.pricingModel,
+          dropInPrice: original.dropInPrice,
+          slidingScaleMinPrice: original.slidingScaleMinPrice,
+          slidingScaleMaxPrice: original.slidingScaleMaxPrice,
+          currency: original.currency,
+          waitlistEnabled: waitlistValues.mode !== "DISABLED",
+          autoPromoteWaitlist: waitlistValues.mode === "OFFER_NEXT",
+          waitlistPolicyOverrideId: original.waitlistPolicyOverrideId,
+          resolvedWaitlistPolicyId: policies.waitlist.policyId,
+          resolvedWaitlistPolicyVersionId: policies.waitlist.versionId,
+          waitlistPolicySource: policies.waitlist.source,
+          waitlistMode: waitlistValues.mode,
+          waitlistAutomationClosesMinutesBeforeStart:
+            waitlistValues.automationClosesMinutesBeforeStart,
+          waitlistMaxEntries: waitlistValues.maxEntries,
+          waitlistAllowOverlappingReservations:
+            waitlistValues.allowOverlappingReservations,
+          waitlistCreditHoldPolicy: waitlistValues.creditHoldPolicy,
+          waitlistOfferExpiryMinutes: waitlistValues.offerExpiryMinutes,
+          waitlistFailureFallback: waitlistValues.failureFallback,
+          schedulingPolicySchemaVersion: 1,
+          schedulingPolicyResolvedAt: now,
+          onlineBookingEnabled: original.onlineBookingEnabled,
+          onlineCapacity: original.onlineCapacity,
+          walkInCapacity: original.walkInCapacity,
+          spotPickingEnabled: original.spotPickingEnabled,
+          imageUrl: original.imageUrl,
+          cancellationPolicyId: original.cancellationPolicyId,
+          isRecurring: original.isRecurring,
+          recurrenceRule: original.recurrenceRule,
+          status: "SCHEDULED",
+          organizationId: original.organizationId,
+          locationId: original.locationId,
+          createdAt: now,
+          updatedAt: now,
+        });
       });
 
       const cls = await getClassWithRelations(id);
@@ -870,30 +1249,41 @@ export const studioClassesEnhancedRouter = createTRPCRouter({
 
 async function assertClassReferences(
   organizationId: string,
+  locationId: string | null,
   refs: {
     instructorId?: string | null;
     roomId?: string | null;
     classTypeId?: string | null;
     serviceTypeId?: string | null;
     cancellationPolicyId?: string | null;
-  }
+  },
 ) {
   if (refs.instructorId) {
     const record = await db.query.instructor.findFirst({
       where: and(
         eq(instructor.id, refs.instructorId),
-        eq(instructor.organizationId, organizationId)
+        eq(instructor.organizationId, organizationId),
+        locationId
+          ? eq(instructor.locationId, locationId)
+          : isNull(instructor.locationId),
       ),
       columns: { id: true },
     });
     if (!record) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Instructor not found" });
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Instructor not found",
+      });
     }
   }
 
   if (refs.roomId) {
     const record = await db.query.room.findFirst({
-      where: and(eq(room.id, refs.roomId), eq(room.organizationId, organizationId)),
+      where: and(
+        eq(room.id, refs.roomId),
+        eq(room.organizationId, organizationId),
+        locationId ? eq(room.locationId, locationId) : isNull(room.locationId),
+      ),
       columns: { id: true },
     });
     if (!record) {
@@ -905,12 +1295,18 @@ async function assertClassReferences(
     const record = await db.query.classType.findFirst({
       where: and(
         eq(classType.id, refs.classTypeId),
-        eq(classType.organizationId, organizationId)
+        eq(classType.organizationId, organizationId),
+        locationId
+          ? eq(classType.locationId, locationId)
+          : isNull(classType.locationId),
       ),
       columns: { id: true },
     });
     if (!record) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Class type not found" });
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Class type not found",
+      });
     }
   }
 
@@ -918,12 +1314,18 @@ async function assertClassReferences(
     const record = await db.query.serviceType.findFirst({
       where: and(
         eq(serviceType.id, refs.serviceTypeId),
-        eq(serviceType.organizationId, organizationId)
+        eq(serviceType.organizationId, organizationId),
+        locationId
+          ? eq(serviceType.locationId, locationId)
+          : isNull(serviceType.locationId),
       ),
       columns: { id: true },
     });
     if (!record) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "Service type not found" });
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Service type not found",
+      });
     }
   }
 
@@ -931,15 +1333,29 @@ async function assertClassReferences(
     const record = await db.query.cancellationPolicy.findFirst({
       where: and(
         eq(cancellationPolicy.id, refs.cancellationPolicyId),
-        eq(cancellationPolicy.organizationId, organizationId)
+        eq(cancellationPolicy.organizationId, organizationId),
+        eq(cancellationPolicy.isActive, true),
+        locationId
+          ? eq(cancellationPolicy.locationId, locationId)
+          : isNull(cancellationPolicy.locationId),
       ),
       columns: { id: true },
     });
     if (!record) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Cancellation policy not found",
+        message: "Active cancellation policy not found",
       });
     }
+  }
+}
+
+function assertSupportedWaitlistRuntime(values: WaitlistValues): void {
+  if (!supportsWaitlistRuntime(values)) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This waitlist policy requires automation that is not enabled for class creation yet.",
+    });
   }
 }

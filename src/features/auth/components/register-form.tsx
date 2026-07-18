@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 
 import { toast } from "sonner";
 
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -28,6 +28,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { getSafeCallbackUrl } from "@/features/auth/lib/callback-url";
 import { authClient } from "@/lib/auth-client";
 
 const registerSchema = z
@@ -47,7 +48,8 @@ type RegisterFormValues = z.infer<typeof registerSchema>;
 const RegisterForm = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const callbackUrl = getSafeCallbackUrl(searchParams.get("callbackUrl"));
+  const [isGooglePending, setIsGooglePending] = useState(false);
 
   const form = useForm({
     resolver: zodResolver(registerSchema),
@@ -78,13 +80,31 @@ const RegisterForm = () => {
     );
   };
 
-  const isPending = form.formState.isSubmitting;
+  const onGoogleSignIn = async () => {
+    setIsGooglePending(true);
+    try {
+      await authClient.signIn.social(
+        { provider: "google", callbackURL: callbackUrl },
+        {
+          onError: (ctx) => {
+            toast.error(ctx.error.message);
+          },
+        },
+      );
+    } finally {
+      setIsGooglePending(false);
+    }
+  };
+
+  const isPending = form.formState.isSubmitting || isGooglePending;
 
   return (
-    <div className="flex flex-col gap-6 items-center justify-center">
-      <Card className="w-xl">
+    <div className="flex w-full flex-col items-center justify-center gap-6">
+      <Card className="w-full max-w-xl">
         <CardHeader className="text-center gap-1">
-          <CardTitle> Ready to supercharge your studio? </CardTitle>
+          <CardTitle>
+            <h1>Ready to supercharge your studio?</h1>
+          </CardTitle>
         </CardHeader>
 
         <CardContent>
@@ -101,6 +121,7 @@ const RegisterForm = () => {
                         <FormControl>
                           <Input
                             type="text"
+                            autoComplete="name"
                             placeholder="John Doe"
                             {...field}
                           />
@@ -119,6 +140,7 @@ const RegisterForm = () => {
                         <FormControl>
                           <Input
                             type="email"
+                            autoComplete="email"
                             placeholder="m@example.com"
                             {...field}
                           />
@@ -138,6 +160,7 @@ const RegisterForm = () => {
                         <FormControl>
                           <Input
                             type="password"
+                            autoComplete="new-password"
                             placeholder="******"
                             {...field}
                           />
@@ -157,6 +180,7 @@ const RegisterForm = () => {
                         <FormControl>
                           <Input
                             type="password"
+                            autoComplete="new-password"
                             placeholder="******"
                             {...field}
                           />
@@ -182,12 +206,13 @@ const RegisterForm = () => {
                       className="w-full"
                       type="button"
                       disabled={isPending}
+                      onClick={onGoogleSignIn}
                     >
                       <Image
                         src="/logos/google.svg"
                         height={16}
                         width={16}
-                        alt="google"
+                        alt=""
                       />
                       Continue with Google
                     </Button>

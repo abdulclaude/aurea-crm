@@ -1,7 +1,7 @@
 "use server";
 
 import { createId } from "@paralleldrive/cuid2";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { NodeType } from "@/db/enums";
 import { node as nodeTable, telegramTriggerState, workflows } from "@/db/schema";
@@ -54,11 +54,13 @@ type TelegramTriggerConfig = {
 
 export async function processTelegramUpdate({
   credentialId,
-  userId,
+  organizationId,
+  locationId,
   update,
 }: {
   credentialId: string;
-  userId: string;
+  organizationId: string;
+  locationId: string | null;
   update: TelegramUpdate;
 }) {
   const primaryMessage =
@@ -84,7 +86,10 @@ export async function processTelegramUpdate({
       and(
         eq(nodeTable.type, NodeType.TELEGRAM_TRIGGER),
         eq(nodeTable.credentialId, credentialId),
-        eq(workflows.userId, userId),
+        eq(workflows.organizationId, organizationId),
+        locationId
+          ? eq(workflows.locationId, locationId)
+          : isNull(workflows.locationId),
         eq(workflows.archived, false),
         eq(workflows.isTemplate, false)
       )
@@ -139,6 +144,7 @@ export async function processTelegramUpdate({
     await sendWorkflowExecution({
       workflowId: node.workflowId,
       initialData,
+      idempotencyKey: `telegram:${credentialId}:${node.id}:${incomingUpdateId}`,
     });
 
     await db

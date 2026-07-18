@@ -43,7 +43,6 @@ export const scheduleAppointmentExecutor: NodeExecutor<ScheduleAppointmentData> 
     const startTime = data.startTime ? decode(Handlebars.compile(data.startTime)(context)) : undefined;
     const endTime = data.endTime ? decode(Handlebars.compile(data.endTime)(context)) : undefined;
 
-    // TODO: Implement Schedule Appointment logic here
     const result = await step.run("schedule-appointment", async () => {
       // Add implementation here
       throw new NonRetriableError("Schedule Appointment: Not yet implemented");

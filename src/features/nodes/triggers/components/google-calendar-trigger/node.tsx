@@ -13,6 +13,7 @@ import { GOOGLE_CALENDAR_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/google-
 import { fetchGoogleCalendarTriggerRealtimeToken } from "./actions";
 
 type GoogleCalendarTriggerNodeData = {
+  providerAccountId?: string;
   calendarId?: string;
   calendarName?: string;
   listenFor?: string[];
@@ -71,6 +72,7 @@ export const GoogleCalendarNode: React.FC<
         onOpenChange={setDialogOpen}
         onSubmit={handleSubmit}
         defaultValues={{
+          providerAccountId: nodeData.providerAccountId || "",
           variableName: nodeData.variableName || "googleCalendar",
           calendarId: nodeData.calendarId || "",
           calendarName: nodeData.calendarName || "",

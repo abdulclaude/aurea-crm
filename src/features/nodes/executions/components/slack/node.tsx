@@ -48,7 +48,7 @@ export const SlackNode: React.FC<NodeProps<SlackNodeType>> = memo((props) => {
     nodeId: props.id,
     channel: SLACK_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchSlackRealtimeToken as any,
+    refreshToken: fetchSlackRealtimeToken,
   });
 
   const handleOpenSettings = () => {

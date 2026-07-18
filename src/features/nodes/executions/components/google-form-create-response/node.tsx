@@ -50,7 +50,7 @@ export const GoogleFormCreateResponseNode: React.FC<NodeProps<GoogleFormCreateRe
       nodeId: props.id,
       channel: GOOGLE_FORM_CREATE_RESPONSE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchGoogleFormCreateResponseRealtimeToken as any,
+      refreshToken: fetchGoogleFormCreateResponseRealtimeToken,
     });
 
     const handleOpenSettings = () => {

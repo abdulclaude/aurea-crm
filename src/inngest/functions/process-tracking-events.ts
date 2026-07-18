@@ -5,12 +5,14 @@ import {
 	eq,
 	inArray,
 	isNotNull,
+	isNull,
 	sql,
 	type SQL,
 } from "drizzle-orm";
 import {
 	anonymousUserProfiles,
 	client,
+	funnel,
 	funnelEvent,
 	funnelSession,
 } from "@/db/schema";
@@ -21,14 +23,43 @@ import {
 	parseIPAddress,
 } from "@/lib/device-parser";
 import { pushRealtimeEvents } from "@/lib/realtime-cache";
-import { sendMetaPurchase, sendMetaLead } from "@/lib/ads/meta/conversion-api";
-import { sendGooglePurchase, sendGoogleLead } from "@/lib/ads/google/enhanced-conversions";
-import { sendTikTokPurchase, sendTikTokLead } from "@/lib/ads/tiktok/events-api";
+import { dispatchAdConversionEvent } from "@/features/ad-conversions/server/dispatch-conversion";
+import { buildAnonymousProfileId } from "@/features/external-funnels/lib/anonymous-profile-identity";
+import { z } from "zod";
+
+type TrackingEventProperties = Record<string, unknown> & {
+  _category?: string;
+  _color?: string;
+  _currentStage?: string;
+  _description?: string;
+  _value?: number;
+  activeTime?: number;
+  anonymousId?: string;
+  checkoutDuration?: number;
+  conversionType?: string;
+  currency?: string;
+  currentStage?: string;
+  duration?: number;
+  engagementRate?: number;
+  idleTime?: number;
+  metric?: string;
+  microConversionType?: string;
+  orderId?: string;
+  originalSessionId?: string;
+  rating?: string;
+  reason?: string;
+  revenue?: number;
+  stage?: string;
+  stageHistory?: unknown[];
+  traits?: Record<string, unknown> & { name?: string; email?: string };
+  userId?: string;
+  value?: number;
+};
 
 interface TrackingEvent {
   eventId: string;
   eventName: string;
-  properties?: Record<string, any>;
+  properties?: TrackingEventProperties;
   context: {
     page?: {
       url: string;
@@ -104,7 +135,7 @@ interface TrackingEvent {
       language?: string;
       timezone?: string;
     };
-    customDimensions?: Record<string, any>;
+    customDimensions?: Record<string, unknown>;
     abTests?: Array<{
       testId: string;
       variant: string;
@@ -146,50 +177,26 @@ const normalizeCountryCode = (code?: string | null) => {
   return normalized;
 };
 
-async function fetchCityCoordinates({
-  city,
-  region,
-  countryCode,
-  countryName,
-}: {
-  city: string;
-  region?: string | null;
-  countryCode?: string | null;
-  countryName?: string | null;
-}): Promise<GeoCoordinates> {
-  if (!city || city === "Unknown") return null;
+const unknownRecordSchema = z.record(z.string(), z.unknown());
 
-  try {
-    const normalizedCountryCode = normalizeCountryCode(countryCode);
-    const params = new URLSearchParams({
-      format: "json",
-      limit: "1",
-      city,
-    });
-    if (region) params.set("state", region);
-    if (countryName) params.set("country", countryName);
-    if (normalizedCountryCode) {
-      params.set("countrycodes", normalizedCountryCode.toLowerCase());
-    }
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?${params.toString()}`,
-      {
-        headers: {
-          "User-Agent": "aurea-crm/1.0",
-        },
-      }
-    );
-    if (!response.ok) return null;
-    const results = (await response.json()) as { lat?: string; lon?: string }[];
-    if (!results?.length) return null;
-    const latitude = Number(results[0].lat);
-    const longitude = Number(results[0].lon);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-    return { latitude, longitude };
-  } catch (error) {
-    console.error("[Geo] Failed to geocode city:", error);
-    return null;
-  }
+function asUnknownRecord(value: unknown): Record<string, unknown> {
+  const parsed = unknownRecordSchema.safeParse(value);
+  return parsed.success ? parsed.data : {};
+}
+
+function stringProperty(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const property = value[key];
+  return typeof property === "string" && property.trim()
+    ? property.trim()
+    : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 export const processTrackingEvents = inngest.createFunction(
@@ -199,40 +206,77 @@ export const processTrackingEvents = inngest.createFunction(
   },
   { event: "tracking/events.batch" },
   async ({ event, step }) => {
-    const { funnelId, locationId, organizationId, events, ipAddress } = event.data as {
+    const { funnelId, locationId, organizationId, events, ipAddress, trustLevel } = event.data as {
       funnelId: string;
       locationId: string | null;
       organizationId: string;
       events: TrackingEvent[];
       ipAddress: string;
+      trustLevel?: "TELEMETRY" | "VERIFIED_FORM";
     };
 
     const cityGeoCache = new Map<string, GeoCoordinates>();
+    const authoritativeFunnel = await step.run("resolve-tracking-scope", async () => {
+      const [record] = await db
+        .select({
+          organizationId: funnel.organizationId,
+          locationId: funnel.locationId,
+        })
+        .from(funnel)
+        .where(eq(funnel.id, funnelId))
+        .limit(1);
+      if (
+        !record ||
+        record.organizationId !== organizationId ||
+        record.locationId !== locationId
+      ) {
+        throw new Error("Tracking batch scope did not match the funnel scope.");
+      }
+      return record;
+    });
+
+    const processableEvents = await step.run("exclude-erased-visitors", async () => {
+      const anonymousIds = [
+        ...new Set(
+          events.flatMap((trackingEvent) => {
+            const anonymousId = trackingEvent.context.user?.anonymousId;
+            return anonymousId ? [anonymousId] : [];
+          }),
+        ),
+      ];
+      if (anonymousIds.length === 0) return events;
+
+      const erasedProfiles = await db
+        .select({ anonymousId: anonymousUserProfiles.anonymousId })
+        .from(anonymousUserProfiles)
+        .where(
+          and(
+            eq(anonymousUserProfiles.organizationId, organizationId),
+            locationId
+              ? eq(anonymousUserProfiles.locationId, locationId)
+              : isNull(anonymousUserProfiles.locationId),
+            inArray(anonymousUserProfiles.anonymousId, anonymousIds),
+            isNotNull(anonymousUserProfiles.deletionRequestedAt),
+          ),
+        );
+      const erasedAnonymousIds = new Set(
+        erasedProfiles.map((profile) => profile.anonymousId),
+      );
+      return events.filter((trackingEvent) => {
+        const anonymousId = trackingEvent.context.user?.anonymousId;
+        return !anonymousId || !erasedAnonymousIds.has(anonymousId);
+      });
+    });
+    if (processableEvents.length === 0) {
+      return { success: true, eventsProcessed: 0 };
+    }
 
     // Step 1: Parse and enrich events
     const enrichedEvents = await step.run("enrich-events", async () => {
       // Parse IP address once for all events in this batch (they share the same IP)
       const geoInfo = await parseIPAddress(ipAddress);
-      
-      // DEBUG: Log first event's UTM data
-      if (events.length > 0) {
-        console.log('[DEBUG] First event UTM data:', {
-          utmSource: events[0].context.utm?.source,
-          utmMedium: events[0].context.utm?.medium,
-          utmCampaign: events[0].context.utm?.campaign,
-          pageUrl: events[0].context.page?.url,
-        });
-      }
-      
-      const enriched = events.map((evt) => {
-        // DEBUG: Log ALL event contexts to see what's missing
-        console.log(`[DEBUG] Event ${evt.eventName} context:`, {
-          hasClickIds: !!evt.context.clickIds,
-          clickIds: evt.context.clickIds,
-          hasUtm: !!evt.context.utm,
-          utm: evt.context.utm,
-        });
-        
+
+      const enriched = processableEvents.map((evt) => {
         // Use SDK-parsed device info if available, otherwise parse server-side
         const sdkDeviceInfo = evt.context.device;
         const isKnownValue = (value?: string) =>
@@ -334,21 +378,6 @@ export const processTrackingEvents = inngest.createFunction(
           ScCid: evt.context.clickIds?.ScCid,
           epik: evt.context.clickIds?.epik,
           rdt_cid: evt.context.clickIds?.rdt_cid,
-          
-          // DEBUG: Log extracted click IDs
-          ...(evt.eventName === 'checkout_completed' && console.log('[DEBUG] Extracted click IDs for checkout:', {
-            fbclid: evt.context.clickIds?.fbclid,
-            gclid: evt.context.clickIds?.gclid,
-          }), {}),
-          
-          // DEBUG: Log click ID extraction for page_view
-          ...(evt.eventName === 'page_view' && console.log('[DEBUG] Page view click IDs:', {
-            fbclid: evt.context.clickIds?.fbclid,
-            gclid: evt.context.clickIds?.gclid,
-            ttclid: evt.context.clickIds?.ttclid,
-            msclkid: evt.context.clickIds?.msclkid,
-            url: evt.context.page?.url,
-          }), {}),
 
           userAgent: sdkDeviceInfo?.userAgent,
           // Prefer SDK-parsed data, fallback to server-parsed (avoid "Unknown" masking)
@@ -377,8 +406,9 @@ export const processTrackingEvents = inngest.createFunction(
           city: geoInfo.city,
           timezone: sdkDeviceInfo?.timezone,
 
-          isConversion: evt.eventName === "conversion" || evt.eventName === "purchase" || evt.eventName === "checkout_completed" || evt.eventName === "form_submitted",
-          conversionType: evt.properties?.conversionType ?? (evt.eventName === "form_submitted" ? "lead" : undefined),
+          isConversion: trustLevel === "VERIFIED_FORM",
+          conversionType:
+            trustLevel === "VERIFIED_FORM" ? "lead" : undefined,
           revenue: evt.properties?.revenue,
           currency: evt.properties?.currency,
           orderId: evt.properties?.orderId,
@@ -423,9 +453,9 @@ export const processTrackingEvents = inngest.createFunction(
     });
 
     // Step 2: Store events in database
-    await step.run("store-events", async () => {
-      if (enrichedEvents.length === 0) return;
-      await db
+    const insertedEventIds = await step.run("store-events", async () => {
+      if (enrichedEvents.length === 0) return [];
+      const inserted = await db
         .insert(funnelEvent)
         .values(
           enrichedEvents.map((event) => ({
@@ -440,13 +470,22 @@ export const processTrackingEvents = inngest.createFunction(
             revenue: event.revenue == null ? event.revenue : String(event.revenue),
           }))
         )
-        .onConflictDoNothing({ target: funnelEvent.eventId });
+        .onConflictDoNothing({ target: funnelEvent.eventId })
+        .returning({ eventId: funnelEvent.eventId });
+      return inserted.map((record) => record.eventId);
     });
+    const insertedEventIdSet = new Set(insertedEventIds);
+    const acceptedEvents = enrichedEvents.filter((event) =>
+      insertedEventIdSet.delete(event.eventId),
+    );
+    if (acceptedEvents.length === 0) {
+      return { success: true, eventsProcessed: 0 };
+    }
 
     // Step 2.5: Push events to real-time cache for instant SSE delivery
     await step.run("push-to-realtime-cache", async () => {
       // Map enriched events to cached event format
-      const cachedEvents = enrichedEvents.map((e) => ({
+      const cachedEvents = acceptedEvents.map((e) => ({
         id: e.eventId,
         eventName: e.eventName,
         pagePath: e.pagePath ?? null,
@@ -482,34 +521,68 @@ export const processTrackingEvents = inngest.createFunction(
     });
 
     // Step 3: Create or update user profiles
-    await step.run("upsert-user-profiles", async () => {
-      const anonymousIds = [...new Set(enrichedEvents.map((e) => e.anonymousId).filter(Boolean))];
+    const resolvedProfiles = await step.run("upsert-user-profiles", async () => {
+      const anonymousIds = [
+        ...new Set(acceptedEvents.map((event) => event.anonymousId).filter(Boolean)),
+      ];
+      const resolved: Array<{ anonymousId: string; profileId: string }> = [];
 
       for (const anonymousId of anonymousIds) {
         if (!anonymousId) continue;
-
-        const userEvents = enrichedEvents.filter((e) => e.anonymousId === anonymousId);
+        const userEvents = acceptedEvents.filter(
+          (event) => event.anonymousId === anonymousId,
+        );
         const eventsCount = userEvents.length;
-
-        await db
-          .insert(anonymousUserProfiles)
-          .values({
-            id: anonymousId,
-            displayName: generateUserName(),
-            firstSeen: new Date(userEvents[0].timestamp),
-            lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
-            totalEvents: eventsCount,
-            totalSessions: 0,
-          })
-          .onConflictDoUpdate({
-            target: anonymousUserProfiles.id,
-            set: {
+        const existingProfile = await db.query.anonymousUserProfiles.findFirst({
+          where: and(
+            eq(anonymousUserProfiles.organizationId, organizationId),
+            locationId
+              ? eq(anonymousUserProfiles.locationId, locationId)
+              : isNull(anonymousUserProfiles.locationId),
+            eq(anonymousUserProfiles.anonymousId, anonymousId),
+          ),
+          columns: { id: true },
+        });
+        const profileId =
+          existingProfile?.id ??
+          buildAnonymousProfileId({ organizationId, locationId }, anonymousId);
+        if (existingProfile) {
+          await db
+            .update(anonymousUserProfiles)
+            .set({
               lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
               totalEvents: sql`${anonymousUserProfiles.totalEvents} + ${eventsCount}`,
-            },
-          });
+            })
+            .where(eq(anonymousUserProfiles.id, profileId));
+        } else {
+          await db
+            .insert(anonymousUserProfiles)
+            .values({
+              id: profileId,
+              organizationId,
+              locationId,
+              anonymousId,
+              displayName: generateUserName(),
+              firstSeen: new Date(userEvents[0].timestamp),
+              lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
+              totalEvents: eventsCount,
+              totalSessions: 0,
+            })
+            .onConflictDoUpdate({
+              target: anonymousUserProfiles.id,
+              set: {
+                lastSeen: new Date(userEvents[userEvents.length - 1].timestamp),
+                totalEvents: sql`${anonymousUserProfiles.totalEvents} + ${eventsCount}`,
+              },
+            });
+        }
+        resolved.push({ anonymousId, profileId });
       }
+      return resolved;
     });
+    const profileIdByAnonymousId = new Map(
+      resolvedProfiles.map((profile) => [profile.anonymousId, profile.profileId]),
+    );
 
     const getLifecycleStage = (totalSessions: number, lastSeen?: Date | null) => {
       if (lastSeen) {
@@ -548,6 +621,7 @@ export const processTrackingEvents = inngest.createFunction(
       }
 
       const existingConditions: SQL[] = [
+        eq(funnelSession.funnelId, funnelId),
         eq(funnelSession.city, city),
         isNotNull(funnelSession.latitude),
         isNotNull(funnelSession.longitude),
@@ -579,27 +653,21 @@ export const processTrackingEvents = inngest.createFunction(
         return coords;
       }
 
-      const coords = await fetchCityCoordinates({
-        city,
-        region,
-        countryCode: normalizedCountryCode,
-        countryName: normalizedCountryName,
-      });
-      cityGeoCache.set(cacheKey, coords);
-      return coords;
+      cityGeoCache.set(cacheKey, null);
+      return null;
     };
 
     // Step 4: Update or create sessions
     await step.run("update-sessions", async () => {
-      const sessionIds = [...new Set(enrichedEvents.map((e) => e.sessionId))];
+      const sessionIds = [...new Set(acceptedEvents.map((e) => e.sessionId))];
 
       for (const sessionId of sessionIds) {
-        const sessionEvents = enrichedEvents.filter((e: any) => e.sessionId === sessionId);
+        const sessionEvents = acceptedEvents.filter((e) => e.sessionId === sessionId);
         const firstEvent = sessionEvents[0];
         const lastEvent = sessionEvents[sessionEvents.length - 1];
 
-        const hasConversion = sessionEvents.some((e: any) => e.isConversion);
-        const conversionEvent = sessionEvents.find((e: any) => e.isConversion);
+        const hasConversion = sessionEvents.some((e) => e.isConversion);
+        const conversionEvent = sessionEvents.find((e) => e.isConversion);
 
         const firstSourceValue = firstEvent.utmSource || firstEvent.firstTouchUtmSource || firstEvent.lastTouchUtmSource || null;
         const firstMediumValue = firstEvent.utmMedium || firstEvent.firstTouchUtmMedium || firstEvent.lastTouchUtmMedium || null;
@@ -610,7 +678,10 @@ export const processTrackingEvents = inngest.createFunction(
 
         // Query ALL events for this session from the database to calculate accurate duration
         const allSessionEvents = await db.query.funnelEvent.findMany({
-          where: eq(funnelEvent.sessionId, sessionId),
+          where: and(
+            eq(funnelEvent.sessionId, sessionId),
+            eq(funnelEvent.funnelId, funnelId),
+          ),
           orderBy: (event, { asc }) => asc(event.timestamp),
           columns: {
             timestamp: true,
@@ -622,8 +693,8 @@ export const processTrackingEvents = inngest.createFunction(
         // Calculate session duration using ALL events (DB + current batch)
         // Combine existing DB events with new batch events
         const allTimestamps = [
-          ...allSessionEvents.map((e: any) => new Date(e.timestamp).getTime()),
-          ...sessionEvents.map((e: any) => new Date(e.timestamp).getTime()),
+          ...allSessionEvents.map((e) => new Date(e.timestamp).getTime()),
+          ...sessionEvents.map((e) => new Date(e.timestamp).getTime()),
         ];
         
         const firstTimestamp = new Date(Math.min(...allTimestamps));
@@ -633,17 +704,27 @@ export const processTrackingEvents = inngest.createFunction(
         const durationMs = endTime - startTime;
 
         // Extract session_end event if exists (from current batch or DB)
-        const sessionEndEvent = sessionEvents.find((e: any) => e.eventName === "session_end") ||
-          allSessionEvents.find((e: any) => e.eventName === "session_end");
-        const sessionEndProps = (sessionEndEvent?.eventProperties as any) || {};
+        const sessionEndEvent = sessionEvents.find(
+          (e) => e.eventName === "session_end",
+        );
+        const storedSessionEndEvent = allSessionEvents.find(
+          (e) => e.eventName === "session_end",
+        );
+        const sessionEndProps = asUnknownRecord(
+          sessionEndEvent?.eventProperties ?? storedSessionEndEvent?.eventProperties,
+        );
+        const sessionDuration = finiteNumber(sessionEndProps.duration);
+        const activeTime = finiteNumber(sessionEndProps.activeTime);
+        const idleTime = finiteNumber(sessionEndProps.idleTime);
+        const engagementRate = finiteNumber(sessionEndProps.engagementRate);
         
         // Calculate Core Web Vitals averages for this session
-        const vitalEvents = sessionEvents.filter((e: any) => e.eventName === "web_vital");
-        const lcpValues = vitalEvents.filter((e: any) => e.lcp != null).map((e: any) => e.lcp);
-        const inpValues = vitalEvents.filter((e: any) => e.inp != null).map((e: any) => e.inp);
-        const clsValues = vitalEvents.filter((e: any) => e.cls != null).map((e: any) => e.cls);
-        const fcpValues = vitalEvents.filter((e: any) => e.fcp != null).map((e: any) => e.fcp);
-        const ttfbValues = vitalEvents.filter((e: any) => e.ttfb != null).map((e: any) => e.ttfb);
+        const vitalEvents = sessionEvents.filter((e) => e.eventName === "web_vital");
+        const lcpValues = vitalEvents.flatMap((e) => e.lcp == null ? [] : [e.lcp]);
+        const inpValues = vitalEvents.flatMap((e) => e.inp == null ? [] : [e.inp]);
+        const clsValues = vitalEvents.flatMap((e) => e.cls == null ? [] : [e.cls]);
+        const fcpValues = vitalEvents.flatMap((e) => e.fcp == null ? [] : [e.fcp]);
+        const ttfbValues = vitalEvents.flatMap((e) => e.ttfb == null ? [] : [e.ttfb]);
 
         const avgLcp = lcpValues.length > 0 ? lcpValues.reduce((a, b) => a + b, 0) / lcpValues.length : null;
         const avgInp = inpValues.length > 0 ? inpValues.reduce((a, b) => a + b, 0) / inpValues.length : null;
@@ -677,7 +758,10 @@ export const processTrackingEvents = inngest.createFunction(
         const experienceScore = calculateExperienceScore();
 
         const existingSession = await db.query.funnelSession.findFirst({
-          where: eq(funnelSession.sessionId, sessionId),
+          where: and(
+            eq(funnelSession.sessionId, sessionId),
+            eq(funnelSession.funnelId, funnelId),
+          ),
           columns: {
             id: true,
             firstSource: true,
@@ -694,8 +778,6 @@ export const processTrackingEvents = inngest.createFunction(
         });
         
         const isNewSession = !existingSession;
-        
-        // @ts-ignore - TypeScript hasn't picked up the new Prisma types yet
         
         // Determine if we should update first* fields
         // Update if: 1) it's a new session, OR 2) existing session has NULL first* fields
@@ -741,36 +823,6 @@ export const processTrackingEvents = inngest.createFunction(
           resolvedRegion
         );
 
-        // DEBUG: Log session creation data
-        console.log('[DEBUG] Creating/updating session:', {
-          sessionId,
-          isNew: isNewSession,
-          shouldUpdateFirst,
-          existingFirstSource: existingSession?.firstSource,
-          firstEventUTM: {
-            source: firstEvent.utmSource,
-            medium: firstEvent.utmMedium,
-            campaign: firstEvent.utmCampaign,
-          },
-          firstEventName: firstEvent.eventName,
-        });
-
-        console.log('[DEBUG] *** UPSERT SESSION WITH CLICK IDS ***', {
-          sessionId,
-          fbclid: lastEvent.fbclid,
-          gclid: lastEvent.gclid,
-          gbraid: lastEvent.gbraid,
-          wbraid: lastEvent.wbraid,
-        });
-        
-        console.log('[DEBUG] *** ABOUT TO UPSERT SESSION ***', {
-          sessionId,
-          lastEventFbclid: lastEvent.fbclid,
-          lastEventGclid: lastEvent.gclid,
-          lastEventGbraid: lastEvent.gbraid,
-          lastEventWbraid: lastEvent.wbraid,
-        });
-        
         const sessionCreate = {
             id: crypto.randomUUID(),
             sessionId,
@@ -778,15 +830,17 @@ export const processTrackingEvents = inngest.createFunction(
             locationId,
             userId: firstEvent.userId,
             anonymousId: firstEvent.anonymousId,
-            profileId: firstEvent.anonymousId,
+            profileId: firstEvent.anonymousId
+              ? profileIdByAnonymousId.get(firstEvent.anonymousId)
+              : undefined,
 
             startedAt: firstTimestamp,
             updatedAt: new Date(),
             endedAt: lastTimestamp,
-            durationSeconds: sessionEndProps.duration || Math.floor(durationMs / 1000),
-            activeTimeSeconds: sessionEndProps.activeTime || null,
-            idleTimeSeconds: sessionEndProps.idleTime || null,
-            engagementRate: sessionEndProps.engagementRate || null,
+            durationSeconds: sessionDuration ?? Math.floor(durationMs / 1000),
+            activeTimeSeconds: activeTime ?? null,
+            idleTimeSeconds: idleTime ?? null,
+            engagementRate: engagementRate ?? null,
 
             // Core Web Vitals aggregates
             avgLcp,
@@ -874,10 +928,10 @@ export const processTrackingEvents = inngest.createFunction(
         const sessionUpdates = {
             updatedAt: new Date(),
             endedAt: lastTimestamp,
-            durationSeconds: sessionEndProps.duration || Math.floor(durationMs / 1000),
-            activeTimeSeconds: sessionEndProps.activeTime || null,
-            idleTimeSeconds: sessionEndProps.idleTime || null,
-            engagementRate: sessionEndProps.engagementRate || null,
+            durationSeconds: sessionDuration ?? Math.floor(durationMs / 1000),
+            activeTimeSeconds: activeTime ?? null,
+            idleTimeSeconds: idleTime ?? null,
+            engagementRate: engagementRate ?? null,
 
             // Update Core Web Vitals if we have new data
             ...(avgLcp !== null && { avgLcp }),
@@ -961,36 +1015,67 @@ export const processTrackingEvents = inngest.createFunction(
             }),
         };
 
+        let sessionWasCreated = false;
         if (existingSession) {
           await db
             .update(funnelSession)
             .set(sessionUpdates)
-            .where(eq(funnelSession.sessionId, sessionId));
+            .where(
+              and(
+                eq(funnelSession.sessionId, sessionId),
+                eq(funnelSession.funnelId, funnelId),
+              ),
+            );
         } else {
-          await db.insert(funnelSession).values(sessionCreate);
+          const [createdSession] = await db
+            .insert(funnelSession)
+            .values(sessionCreate)
+            .onConflictDoNothing({
+              target: [funnelSession.funnelId, funnelSession.sessionId],
+            })
+            .returning({ id: funnelSession.id });
+          sessionWasCreated = createdSession !== undefined;
+          if (!sessionWasCreated) {
+            await db
+              .update(funnelSession)
+              .set(sessionUpdates)
+              .where(
+                and(
+                  eq(funnelSession.sessionId, sessionId),
+                  eq(funnelSession.funnelId, funnelId),
+                ),
+              );
+          }
         }
 
         // Increment session count for user profile if this is a new session
-        if (isNewSession && firstEvent.anonymousId) {
+        const firstEventProfileId = firstEvent.anonymousId
+          ? profileIdByAnonymousId.get(firstEvent.anonymousId)
+          : undefined;
+        if (sessionWasCreated && firstEventProfileId) {
           await db
             .update(anonymousUserProfiles)
             .set({ totalSessions: sql`${anonymousUserProfiles.totalSessions} + 1` })
-            .where(eq(anonymousUserProfiles.id, firstEvent.anonymousId));
+            .where(eq(anonymousUserProfiles.id, firstEventProfileId));
         }
       }
     });
 
     // Step 4.1: Update visitor lifecycle stages
     await step.run("update-visitor-lifecycle", async () => {
-      const anonymousIds = [
-        ...new Set(enrichedEvents.map((e) => e.anonymousId).filter(Boolean)),
-      ];
+      const profileIds = [...new Set(profileIdByAnonymousId.values())];
 
-      for (const anonymousId of anonymousIds) {
-        if (!anonymousId) continue;
+      for (const profileId of profileIds) {
+        if (!profileId) continue;
 
         const profile = await db.query.anonymousUserProfiles.findFirst({
-          where: eq(anonymousUserProfiles.id, anonymousId),
+          where: and(
+            eq(anonymousUserProfiles.id, profileId),
+            eq(anonymousUserProfiles.organizationId, organizationId),
+            locationId
+              ? eq(anonymousUserProfiles.locationId, locationId)
+              : isNull(anonymousUserProfiles.locationId),
+          ),
           columns: {
             id: true,
             totalSessions: true,
@@ -1015,7 +1100,7 @@ export const processTrackingEvents = inngest.createFunction(
     // Step 4.5: Handle funnel tracking and session bridging
     await step.run("handle-funnel-tracking", async () => {
       // Handle funnel_stage_entered events
-      const stageEvents = enrichedEvents.filter((e) => e.eventName === "funnel_stage_entered");
+      const stageEvents = acceptedEvents.filter((e) => e.eventName === "funnel_stage_entered");
       for (const stageEvent of stageEvents) {
         const { stage, stageHistory } = stageEvent.eventProperties || {};
         if (!stage || !stageEvent.sessionId) continue;
@@ -1026,14 +1111,19 @@ export const processTrackingEvents = inngest.createFunction(
             currentStage: stage,
             stageHistory: stageHistory || [],
           })
-          .where(eq(funnelSession.sessionId, stageEvent.sessionId))
+          .where(
+            and(
+              eq(funnelSession.sessionId, stageEvent.sessionId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+          )
           .catch(() => {
           // Session might not exist yet - will be created in next batch
         });
       }
       
       // Handle checkout_started events
-      const checkoutStartedEvents = enrichedEvents.filter((e) => e.eventName === "checkout_started");
+      const checkoutStartedEvents = acceptedEvents.filter((e) => e.eventName === "checkout_started");
       for (const checkoutEvent of checkoutStartedEvents) {
         const { sessionId } = checkoutEvent;
         if (!sessionId) continue;
@@ -1044,14 +1134,19 @@ export const processTrackingEvents = inngest.createFunction(
             checkoutStartedAt: new Date(checkoutEvent.timestamp),
             currentStage: "checkout",
           })
-          .where(eq(funnelSession.sessionId, sessionId))
+          .where(
+            and(
+              eq(funnelSession.sessionId, sessionId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+          )
           .catch(() => {
           // Session might not exist yet
         });
       }
       
       // Handle checkout_completed events with session bridging
-      const checkoutCompletedEvents = enrichedEvents.filter((e) => e.eventName === "checkout_completed");
+      const checkoutCompletedEvents = acceptedEvents.filter((e) => e.eventName === "checkout_completed");
       for (const completionEvent of checkoutCompletedEvents) {
         const { sessionId } = completionEvent;
         const { originalSessionId, checkoutDuration } = completionEvent.eventProperties || {};
@@ -1063,12 +1158,22 @@ export const processTrackingEvents = inngest.createFunction(
           checkoutCompletedAt: new Date(completionEvent.timestamp),
           currentStage: "purchase",
           converted: true,
-          conversionValue: completionEvent.revenue,
+          conversionValue:
+            completionEvent.revenue == null
+              ? undefined
+              : String(completionEvent.revenue),
           conversionType: "purchase",
         };
         
-        if (originalSessionId) {
-          updateData.linkedSessionId = originalSessionId;
+        if (typeof originalSessionId === "string") {
+          const originalSession = await db.query.funnelSession.findFirst({
+            where: and(
+              eq(funnelSession.sessionId, originalSessionId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+            columns: { id: true },
+          });
+          if (originalSession) updateData.linkedSessionId = originalSession.id;
         }
         
         if (checkoutDuration) {
@@ -1078,14 +1183,19 @@ export const processTrackingEvents = inngest.createFunction(
         await db
           .update(funnelSession)
           .set(updateData)
-          .where(eq(funnelSession.sessionId, sessionId))
+          .where(
+            and(
+              eq(funnelSession.sessionId, sessionId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+          )
           .catch(() => {
           // Session might not exist yet
         });
       }
       
       // Handle checkout_abandoned events
-      const checkoutAbandonedEvents = enrichedEvents.filter((e) => e.eventName === "checkout_abandoned");
+      const checkoutAbandonedEvents = acceptedEvents.filter((e) => e.eventName === "checkout_abandoned");
       for (const abandonEvent of checkoutAbandonedEvents) {
         const { sessionId } = abandonEvent;
         const { reason } = abandonEvent.eventProperties || {};
@@ -1100,36 +1210,32 @@ export const processTrackingEvents = inngest.createFunction(
             abandonReason: reason || "unknown",
             currentStage: "abandoned",
           })
-          .where(eq(funnelSession.sessionId, sessionId))
+          .where(
+            and(
+              eq(funnelSession.sessionId, sessionId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+          )
           .catch(() => {
           // Session might not exist yet
         });
       }
     });
 
-    // Step 4.6: Send server-side conversion events to ad platforms
+    // Step 4.6: Send server-side conversion events through tenant-owned accounts.
     await step.run("send-ad-platform-conversions", async () => {
-      console.log("[Ad Conversions] Starting ad conversions step...");
-      
-      // Get conversion events (checkout_completed and form_submitted)
-      const conversionEvents = enrichedEvents.filter((e) => 
-        e.eventName === "checkout_completed" || e.eventName === "form_submitted"
-      );
-      
-      console.log(`[Ad Conversions] Found ${conversionEvents.length} conversion events`);
+      const conversionEvents = acceptedEvents.filter((event) => event.isConversion);
+      if (conversionEvents.length === 0) return;
 
       for (const event of conversionEvents) {
         const { sessionId } = event;
-        console.log(`[Ad Conversions] Processing event ${event.eventId} for session ${sessionId}`);
-        
-        if (!sessionId) {
-          console.log("[Ad Conversions] No sessionId, skipping");
-          continue;
-        }
+        if (!sessionId) continue;
 
-        // Get session data with click IDs
         const session = await db.query.funnelSession.findFirst({
-          where: eq(funnelSession.sessionId, sessionId),
+          where: and(
+            eq(funnelSession.sessionId, sessionId),
+            eq(funnelSession.funnelId, funnelId),
+          ),
           columns: {
             lastFbclid: true,
             lastGclid: true,
@@ -1142,251 +1248,98 @@ export const processTrackingEvents = inngest.createFunction(
             funnelId: true,
           },
         });
+        if (!session || session.funnelId !== funnelId) continue;
 
-        if (!session) {
-          console.log(`[Ad Conversions] Session ${sessionId} not found in database, skipping`);
-          continue;
-        }
-        
-        console.log(`[Ad Conversions] Session data:`, {
-          sessionId,
-          lastFbclid: session.lastFbclid,
-          lastGclid: session.lastGclid,
-          lastTtclid: session.lastTtclid,
-          gbraid: session.gbraid,
-          wbraid: session.wbraid,
-          fbp: session.fbp,
-          fbc: session.fbc,
+        const properties = asUnknownRecord(event.eventProperties);
+        await dispatchAdConversionEvent({
+          scope: authoritativeFunnel,
+          event: {
+            eventId: event.eventId,
+            kind: event.eventName === "checkout_completed" ? "PURCHASE" : "LEAD",
+            occurredAt: new Date(event.timestamp),
+            email: stringProperty(properties, "email"),
+            phone: stringProperty(properties, "phone"),
+            value: finiteNumber(event.revenue),
+            currency: stringProperty(properties, "currency") ?? "USD",
+            orderId: stringProperty(properties, "orderId") ?? event.eventId,
+            pageUrl: event.pageUrl,
+            ipAddress: event.ipAddress,
+            userAgent: event.userAgent,
+            fbclid: session.lastFbclid ?? undefined,
+            fbp: session.fbp ?? undefined,
+            fbc: session.fbc ?? undefined,
+            gclid: session.lastGclid ?? undefined,
+            gbraid: session.gbraid ?? undefined,
+            wbraid: session.wbraid ?? undefined,
+            ttclid: session.lastTtclid ?? undefined,
+            ttp: session.ttp ?? undefined,
+          },
         });
-
-        // Get ad platform credentials from environment variables
-        // TODO: This should be retrieved from a new AdPlatformCredential table
-        // For now, we use env vars which work for both location and external funnels
-        const metaPixelId = process.env.META_PIXEL_ID;
-        const metaAccessToken = process.env.META_CAPI_ACCESS_TOKEN;
-        const metaTestEventCode = process.env.META_TEST_EVENT_CODE;
-        const googleCustomerId = process.env.GOOGLE_ADS_CUSTOMER_ID;
-        const googleConversionActionId = process.env.GOOGLE_ADS_CONVERSION_ACTION_ID;
-        const googleDeveloperToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
-        const googleAccessToken = process.env.GOOGLE_ADS_ACCESS_TOKEN;
-        const tiktokPixelCode = process.env.TIKTOK_PIXEL_ID;
-        const tiktokAccessToken = process.env.TIKTOK_ACCESS_TOKEN;
-
-        const isPurchase = event.eventName === "checkout_completed";
-        const isLead = event.eventName === "form_submitted";
-
-        // Prepare common data
-        const email = event.eventProperties?.email;
-        const phone = event.eventProperties?.phone;
-        const value = event.revenue;
-        const currency = event.eventProperties?.currency || "USD";
-        const orderId = event.eventProperties?.orderId || event.eventId;
-
-        // Send to Meta if fbclid is present
-        console.log(`[Ad Conversions] Checking Meta conditions:`, {
-          hasLastFbclid: !!session.lastFbclid,
-          hasMetaPixelId: !!metaPixelId,
-          hasMetaAccessToken: !!metaAccessToken,
-          isPurchase,
-          isLead,
-        });
-        
-        if (session.lastFbclid && metaPixelId && metaAccessToken) {
-          console.log(`[Ad Conversions] Sending to Meta...`);
-          try {
-            if (isPurchase) {
-              await sendMetaPurchase(
-                { 
-                  pixelId: metaPixelId, 
-                  accessToken: metaAccessToken,
-                  testEventCode: metaTestEventCode 
-                },
-                {
-                  eventId: event.eventId,
-                  email,
-                  phone,
-                  value: value || 0,
-                  currency,
-                  orderId,
-                  fbclid: session.lastFbclid,
-                  fbp: session.fbp || undefined,
-                  fbc: session.fbc || undefined,
-                  ipAddress: event.ipAddress,
-                  userAgent: event.userAgent,
-                  eventTime: Math.floor(new Date(event.timestamp).getTime() / 1000),
-                }
-              );
-              console.log(`[Ad Conversions] Sent Meta purchase for event ${event.eventId}`);
-            } else if (isLead) {
-              await sendMetaLead(
-                { 
-                  pixelId: metaPixelId, 
-                  accessToken: metaAccessToken,
-                  testEventCode: metaTestEventCode 
-                },
-                {
-                  eventId: event.eventId,
-                  email,
-                  phone,
-                  value,
-                  currency,
-                  fbclid: session.lastFbclid,
-                  fbp: session.fbp || undefined,
-                  fbc: session.fbc || undefined,
-                  ipAddress: event.ipAddress,
-                  userAgent: event.userAgent,
-                  eventTime: Math.floor(new Date(event.timestamp).getTime() / 1000),
-                }
-              );
-              console.log(`[Ad Conversions] Sent Meta lead for event ${event.eventId}`);
-            }
-          } catch (error) {
-            console.error(`[Ad Conversions] Meta error for event ${event.eventId}:`, error);
-          }
-        }
-
-        // Send to Google if gclid/gbraid/wbraid is present
-        if ((session.lastGclid || session.gbraid || session.wbraid) && 
-            googleCustomerId && googleConversionActionId && googleDeveloperToken && googleAccessToken) {
-          try {
-            const conversionDateTime = new Date(event.timestamp).toISOString()
-              .replace('T', ' ')
-              .replace(/\.\d{3}Z$/, '+00:00');
-
-            if (isPurchase) {
-              await sendGooglePurchase(
-                {
-                  customerId: googleCustomerId,
-                  conversionActionId: googleConversionActionId,
-                  developerToken: googleDeveloperToken,
-                  accessToken: googleAccessToken,
-                },
-                {
-                  gclid: session.lastGclid || undefined,
-                  gbraid: session.gbraid || undefined,
-                  wbraid: session.wbraid || undefined,
-                  email,
-                  phone,
-                  value: value || 0,
-                  currency,
-                  orderId,
-                  conversionDateTime,
-                }
-              );
-              console.log(`[Ad Conversions] Sent Google purchase for event ${event.eventId}`);
-            } else if (isLead) {
-              await sendGoogleLead(
-                {
-                  customerId: googleCustomerId,
-                  conversionActionId: googleConversionActionId,
-                  developerToken: googleDeveloperToken,
-                  accessToken: googleAccessToken,
-                },
-                {
-                  gclid: session.lastGclid || undefined,
-                  gbraid: session.gbraid || undefined,
-                  wbraid: session.wbraid || undefined,
-                  email,
-                  phone,
-                  value,
-                  currency,
-                  conversionDateTime,
-                }
-              );
-              console.log(`[Ad Conversions] Sent Google lead for event ${event.eventId}`);
-            }
-          } catch (error) {
-            console.error(`[Ad Conversions] Google error for event ${event.eventId}:`, error);
-          }
-        }
-
-        // Send to TikTok if ttclid is present
-        if (session.lastTtclid && tiktokPixelCode && tiktokAccessToken) {
-          try {
-            if (isPurchase) {
-              await sendTikTokPurchase(
-                { pixelCode: tiktokPixelCode, accessToken: tiktokAccessToken },
-                {
-                  eventId: event.eventId,
-                  email,
-                  phone,
-                  value: value || 0,
-                  currency,
-                  ttclid: session.lastTtclid,
-                  ttp: session.ttp || undefined,
-                  ipAddress: event.ipAddress,
-                  userAgent: event.userAgent,
-                  pageUrl: event.pageUrl,
-                }
-              );
-              console.log(`[Ad Conversions] Sent TikTok purchase for event ${event.eventId}`);
-            } else if (isLead) {
-              await sendTikTokLead(
-                { pixelCode: tiktokPixelCode, accessToken: tiktokAccessToken },
-                {
-                  eventId: event.eventId,
-                  email,
-                  phone,
-                  value,
-                  currency,
-                  ttclid: session.lastTtclid,
-                  ttp: session.ttp || undefined,
-                  ipAddress: event.ipAddress,
-                  userAgent: event.userAgent,
-                  pageUrl: event.pageUrl,
-                }
-              );
-              console.log(`[Ad Conversions] Sent TikTok lead for event ${event.eventId}`);
-            }
-          } catch (error) {
-            console.error(`[Ad Conversions] TikTok error for event ${event.eventId}:`, error);
-          }
-        }
       }
     });
 
     // Step 4.7: Handle user identification events
     await step.run("handle-user-identification", async () => {
-      const identifyEvents = enrichedEvents.filter((e) => e.eventName === "user_identified");
+      const identifyEvents = acceptedEvents.filter((e) => e.eventName === "user_identified");
       
       for (const identifyEvent of identifyEvents) {
         const { userId, anonymousId, traits } = identifyEvent.eventProperties || {};
         
-        if (!anonymousId || !userId) continue;
+        if (typeof anonymousId !== "string" || !anonymousId || !userId) continue;
+        const existingProfile = await db.query.anonymousUserProfiles.findFirst({
+          where: and(
+            eq(anonymousUserProfiles.organizationId, organizationId),
+            locationId
+              ? eq(anonymousUserProfiles.locationId, locationId)
+              : isNull(anonymousUserProfiles.locationId),
+            eq(anonymousUserProfiles.anonymousId, anonymousId),
+          ),
+          columns: { id: true },
+        });
+        const profileId =
+          existingProfile?.id ??
+          buildAnonymousProfileId({ organizationId, locationId }, anonymousId);
         
-        // Update the anonymous user profile with identified user data
         await db
-          .update(anonymousUserProfiles)
-          .set({
+          .insert(anonymousUserProfiles)
+          .values({
+            id: profileId,
+            organizationId,
+            locationId,
+            anonymousId,
+            displayName: traits?.name || traits?.email || userId,
             identifiedUserId: userId,
             identifiedAt: new Date(),
             userProperties: traits || {},
-            displayName: traits?.name || traits?.email || userId,
+            firstSeen: new Date(identifyEvent.timestamp),
+            lastSeen: new Date(identifyEvent.timestamp),
           })
-          .where(eq(anonymousUserProfiles.id, anonymousId))
-          .catch(() => {
-          // Profile might not exist yet, create it
-          return db.insert(anonymousUserProfiles).values({
-              id: anonymousId,
+          .onConflictDoUpdate({
+            target: anonymousUserProfiles.id,
+            set: {
               displayName: traits?.name || traits?.email || userId,
               identifiedUserId: userId,
               identifiedAt: new Date(),
               userProperties: traits || {},
-              firstSeen: new Date(),
-              lastSeen: new Date(),
+              lastSeen: new Date(identifyEvent.timestamp),
+            },
           });
-        });
         
         // Update all sessions for this anonymous user to link to identified user
         await db
           .update(funnelSession)
           .set({ userId })
-          .where(eq(funnelSession.anonymousId, anonymousId));
+          .where(
+            and(
+              eq(funnelSession.anonymousId, anonymousId),
+              eq(funnelSession.funnelId, funnelId),
+            ),
+          );
       }
     });
 
     // Step 5: Create or update clients for conversions
-    const conversions = enrichedEvents.filter((e) => e.isConversion);
+    const conversions = acceptedEvents.filter((e) => e.isConversion);
 
     for (const conversion of conversions) {
       await step.run(`process-conversion-${conversion.eventId}`, async () => {
@@ -1408,7 +1361,7 @@ export const processTrackingEvents = inngest.createFunction(
               lifecycleStage: "CUSTOMER",
               score: (existingClient.score ?? 0) + 50,
               metadata: {
-                ...((existingClient.metadata as any) || {}),
+                ...asUnknownRecord(existingClient.metadata),
                 funnelConversion: {
                   funnelId,
                   date: new Date().toISOString(),
@@ -1446,7 +1399,7 @@ export const processTrackingEvents = inngest.createFunction(
       // Step 6: Trigger workflows for conversion events
       await step.run(`trigger-workflows-${conversion.eventId}`, async () => {
         // Funnel conversion workflow triggers are intentionally disabled until the node type exists.
-        const workflows: any[] = [];
+        const workflows: Array<{ id: string }> = [];
 
         // Trigger each workflow
         for (const workflow of workflows) {
@@ -1467,6 +1420,6 @@ export const processTrackingEvents = inngest.createFunction(
       });
     }
 
-    return { success: true, eventsProcessed: enrichedEvents.length };
+    return { success: true, eventsProcessed: acceptedEvents.length };
   }
 );

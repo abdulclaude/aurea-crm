@@ -4,12 +4,14 @@ import {
   closestCenter,
   DndContext,
   type DragEndEvent,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
 import {
   arrayMove,
+  sortableKeyboardCoordinates,
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
@@ -57,7 +59,9 @@ export function ReportColumnControls<TData>({
     const ordered = columnOrder
       .map((id) => map.get(id))
       .filter((column): column is (typeof columns)[number] => Boolean(column));
-    const missing = columns.filter((column) => !columnOrder.includes(column.id));
+    const missing = columns.filter(
+      (column) => !columnOrder.includes(column.id),
+    );
     return [...ordered, ...missing];
   }, [columns, columnOrder]);
   const fixedColumn = orderedColumns.find(
@@ -68,6 +72,9 @@ export function ReportColumnControls<TData>({
   );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
   );
 
   const handleDragEnd = React.useCallback(

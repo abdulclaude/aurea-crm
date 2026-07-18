@@ -31,12 +31,12 @@ import {
   useSuspenseBundles,
 } from "../hooks/use-bundles";
 
-import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useBundlesParams } from "../hooks/use-bundles-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
 import type { Workflows } from "@/db/types";
 import { NodeType } from "@/db/enums";
+import { toast } from "sonner";
 
 type BundleNodePreview = {
   id?: string;
@@ -65,7 +65,6 @@ export default BundlesList;
 
 export const BundlesHeader = ({ disabled }: { disabled?: boolean }) => {
   const createBundle = useCreateBundle();
-  const { handleError, modal } = useUpgradeModal();
 
   const router = useRouter();
 
@@ -74,24 +73,19 @@ export const BundlesHeader = ({ disabled }: { disabled?: boolean }) => {
       onSuccess: (data) => {
         router.push(`/bundles/${data.id}`);
       },
-      onError: (error) => {
-        handleError(error);
-      },
+      onError: (error) => toast.error(error.message),
     });
   };
 
   return (
-    <>
-      {modal}
-      <EntityHeader
-        title="Bundle Workflows"
-        description="Create and manage reusable workflow bundles"
-        onNew={handleCreate}
-        newButtonLabel="New bundle"
-        disabled={disabled}
-        isCreating={createBundle.isPending}
-      />
-    </>
+    <EntityHeader
+      title="Bundle Workflows"
+      description="Create and manage reusable workflow bundles"
+      onNew={handleCreate}
+      newButtonLabel="New bundle"
+      disabled={disabled}
+      isCreating={createBundle.isPending}
+    />
   );
 };
 
@@ -147,7 +141,6 @@ export const BundlesError = () => {
 
 export const BundlesEmpty = () => {
   const createBundle = useCreateBundle();
-  const { handleError, modal } = useUpgradeModal();
 
   const router = useRouter();
 
@@ -156,22 +149,17 @@ export const BundlesEmpty = () => {
       onSuccess: (data) => {
         router.push(`/bundles/${data.id}`);
       },
-      onError: (error) => {
-        handleError(error);
-      },
+      onError: (error) => toast.error(error.message),
     });
   };
 
   return (
-    <>
-      {modal}
-      <EmptyView
-        title="No bundles"
-        label="bundle"
-        onNew={handleCreate}
-        message="No bundle workflows have been found. Get started by creating a bundle."
-      />
-    </>
+    <EmptyView
+      title="No bundles"
+      label="bundle"
+      onNew={handleCreate}
+      message="No bundle workflows have been found. Get started by creating a bundle."
+    />
   );
 };
 

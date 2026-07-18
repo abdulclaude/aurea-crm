@@ -1,6 +1,11 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -38,32 +43,39 @@ export function DataTablePagination({
   };
 
   return (
-    <div className="flex items-center justify-between px-6 py-4 border-t border-black/5 dark:border-white/5">
-      <div className="flex items-center gap-6 text-xs text-primary/75">
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-3 px-4 py-4 dark:border-white/5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+      <div className="flex w-full items-center justify-between gap-3 text-xs text-primary/75 sm:w-auto sm:justify-start sm:gap-6">
+        <div className="flex items-center gap-2 whitespace-nowrap">
           <span>Rows per page</span>
           <Select
             value={pageSize.toString()}
             onValueChange={(value) => onPageSizeChange(Number(value))}
           >
-            <SelectTrigger className="h-8 w-[70px] text-xs bg-background border-black/5 dark:border-white/5">
+            <SelectTrigger
+              aria-label="Rows per page"
+              className="h-8 w-[70px] text-xs bg-background border-black/5 dark:border-white/5"
+            >
               <SelectValue placeholder={pageSize.toString()} />
             </SelectTrigger>
             <SelectContent className="bg-background border-black/5 dark:border-white/5">
               {pageSizeOptions.map((size) => (
-                <SelectItem key={size} value={size.toString()} className="text-xs">
+                <SelectItem
+                  key={size}
+                  value={size.toString()}
+                  className="text-xs"
+                >
                   {size}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <span>
+        <span className="whitespace-nowrap">
           Showing {startItem}-{endItem} of {totalItems}
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex w-full items-center justify-between gap-1 sm:w-auto sm:justify-start sm:gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -85,7 +97,7 @@ export function DataTablePagination({
           <span className="sr-only">Previous page</span>
         </Button>
 
-        <div className="flex items-center gap-1 text-xs text-primary">
+        <div className="flex items-center gap-1 whitespace-nowrap text-xs text-primary">
           <span>
             Page {safeCurrentPage} of {safeTotalPages}
           </span>

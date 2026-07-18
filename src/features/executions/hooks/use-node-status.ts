@@ -3,19 +3,40 @@ import { useInngestSubscription } from "@inngest/realtime/hooks";
 import { useEffect, useState } from "react";
 import type { NodeStatus } from "@/components/react-flow/node-status-indicator";
 
-interface UseNodeStatusOptions {
+interface UseNodeStatusOptions<TToken extends Realtime.Subscribe.Token> {
   nodeId: string;
   channel: string;
   topic: string;
-  refreshToken: () => Promise<Realtime.Subscribe.Token>;
+  refreshToken: () => Promise<TToken>;
 }
 
-export function useNodeStatus({
+function getCreatedAtTimestamp(message: unknown): number {
+  if (
+    typeof message !== "object" ||
+    message === null ||
+    !("createdAt" in message)
+  ) {
+    return 0;
+  }
+
+  const { createdAt } = message;
+  if (createdAt instanceof Date) {
+    return createdAt.getTime();
+  }
+
+  if (typeof createdAt === "string" || typeof createdAt === "number") {
+    return new Date(createdAt).getTime();
+  }
+
+  return 0;
+}
+
+export function useNodeStatus<TToken extends Realtime.Subscribe.Token>({
   nodeId,
   channel,
   topic,
   refreshToken,
-}: UseNodeStatusOptions) {
+}: UseNodeStatusOptions<TToken>): NodeStatus {
   const [status, setStatus] = useState<NodeStatus>("initial");
 
   const { data } = useInngestSubscription({
@@ -38,14 +59,9 @@ export function useNodeStatus({
           msg.topic === topic &&
           msg.data.nodeId === nodeId
       )
-      .sort((a, b) => {
-        if (a.kind === "data" && b.kind === "data") {
-          return (
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-        }
-        return 0;
-      })[0];
+      .sort(
+        (a, b) => getCreatedAtTimestamp(b) - getCreatedAtTimestamp(a)
+      )[0];
 
     if (latestMessage?.kind === "data") {
       setStatus(latestMessage.data.status as NodeStatus);

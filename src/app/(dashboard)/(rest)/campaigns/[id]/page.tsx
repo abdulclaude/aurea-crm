@@ -16,7 +16,7 @@ function CampaignContent({ id }: { id: string }) {
   const trpc = useTRPC();
 
   const { data: campaign } = useSuspenseQuery(
-    trpc.campaigns.get.queryOptions({ id })
+    trpc.campaigns.get.queryOptions({ id }),
   );
 
   if (!campaign) {
@@ -40,6 +40,7 @@ function CampaignContent({ id }: { id: string }) {
         replyTo: campaign.replyTo,
         emailDomainId: campaign.emailDomainId,
         resendTemplateId: campaign.resendTemplateId,
+        savedAudienceId: campaign.savedAudienceId,
         segmentType: campaign.segmentType,
         segmentFilter: campaign.segmentFilter,
         content: campaign.content,
@@ -51,7 +52,7 @@ function CampaignContent({ id }: { id: string }) {
 
 export default function CampaignPage({ params }: PageProps) {
   const resolvedParams = use(params);
-  
+
   return (
     <div className="p-6">
       <Suspense

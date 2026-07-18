@@ -15,82 +15,82 @@ type OutlookNodeData = Partial<OutlookExecutionFormValues>;
 type OutlookNodeType = Node<OutlookNodeData>;
 
 export const OutlookNode: React.FC<NodeProps<OutlookNodeType>> = memo((props) => {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const { setNodes, getNodes, getEdges } = useReactFlow();
-  const workflowContext = useWorkflowContext();
+    const [dialogOpen, setDialogOpen] = useState(false);
+    const { setNodes, getNodes, getEdges } = useReactFlow();
+    const workflowContext = useWorkflowContext();
 
-  const data = props.data || {};
+    const data = props.data || {};
 
-  // Get the latest node data from React Flow when dialog is open
-  const currentData = useMemo(() => {
-    if (!dialogOpen) return data;
-    const nodes = getNodes();
-    const currentNode = nodes.find((n) => n.id === props.id);
-    return (currentNode?.data as OutlookNodeData) || data;
-  }, [dialogOpen, getNodes, props.id, data]);
+    // Get the latest node data from React Flow when dialog is open
+    const currentData = useMemo(() => {
+      if (!dialogOpen) return data;
+      const nodes = getNodes();
+      const currentNode = nodes.find((n) => n.id === props.id);
+      return (currentNode?.data as OutlookNodeData) || data;
+    }, [dialogOpen, getNodes, props.id, data]);
 
-  // Build available context from upstream nodes
-  const variables = useMemo(() => {
-    if (!dialogOpen) return [];
-    const nodes = getNodes();
-    const edges = getEdges();
-    return buildNodeContext(props.id, nodes, edges, {
-      isBundle: workflowContext.isBundle,
-      bundleInputs: workflowContext.bundleInputs,
-      bundleWorkflowName: workflowContext.workflowName,
-      parentWorkflowContext: workflowContext.parentWorkflowContext,
+    // Build available context from upstream nodes
+    const variables = useMemo(() => {
+      if (!dialogOpen) return [];
+      const nodes = getNodes();
+      const edges = getEdges();
+      return buildNodeContext(props.id, nodes, edges, {
+        isBundle: workflowContext.isBundle,
+        bundleInputs: workflowContext.bundleInputs,
+        bundleWorkflowName: workflowContext.workflowName,
+        parentWorkflowContext: workflowContext.parentWorkflowContext,
+      });
+    }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
+
+    const description = data.to
+      ? `Email ${data.to.split(",")[0].trim()}`
+      : "Not configured";
+
+    const nodeStatus = useNodeStatus({
+      nodeId: props.id,
+      channel: OUTLOOK_CHANNEL_NAME,
+      topic: "status",
+      refreshToken: fetchOutlookRealtimeToken,
     });
-  }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
-  const description = data.to
-    ? `Email ${data.to.split(",")[0].trim()}`
-    : "Not configured";
+    const handleSubmit = (values: OutlookExecutionFormValues) => {
+      setNodes((nodes) =>
+        nodes.map((node) => {
+          if (node.id === props.id) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                ...values,
+              },
+            };
+          }
+          return node;
+        })
+      );
+    };
 
-  const nodeStatus = useNodeStatus({
-    nodeId: props.id,
-    channel: OUTLOOK_CHANNEL_NAME,
-    topic: "status",
-    refreshToken: fetchOutlookRealtimeToken as any,
-  });
+    const handleOpen = () => setDialogOpen(true);
 
-  const handleSubmit = (values: OutlookExecutionFormValues) => {
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id === props.id) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              ...values,
-            },
-          };
-        }
-        return node;
-      })
+    return (
+      <>
+        <OutlookExecutionDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          onSubmit={handleSubmit}
+          defaultValues={currentData}
+          variables={variables}
+        />
+
+        <BaseExecutionNode
+          {...props}
+          icon="/logos/microsoft.svg"
+          name="Outlook"
+          description={description}
+          status={nodeStatus}
+          onSettings={handleOpen}
+          onDoubleClick={handleOpen}
+        />
+      </>
     );
-  };
-
-  const handleOpen = () => setDialogOpen(true);
-
-  return (
-    <>
-      <OutlookExecutionDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        onSubmit={handleSubmit}
-        defaultValues={currentData}
-        variables={variables}
-      />
-
-      <BaseExecutionNode
-        {...props}
-        icon="/logos/microsoft.svg"
-        name="Outlook"
-        description={description}
-        status={nodeStatus}
-        onSettings={handleOpen}
-        onDoubleClick={handleOpen}
-      />
-    </>
-  );
 });

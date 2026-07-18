@@ -15,13 +15,20 @@ import {
   ChevronRight,
   CreditCard,
   Gift,
+  FileCheck2,
+  Handshake,
   HeartPulse,
   MessageSquare,
+  Mail,
   Search,
   Trophy,
   UserCheck,
   UserMinus,
   Users,
+  ShoppingBag,
+  TimerOff,
+  ListTodo,
+  CalendarCheck2,
 } from "lucide-react";
 
 import { IconCursorClick as ManualTriggerIcon } from "central-icons/IconCursorClick";
@@ -61,12 +68,16 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { AppProvider, NodeType } from "@/db/enums";
+import type { JsonObject } from "@/db/json";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { useSuspenseAppProviders } from "@/features/apps/hooks/use-apps";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { Separator } from "./ui/separator";
+import { nodeTypeIsAvailable } from "@/features/nodes/lib/node-availability";
+import { getNodeDefaultData } from "@/features/nodes/lib/node-default-data";
+import { isWorkflowTriggerNodeType } from "@/features/workflows/lib/workflow-node-types";
 
 export type NodeTypeOption = {
   type: NodeType;
@@ -74,6 +85,7 @@ export type NodeTypeOption = {
   description: string;
   icon: React.ComponentType<{ className?: string }> | string;
   requiresApp?: AppProvider;
+  defaultData?: JsonObject;
 };
 
 // ========== TRIGGERS ==========
@@ -377,8 +389,7 @@ const clientTriggerNodes: NodeTypeOption[] = [
   {
     type: NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
     label: "Client Lifecycle Stage Changed",
-    description:
-      "Triggers when a client moves to a different lifecycle stage.",
+    description: "Triggers when a client moves to a different lifecycle stage.",
     icon: ClientLifecycleStageChangedIcon,
   },
 ];
@@ -427,12 +438,6 @@ const appointmentTriggerNodes: NodeTypeOption[] = [
 
 // Stripe Triggers
 const stripeTriggerNodes: NodeTypeOption[] = [
-  {
-    type: NodeType.STRIPE_TRIGGER,
-    label: "Stripe Event",
-    description: "Runs the flow when a Stripe event is captured.",
-    icon: "/logos/stripe.svg",
-  },
   {
     type: NodeType.STRIPE_PAYMENT_SUCCEEDED,
     label: "Payment Succeeded",
@@ -876,16 +881,148 @@ const appointmentExecutionNodes: NodeTypeOption[] = [
 
 const studioTriggerNodes: NodeTypeOption[] = [
   {
+    type: NodeType.CLIENT_CREATED_TRIGGER,
+    label: "New client added",
+    description: "Runs when a new non-lead CRM member is added.",
+    icon: UserCheck,
+    defaultData: {
+      clientTypeFilter: "CLIENT",
+      variableName: "newClient",
+    },
+  },
+  {
+    type: NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
+    label: "Client transitioned to lifecycle stage",
+    description:
+      "Runs when a client moves from or into selected lifecycle stages.",
+    icon: UserCheck,
+    defaultData: {
+      variableName: "clientStageChange",
+    },
+  },
+  {
+    type: NodeType.CLIENT_CREATED_TRIGGER,
+    label: "New lead added",
+    description: "Runs when a new lead is added.",
+    icon: Users,
+    defaultData: {
+      clientTypeFilter: "LEAD",
+      variableName: "newLead",
+    },
+  },
+  {
+    type: NodeType.FORM_SUBMITTED_TRIGGER,
+    label: "Form submitted",
+    description: "Runs when an Aurea published or builder form is submitted.",
+    icon: FileCheck2,
+  },
+  {
+    type: NodeType.FORM_SUBMITTED_TRIGGER,
+    label: "Subscribed to newsletter",
+    description:
+      "Runs when a member submits the selected newsletter signup form.",
+    icon: Mail,
+    defaultData: {
+      intent: "NEWSLETTER",
+      formId: null,
+      variableName: "newsletterSubscription",
+    },
+  },
+  {
+    type: NodeType.PRICING_OPTION_PURCHASED_TRIGGER,
+    label: "Client purchased pricing option",
+    description:
+      "Runs after a successful checkout for configured pricing options.",
+    icon: ShoppingBag,
+  },
+  {
+    type: NodeType.CLIENT_INACTIVITY_TRIGGER,
+    label: "No recent bookings",
+    description:
+      "Runs after a client has made no class bookings for a chosen period.",
+    icon: TimerOff,
+    defaultData: {
+      days: 30,
+      activityDimensions: ["CLASS_BOOKING"],
+      variableName: "bookingInactivity",
+    },
+  },
+  {
+    type: NodeType.CLIENT_INACTIVITY_TRIGGER,
+    label: "No recent purchases",
+    description:
+      "Runs after a client has made no successful purchases for a chosen period.",
+    icon: TimerOff,
+    defaultData: {
+      days: 30,
+      activityDimensions: ["SUCCESSFUL_PAYMENT"],
+      variableName: "purchaseInactivity",
+    },
+  },
+  {
+    type: NodeType.CLIENT_INACTIVITY_TRIGGER,
+    label: "No recent purchases or bookings",
+    description:
+      "Runs when neither a class booking nor a successful purchase is recent.",
+    icon: TimerOff,
+    defaultData: {
+      days: 30,
+      activityDimensions: ["CLASS_BOOKING", "SUCCESSFUL_PAYMENT"],
+      variableName: "clientInactivity",
+    },
+  },
+  {
     type: NodeType.BIRTHDAY_TRIGGER,
-    label: "Birthday",
-    description: "Runs daily for members whose birthday is today.",
+    label: "Upcoming birthday",
+    description: "Runs before or on each member's birthday.",
     icon: Cake,
+    defaultData: {
+      daysBefore: 7,
+      variableName: "birthday",
+    },
   },
   {
     type: NodeType.CLASS_BOOKED_TRIGGER,
     label: "Class booked",
     description: "Runs when a member books a class.",
     icon: CalendarCheck,
+    defaultData: {
+      variableName: "bookedClass",
+      firstBookingOnly: false,
+      triggerTiming: "BOOKED",
+    },
+  },
+  {
+    type: NodeType.CLASS_BOOKED_TRIGGER,
+    label: "One hour before class",
+    description: "Runs one hour before a booked class begins.",
+    icon: Bell,
+    defaultData: {
+      variableName: "upcomingClass",
+      firstBookingOnly: false,
+      triggerTiming: "ONE_HOUR_BEFORE",
+    },
+  },
+  {
+    type: NodeType.APPOINTMENT_CREATED_TRIGGER,
+    label: "First appointment booked",
+    description: "Runs when a client books their first appointment.",
+    icon: CalendarCheck,
+    defaultData: {
+      variableName: "firstAppointment",
+      firstAppointmentOnly: true,
+    },
+  },
+  {
+    type: NodeType.CLASS_BOOKED_TRIGGER,
+    label: "First class booked",
+    description: "Runs when a member books their first class.",
+    icon: CalendarCheck,
+    defaultData: {
+      variableName: "firstClassBooking",
+      firstBookingOnly: true,
+      triggerTiming: "BOOKED",
+    },
   },
   {
     type: NodeType.CLASS_CANCELLED_TRIGGER,
@@ -895,9 +1032,23 @@ const studioTriggerNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.MEMBER_CHECKED_IN_TRIGGER,
-    label: "Member checked in",
+    label: "Checked into class",
     description: "Runs when a member checks in and includes visit count.",
     icon: UserCheck,
+    defaultData: {
+      variableName: "checkIn",
+      firstCheckInOnly: false,
+    },
+  },
+  {
+    type: NodeType.MEMBER_CHECKED_IN_TRIGGER,
+    label: "Checked into first class",
+    description: "Runs only for a member's first class check-in.",
+    icon: UserCheck,
+    defaultData: {
+      variableName: "firstCheckIn",
+      firstCheckInOnly: true,
+    },
   },
   {
     type: NodeType.MEMBER_NO_SHOW_TRIGGER,
@@ -913,13 +1064,29 @@ const studioTriggerNodes: NodeTypeOption[] = [
   },
   {
     type: NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
-    label: "Membership expiring",
-    description: "Runs when a membership is nearing its end date.",
+    label: "Subscription expiring",
+    description: "Runs before an active subscription reaches its end date.",
     icon: Bell,
+    defaultData: {
+      membershipKind: "SUBSCRIPTION",
+      daysBefore: 7,
+      variableName: "expiringSubscription",
+    },
+  },
+  {
+    type: NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
+    label: "Package expiring soon",
+    description: "Runs before a class package reaches its end date.",
+    icon: Bell,
+    defaultData: {
+      membershipKind: "PACKAGE",
+      daysBefore: 7,
+      variableName: "expiringPackage",
+    },
   },
   {
     type: NodeType.MEMBERSHIP_CANCELLED_TRIGGER,
-    label: "Membership cancelled",
+    label: "Canceled subscription",
     description: "Runs when a membership is cancelled.",
     icon: UserMinus,
   },
@@ -942,14 +1109,56 @@ const studioTriggerNodes: NodeTypeOption[] = [
     icon: Gift,
   },
   {
+    type: NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
+    label: "Client used all pricing option credits",
+    description:
+      "Runs when a member uses the final credit in a class package.",
+    icon: Gift,
+    defaultData: {
+      creditThreshold: 0,
+      pricingOptionIds: [],
+      pricingOptionNames: [],
+      variableName: "pricingCreditsUsed",
+    },
+  },
+  {
+    type: NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
+    label: "Package credits running low",
+    description:
+      "Runs when a member's remaining class credits reach a chosen threshold.",
+    icon: Gift,
+    defaultData: {
+      creditThreshold: 2,
+      pricingOptionIds: [],
+      pricingOptionNames: [],
+      variableName: "pricingCreditsLow",
+    },
+  },
+  {
+    type: NodeType.REFERRAL_CONVERTED_TRIGGER,
+    label: "Referral converted",
+    description: "Runs when a referred member converts.",
+    icon: Handshake,
+  },
+  {
     type: NodeType.MEMBER_CLASS_COUNT_TRIGGER,
-    label: "Class milestone",
+    label: "Milestone reached",
+    description: "Runs when a member reaches a configured attendance count.",
+    icon: Trophy,
+    defaultData: {
+      targetCount: 10,
+      variableName: "milestone",
+    },
+  },
+  {
+    type: NodeType.MEMBER_CLASS_COUNT_TRIGGER,
+    label: "Class milestone at location",
     description: "Runs when a member reaches a configured visit count.",
     icon: Trophy,
   },
   {
     type: NodeType.CLIENT_TAG_ADDED_TRIGGER,
-    label: "Member tag added",
+    label: "Client tag added",
     description: "Runs when a specific tag is added to a member.",
     icon: TagIcon,
   },
@@ -966,6 +1175,17 @@ const studioTriggerNodes: NodeTypeOption[] = [
     icon: CreditCard,
   },
   {
+    type: NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER,
+    label: "Subscription first payment succeeded",
+    description:
+      "Runs when the first successful payment for a membership is recorded.",
+    icon: CreditCard,
+    defaultData: {
+      firstPaymentOnly: true,
+      variableName: "subscriptionPayment",
+    },
+  },
+  {
     type: NodeType.STUDIO_PAYMENT_FAILED_TRIGGER,
     label: "Studio payment failed",
     description: "Runs when a studio payment fails.",
@@ -974,6 +1194,24 @@ const studioTriggerNodes: NodeTypeOption[] = [
 ];
 
 const studioExecutionNodes: NodeTypeOption[] = [
+  {
+    type: NodeType.STUDIO_CLASS_ACTION,
+    label: "Attendance and waitlist action",
+    description: "Check in, mark a no-show, or manage a class waitlist.",
+    icon: CalendarCheck2,
+  },
+  {
+    type: NodeType.CREATE_TASK,
+    label: "Create task",
+    description: "Create a tenant-scoped CRM follow-up task.",
+    icon: ListTodo,
+  },
+  {
+    type: NodeType.SEND_EMAIL,
+    label: "Send email",
+    description: "Queue a client email through the workspace provider.",
+    icon: Mail,
+  },
   {
     type: NodeType.SEND_CLASS_REMINDER,
     label: "Send class reminder",
@@ -998,7 +1236,134 @@ const studioExecutionNodes: NodeTypeOption[] = [
     description: "Send an SMS through your configured provider.",
     icon: MessageSquare,
   },
+  {
+    type: NodeType.UPDATE_CLIENT,
+    label: "Lifecycle stage",
+    description: "Move a workflow member to a selected lifecycle stage.",
+    icon: UserCheck,
+    defaultData: {
+      workflowAction: "LIFECYCLE_STAGE",
+      variableName: "updatedClient",
+    },
+  },
 ];
+
+type StudioNodeCategory = {
+  id: string;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  nodes: NodeTypeOption[];
+};
+
+const studioTriggerCategories: StudioNodeCategory[] = [
+  studioCategory(
+    "forms-leads",
+    "Forms and leads",
+    "Responses and new lead activity",
+    FileCheck2,
+    studioTriggerNodes,
+    [NodeType.CLIENT_CREATED_TRIGGER, NodeType.FORM_SUBMITTED_TRIGGER],
+  ),
+  studioCategory(
+    "classes-visits",
+    "Classes and visits",
+    "Bookings, attendance, waitlists, and milestones",
+    CalendarCheck2,
+    studioTriggerNodes,
+    [
+      NodeType.CLASS_BOOKED_TRIGGER,
+      NodeType.CLASS_CANCELLED_TRIGGER,
+      NodeType.MEMBER_CHECKED_IN_TRIGGER,
+      NodeType.MEMBER_NO_SHOW_TRIGGER,
+      NodeType.WAITLIST_SPOT_OPENED_TRIGGER,
+      NodeType.MEMBER_CLASS_COUNT_TRIGGER,
+      NodeType.APPOINTMENT_CREATED_TRIGGER,
+    ],
+  ),
+  studioCategory(
+    "purchases-memberships",
+    "Purchases and memberships",
+    "Pricing options, memberships, and payments",
+    CreditCard,
+    studioTriggerNodes,
+    [
+      NodeType.PRICING_OPTION_PURCHASED_TRIGGER,
+      NodeType.MEMBERSHIP_CREATED_TRIGGER,
+      NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
+      NodeType.MEMBERSHIP_CANCELLED_TRIGGER,
+      NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER,
+      NodeType.STUDIO_PAYMENT_FAILED_TRIGGER,
+    ],
+  ),
+  studioCategory(
+    "member-lifecycle",
+    "Member lifecycle",
+    "Retention, offers, referrals, tags, and birthdays",
+    Users,
+    studioTriggerNodes,
+    [
+      NodeType.CLIENT_INACTIVITY_TRIGGER,
+      NodeType.BIRTHDAY_TRIGGER,
+      NodeType.INTRO_OFFER_REDEEMED_TRIGGER,
+      NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
+      NodeType.REFERRAL_CONVERTED_TRIGGER,
+      NodeType.CLIENT_TAG_ADDED_TRIGGER,
+      NodeType.CLIENT_TAG_REMOVED_TRIGGER,
+      NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
+    ],
+  ),
+];
+
+const studioExecutionCategories: StudioNodeCategory[] = [
+  studioCategory(
+    "attendance-waitlists",
+    "Attendance and waitlists",
+    "Check in, record no-shows, and manage waitlists",
+    CalendarCheck2,
+    studioExecutionNodes,
+    [NodeType.STUDIO_CLASS_ACTION, NodeType.SEND_CLASS_REMINDER],
+  ),
+  studioCategory(
+    "member-follow-up",
+    "Member follow-up",
+    "Send a message or create work for your team",
+    MessageSquare,
+    studioExecutionNodes,
+    [
+      NodeType.SEND_EMAIL,
+      NodeType.SEND_SMS,
+      NodeType.CREATE_TASK,
+      NodeType.UPDATE_CLIENT,
+    ],
+  ),
+  studioCategory(
+    "retention-tools",
+    "Retention tools",
+    "Loyalty and churn actions",
+    HeartPulse,
+    studioExecutionNodes,
+    [NodeType.AWARD_LOYALTY_POINTS, NodeType.CALCULATE_CHURN_SCORE],
+  ),
+];
+
+function studioCategory(
+  id: string,
+  label: string,
+  description: string,
+  icon: React.ComponentType<{ className?: string }>,
+  nodes: NodeTypeOption[],
+  types: NodeType[],
+): StudioNodeCategory {
+  const selectedTypes = new Set(types);
+  return {
+    id,
+    label,
+    description,
+    icon,
+    nodes: nodes.filter((node) => selectedTypes.has(node.type)),
+  };
+}
 
 // Stripe Executions
 const stripeExecutionNodes: NodeTypeOption[] = [
@@ -1018,12 +1383,6 @@ const stripeExecutionNodes: NodeTypeOption[] = [
     type: NodeType.STRIPE_SEND_INVOICE,
     label: "Send Invoice",
     description: "Send a Stripe invoice to a customer.",
-    icon: "/logos/stripe.svg",
-  },
-  {
-    type: NodeType.STRIPE_REFUND_PAYMENT,
-    label: "Refund Payment",
-    description: "Refund a Stripe payment.",
     icon: "/logos/stripe.svg",
   },
 ];
@@ -1127,81 +1486,6 @@ const logicNodes: NodeTypeOption[] = [
   },
 ];
 
-// All trigger node types - used to validate that only one trigger exists per workflow
-const TRIGGER_NODE_TYPES: NodeType[] = [
-  NodeType.MANUAL_TRIGGER,
-  // Google triggers
-  NodeType.GOOGLE_FORM_TRIGGER,
-  NodeType.GOOGLE_CALENDAR_TRIGGER,
-  NodeType.GOOGLE_CALENDAR_EVENT_CREATED,
-  NodeType.GOOGLE_CALENDAR_EVENT_UPDATED,
-  NodeType.GOOGLE_CALENDAR_EVENT_DELETED,
-  NodeType.GOOGLE_DRIVE_FILE_CREATED,
-  NodeType.GOOGLE_DRIVE_FILE_UPDATED,
-  NodeType.GOOGLE_DRIVE_FILE_DELETED,
-  NodeType.GOOGLE_DRIVE_FOLDER_CREATED,
-  NodeType.GMAIL_TRIGGER,
-  // Microsoft triggers
-  NodeType.OUTLOOK_TRIGGER,
-  NodeType.OUTLOOK_NEW_EMAIL,
-  NodeType.OUTLOOK_EMAIL_MOVED,
-  NodeType.OUTLOOK_EMAIL_DELETED,
-  NodeType.ONEDRIVE_TRIGGER,
-  NodeType.ONEDRIVE_FILE_CREATED,
-  NodeType.ONEDRIVE_FILE_UPDATED,
-  NodeType.ONEDRIVE_FILE_DELETED,
-  NodeType.OUTLOOK_CALENDAR_EVENT_CREATED,
-  NodeType.OUTLOOK_CALENDAR_EVENT_UPDATED,
-  NodeType.OUTLOOK_CALENDAR_EVENT_DELETED,
-  // Social triggers
-  NodeType.SLACK_NEW_MESSAGE,
-  NodeType.SLACK_MESSAGE_REACTION,
-  NodeType.SLACK_CHANNEL_JOINED,
-  NodeType.DISCORD_NEW_MESSAGE,
-  NodeType.DISCORD_NEW_REACTION,
-  NodeType.DISCORD_USER_JOINED,
-  NodeType.TELEGRAM_TRIGGER,
-  NodeType.TELEGRAM_NEW_MESSAGE,
-  NodeType.TELEGRAM_COMMAND_RECEIVED,
-  // CRM triggers
-  NodeType.CLIENT_CREATED_TRIGGER,
-  NodeType.CLIENT_UPDATED_TRIGGER,
-  NodeType.CLIENT_FIELD_CHANGED_TRIGGER,
-  NodeType.CLIENT_DELETED_TRIGGER,
-  NodeType.CLIENT_TYPE_CHANGED_TRIGGER,
-  NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER,
-  NodeType.DEAL_CREATED_TRIGGER,
-  NodeType.DEAL_UPDATED_TRIGGER,
-  NodeType.DEAL_DELETED_TRIGGER,
-  NodeType.DEAL_STAGE_CHANGED_TRIGGER,
-  NodeType.APPOINTMENT_CREATED_TRIGGER,
-  NodeType.APPOINTMENT_CANCELLED_TRIGGER,
-  // Studio triggers
-  NodeType.BIRTHDAY_TRIGGER,
-  NodeType.CLASS_BOOKED_TRIGGER,
-  NodeType.CLASS_CANCELLED_TRIGGER,
-  NodeType.MEMBER_CHECKED_IN_TRIGGER,
-  NodeType.MEMBER_NO_SHOW_TRIGGER,
-  NodeType.MEMBERSHIP_CREATED_TRIGGER,
-  NodeType.MEMBERSHIP_EXPIRING_TRIGGER,
-  NodeType.MEMBERSHIP_CANCELLED_TRIGGER,
-  NodeType.WAITLIST_SPOT_OPENED_TRIGGER,
-  NodeType.INTRO_OFFER_REDEEMED_TRIGGER,
-  NodeType.INTRO_OFFER_COMPLETED_TRIGGER,
-  NodeType.MEMBER_CLASS_COUNT_TRIGGER,
-  NodeType.CLIENT_TAG_ADDED_TRIGGER,
-  NodeType.CLIENT_TAG_REMOVED_TRIGGER,
-  NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER,
-  NodeType.STUDIO_PAYMENT_FAILED_TRIGGER,
-  // Stripe triggers
-  NodeType.STRIPE_TRIGGER,
-  NodeType.STRIPE_PAYMENT_SUCCEEDED,
-  NodeType.STRIPE_PAYMENT_FAILED,
-  NodeType.STRIPE_SUBSCRIPTION_CREATED,
-  NodeType.STRIPE_SUBSCRIPTION_UPDATED,
-  NodeType.STRIPE_SUBSCRIPTION_CANCELLED,
-];
-
 interface NodeSelectorProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1226,6 +1510,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>(["Nodes"]);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [hasTrigger, setHasTrigger] = useState(false);
+  const selectingActions = hasTrigger || isBundle;
 
   const trpc = useTRPC();
   const { data: bundles = [] } = useQuery({
@@ -1238,7 +1523,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     if (open) {
       const nodes = getNodes();
       const triggerExists = nodes.some((node) =>
-        TRIGGER_NODE_TYPES.includes(node.type as NodeType),
+        isWorkflowTriggerNodeType(node.type as NodeType),
       );
       setHasTrigger(triggerExists);
     }
@@ -1246,11 +1531,16 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
   const handleNodeSelect = useCallback(
     (selection: NodeTypeOption, bundleId?: string) => {
+      if (!nodeTypeIsAvailable(selection.type)) {
+        toast.error("This node is not available yet.");
+        return;
+      }
+
       // Check if trying to add a trigger node
-      if (TRIGGER_NODE_TYPES.includes(selection.type)) {
+      if (isWorkflowTriggerNodeType(selection.type)) {
         const nodes = getNodes();
         const existingTrigger = nodes.find((node) =>
-          TRIGGER_NODE_TYPES.includes(node.type as NodeType),
+          isWorkflowTriggerNodeType(node.type as NodeType),
         );
 
         if (existingTrigger) {
@@ -1271,7 +1561,11 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
       const newNode = {
         id: createId(),
-        data: bundleId ? { bundleWorkflowId: bundleId } : {},
+        data: {
+          ...getNodeDefaultData(selection.type),
+          ...selection.defaultData,
+          ...(bundleId ? { bundleWorkflowId: bundleId } : {}),
+        },
         position: flowPosition,
         type: selection.type,
       };
@@ -1317,18 +1611,20 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     const Icon = nodeType.icon;
     const isIntegrationSatisfied =
       !nodeType.requiresApp || connectedProviderSet.has(nodeType.requiresApp);
-    const isTrigger = TRIGGER_NODE_TYPES.includes(nodeType.type);
+    const isTrigger = isWorkflowTriggerNodeType(nodeType.type);
     const isTriggerDisabled = isTrigger && hasTrigger;
+    const isNodeUnavailable = !nodeTypeIsAvailable(nodeType.type);
+    if (isNodeUnavailable) return null;
 
     return (
       <Button
-        key={nodeType.type}
-        className="w-full justify-start h-max py-5 px-8 bg-background text-primary hover:bg-primary-foreground/40 hover:text-primary rounded-sm border border-black/10"
+        key={`${nodeType.type}-${nodeType.label}`}
+        className="h-max w-full justify-start rounded-lg border border-black/10 bg-background px-4 py-3 text-primary hover:bg-primary-foreground/40 hover:text-primary dark:border-white/10"
         onClick={() => handleNodeSelect(nodeType)}
         variant="ghost"
         disabled={!isIntegrationSatisfied || isTriggerDisabled}
       >
-        <div className="flex items-center gap-6 w-full overflow-hidden">
+        <div className="flex w-full items-center gap-4 overflow-hidden">
           {typeof Icon === "string" ? (
             <Image
               src={Icon}
@@ -1375,11 +1671,11 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
     const Icon = icon;
     return (
       <Button
-        className="w-full justify-between h-max py-5 px-8 bg-background text-primary hover:bg-primary-foreground/40 hover:text-primary rounded-sm border border-black/10"
+        className="h-max w-full justify-between rounded-lg border border-black/10 bg-background px-4 py-3 text-primary hover:bg-primary-foreground/40 hover:text-primary dark:border-white/10"
         onClick={onClick}
         variant="ghost"
       >
-        <div className="flex items-center gap-6 w-full overflow-hidden">
+        <div className="flex w-full items-center gap-4 overflow-hidden">
           {typeof Icon === "string" ? (
             <Image
               src={Icon}
@@ -1431,9 +1727,12 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
   // Filter nodes based on search query
   const filterNodes = (nodes: NodeTypeOption[]) => {
-    if (!searchQuery.trim()) return nodes;
+    const availableNodes = nodes.filter((node) =>
+      nodeTypeIsAvailable(node.type),
+    );
+    if (!searchQuery.trim()) return availableNodes;
     const query = searchQuery.toLowerCase();
-    return nodes.filter(
+    return availableNodes.filter(
       (node) =>
         node.label.toLowerCase().includes(query) ||
         node.description.toLowerCase().includes(query),
@@ -1518,6 +1817,19 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       );
     }
 
+    const activeStudioCategory = (
+      selectingActions ? studioExecutionCategories : studioTriggerCategories
+    ).find((category) => currentView === `studio-${category.id}`);
+    if (activeStudioCategory) {
+      return (
+        <div className="flex flex-col gap-2">
+          {filterNodes(activeStudioCategory.nodes).map((node) =>
+            renderNodeButton(node),
+          )}
+        </div>
+      );
+    }
+
     // Main navigation
     switch (currentView) {
       case "main":
@@ -1564,9 +1876,9 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
             {renderMenuButton(
               "Studio",
-              hasTrigger
-                ? "Membership, check-in, SMS, loyalty"
-                : "Class, membership, check-in triggers",
+              selectingActions
+                ? "Attendance, follow-up, and studio operations"
+                : "Forms, classes, purchases, and member lifecycle",
               UserCheck,
               () => navigateTo("studio", "Studio"),
             )}
@@ -1850,9 +2162,21 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
       case "studio":
         return (
           <div className="flex flex-col gap-2">
-            {(hasTrigger ? studioExecutionNodes : studioTriggerNodes).map(
-              (node) => renderNodeButton(node),
-            )}
+            {(selectingActions
+              ? studioExecutionCategories
+              : studioTriggerCategories
+            )
+              .filter((category) => filterNodes(category.nodes).length > 0)
+              .map((category) => (
+                <React.Fragment key={category.id}>
+                  {renderMenuButton(
+                    category.label,
+                    category.description,
+                    category.icon,
+                    () => navigateTo(`studio-${category.id}`, category.label),
+                  )}
+                </React.Fragment>
+              ))}
           </div>
         );
 
@@ -1948,11 +2272,13 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
 
       <SheetContent
         side="right"
-        className="w-full sm:max-w-lg overflow-y-auto border-none text-primary bg-background pb-8"
+        className="w-full overflow-y-auto border-l border-black/10 bg-background pb-6 text-primary dark:border-white/10 sm:max-w-md"
       >
-        <SheetHeader className="px-8 pt-6 gap-0">
+        <SheetHeader className="gap-0 px-5 pt-5">
           <SheetTitle className="text-primary font-medium">
-            Add a node
+            {!hasTrigger && !isBundle
+              ? "Add trigger to workflow"
+              : "Add action to workflow"}
           </SheetTitle>
           <SheetDescription className="text-primary/60">
             {isBundle
@@ -1964,21 +2290,23 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         <Separator className="bg-black/10 dark:bg-white/10" />
 
         {/* Breadcrumb Navigation */}
-        <div className="px-8 py-4 pb-3">
+        <div className="px-5 py-4 pb-3">
           <div className="flex items-center gap-2 text-xs">
             {breadcrumbs.map((crumb, index) => (
               <React.Fragment key={`breadcrumb-${index}-${crumb}`}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => navigateBack(index)}
-                  className={`${
+                  className={`h-auto p-0 text-xs ${
                     index === breadcrumbs.length - 1
                       ? "text-primary font-medium"
                       : "text-primary/60 hover:text-primary"
                   } transition-colors`}
                 >
                   {crumb}
-                </button>
+                </Button>
                 {index < breadcrumbs.length - 1 && (
                   <ChevronRight className="size-3 text-primary/60" />
                 )}
@@ -1988,7 +2316,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
         </div>
 
         {/* Search Input */}
-        <div className="px-8 pb-3">
+        <div className="px-5 pb-3">
           <div className="relative">
             <Search className="absolute z-10 left-3 top-1/2 -translate-y-1/2 size-3.5 text-primary!" />
 
@@ -2002,7 +2330,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
           </div>
         </div>
 
-        <div className="px-8">{renderContent()}</div>
+        <div className="px-5">{renderContent()}</div>
       </SheetContent>
     </Sheet>
   );

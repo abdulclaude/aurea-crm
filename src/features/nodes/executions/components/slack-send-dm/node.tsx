@@ -50,7 +50,7 @@ export const SlackSendDmNode: React.FC<NodeProps<SlackSendDmNodeType>> =
       nodeId: props.id,
       channel: SLACK_SEND_DM_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchSlackSendDmRealtimeToken as any,
+      refreshToken: fetchSlackSendDmRealtimeToken,
     });
 
     const handleOpenSettings = () => {

@@ -1,6 +1,18 @@
 import { randomUUID } from "crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, gt, gte, ilike, lt, lte, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  ilike,
+  isNull,
+  lt,
+  lte,
+  or,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import { ActivityAction } from "@/db/enums";
@@ -10,7 +22,6 @@ import {
   bookingAvailability,
   bookingEventType,
   bookingHoliday,
-  calComCredential,
   client,
   deal,
   stripeConnection,
@@ -18,9 +29,28 @@ import {
 import { getCalComClient } from "@/lib/calcom";
 import { logAnalytics } from "@/lib/analytics-logger";
 import { createNotification } from "@/lib/notifications";
-import { createStripeCheckoutSessionForBooking } from "@/lib/stripe";
+import { createStripeCheckoutSessionForBooking } from "@/features/bookings/server/stripe-checkout";
+import {
+  attachStripeCheckoutToOperation,
+  createOrReuseCheckoutOperation,
+  failCommerceOperation,
+} from "@/features/commerce/server/operations";
+import {
+  currencyExponent,
+  decimalToMinorUnits,
+  minorUnitsToDecimal,
+  normalizeCurrency,
+} from "@/features/commerce/lib/money";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { BOOKING_PAGE_SIZE } from "../constants";
+import { requireActiveCalComCredential } from "./calcom-scope";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import {
+  bookingFitsBusinessHours,
+  guestBookingPolicyError,
+} from "@/features/workspace-settings/lib/booking-operations-policy";
+import { getEffectiveWorkspaceOperationsValues } from "@/features/workspace-settings/server/operations-query-service";
+import { getEffectiveWorkspaceRegionalValues } from "@/features/workspace-settings/server/query-service";
 
 const bookingStatusSchema = z.enum([
   "PENDING",
@@ -30,6 +60,9 @@ const bookingStatusSchema = z.enum([
   "NO_SHOW",
   "COMPLETED",
 ]);
+
+const BOOKING_PAYMENT_HOLD_MS = 60 * 60 * 1000;
+const STRIPE_MIN_CHECKOUT_LIFETIME_MS = 30 * 60 * 1000;
 
 const bookingWithRelations = {
   bookingEventType: true,
@@ -52,7 +85,10 @@ const bookingWithRelations = {
   },
 } as const;
 
-function requireOrgAndLocation(ctx: { orgId: string | null; locationId: string | null }) {
+function requireOrgAndLocation(ctx: {
+  orgId: string | null;
+  locationId: string | null;
+}) {
   if (!ctx.orgId || !ctx.locationId) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -60,6 +96,21 @@ function requireOrgAndLocation(ctx: { orgId: string | null; locationId: string |
     });
   }
   return { organizationId: ctx.orgId, locationId: ctx.locationId };
+}
+
+async function requireScheduleManagement(
+  ctx: { auth: { user: { id: string } } },
+  scope: { organizationId: string; locationId: string },
+) {
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: scope.organizationId,
+      locationId: scope.locationId,
+    },
+    capability: "schedule.manage",
+    resource: scope,
+  });
 }
 
 function mapBooking<T extends { bookingEventType?: unknown }>(
@@ -74,6 +125,13 @@ function metadataRecord(value: unknown): Record<string, unknown> | null {
     return value as Record<string, unknown>;
   }
   return null;
+}
+
+function metadataString(value: unknown, key: string): string | null {
+  const candidate = metadataRecord(value)?.[key];
+  return typeof candidate === "string" && candidate.length > 0
+    ? candidate
+    : null;
 }
 
 const resolveBookingPricing = (
@@ -109,7 +167,7 @@ const resolveBookingPricing = (
       });
     }
 
-    return { amount: Number(match.price), currency };
+    return { amount: String(match.price), currency };
   }
 
   if (eventType.price === null || eventType.price === undefined) {
@@ -119,8 +177,49 @@ const resolveBookingPricing = (
     });
   }
 
-  return { amount: Number(eventType.price), currency };
+  return { amount: eventType.price, currency };
 };
+
+function bookingApplicationFeeMinor(input: {
+  amountMinor: number;
+  currencyExponent: number;
+  percent: string | null;
+  fixed: string | null;
+}): number | undefined {
+  let basisPoints: number;
+  let fixedMinor: number;
+  try {
+    basisPoints = decimalToMinorUnits(input.percent ?? "0", 2);
+    fixedMinor = decimalToMinorUnits(
+      input.fixed ?? "0",
+      input.currencyExponent,
+    );
+  } catch {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The Stripe application fee configuration is invalid.",
+    });
+  }
+  if (basisPoints < 0 || basisPoints > 10_000 || fixedMinor < 0) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The Stripe application fee configuration is invalid.",
+    });
+  }
+
+  const percentMinor =
+    Math.trunc(input.amountMinor / 10_000) * basisPoints +
+    Math.round(((input.amountMinor % 10_000) * basisPoints) / 10_000);
+  const total = percentMinor + fixedMinor;
+  if (!Number.isSafeInteger(total) || total < 0 || total >= input.amountMinor) {
+    if (total === 0) return undefined;
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The Stripe application fee must be lower than the charge.",
+    });
+  }
+  return total > 0 ? total : undefined;
+}
 
 async function getBookingForScope({
   id,
@@ -168,7 +267,8 @@ export const bookingsRouter = createTRPCRouter({
       ];
 
       if (input.status) conditions.push(eq(booking.status, input.status));
-      if (input.eventTypeId) conditions.push(eq(booking.eventTypeId, input.eventTypeId));
+      if (input.eventTypeId)
+        conditions.push(eq(booking.eventTypeId, input.eventTypeId));
       if (input.clientId) conditions.push(eq(booking.clientId, input.clientId));
       if (input.dealId) conditions.push(eq(booking.dealId, input.dealId));
       if (input.cursor) conditions.push(lt(booking.id, input.cursor));
@@ -211,12 +311,23 @@ export const bookingsRouter = createTRPCRouter({
     )
     .query(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId,
+        },
+        capability: "schedule.view",
+        resource: { organizationId, locationId },
+      });
 
       const bookings = await db.query.booking.findMany({
         where: and(
           eq(booking.organizationId, organizationId),
           eq(booking.locationId, locationId),
-          input.eventTypeId ? eq(booking.eventTypeId, input.eventTypeId) : undefined,
+          input.eventTypeId
+            ? eq(booking.eventTypeId, input.eventTypeId)
+            : undefined,
           lte(booking.startTime, input.endDate),
           gte(booking.endTime, input.startDate),
         ),
@@ -246,6 +357,10 @@ export const bookingsRouter = createTRPCRouter({
 
       return {
         bookings: bookings.map((item) => ({
+          policyStatus: metadataString(
+            metadataRecord(item.metadata)?.policyEvaluation,
+            "status",
+          ),
           id: item.id,
           title: item.title,
           status: item.status,
@@ -306,6 +421,7 @@ export const bookingsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       const startTime = new Date(input.startTime);
       const endTime = new Date(input.startTime);
       endTime.setMinutes(endTime.getMinutes() + input.duration);
@@ -318,7 +434,36 @@ export const bookingsRouter = createTRPCRouter({
         ),
       });
       if (!eventType) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Event type not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Event type not found",
+        });
+      }
+
+      const scope = { organizationId, locationId };
+      const [operationsSettings, regionalSettings] = await Promise.all([
+        getEffectiveWorkspaceOperationsValues(scope),
+        getEffectiveWorkspaceRegionalValues(scope),
+      ]);
+      const guestPolicyError = guestBookingPolicyError({
+        guestCount: input.guests?.length ?? 0,
+        settings: operationsSettings,
+      });
+      if (guestPolicyError) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: guestPolicyError });
+      }
+      if (
+        !bookingFitsBusinessHours({
+          start: startTime,
+          end: endTime,
+          timezone: regionalSettings.timezone,
+          businessHours: operationsSettings.businessHours,
+        })
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This booking falls outside the workspace business hours.",
+        });
       }
 
       if (input.clientId) {
@@ -330,7 +475,10 @@ export const bookingsRouter = createTRPCRouter({
           ),
         });
         if (!existingClient) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Client not found",
+          });
         }
       }
 
@@ -379,78 +527,34 @@ export const bookingsRouter = createTRPCRouter({
         });
       }
 
-      let calComBooking: unknown = null;
       const pricing = resolveBookingPricing(eventType, input.duration);
-
-      if (input.syncToCalCom) {
-        if (!eventType.calEventTypeId) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "This event type is not synced to Cal.com yet.",
-          });
-        }
-
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, organizationId),
-            eq(calComCredential.locationId, locationId),
-            eq(calComCredential.isActive, true),
-          ),
-        });
-        if (!credential) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Cal.com credentials are not configured for this location.",
-          });
-        }
-
-        const calClient = await getCalComClient(credential.apiKey);
-        calComBooking = await calClient.createBooking({
-          eventTypeId: eventType.calEventTypeId,
-          start: input.startTime,
-          timeZone: input.attendeeTimezone || "UTC",
-          language: "en",
-          guests: input.guests,
-          metadata: {
-            aureaCrmBooking: "true",
-            ...(input.clientId ? { clientId: input.clientId } : {}),
-            ...(input.dealId ? { dealId: input.dealId } : {}),
-          },
-          responses: {
-            name: input.attendeeName,
-            email: input.attendeeEmail,
-            ...(input.attendeePhone ? { phone: input.attendeePhone } : {}),
-            ...(input.locationValue ? { location: input.locationValue } : {}),
-            ...(input.customFieldsResponses ?? {}),
-          },
-          lengthInMinutes: input.duration,
-        });
-      }
-
-      const calData =
-        metadataRecord(calComBooking)?.data && metadataRecord(metadataRecord(calComBooking)?.data)
-          ? metadataRecord(metadataRecord(calComBooking)?.data)
-          : metadataRecord(calComBooking);
-      const calBookingId =
-        typeof calData?.id === "number" ? calData.id : undefined;
-      const calBookingUid =
-        typeof calData?.uid === "string" ? calData.uid : undefined;
-
-      if (calBookingUid) {
-        const existingBooking = await db.query.booking.findFirst({
-          where: and(
-            eq(booking.organizationId, organizationId),
-            eq(booking.locationId, locationId),
-            eq(booking.calBookingUid, calBookingUid),
-          ),
-          with: bookingWithRelations,
-        });
-        if (existingBooking) {
-          return mapBooking(existingBooking);
-        }
-      }
-
+      const paymentRequired =
+        pricing.amount !== null && pricing.currency !== null;
+      const now = new Date();
       const bookingId = randomUUID();
+      const holdExpiresAt = paymentRequired
+        ? new Date(now.getTime() + BOOKING_PAYMENT_HOLD_MS)
+        : null;
+
+      if (paymentRequired) {
+        const paymentConnection = await db.query.stripeConnection.findFirst({
+          where: and(
+            eq(stripeConnection.organizationId, organizationId),
+            eq(stripeConnection.locationId, locationId),
+            eq(stripeConnection.isActive, true),
+            eq(stripeConnection.chargesEnabled, true),
+          ),
+          columns: { accountType: true },
+        });
+        if (!paymentConnection || paymentConnection.accountType !== "express") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message:
+              "Complete Stripe Express onboarding for this location before creating paid bookings.",
+          });
+        }
+      }
+
       await db.insert(booking).values({
         id: bookingId,
         organizationId,
@@ -460,7 +564,11 @@ export const bookingsRouter = createTRPCRouter({
         dealId: input.dealId,
         title: eventType.title,
         description: eventType.description,
-        status: "CONFIRMED",
+        status: paymentRequired ? "PENDING" : "CONFIRMED",
+        paymentStatus: paymentRequired ? "REQUIRES_PAYMENT" : "NOT_REQUIRED",
+        holdExpiresAt,
+        paymentRequiredAt: paymentRequired ? now : null,
+        confirmedAt: paymentRequired ? null : now,
         attendeeName: input.attendeeName,
         attendeeEmail: input.attendeeEmail,
         attendeePhone: input.attendeePhone,
@@ -473,16 +581,137 @@ export const bookingsRouter = createTRPCRouter({
         locationType: input.locationType,
         locationValue: input.locationValue,
         customFieldsResponses: input.customFieldsResponses,
-        amount: pricing.amount === null ? null : String(pricing.amount),
+        amount: pricing.amount,
         currency: pricing.currency,
-        calBookingId,
-        calBookingUid,
-        lastSyncedAt: calBookingUid ? new Date() : null,
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        createdAt: now,
+        updatedAt: now,
       });
 
-      const created = await getBookingForScope({ id: bookingId, organizationId, locationId });
+      let calComBooking: unknown = null;
+      let calComCredentialId: string | null = null;
+
+      try {
+        if (!input.syncToCalCom) {
+          calComBooking = null;
+        } else {
+          if (!eventType.calEventTypeId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "This event type is not synced to Cal.com yet.",
+            });
+          }
+
+          const credential = await requireActiveCalComCredential({
+            organizationId,
+            locationId,
+          });
+          if (eventType.calComCredentialId !== credential.id) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message:
+                "This event type belongs to a different Cal.com connection.",
+            });
+          }
+          calComCredentialId = credential.id;
+          const calClient = await getCalComClient(credential.apiKey);
+          calComBooking = await calClient.createBooking({
+            eventTypeId: eventType.calEventTypeId,
+            start: input.startTime,
+            timeZone: input.attendeeTimezone || "UTC",
+            language: "en",
+            guests: input.guests,
+            metadata: {
+              aureaCrmBooking: "true",
+              ...(input.clientId ? { clientId: input.clientId } : {}),
+              ...(input.dealId ? { dealId: input.dealId } : {}),
+            },
+            responses: {
+              name: input.attendeeName,
+              email: input.attendeeEmail,
+              ...(input.attendeePhone ? { phone: input.attendeePhone } : {}),
+              ...(input.locationValue ? { location: input.locationValue } : {}),
+              ...(input.customFieldsResponses ?? {}),
+            },
+            lengthInMinutes: input.duration,
+          });
+        }
+      } catch (error) {
+        await db
+          .update(booking)
+          .set({
+            status: "CANCELLED",
+            paymentStatus: paymentRequired ? "EXPIRED" : "NOT_REQUIRED",
+            cancelledAt: new Date(),
+            cancellationReason: "Provider booking creation failed",
+            releasedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(booking.id, bookingId));
+        if (error instanceof TRPCError) throw error;
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Cal.com could not create the booking.",
+          cause: error,
+        });
+      }
+
+      const calData =
+        metadataRecord(calComBooking)?.data &&
+        metadataRecord(metadataRecord(calComBooking)?.data)
+          ? metadataRecord(metadataRecord(calComBooking)?.data)
+          : metadataRecord(calComBooking);
+      const calBookingId =
+        typeof calData?.id === "number" ? calData.id : undefined;
+      const calBookingUid =
+        typeof calData?.uid === "string" ? calData.uid : undefined;
+
+      if (calBookingUid) {
+        const existingBooking = await db.query.booking.findFirst({
+          where: and(
+            eq(booking.organizationId, organizationId),
+            eq(booking.locationId, locationId),
+            calComCredentialId
+              ? eq(booking.calComCredentialId, calComCredentialId)
+              : isNull(booking.calComCredentialId),
+            eq(booking.calBookingUid, calBookingUid),
+          ),
+          with: bookingWithRelations,
+        });
+        if (existingBooking) {
+          await db
+            .update(booking)
+            .set({
+              status: "CANCELLED",
+              paymentStatus: paymentRequired ? "EXPIRED" : "NOT_REQUIRED",
+              cancelledAt: new Date(),
+              cancellationReason: "Duplicate provider booking",
+              releasedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(booking.id, bookingId));
+          return mapBooking(existingBooking);
+        }
+      }
+
+      if (calBookingId || calBookingUid || calComCredentialId) {
+        await db
+          .update(booking)
+          .set({
+            calBookingId,
+            calBookingUid,
+            calComCredentialId,
+            calLastEventAt: calBookingUid ? new Date() : null,
+            lastSyncedAt: calBookingUid ? new Date() : null,
+            updatedAt: new Date(),
+          })
+          .where(eq(booking.id, bookingId));
+      }
+
+      const created = await getBookingForScope({
+        id: bookingId,
+        organizationId,
+        locationId,
+      });
 
       await logAnalytics({
         organizationId,
@@ -510,14 +739,85 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   createPaymentSession: protectedProcedure
-    .input(z.object({ bookingId: z.string() }))
+    .input(
+      z.object({
+        bookingId: z.string(),
+        checkoutRequestId: z.string().uuid(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId,
+        },
+        capability: "commerce.checkout.create",
+        resource: { organizationId, locationId },
+      });
       const existingBooking = await getBookingForScope({
         id: input.bookingId,
         organizationId,
         locationId,
       });
+
+      if (
+        existingBooking.paid ||
+        existingBooking.paymentStatus === "PAID" ||
+        existingBooking.paymentStatus === "REFUNDED"
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "This booking has already been paid.",
+        });
+      }
+      if (
+        !["PENDING", "CONFIRMED"].includes(existingBooking.status) ||
+        existingBooking.startTime <= new Date()
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "This booking can no longer accept payment.",
+        });
+      }
+      if (
+        existingBooking.holdExpiresAt &&
+        existingBooking.holdExpiresAt <= new Date()
+      ) {
+        await db
+          .update(booking)
+          .set({
+            status: "CANCELLED",
+            paymentStatus: "EXPIRED",
+            cancelledAt: new Date(),
+            cancellationReason: "Payment hold expired",
+            releasedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(booking.id, existingBooking.id),
+              eq(booking.organizationId, organizationId),
+              eq(booking.locationId, locationId),
+            ),
+          );
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "The payment hold has expired. Create a new booking.",
+        });
+      }
+      if (
+        existingBooking.holdExpiresAt &&
+        existingBooking.holdExpiresAt.getTime() - Date.now() <
+          STRIPE_MIN_CHECKOUT_LIFETIME_MS
+      ) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message:
+            "This payment hold is too close to expiry. Create a new booking.",
+        });
+      }
 
       if (!existingBooking.eventType) {
         throw new TRPCError({
@@ -526,7 +826,10 @@ export const bookingsRouter = createTRPCRouter({
         });
       }
 
-      const pricing = resolveBookingPricing(existingBooking.eventType, existingBooking.duration);
+      const pricing = resolveBookingPricing(
+        existingBooking.eventType,
+        existingBooking.duration,
+      );
       if (!pricing.amount || !pricing.currency) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -541,68 +844,163 @@ export const bookingsRouter = createTRPCRouter({
           eq(stripeConnection.isActive, true),
         ),
       });
-      if (!connection) {
+      if (
+        !connection ||
+        !connection.chargesEnabled ||
+        connection.accountType !== "express"
+      ) {
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Stripe is not connected for this location.",
+          code: "PRECONDITION_FAILED",
+          message: "Complete Stripe Express onboarding for this location.",
         });
       }
 
-      const amountInCents = Math.round(pricing.amount * 100);
+      const paymentCurrency = normalizeCurrency(pricing.currency);
+      const exponent = currencyExponent(paymentCurrency);
+      const amountInCents = decimalToMinorUnits(
+        String(pricing.amount),
+        exponent,
+      );
       if (amountInCents <= 0) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid booking amount." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Invalid booking amount.",
+        });
       }
 
-      let applicationFeeAmount: number | undefined;
-      if (connection.applicationFeePercent) {
-        applicationFeeAmount = Math.round(
-          (Number(connection.applicationFeePercent) / 100) * amountInCents,
-        );
+      const applicationFeeAmount = bookingApplicationFeeMinor({
+        amountMinor: amountInCents,
+        currencyExponent: exponent,
+        percent: connection.applicationFeePercent,
+        fixed: connection.applicationFeeFixed,
+      });
+
+      const operation = await createOrReuseCheckoutOperation({
+        organizationId,
+        locationId,
+        clientId: existingBooking.clientId,
+        stripeConnectionId: connection.id,
+        providerAccountId: connection.stripeAccountId,
+        idempotencyKey: `stripe:booking:${organizationId}:${input.checkoutRequestId}`,
+        amountMinor: amountInCents,
+        currency: paymentCurrency,
+        currencyExponent: exponent,
+        bookingId: existingBooking.id,
+        requestedBy: ctx.auth.user.id,
+        expiresAt:
+          existingBooking.holdExpiresAt ??
+          new Date(Date.now() + BOOKING_PAYMENT_HOLD_MS),
+        metadata: { checkoutKind: "BOOKING" },
+      });
+
+      const existingCheckoutUrl = metadataString(
+        operation.metadata,
+        "checkoutUrl",
+      );
+      if (operation.providerCheckoutSessionId && existingCheckoutUrl) {
+        return {
+          url: existingCheckoutUrl,
+          sessionId: operation.providerCheckoutSessionId,
+          operationId: operation.id,
+        };
       }
-      if (connection.applicationFeeFixed) {
-        applicationFeeAmount =
-          (applicationFeeAmount ?? 0) +
-          Math.round(Number(connection.applicationFeeFixed) * 100);
-      }
+
+      const checkoutExpiresAt =
+        existingBooking.holdExpiresAt ??
+        new Date(Date.now() + BOOKING_PAYMENT_HOLD_MS);
 
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
       const session = await createStripeCheckoutSessionForBooking({
         bookingId: existingBooking.id,
+        organizationId,
+        locationId,
+        clientId: existingBooking.clientId,
+        commerceOperationId: operation.id,
+        stripeConnectionId: connection.id,
+        idempotencyKey: `aurea_checkout_${operation.id}`,
         bookingTitle: existingBooking.title,
         amount: amountInCents,
-        currency: pricing.currency,
+        currency: paymentCurrency,
         attendeeEmail: existingBooking.attendeeEmail,
         attendeeName: existingBooking.attendeeName,
         successUrl: `${appUrl}/bookings?payment=success&bookingId=${existingBooking.id}`,
         cancelUrl: `${appUrl}/bookings?payment=cancelled&bookingId=${existingBooking.id}`,
+        expiresAt: checkoutExpiresAt,
         stripeAccountId: connection.stripeAccountId,
+        stripeAccountType: connection.accountType,
         applicationFeeAmount,
       });
 
-      if (!session.success || !session.url) {
+      if (!session.success) {
+        await Promise.all([
+          failCommerceOperation({
+            operationId: operation.id,
+            code: "STRIPE_CHECKOUT_CREATE_FAILED",
+            message: session.error,
+          }),
+          db
+            .update(booking)
+            .set({
+              paymentStatus: "FAILED",
+              paymentFailureAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(booking.id, existingBooking.id),
+                eq(booking.organizationId, organizationId),
+                eq(booking.locationId, locationId),
+              ),
+            ),
+        ]);
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: session.error || "Failed to create payment session.",
+          message: session.error,
         });
       }
+
+      await attachStripeCheckoutToOperation({
+        operationId: operation.id,
+        checkoutSessionId: session.sessionId,
+        paymentIntentId: session.paymentIntentId,
+        checkoutUrl: session.url,
+      });
 
       await db
         .update(booking)
         .set({
-          paymentId: session.sessionId,
-          amount: String(pricing.amount),
-          currency: pricing.currency,
+          amount: minorUnitsToDecimal(amountInCents, exponent),
+          currency: paymentCurrency,
+          paymentStatus: "PROCESSING",
+          holdExpiresAt: checkoutExpiresAt,
           updatedAt: new Date(),
         })
-        .where(eq(booking.id, existingBooking.id));
+        .where(
+          and(
+            eq(booking.id, existingBooking.id),
+            eq(booking.organizationId, organizationId),
+            eq(booking.locationId, locationId),
+          ),
+        );
 
-      return { url: session.url, sessionId: session.sessionId };
+      return {
+        url: session.url,
+        sessionId: session.sessionId,
+        operationId: operation.id,
+      };
     }),
 
   createAvailabilityBlock: protectedProcedure
-    .input(z.object({ title: z.string().optional(), startTime: z.date(), endTime: z.date() }))
+    .input(
+      z.object({
+        title: z.string().optional(),
+        startTime: z.date(),
+        endTime: z.date(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       const [created] = await db
         .insert(bookingAvailability)
         .values({
@@ -620,9 +1018,17 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   updateAvailabilityBlock: protectedProcedure
-    .input(z.object({ id: z.string(), title: z.string().optional(), startTime: z.date(), endTime: z.date() }))
+    .input(
+      z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        startTime: z.date(),
+        endTime: z.date(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       const [updated] = await db
         .update(bookingAvailability)
         .set({
@@ -640,7 +1046,10 @@ export const bookingsRouter = createTRPCRouter({
         )
         .returning();
       if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Availability block not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Availability block not found",
+        });
       }
       return updated;
     }),
@@ -649,6 +1058,7 @@ export const bookingsRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       await db
         .delete(bookingAvailability)
         .where(
@@ -662,9 +1072,16 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   createHoliday: protectedProcedure
-    .input(z.object({ name: z.string().optional(), startDate: z.date(), endDate: z.date() }))
+    .input(
+      z.object({
+        name: z.string().optional(),
+        startDate: z.date(),
+        endDate: z.date(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       const [created] = await db
         .insert(bookingHoliday)
         .values({
@@ -682,9 +1099,17 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   updateHoliday: protectedProcedure
-    .input(z.object({ id: z.string(), name: z.string().optional(), startDate: z.date(), endDate: z.date() }))
+    .input(
+      z.object({
+        id: z.string(),
+        name: z.string().optional(),
+        startDate: z.date(),
+        endDate: z.date(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       const [existing] = await db
         .select()
         .from(bookingHoliday)
@@ -696,7 +1121,10 @@ export const bookingsRouter = createTRPCRouter({
           ),
         );
       if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Holiday not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Holiday not found",
+        });
       }
 
       const [updated] = await db
@@ -716,6 +1144,7 @@ export const bookingsRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { organizationId, locationId } = requireOrgAndLocation(ctx);
+      await requireScheduleManagement(ctx, { organizationId, locationId });
       await db
         .delete(bookingHoliday)
         .where(
@@ -755,10 +1184,16 @@ export const bookingsRouter = createTRPCRouter({
         .where(eq(booking.id, input.id))
         .returning();
       if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Booking not found",
+        });
       }
 
-      const updatedBooking = await getBookingForScope({ id: input.id, ...scope });
+      const updatedBooking = await getBookingForScope({
+        id: input.id,
+        ...scope,
+      });
       await logAnalytics({
         organizationId: scope.organizationId,
         locationId: scope.locationId,
@@ -774,23 +1209,27 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   cancel: protectedProcedure
-    .input(z.object({ id: z.string(), reason: z.string().optional(), syncToCalCom: z.boolean().default(false) }))
+    .input(
+      z.object({
+        id: z.string(),
+        reason: z.string().optional(),
+        syncToCalCom: z.boolean().default(false),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const scope = requireOrgAndLocation(ctx);
       const existing = await getBookingForScope({ id: input.id, ...scope });
 
       if (input.syncToCalCom && existing.calBookingUid) {
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, scope.organizationId),
-            eq(calComCredential.locationId, scope.locationId),
-            eq(calComCredential.isActive, true),
-          ),
-        });
-        if (credential) {
-          const calClient = await getCalComClient(credential.apiKey);
-          await calClient.cancelBooking(existing.calBookingUid, input.reason);
+        const credential = await requireActiveCalComCredential(scope);
+        if (existing.calComCredentialId !== credential.id) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "This booking belongs to a different Cal.com connection.",
+          });
         }
+        const calClient = await getCalComClient(credential.apiKey);
+        await calClient.cancelBooking(existing.calBookingUid, input.reason);
       }
 
       await db
@@ -820,7 +1259,14 @@ export const bookingsRouter = createTRPCRouter({
     }),
 
   reschedule: protectedProcedure
-    .input(z.object({ id: z.string(), newStartTime: z.string().datetime(), reason: z.string().optional(), syncToCalCom: z.boolean().default(false) }))
+    .input(
+      z.object({
+        id: z.string(),
+        newStartTime: z.string().datetime(),
+        reason: z.string().optional(),
+        syncToCalCom: z.boolean().default(false),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const scope = requireOrgAndLocation(ctx);
       const existing = await getBookingForScope({ id: input.id, ...scope });
@@ -828,20 +1274,18 @@ export const bookingsRouter = createTRPCRouter({
       newEndTime.setMinutes(newEndTime.getMinutes() + existing.duration);
 
       if (input.syncToCalCom && existing.calBookingUid) {
-        const credential = await db.query.calComCredential.findFirst({
-          where: and(
-            eq(calComCredential.organizationId, scope.organizationId),
-            eq(calComCredential.locationId, scope.locationId),
-            eq(calComCredential.isActive, true),
-          ),
-        });
-        if (credential) {
-          const calClient = await getCalComClient(credential.apiKey);
-          await calClient.rescheduleBooking(existing.calBookingUid, {
-            start: input.newStartTime,
-            reschedulingReason: input.reason,
+        const credential = await requireActiveCalComCredential(scope);
+        if (existing.calComCredentialId !== credential.id) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "This booking belongs to a different Cal.com connection.",
           });
         }
+        const calClient = await getCalComClient(credential.apiKey);
+        await calClient.rescheduleBooking(existing.calBookingUid, {
+          start: input.newStartTime,
+          reschedulingReason: input.reason,
+        });
       }
 
       await db

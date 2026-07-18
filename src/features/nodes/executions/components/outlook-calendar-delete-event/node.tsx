@@ -50,7 +50,7 @@ export const OutlookCalendarDeleteEventNode: React.FC<NodeProps<OutlookCalendarD
       nodeId: props.id,
       channel: OUTLOOK_CALENDAR_DELETE_EVENT_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookCalendarDeleteEventRealtimeToken as any,
+      refreshToken: fetchOutlookCalendarDeleteEventRealtimeToken,
     });
 
     const handleOpenSettings = () => {

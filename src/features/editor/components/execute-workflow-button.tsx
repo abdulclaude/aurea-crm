@@ -14,7 +14,7 @@ export const ExecuteWorkflowButton = ({
       size="lg"
       onClick={() => executeWorkflow.mutate({ id: workflowId })}
       disabled={executeWorkflow.isPending}
-      className="bg-background text-primary gap-2 text-xs hover:bg-primary-foreground/40 hover:text-primary rounded-sm border border-black/10"
+      className="h-9 w-max gap-2 rounded-lg border border-black/10 bg-background px-4 text-xs text-primary shadow-sm hover:bg-primary-foreground/40 hover:text-primary dark:border-white/10"
     >
       <FlaskConicalIcon className="size-3.5" />
       Execute workflow

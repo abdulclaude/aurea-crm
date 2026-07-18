@@ -9,23 +9,92 @@ import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { stripeConnection } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { syncStripeConnectAccount } from "@/lib/stripe";
 import {
-  syncStripeConnectAccount,
-  disconnectStripeConnectAccount,
-} from "@/lib/stripe";
+  authorizeStripeConnectContext,
+  type StripeConnectContext,
+} from "./authorization";
+import {
+  createStripeConnectOnboardingLink,
+  StripeConnectMigrationRequiredError,
+} from "./onboarding";
+import { StripeAccountAlreadyBoundError } from "./upsert-connection";
+
+function getAppUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
+async function authorizeStripeMutation(ctx: {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+}): Promise<StripeConnectContext> {
+  return authorizeStripeConnectContext({
+    userId: ctx.auth.user.id,
+    organizationId: ctx.orgId,
+    locationId: ctx.locationId,
+    capability: "provider.manage",
+  });
+}
+
+async function authorizeStripeView(ctx: {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+}): Promise<StripeConnectContext> {
+  return authorizeStripeConnectContext({
+    userId: ctx.auth.user.id,
+    organizationId: ctx.orgId,
+    locationId: ctx.locationId,
+    capability: "commerce.view",
+  });
+}
 
 export const stripeConnectRouter = createTRPCRouter({
+  createOnboardingLink: protectedProcedure
+    .input(z.object({}))
+    .mutation(async ({ ctx }) => {
+      const context = await authorizeStripeMutation(ctx);
+
+      try {
+        const url = await createStripeConnectOnboardingLink(
+          context,
+          getAppUrl(),
+        );
+        return { url };
+      } catch (error) {
+        if (error instanceof StripeConnectMigrationRequiredError) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: error.message,
+          });
+        }
+        if (error instanceof StripeAccountAlreadyBoundError) {
+          throw new TRPCError({ code: "CONFLICT", message: error.message });
+        }
+
+        console.error("[stripe-connect.onboarding] Failed to create link", {
+          organizationId: context.organizationId,
+          locationId: context.locationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Unable to start Stripe onboarding",
+        });
+      }
+    }),
+
   // Get connection status for current location/organization
   getConnection: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.locationId && !ctx.orgId) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Organization or location context required",
-      });
-    }
+    const scope = await authorizeStripeView(ctx);
 
     const connection = await db.query.stripeConnection.findFirst({
-      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
+      where: stripeConnectionScopeWhere(scope.organizationId, scope.locationId),
     });
 
     if (!connection) {
@@ -44,7 +113,8 @@ export const stripeConnectRouter = createTRPCRouter({
       businessName: connection.businessName,
       country: connection.country,
       currency: connection.currency,
-      applicationFeePercent: connection.applicationFeePercent?.toString() || null,
+      applicationFeePercent:
+        connection.applicationFeePercent?.toString() || null,
       applicationFeeFixed: connection.applicationFeeFixed?.toString() || null,
       lastSyncedAt: connection.lastSyncedAt,
       createdAt: connection.createdAt,
@@ -53,15 +123,10 @@ export const stripeConnectRouter = createTRPCRouter({
 
   // Sync account info from Stripe
   syncAccount: protectedProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.locationId && !ctx.orgId) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Organization or location context required",
-      });
-    }
+    const scope = await authorizeStripeMutation(ctx);
 
     const connection = await db.query.stripeConnection.findFirst({
-      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
+      where: stripeConnectionScopeWhere(scope.organizationId, scope.locationId),
     });
 
     if (!connection) {
@@ -119,15 +184,10 @@ export const stripeConnectRouter = createTRPCRouter({
 
   // Disconnect Stripe account
   disconnect: protectedProcedure.mutation(async ({ ctx }) => {
-    if (!ctx.locationId && !ctx.orgId) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "Organization or location context required",
-      });
-    }
+    const scope = await authorizeStripeMutation(ctx);
 
     const connection = await db.query.stripeConnection.findFirst({
-      where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
+      where: stripeConnectionScopeWhere(scope.organizationId, scope.locationId),
     });
 
     if (!connection) {
@@ -137,15 +197,8 @@ export const stripeConnectRouter = createTRPCRouter({
       });
     }
 
-    // Disconnect from Stripe
-    const result = await disconnectStripeConnectAccount(connection.stripeAccountId);
-
-    if (!result.success) {
-      console.error("Failed to disconnect from Stripe:", result.error);
-      // Continue with local disconnect even if Stripe call fails
-    }
-
-    // Mark as inactive in database (don't delete to preserve history)
+    // Keep the Express account and financial history intact. Reconnecting
+    // creates a fresh hosted onboarding link for this same account.
     await db
       .update(stripeConnection)
       .set({
@@ -163,18 +216,16 @@ export const stripeConnectRouter = createTRPCRouter({
       z.object({
         applicationFeePercent: z.number().min(0).max(100).optional(),
         applicationFeeFixed: z.number().min(0).optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.locationId && !ctx.orgId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Organization or location context required",
-        });
-      }
+      const scope = await authorizeStripeMutation(ctx);
 
       const connection = await db.query.stripeConnection.findFirst({
-        where: stripeConnectionScopeWhere(ctx.orgId, ctx.locationId),
+        where: stripeConnectionScopeWhere(
+          scope.organizationId,
+          scope.locationId,
+        ),
       });
 
       if (!connection) {
@@ -188,8 +239,14 @@ export const stripeConnectRouter = createTRPCRouter({
       const [updated] = await db
         .update(stripeConnection)
         .set({
-          applicationFeePercent: input.applicationFeePercent === undefined ? null : String(input.applicationFeePercent),
-          applicationFeeFixed: input.applicationFeeFixed === undefined ? null : String(input.applicationFeeFixed),
+          applicationFeePercent:
+            input.applicationFeePercent === undefined
+              ? null
+              : String(input.applicationFeePercent),
+          applicationFeeFixed:
+            input.applicationFeeFixed === undefined
+              ? null
+              : String(input.applicationFeeFixed),
           updatedAt: new Date(),
         })
         .where(eq(stripeConnection.id, connection.id))
@@ -204,14 +261,26 @@ export const stripeConnectRouter = createTRPCRouter({
 
       return {
         success: true,
-        applicationFeePercent: updated.applicationFeePercent?.toString() || null,
+        applicationFeePercent:
+          updated.applicationFeePercent?.toString() || null,
         applicationFeeFixed: updated.applicationFeeFixed?.toString() || null,
       };
     }),
 });
 
-function stripeConnectionScopeWhere(organizationId: string | null, locationId: string | null): SQL | undefined {
+function stripeConnectionScopeWhere(
+  organizationId: string,
+  locationId: string | null,
+): SQL {
   return locationId
-    ? eq(stripeConnection.locationId, locationId)
-    : and(eq(stripeConnection.organizationId, organizationId ?? ""), isNull(stripeConnection.locationId));
+    ? and(
+        eq(stripeConnection.organizationId, organizationId),
+        eq(stripeConnection.locationId, locationId),
+        eq(stripeConnection.isActive, true),
+      )!
+    : and(
+        eq(stripeConnection.organizationId, organizationId),
+        isNull(stripeConnection.locationId),
+        eq(stripeConnection.isActive, true),
+      )!;
 }

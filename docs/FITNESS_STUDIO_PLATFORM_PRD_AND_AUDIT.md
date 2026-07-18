@@ -1,6 +1,6 @@
 # Aurea Fitness Studio Platform PRD and Audit
 
-Last audited: 2026-05-18
+Last reconciled against the current worktree: 2026-07-15
 
 ## 1. Purpose
 
@@ -14,13 +14,14 @@ This PRD defines the target product, what exists today, what should be added, wh
 
 I reviewed:
 
-- App Router pages under `src/app`: 136 user-visible `page.tsx` routes.
+- App Router pages under `src/app`: 157 `page.tsx` files, represented by 156
+  unique page URL patterns in the canonical route checklist.
 - Main navigation in `src/components/sidebar/app-sidebar.tsx`.
 - tRPC router aggregation in `src/trpc/routers/_app.ts`.
 - Prisma model and enum inventory in `prisma/schema.prisma`.
 - Dashboard widget data sources in `src/app/(dashboard)/(rest)/dashboard/page.tsx` and `src/features/studio/server/studio-dashboard-router.ts`.
 - Embeddable widget settings in `src/app/(dashboard)/settings/widgets/page.tsx` and `src/features/studio/server/widgets-router.ts`.
-- Studio demo data generator in `src/features/studio/server/seed-router.ts`.
+- Safe studio demo data orchestration in `src/features/demo-data/server/router.ts`.
 - Fitness terminology violations across schema, routes, components, and routers.
 - Official competitor/product references from Mindbody, Arketa, Momence, Mariana Tek, Walla, Glofox, and WellnessLiving to anchor the product benchmark.
 
@@ -30,7 +31,7 @@ Current state:
 - The dashboard is mostly connected to studio-native tables: `StudioClass`, `StudioBooking`, `CheckIn`, `StudioMembership`, `StudioPayment`, `ClassWaitlist`, and `ChurnRiskScore`.
 - The codebase still contains heavy agency/client/worker terminology in schema and code paths: `Subaccount`, `SubaccountMemberRole.AGENCY`, `Worker`, `WorkerDocument`, `WorkerAvailability`, `PayrollRunWorker`, `WorkerPayment`, `/clients`, `getClients`, `createAgency`, `Agency Owner`, `All clients`, and `Client acquisition`.
 - Several generic SaaS/agency routes are still exposed or present: `/clients`, `/deals`, `/pipelines`, `/bookings`, `/bookings/event-types`, `/rotas`, `/requests`, `/credentials`, and `/webhooks`.
-- Embeddable widget configuration supports multiple widget types, but the settings UI currently copies a schedule-only embed URL. Booking, membership, and instructor widgets need first-class embed routes before this is considered complete.
+- Schedule, membership-catalog, instructor-gallery, and free Cal.com appointment widgets now use exact organization/location scope, immutable publication versions, explicit allowed website origins, and dedicated typed renderers. Appointment widgets launch only the exact location-bound Cal.com account and never perform native booking or payment mutation.
 
 ## 3. Product Positioning
 
@@ -396,8 +397,10 @@ Required widget types:
 
 Required fixes:
 
-- Stop hard-coding schedule embed URLs for every widget type.
+- Keep publication-backed URLs type-specific; raw widget IDs must never be public runtime URLs.
 - Add typed embed routes for every supported `WidgetType`.
+- Store exact allowed website origins in each immutable widget version and enforce them with `frame-ancestors`; wildcard origins are not supported.
+- Before origin enforcement reaches an environment with legacy published widgets, configure origins and republish them. Legacy snapshots intentionally fail closed.
 - Respect `WidgetConfigSchema` fields in the rendered widget: colors, fonts, radius, prices, instructors, max days ahead, and class type filters.
 - Add preview per widget.
 - Track widget view, start, booking, signup, and purchase events in the conversion/event table.
@@ -786,7 +789,7 @@ Routes:
 QA:
 
 - Open public schedule by studio slug and confirm availability matches internal schedule.
-- Open embed schedule by widget ID and by org slug.
+- Confirm raw widget IDs and organization-only legacy embed inputs fail closed.
 - Confirm unsupported widget types do not show schedule accidentally.
 - Submit a public funnel/form and confirm contact creation, source, acquisition stage, and conversion event.
 - Use API keys to fetch classes, members, instructors, bookings, and memberships; verify scopes are enforced.
@@ -845,7 +848,7 @@ Data risks:
 - Revenue widgets are only complete if every commerce surface writes to `StudioPayment`.
 - Occupancy and utilization should exclude cancelled, rejected, no-show, and late-cancelled bookings consistently.
 - At-risk logic should combine recent visits, failed payments, churn scores, membership status, and open tasks.
-- Widget settings support multiple widget types, but only schedule rendering is implemented today.
+- Schedule, membership-catalog, instructor-gallery, and free appointment widgets have typed public renderers. Source or provider-account drift fails closed and the CRM suppresses stale embed controls until republished.
 
 Required analytics additions:
 
@@ -862,42 +865,48 @@ Required analytics additions:
 
 ## 11. Optimization Backlog
 
+Status note, reconciled 2026-07-15: this section is the older fitness-product
+backlog, not an additional set of Arketa priority blocks. The current Arketa
+roadmap has four blocks: P0-P2 are delivered for the retained scope and P3 is a
+deliberate defer. Items below are marked by current disposition so delivered
+work is not mistaken for remaining work.
+
 P0 before serious QA:
 
-- Remove or migrate all agency/client/worker terminology.
-- Fix widget embed type mismatch.
-- Decide the fate of `/clients`, `/deals`, `/pipelines`, `/bookings`, `/bookings/event-types`, `/rotas`, and `/requests`.
-- Move member tags and workflow conditions into first-class studio automation nodes.
-- Validate every studio automation trigger/action with real data.
-- Add dedicated automation conversion/event reporting widgets.
-- Ensure seed data covers all current database concepts.
-- Remove committed `TODO`/`FIXME` comments or convert them into tracked backlog docs.
+- Pending: finish the internal agency/client/worker terminology and schema
+  migration. User-facing studio terminology is already substantially migrated.
+- Design native paid appointment booking as a separate V2 with an expiring slot hold, idempotent public receipt, and exact location Stripe Connect Express destination charge. The shipped V1 remains a read-only Cal.com launcher.
+- Pending product decision: consolidate or rename `/clients`, `/deals`,
+  `/pipelines`, `/bookings`, `/bookings/event-types`, `/rotas`, and `/requests`.
+- Delivered for the retained workflow scope: first-class studio triggers/actions,
+  capability and provider-readiness checks, and automation conversion reporting.
+  Live third-party validation remains account-owner test work.
+- Delivered: rollback-only SHOWCASE and QA_EXHAUSTIVE profiles cover 128 owned
+  record types and leave no committed rows.
+- Delivered: committed source comments contain no unresolved `TODO` or `FIXME`
+  markers; task-status enum values named `TODO` remain valid product data.
 
 P1:
 
-- Multi-location support as Locations, not clients/subaccounts.
-- Member timeline that combines check-ins, bookings, payments, notes, tasks, waivers, campaigns, SMS, referrals, loyalty, and automation events.
-- Payment plans and installments.
-- Failed-payment recovery.
-- Reserve with Google.
-- ClassPass/Gympass/Wellhub integration.
-- Dynamic pricing rules visible in the class/booking flow.
-- Guest booking and bring-a-friend.
-- Automated no-show/late-cancel fees.
-- Self check-in kiosk mode.
-- Better public/member booking flow.
-- Widget previews and analytics.
-- Stronger role/permission model for studio owners, managers, front desk, instructors, and bookkeepers.
-- Branded member app strategy: native app, PWA, or white-label wrapper.
-- On-demand video library.
+- Delivered: exact-scope multi-location operation, consolidated member timeline,
+  payment-plan/installment configuration, failed-payment recovery, dynamic
+  pricing configuration, automated no-show/late-cancel fees, public paid class
+  booking, widget publication/preview foundations, and capability-based roles.
+- Pending provider lifecycle: Reserve with Google and
+  ClassPass/Gympass/Wellhub. Stored integration configuration is not represented
+  as a live sync, subscription, reconciliation, or operational health contract.
+- Pending retained product work: guest/bring-a-friend and a full self check-in
+  kiosk mode.
+- Deferred with P3: branded native/white-label member apps and a full on-demand
+  video suite. These require separate trustworthy product contracts rather than
+  route shells.
 
 P2:
 
-- Access control and door integration.
-- Heart rate and performance tracking.
-- Workout programming/WOD builder for studios that need it.
-- SOAP notes for personal training, physio, or wellness use cases.
-- Marketplace/discovery listing.
+- Deferred with P3: access-control providers, heart-rate/performance ingestion,
+  workout programming, SOAP-note clinical/privacy lifecycles, and a discovery
+  marketplace. Aurea has scoped configuration/data foundations for these, but
+  does not advertise them as complete provider/runtime products.
 
 ## 12. Data and Schema Cleanup Plan
 
@@ -971,7 +980,7 @@ Operations:
 ## 14. Recommended Next Implementation Order
 
 1. Terminology pass in UI and route labels: agency/client/worker -> studio/location/member/instructor.
-2. Widget embed fixes: typed embed routes and correct settings copy/code.
+2. Widget expansion: add typed intro-offer, form, referral, event, and on-demand contracts on the publication-backed schedule, appointment, membership, and instructor foundation.
 3. Route consolidation: hide or redirect `/clients`, `/rotas`, `/requests`, `/bookings`, `/bookings/event-types`, `/deals`, and `/pipelines` according to product decisions.
 4. Automation conversion widgets and reporting.
 5. Workflow condition nodes for class-count, intro-offer completion, tags, churn threshold, and membership state.

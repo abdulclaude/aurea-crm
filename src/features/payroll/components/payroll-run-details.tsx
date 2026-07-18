@@ -19,9 +19,16 @@ interface PayrollRunDetailsProps {
   onBack?: () => void;
 }
 
-function formatCurrency(amount: number | string | { toNumber?: () => number }): string {
+function formatCurrency(
+  amount: number | string | { toNumber?: () => number },
+): string {
   // Handle Prisma Decimal type
-  if (typeof amount === 'object' && amount !== null && 'toNumber' in amount && typeof amount.toNumber === 'function') {
+  if (
+    typeof amount === "object" &&
+    amount !== null &&
+    "toNumber" in amount &&
+    typeof amount.toNumber === "function"
+  ) {
     return `£${amount.toNumber().toFixed(2)}`;
   }
   return `£${Number(amount).toFixed(2)}`;
@@ -48,7 +55,10 @@ const getStatusColor = (status: string) => {
   }
 };
 
-export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsProps) {
+export function PayrollRunDetails({
+  payrollRunId,
+  onBack,
+}: PayrollRunDetailsProps) {
   const trpc = useTRPC();
   const [selectedInstructor, setSelectedInstructor] = React.useState<{
     id: string;
@@ -56,7 +66,7 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
   } | null>(null);
 
   const { data: payrollRun } = useSuspenseQuery(
-    trpc.payroll.getById.queryOptions({ id: payrollRunId })
+    trpc.payroll.getById.queryOptions({ id: payrollRunId }),
   );
 
   if (!payrollRun) {
@@ -67,7 +77,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
     );
   }
 
-  const columns: ColumnDef<typeof payrollRun.payrollRunInstructors[number]>[] = [
+  const columns: ColumnDef<
+    (typeof payrollRun.payrollRunInstructors)[number]
+  >[] = [
     {
       id: "instructor",
       accessorKey: "instructor.name",
@@ -75,7 +87,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       cell: ({ row }) => (
         <div>
           <p className="font-medium text-xs">{row.original.instructor.name}</p>
-          <p className="text-xs text-primary/60">{row.original.instructor.email || "No email"}</p>
+          <p className="text-xs text-primary/60">
+            {row.original.instructor.email || "No email"}
+          </p>
         </div>
       ),
     },
@@ -85,11 +99,15 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       cell: ({ row }) => (
         <div className="text-xs">
           <p className="font-medium">
-            {formatHours(Number(row.original.regularHours) + Number(row.original.overtimeHours))}
+            {formatHours(
+              Number(row.original.regularHours) +
+                Number(row.original.overtimeHours),
+            )}
           </p>
           <p className="text-primary/60">
             {formatHours(Number(row.original.regularHours))} reg
-            {Number(row.original.overtimeHours) > 0 && ` + ${formatHours(Number(row.original.overtimeHours))} OT`}
+            {Number(row.original.overtimeHours) > 0 &&
+              ` + ${formatHours(Number(row.original.overtimeHours))} OT`}
           </p>
         </div>
       ),
@@ -99,7 +117,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       accessorKey: "grossPay",
       header: "Gross Pay",
       cell: ({ row }) => (
-        <p className="text-xs font-medium">{formatCurrency(row.original.grossPay)}</p>
+        <p className="text-xs font-medium">
+          {formatCurrency(row.original.grossPay)}
+        </p>
       ),
     },
     {
@@ -107,7 +127,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       accessorKey: "deductions",
       header: "Deductions",
       cell: ({ row }) => (
-        <p className="text-xs text-red-500">{formatCurrency(row.original.deductions)}</p>
+        <p className="text-xs text-red-500">
+          {formatCurrency(row.original.deductions)}
+        </p>
       ),
     },
     {
@@ -115,7 +137,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
       accessorKey: "netPay",
       header: "Net Pay",
       cell: ({ row }) => (
-        <p className="text-xs font-bold text-green-600">{formatCurrency(row.original.netPay)}</p>
+        <p className="text-xs font-bold text-green-600">
+          {formatCurrency(row.original.netPay)}
+        </p>
       ),
     },
     {
@@ -132,6 +156,7 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
               name: row.original.instructor.name,
             })
           }
+          aria-label={`View payslip for ${row.original.instructor.name}`}
         >
           <FileText className="size-3.5 mr-1" />
           View
@@ -147,18 +172,28 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             {onBack && (
-              <Button variant="ghost" size="sm" onClick={onBack}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onBack}
+                aria-label="Back to payroll runs"
+              >
                 <ArrowLeft className="size-4" />
               </Button>
             )}
             <div>
-              <h2 className="text-lg font-semibold text-primary">Payroll Run Details</h2>
+              <h2 className="text-lg font-semibold text-primary">
+                Payroll Run Details
+              </h2>
               <p className="text-xs text-primary/75 mt-1">
                 {format(new Date(payrollRun.periodStart), "MMM d")} -{" "}
                 {format(new Date(payrollRun.periodEnd), "MMM d, yyyy")}
               </p>
             </div>
-            <Badge variant="outline" className={cn("ml-3", getStatusColor(payrollRun.status))}>
+            <Badge
+              variant="outline"
+              className={cn("ml-3", getStatusColor(payrollRun.status))}
+            >
               {payrollRun.status.replace("_", " ")}
             </Badge>
           </div>
@@ -170,16 +205,22 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-primary/60">Total Instructors</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary/60">
+                Total Instructors
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{payrollRun._count.payrollRunInstructors}</div>
+              <div className="text-2xl font-bold">
+                {payrollRun._count.payrollRunInstructors}
+              </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-primary/60">Gross Pay</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary/60">
+                Gross Pay
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-emerald-500">
@@ -190,7 +231,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-primary/60">Deductions</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary/60">
+                Deductions
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-500">
@@ -201,7 +244,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-primary/60">Net Pay</CardTitle>
+              <CardTitle className="text-sm font-medium text-primary/60">
+                Net Pay
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-green-600">
@@ -220,7 +265,9 @@ export function PayrollRunDetails({ payrollRunId, onBack }: PayrollRunDetailsPro
             emptyState={
               <div className="text-center py-12">
                 <FileText className="size-12 mx-auto text-primary/20 mb-4" />
-                <h3 className="text-sm font-medium text-primary mb-1">No instructors</h3>
+                <h3 className="text-sm font-medium text-primary mb-1">
+                  No instructors
+                </h3>
                 <p className="text-xs text-primary/60">
                   No instructors found in this payroll run
                 </p>

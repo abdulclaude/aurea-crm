@@ -58,13 +58,18 @@ export const BirthdayTriggerNode: React.FC<
         onSubmit={handleSubmit}
         defaultValues={{
           variableName: data.variableName || "birthday",
+          daysBefore: data.daysBefore ?? 0,
         }}
       />
       <BaseTriggerNode
         {...props}
         icon={Cake}
-        name="Birthday"
-        description="Runs daily for members whose birthday is today"
+        name="Upcoming birthday"
+        description={
+          data.daysBefore
+            ? `${data.daysBefore} days before each member birthday`
+            : "On each member birthday"
+        }
         status={nodeStatus}
         onSettings={handleOpen}
         onDoubleClick={handleOpen}

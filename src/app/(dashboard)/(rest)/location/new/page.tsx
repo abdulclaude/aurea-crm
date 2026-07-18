@@ -3,9 +3,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import z from "zod";
+import { City, Country, State } from "country-state-city";
+import { allTimezones, useTimezoneSelect } from "react-timezone-select";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -17,6 +20,10 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import {
+  LocationPhoneInput,
+  SearchCombobox,
+} from "@/features/organizations/components/location-form-controls";
 import { useTRPC } from "@/trpc/client";
 
 const formSchema = z.object({
@@ -39,6 +46,23 @@ type FormValues = z.infer<typeof formSchema>;
 export default function NewClientPage() {
   const router = useRouter();
   const trpc = useTRPC();
+  const [selectedCountryCode, setSelectedCountryCode] = useState("");
+
+  const { options: timezoneOptions } = useTimezoneSelect({
+    labelStyle: "original",
+    timezones: allTimezones,
+  });
+  const countryOptions = Country.getAllCountries().map((country) => ({
+    value: country.isoCode,
+    label: country.name,
+  }));
+  const stateOptions = selectedCountryCode
+    ? State.getStatesOfCountry(selectedCountryCode).map((state) => ({
+        value: state.name,
+        label: state.name,
+        isoCode: state.isoCode,
+      }))
+    : [];
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -57,6 +81,17 @@ export default function NewClientPage() {
       industry: "",
     },
   });
+
+  const selectedState = form.watch("state");
+  const selectedStateCode = stateOptions.find(
+    (state) => state.value === selectedState,
+  )?.isoCode;
+  const cityOptions = selectedCountryCode
+    ? (selectedStateCode
+        ? City.getCitiesOfState(selectedCountryCode, selectedStateCode)
+        : (City.getCitiesOfCountry(selectedCountryCode) ?? [])
+      ).map((city) => ({ value: city.name, label: city.name }))
+    : [];
 
   const createLocation = useMutation(
     trpc.organizations.createLocation.mutationOptions(),
@@ -165,13 +200,12 @@ export default function NewClientPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel className="text-xs text-primary/75">
-                        Phone
+                        Phone number
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="+44 7123 456789"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
+                        <LocationPhoneInput
+                          value={field.value}
+                          onChange={field.onChange}
                         />
                       </FormControl>
                       <FormMessage className="text-xs" />
@@ -252,11 +286,22 @@ export default function NewClientPage() {
                         City
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="London"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
-                        />
+                        {cityOptions.length > 0 ? (
+                          <SearchCombobox
+                            value={field.value}
+                            onChange={field.onChange}
+                            options={cityOptions}
+                            placeholder="Select city..."
+                            searchPlaceholder="Search cities..."
+                            emptyText="No city found."
+                          />
+                        ) : (
+                          <Input
+                            placeholder="London"
+                            className="border-black/10 dark:border-white/5 text-primary text-xs"
+                            {...field}
+                          />
+                        )}
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -271,11 +316,25 @@ export default function NewClientPage() {
                         State / Region
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Greater London"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
-                        />
+                        {stateOptions.length > 0 ? (
+                          <SearchCombobox
+                            value={field.value}
+                            onChange={(state) => {
+                              field.onChange(state);
+                              form.setValue("city", "");
+                            }}
+                            options={stateOptions}
+                            placeholder="Select state..."
+                            searchPlaceholder="Search states..."
+                            emptyText="No state found."
+                          />
+                        ) : (
+                          <Input
+                            placeholder="Greater London"
+                            className="border-black/10 dark:border-white/5 text-primary text-xs"
+                            {...field}
+                          />
+                        )}
                       </FormControl>
                       <FormMessage className="text-xs" />
                     </FormItem>
@@ -312,10 +371,18 @@ export default function NewClientPage() {
                         Country
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="United Kingdom"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
+                        <SearchCombobox
+                          value={field.value}
+                          onChange={(countryCode) => {
+                            field.onChange(countryCode);
+                            setSelectedCountryCode(countryCode);
+                            form.setValue("state", "");
+                            form.setValue("city", "");
+                          }}
+                          options={countryOptions}
+                          placeholder="Select country..."
+                          searchPlaceholder="Search countries..."
+                          emptyText="No country found."
                         />
                       </FormControl>
                       <FormMessage className="text-xs" />
@@ -336,10 +403,16 @@ export default function NewClientPage() {
                         Timezone
                       </FormLabel>
                       <FormControl>
-                        <Input
-                          placeholder="Europe/London"
-                          className="border-black/10 dark:border-white/5 text-primary text-xs"
-                          {...field}
+                        <SearchCombobox
+                          value={field.value}
+                          onChange={field.onChange}
+                          options={timezoneOptions.map((option) => ({
+                            value: option.value,
+                            label: option.label,
+                          }))}
+                          placeholder="Select timezone..."
+                          searchPlaceholder="Search timezones..."
+                          emptyText="No timezone found."
                         />
                       </FormControl>
                       <FormMessage className="text-xs" />
@@ -371,17 +444,18 @@ export default function NewClientPage() {
             <div className="flex items-center justify-end gap-3 px-6">
               <Button
                 type="button"
-                variant="ghost"
+                variant="destructive"
                 onClick={() => router.back()}
                 disabled={isPending}
-                className="bg-rose-500 text-rose-100 hover:bg-rose-500/95 hover:text-white text-xs rounded-lg border border-black/10 dark:border-white/5 transition duration-150"
+                className="w-max"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
+                variant="gradient"
                 disabled={isPending}
-                className="bg-background hover:bg-primary-foreground/50 hover:text-black text-xs rounded-lg border border-black/10 dark:border-white/5 transition duration-150"
+                className="w-max"
               >
                 {isPending ? "Creating..." : "Add location"}
               </Button>

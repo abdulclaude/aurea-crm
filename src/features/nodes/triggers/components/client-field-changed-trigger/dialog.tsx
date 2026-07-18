@@ -105,7 +105,7 @@ export const ClientFieldChangedTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Client Field Changed Trigger Configuration</SheetTitle>
           <SheetDescription>
@@ -113,7 +113,7 @@ export const ClientFieldChangedTriggerDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -131,11 +131,11 @@ export const ClientFieldChangedTriggerDialog: React.FC<Props> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Access the change data in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "clientChange"}.oldValue}}`}
                     </span>
                     {", "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "clientChange"}.newValue}}`}
                     </span>
                   </FormDescription>

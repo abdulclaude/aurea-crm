@@ -1,1186 +1,669 @@
-# Aurea CRM User-Visitable Route QA Walkthrough
-
-Generated from `src/app/**/page.tsx` on 2026-05-17. This document intentionally covers routes a user can visit in the browser, not API route handlers or layout-only files.
-
-Use this as a guided QA script. Start with `/dashboard`, run the practical demo-data population action, then work through each section in order. For dynamic routes such as `[workflowId]`, open the parent list route first and use a real record ID, then manually test one invalid ID afterward.
-
-Coverage: 139 visitable page route files.
-
-Important route collision to verify during build/runtime QA: more than one page resolves to `/`:
-- `src/app/(public)/page.tsx`
-- `src/app/page.tsx`
-
----
-
-## 1. Auth, Onboarding, and Entry
-
-These routes handle sign-up, login, invitations, onboarding, and the root entry point. Test them first to establish a valid session.
-
-### `/login`
-
-Source: `src/app/(auth)/login/page.tsx`
-
-Test it thoroughly:
-- Submit empty, invalid, and valid credentials.
-- Verify inline validation and auth errors are understandable.
-- Confirm successful login redirects into the active organization/subaccount.
-- Check OAuth buttons and password visibility/reset links if shown.
-
-### `/sign-up`
-
-Source: `src/app/(auth)/sign-up/page.tsx`
-
-Test it thoroughly:
-- Submit required fields one by one to confirm validation.
-- Complete sign-up and verify user/session/org initialization.
-- Confirm duplicate email and weak password behavior.
-- Check the post-sign-up redirect into onboarding or dashboard.
-
-### `/invitation/[id]`
-
-Source: `src/app/(auth)/invitation/[id]/page.tsx`
-
-Before testing: Create a valid invite from `/invites`; also test a fake or expired invite ID.
-
-Test it thoroughly:
-- Open a valid invitation while signed out and signed in.
-- Accept as a new user and as an existing user.
-- Confirm org/subaccount membership, role, and active workspace after acceptance.
-- Open invalid/expired invites and verify safe messaging.
-
-### `/onboarding/studio`
-
-Source: `src/app/onboarding/studio/page.tsx`
-
-### `/onboarding/preview`
-
-Source: `src/app/onboarding/preview/page.tsx`
-
-Before testing: Use a fresh test org/client if possible.
-
-Test it thoroughly:
-- Complete each onboarding step with minimum and full data.
-- Use back/skip/preview controls and confirm data persists.
-- Finish onboarding and verify created rooms, class types, instructors, memberships, and first class.
-- Check direct access after onboarding is complete.
-
-### `/` (root pages)
-
-Source: `src/app/(public)/page.tsx` and `src/app/page.tsx`
-
-Test it thoroughly:
-- Open `/` directly signed out and signed in.
-- Confirm the route either renders the intended public page or redirects intentionally.
-- Verify metadata, favicon, theme, and navigation are consistent.
-- Check that no dashboard-only data is exposed when signed out.
-- Run a production build to confirm duplicate root pages don't collide.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 2. Dashboard Home
-
-### `/dashboard`
-
-Source: `src/app/(dashboard)/(rest)/dashboard/page.tsx`
-
-Before testing: Use this route first. Run the demo-data action before testing the rest of the app.
-
-Test it thoroughly:
-- Run the practical demo-data generator and confirm the success summary.
-- Verify cards/charts populate with classes, bookings, payments, contacts, workflows, and automation events.
-- Use dashboard links to jump into contacts, studio classes, reports, executions, and growth pages.
-- Run the generator a second time to confirm cleanup/reseed is safe.
-
-Also verify:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 3. Contacts, Households, and Member Directory
-
-These routes manage the unified lead/member directory and family account grouping. Test contacts first, then households.
-
-### `/contacts`
-
-Source: `src/app/(dashboard)/(rest)/contacts/page.tsx`
-
-Before testing: Seed data first so contacts include birthdays, acquisition stages, tags, households, intro-offer members, churn-risk members, and active members.
-
-Test it thoroughly:
-- Switch member/lead/status filters and confirm fields change contextually.
-- Search by name/email/tag and verify results stay tenant-scoped.
-- Open edit actions and check birthday, acquisition stage, tags, attendance, emergency contact, and household indicators.
-- Follow related links to `/contacts/new`, `/households`, `/acquisition`, `/loyalty`, `/referrals`, and `/churn`.
-
-### `/contacts/new`
-
-Source: `src/app/(dashboard)/(rest)/contacts/new/page.tsx`
-
-Before testing: Create one lead and one active member with different tags and birthdays.
-
-Test it thoroughly:
-- Fill only required fields first, then add optional member fields.
-- Validate birthday, tags, source, acquisition stage, waiver, emergency contact, and fitness fields.
-- Save and confirm the contact appears in `/contacts`, `/acquisition`, and member-related pages when applicable.
-- Try duplicate email and invalid phone/email values.
-
-### `/households`
-
-Source: `src/app/(dashboard)/(rest)/households/page.tsx`
-
-Before testing: Seed data includes example households. Also create a new household manually.
-
-Test it thoroughly:
-- Create a household with primary, partner, child, dependent, and member roles.
-- Edit household notes and primary contact.
-- Remove and re-add a member, then confirm the contact record reflects membership.
-- Check scoping by switching subaccounts if available.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 4. Member Growth and Retention
-
-These routes are tightly related: acquisition tracks the funnel, churn monitors risk, loyalty rewards engagement, referrals drive word-of-mouth, intro offers attract new signups, and SMS enables direct outreach. Test them together since they share contact data.
-
-### `/acquisition`
-
-Source: `src/app/(dashboard)/(rest)/acquisition/page.tsx`
-
-Before testing: Seed data first so every acquisition stage has example contacts.
-
-Test it thoroughly:
-- Review counts for INQUIRY, TRIAL, ACTIVE, and LOST.
-- Drag contacts between stages and confirm counts update.
-- Drill into lead/member contact records from the kanban cards.
-- Compare source breakdown against seeded contact sources and referral/intro-offer flows.
-
-### `/churn`
-
-Source: `src/app/(dashboard)/(rest)/churn/page.tsx`
-
-Before testing: Seed data includes medium, high, and critical risk scores.
-
-Test it thoroughly:
-- Review risk levels, scores, factors, and suggested actions.
-- Open linked contacts and compare attendance/streak/membership data.
-- Create a task or message from a churn action if supported.
-- Refresh/recalculate scores if the page exposes that action.
-
-### `/loyalty`
-
-Source: `src/app/(dashboard)/(rest)/loyalty/page.tsx`
-
-Before testing: Seed data includes a program, rewards, balances, tiers, and transactions.
-
-Test it thoroughly:
-- Review program settings and reward catalog.
-- Check member leaderboard/balances and tier assignment.
-- Award or adjust points if controls exist, then verify transaction history.
-- Confirm workflow-awarded points from milestone/birthday automations appear in automation-related pages.
-
-### `/referrals`
-
-Source: `src/app/(dashboard)/(rest)/referrals/page.tsx`
-
-Before testing: Seed data includes pending, signed-up, converted, and rewarded referral examples.
-
-Test it thoroughly:
-- Review reward values and max-referral settings.
-- Copy or inspect referral codes.
-- Confirm each referral status is represented and transitions are understandable.
-- Verify converted referrals relate back to `/contacts`, `/acquisition`, and automation conversion events.
-
-### `/intro-offers`
-
-Source: `src/app/(dashboard)/(rest)/intro-offers/page.tsx`
-
-Before testing: Seed data includes active, converted, and expired redemptions.
-
-Test it thoroughly:
-- Create an offer for each major offer type you plan to support.
-- Edit price, duration, credit count, allowed class types, visibility, max redemptions, and follow-up plan.
-- Inspect redemption counts and statuses.
-- Trace converted intro-offer members into `/acquisition`, `/contacts`, `/workflows`, and `/executions`.
-
-### `/sms`
-
-Source: `src/app/(dashboard)/(rest)/sms/page.tsx`
-
-Before testing: Use test phone numbers and do not assume Twilio credentials are configured.
-
-Test it thoroughly:
-- Send a single SMS to a contact and a bulk SMS to a segment/tag if available.
-- Confirm queued/sent/failed states and provider error messages.
-- Verify messages relate to contact records and automation executions when sent by workflow.
-- Check template variables and opt-out handling if present.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 5. Studio: Schedule, Classes, Class Types, and Rooms
-
-These routes form the core studio operations. Changes to rooms, class types, and instructors directly affect classes and the schedule. Test setup routes first (class types, rooms), then classes, then the schedule.
-
-### `/studio/class-types`
-
-Source: `src/app/(dashboard)/(rest)/studio/class-types/page.tsx`
-
-Before testing: Seed data includes several class types with colors.
-
-Test it thoroughly:
-- Create/edit name, slug, color, description, and active state.
-- Confirm changes appear in `/studio/classes`, `/studio/schedule`, and intro-offer allowed class filters.
-- Try duplicate slugs/names if restricted.
-- Deactivate a class type and verify scheduled classes handle it safely.
-
-### `/studio/rooms`
-
-Source: `src/app/(dashboard)/(rest)/studio/rooms/page.tsx`
-
-Before testing: Seed data includes several rooms.
-
-Test it thoroughly:
-- Create/edit room name, capacity, and description.
-- Confirm capacity appears in class scheduling and class detail.
-- Try lowering capacity below existing bookings and verify app behavior.
-- Deactivate/delete if supported and confirm existing classes remain safe.
-
-### `/studio/classes`
-
-Source: `src/app/(dashboard)/(rest)/studio/classes/page.tsx`
-
-Before testing: Seed data includes past, current, and future classes across class types, rooms, and instructors.
-
-Test it thoroughly:
-- Filter by date/status/class type/instructor and inspect capacity.
-- Create/edit/cancel a class if controls exist.
-- Open `/studio/classes/[classId]` from a row.
-- Confirm substitutions, bookings, waitlist, and check-ins stay in sync.
-
-### `/studio/classes/[classId]`
-
-Source: `src/app/(dashboard)/(rest)/studio/classes/[classId]/page.tsx`
-
-Before testing: Open from `/studio/classes` or `/studio/schedule` using a valid class.
-
-Test it thoroughly:
-- Review roster, bookings, check-ins, capacity, room, instructor, and class type.
-- Book/cancel/check-in members if available.
-- Create or inspect substitution requests linked to this class.
-- Try an invalid class ID and verify the not-found state.
-
-### `/studio/schedule`
-
-Source: `src/app/(dashboard)/(rest)/studio/schedule/page.tsx`
-
-Before testing: Seed data creates classes for the past 30 days and next 7 days.
-
-Test it thoroughly:
-- Switch day/week/month or equivalent views.
-- Book, cancel, waitlist, and open class detail from calendar items.
-- Confirm timezone, capacity, instructor, room, and class type display.
-- Navigate into public schedule/embed routes where relevant.
-
-### `/studio/substitutions`
-
-Source: `src/app/(dashboard)/(rest)/studio/substitutions/page.tsx`
-
-Before testing: Seed data includes open, offered, and accepted substitution requests.
-
-Test it thoroughly:
-- Create a substitution request from a future class.
-- Offer, accept, decline, or reassign substitutes depending on available controls.
-- Verify instructor availability/specialties influence choices if implemented.
-- Confirm the class detail and worker profile reflect the substitution status.
-
-### `/studio/check-in`
-
-Source: `src/app/(dashboard)/(rest)/studio/check-in/page.tsx`
-
-Before testing: Use seeded bookings for today or create one from schedule/classes first.
-
-Test it thoroughly:
-- Search by member name/email and check in manually.
-- Try duplicate check-in and wrong-class check-in.
-- Confirm attendance count and streak update on contact/member pages.
-- Verify check-in workflows and milestone automations can fire and appear in `/executions`.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 6. Studio: Memberships, POS, Gift Cards, and Add-Ons
-
-These routes handle billing, commerce, and retail within the studio. Memberships feed into acquisition and revenue; POS uses add-ons and gift cards for payment. Test memberships first since other routes reference them.
-
-### `/studio/memberships`
-
-Source: `src/app/(dashboard)/(rest)/studio/memberships/page.tsx`
-
-Before testing: Seed data includes unlimited, packs, drop-in, annual, intro, and trial plans.
-
-Test it thoroughly:
-- Create/edit each plan type and verify price, interval, credits, duration, and public visibility.
-- Confirm intro-offer plans relate to `/intro-offers` and acquisition conversion.
-- Check active memberships on contacts and revenue/reporting pages.
-- Test deactivate/delete behavior when memberships already reference a plan.
-
-### `/studio/pos`
-
-Source: `src/app/(dashboard)/(rest)/studio/pos/page.tsx`
-
-Before testing: Use seeded contacts, promo codes, add-ons, gift cards, and membership products.
-
-Test it thoroughly:
-- Build a cart with products, drop-ins, gift cards, and discounts.
-- Attach a customer and process test payment/failure states.
-- Confirm payments appear in revenue/reports/contact history.
-- Check receipt, refund, and empty-cart behavior.
-
-### `/studio/gift-cards`
-
-Source: `src/app/(dashboard)/(rest)/studio/gift-cards/page.tsx`
-
-Before testing: Use seeded contacts and create one new gift card.
-
-Test it thoroughly:
-- Issue a gift card to a contact/recipient.
-- Redeem part and full balances through POS or payment flow if available.
-- Confirm remaining balance, expiry, purchaser, and recipient data.
-- Test invalid code, expired card, and zero-balance states.
-
-### `/studio/add-ons`
-
-Source: `src/app/(dashboard)/(rest)/studio/add-ons/page.tsx`
-
-Before testing: Create at least one retail/product and one service-style add-on if the UI supports types.
-
-Test it thoroughly:
-- Create/edit price, tax/category/status, and availability.
-- Attach add-ons through POS, booking, membership, or class flows where supported.
-- Confirm revenue/reporting reflects add-on purchases.
-- Test unavailable/deactivated add-ons in purchase flows.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 7. Studio: Import and Mindbody Migration
-
-### `/studio/import`
-
-Source: `src/app/(dashboard)/(rest)/studio/import/page.tsx`
-
-Before testing: Use a small CSV with valid rows, invalid rows, duplicates, and missing optional fields.
-
-Test it thoroughly:
-- Upload, map columns, preview, and confirm import.
-- Verify validation errors are row-specific and do not import bad rows silently.
-- Confirm imported records appear in contacts, acquisition, memberships, and reports.
-- Run the same import twice and check duplicate prevention.
-
-### `/studio/mindbody`
-
-Source: `src/app/(dashboard)/(rest)/studio/mindbody/page.tsx`
-
-Before testing: Test without credentials first, then with sandbox/test credentials if available.
-
-Test it thoroughly:
-- Open sync/setup screens and verify missing-credential messaging.
-- Run import/sync actions only against test data.
-- Confirm duplicates are handled and mapped fields land in contacts/classes/memberships.
-- Check logs/status indicators after failures and retries.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 8. Launchpad (Guided Studio Setup)
-
-The launchpad is a guided wizard for initial studio setup. Its child routes mirror setup for class types, rooms, instructors, memberships, and first class. Test the parent first, then each step in order.
-
-### `/launchpad`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/page.tsx`
-
-### `/launchpad/class-types`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/class-types/page.tsx`
-
-### `/launchpad/rooms`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/rooms/page.tsx`
-
-### `/launchpad/instructors`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/instructors/page.tsx`
-
-### `/launchpad/memberships`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/memberships/page.tsx`
-
-### `/launchpad/first-class`
-
-Source: `src/app/(dashboard)/(rest)/launchpad/first-class/page.tsx`
-
-Test it thoroughly (all launchpad routes):
-- Open the parent and each child step in order.
-- Run the main create/edit/view action available on each page.
-- Confirm saved changes appear immediately and still appear after refresh.
-- Verify data created here appears in the corresponding `/studio/*` routes.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 9. Staff, Workers, and Workforce Management
-
-These routes manage instructors/workers, their schedules, time tracking, payroll, requests, and bookings. Workers feed into class assignments, substitutions, payroll, and the worker portal. Test workers first, then time logs, then payroll.
-
-### `/workers`
-
-Source: `src/app/(dashboard)/(rest)/workers/page.tsx`
-
-Before testing: Seed data includes instructors with specialties/certifications.
-
-Test it thoroughly:
-- Create/edit worker details, roles, specialties, availability, and active state.
-- Open worker detail and verify schedule, classes, time logs, earnings, and documents.
-- Confirm substitutions and payroll reference the same worker data.
-- Test invalid worker ID and lower-permission access.
-
-### `/workers/[workerId]`
-
-Source: `src/app/(dashboard)/(rest)/workers/[workerId]/page.tsx`
-
-### `/time-logs`
-
-Source: `src/app/(dashboard)/(rest)/time-logs/page.tsx`
-
-Before testing: Use seeded workers and create fresh clock-in/out examples.
-
-Test it thoroughly:
-- Clock in/out, add breaks if supported, and prevent duplicate open shifts.
-- Review logs in list and timesheet views by worker/pay period.
-- Approve/edit/correct time logs and verify totals.
-- Confirm payroll page uses the same approved totals.
-
-### `/time-logs/clock-in`
-
-Source: `src/app/(dashboard)/(rest)/time-logs/clock-in/page.tsx`
-
-### `/time-logs/timesheet`
-
-Source: `src/app/(dashboard)/(rest)/time-logs/timesheet/page.tsx`
-
-### `/rotas`
-
-Source: `src/app/(dashboard)/(rest)/rotas/page.tsx`
-
-Before testing: Use seeded workers/instructors.
-
-Test it thoroughly:
-- Create shifts, assign workers, drag or resize shifts if supported.
-- Check conflicts, overlapping shifts, and role/availability constraints.
-- Publish or approve schedules if supported.
-- Verify worker portal schedule reflects changes.
-
-### `/payroll`
-
-Source: `src/app/(dashboard)/(rest)/payroll/page.tsx`
-
-Before testing: Use seeded classes, time logs, workers, and payment data.
-
-Test it thoroughly:
-- Review pay period totals and per-worker earnings.
-- Approve/export/run payout if safe in test mode.
-- Check missing Stripe Connect/bank setup warnings.
-- Compare values with time logs and worker earnings portal.
-
-### `/requests`
-
-Source: `src/app/(dashboard)/(rest)/requests/page.tsx`
-
-Before testing: Create time-off, swap, substitution, or generic requests depending on enabled modules.
-
-Test it thoroughly:
-- Submit a request from related routes or worker portal.
-- Approve, decline, comment, and filter by status.
-- Confirm related rota/class/time-log records update.
-- Check notification behavior and permission restrictions.
-
-### `/bookings`
-
-Source: `src/app/(dashboard)/(rest)/bookings/page.tsx`
-
-Before testing: Seed data includes booking event types and sample appointments.
-
-Test it thoroughly:
-- Create/edit event types with duration/location/payment requirements.
-- Create, reschedule, complete, and cancel appointments.
-- Open related contact records and confirm appointment history.
-- Test scheduling conflicts, invalid attendee fields, and public booking links if available.
-
-### `/bookings/event-types`
-
-Source: `src/app/(dashboard)/(rest)/bookings/event-types/page.tsx`
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 10. CRM: Deals, Pipelines, Tasks, and Inbox
-
-These routes handle sales pipeline management, task follow-ups, and multi-channel conversations. Pipelines define the stages; deals move through them; tasks track follow-up work; inbox centralizes messages.
-
-### `/pipelines`
-
-Source: `src/app/(dashboard)/(rest)/pipelines/page.tsx`
-
-Before testing: Use seeded Studio Sales pipeline and create one test pipeline.
-
-Test it thoroughly:
-- Create stages with colors/probabilities and mark default if supported.
-- Drag or move deals across stages from the board.
-- Edit stage order/names and confirm existing deals remain valid.
-- Test delete/archive behavior with and without deals in the pipeline.
-
-### `/pipelines/[pipelineId]`
-
-Source: `src/app/(dashboard)/(rest)/pipelines/[pipelineId]/page.tsx`
-
-### `/pipelines/[pipelineId]/edit`
-
-Source: `src/app/(dashboard)/(rest)/pipelines/[pipelineId]/edit/page.tsx`
-
-### `/pipelines/new`
-
-Source: `src/app/(dashboard)/(rest)/pipelines/new/page.tsx`
-
-### `/deals`
-
-Source: `src/app/(dashboard)/(rest)/deals/page.tsx`
-
-Before testing: Seed data first so deals and contacts exist, then create one new deal manually.
-
-Test it thoroughly:
-- Create a deal with value, stage, contacts, tags, and notes.
-- Move deals between stages and confirm pipeline totals update.
-- Open detail pages to edit fields, add notes/tasks, and link/unlink contacts.
-- Verify invalid deal IDs and missing pipeline/stage references.
-
-### `/deals/[dealId]`
-
-Source: `src/app/(dashboard)/(rest)/deals/[dealId]/page.tsx`
-
-### `/deals/new`
-
-Source: `src/app/(dashboard)/(rest)/deals/new/page.tsx`
-
-### `/tasks`
-
-Source: `src/app/(dashboard)/(rest)/tasks/page.tsx`
-
-Before testing: Seed data includes open, in-progress, and completed tasks tied to contacts.
-
-Test it thoroughly:
-- Create, edit, complete, reopen, and delete/archive tasks if supported.
-- Filter by status/priority/due date/assignee.
-- Open linked contact/deal from a task.
-- Confirm overdue and completed dates display correctly.
-
-### `/inbox`
-
-Source: `src/app/(dashboard)/(rest)/inbox/page.tsx`
-
-Before testing: Seed data includes email, SMS, and app conversations.
-
-Test it thoroughly:
-- Open each seeded conversation and verify message order.
-- Filter by channel/read status and search contacts.
-- Send a reply if available and confirm read/unread state.
-- Jump to contact context from the conversation.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 11. Workflows, Executions, and Bundles
-
-These routes manage the visual workflow editor, execution history, and workflow bundles. Test workflows first to create executions, then verify execution detail.
-
-### `/workflows`
-
-Source: `src/app/(dashboard)/(rest)/workflows/page.tsx`
-
-Before testing: Seed data creates demo workflows, and starter templates include birthday, intro, milestone, renewal, and no-show flows.
-
-Test it thoroughly:
-- Create a workflow from each studio starter template.
-- Search, archive, unarchive, duplicate, and open workflows.
-- Confirm workflow rows link to `/workflows/[workflowId]` editor and `/executions` history.
-- Verify templates do not include removed gamification nodes.
-
-### `/workflows/[workflowId]`
-
-Source: `src/app/(dashboard)/(editor)/workflows/[workflowId]/page.tsx`
-
-Before testing: Open from `/workflows` using a seeded or newly created workflow.
-
-Test it thoroughly:
-- Add, configure, move, and connect nodes.
-- Specifically test birthday trigger, member tags, class milestone, intro-offer completion, SMS, loyalty points, churn score, and contact update nodes.
-- Save, refresh, and confirm nodes/connections persist.
-- Run or trigger a test execution and inspect it in `/executions/[executionId]`.
-
-### `/executions`
-
-Source: `src/app/(dashboard)/(rest)/executions/page.tsx`
-
-Before testing: Seed data includes completed demo executions and persisted automation events.
-
-Test it thoroughly:
-- Filter by status/workflow/date and open recent executions.
-- Review automation insights and conversion/event table.
-- Confirm membership signups, lead conversions, intro redemptions, birthday events, class milestones, and no-shows are visible.
-- Use links back to workflows and execution details.
-
-### `/executions/[executionId]`
-
-Source: `src/app/(dashboard)/(rest)/executions/[executionId]/page.tsx`
-
-Before testing: Open from `/executions` so the ID is valid, then test an invalid ID manually.
-
-Test it thoroughly:
-- Inspect node-by-node timeline, started/completed status, output, errors, and context.
-- Confirm automation events connect to the same execution.
-- Use back navigation to return to filtered execution list.
-- Check failed execution rendering by forcing or finding a failed example.
-
-### `/bundles`
-
-Source: `src/app/(dashboard)/(rest)/bundles/page.tsx`
-
-### `/bundles/[bundleId]`
-
-Source: `src/app/(dashboard)/(editor)/bundles/[bundleId]/page.tsx`
-
-Test it thoroughly (bundles):
-- Open the route directly and through the sidebar or parent route.
-- Run the main create, edit, view, filter, or status-change action available on the page.
-- Confirm saved changes appear immediately and still appear after refresh.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 12. Campaigns and Email Marketing
-
-These routes handle email/SMS campaign planning, content, sending domains, templates, and per-campaign analytics.
-
-### `/campaigns`
-
-Source: `src/app/(dashboard)/(rest)/campaigns/page.tsx`
-
-Before testing: Use seeded contacts/tags and create at least one draft campaign.
-
-Test it thoroughly:
-- Navigate from campaign list into create, templates, domains, and detail pages.
-- Validate audience selection, subject/content, scheduling, sending test messages, and draft save.
-- Check delivery/open/click metrics where present.
-- Confirm domain/template changes are available when composing campaigns.
-
-### `/campaigns/new`
-
-Source: `src/app/(dashboard)/(rest)/campaigns/new/page.tsx`
-
-### `/campaigns/[id]`
-
-Source: `src/app/(dashboard)/(rest)/campaigns/[id]/page.tsx`
-
-### `/campaigns/templates`
-
-Source: `src/app/(dashboard)/(rest)/campaigns/templates/page.tsx`
-
-### `/campaigns/domains`
-
-Source: `src/app/(dashboard)/(rest)/campaigns/domains/page.tsx`
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 13. Funnels, Builder, and Landing Pages
-
-These routes handle funnel creation, editing, publishing, form building, library templates, and funnel analytics.
-
-### `/funnels`
-
-Source: `src/app/(dashboard)/(rest)/funnels/page.tsx`
-
-Before testing: Create at least one draft and one published funnel.
-
-Test it thoroughly:
-- Create, clone, archive/unarchive, and open funnels.
-- Open the editor, change content, preview, publish, and test a form conversion.
-- Use analytics links to verify captured visits/events/conversions.
-- Check domain/path collisions and invalid funnel IDs.
-
-### `/funnels/[funnelId]/editor`
-
-Source: `src/app/(dashboard)/(rest)/funnels/[funnelId]/editor/page.tsx`
-
-### Funnel Analytics
-
-All funnel analytics routes share the same test approach. Open from the analytics tab navigation and by direct URL. Change date filters and confirm the active tab keeps the same funnel context.
-
-Source routes:
-- `/funnels/[funnelId]/analytics` — `src/app/(dashboard)/funnels/[funnelId]/analytics/page.tsx`
-- `/funnels/[funnelId]/analytics/ads` — `src/app/(dashboard)/funnels/[funnelId]/analytics/ads/page.tsx`
-- `/funnels/[funnelId]/analytics/devices` — `src/app/(dashboard)/funnels/[funnelId]/analytics/devices/page.tsx`
-- `/funnels/[funnelId]/analytics/events` — `src/app/(dashboard)/funnels/[funnelId]/analytics/events/page.tsx`
-- `/funnels/[funnelId]/analytics/funnel` — `src/app/(dashboard)/funnels/[funnelId]/analytics/funnel/page.tsx`
-- `/funnels/[funnelId]/analytics/geography` — `src/app/(dashboard)/funnels/[funnelId]/analytics/geography/page.tsx`
-- `/funnels/[funnelId]/analytics/performance` — `src/app/(dashboard)/funnels/[funnelId]/analytics/performance/page.tsx`
-- `/funnels/[funnelId]/analytics/realtime` — `src/app/(dashboard)/funnels/[funnelId]/analytics/realtime/page.tsx`
-- `/funnels/[funnelId]/analytics/sessions` — `src/app/(dashboard)/funnels/[funnelId]/analytics/sessions/page.tsx`
-- `/funnels/[funnelId]/analytics/sources` — `src/app/(dashboard)/funnels/[funnelId]/analytics/sources/page.tsx`
-- `/funnels/[funnelId]/analytics/utm` — `src/app/(dashboard)/funnels/[funnelId]/analytics/utm/page.tsx`
-- `/funnels/[funnelId]/analytics/visitors` — `src/app/(dashboard)/funnels/[funnelId]/analytics/visitors/page.tsx`
-- `/funnels/[funnelId]/analytics/visitors/[anonymousId]` — `src/app/(dashboard)/funnels/[funnelId]/analytics/visitors/[anonymousId]/page.tsx`
-- `/funnels/[funnelId]/analytics/web-vitals` — `src/app/(dashboard)/funnels/[funnelId]/analytics/web-vitals/page.tsx`
-
-Test it thoroughly (analytics tabs):
-- Compare each view against sibling analytics tabs for the same funnel.
-- Test invalid funnel ID behavior and no-data states.
-- Verify date filters persist across tab switches.
-
-### Builder: Forms
-
-### `/builder/forms`
-
-Source: `src/app/(dashboard)/(rest)/builder/forms/page.tsx`
-
-Before testing: Create a test form, publish or preview it, and submit it once.
-
-Test it thoroughly:
-- Move from `/builder/forms` to editor and submissions.
-- Add/edit required fields, validation rules, styling, and save/publish state.
-- Submit a form and confirm it appears under submissions and optionally creates/links a contact.
-- Test invalid form ID and empty submissions.
-
-### `/builder/forms/[id]/editor`
-
-Source: `src/app/(dashboard)/(rest)/builder/forms/[id]/editor/page.tsx`
-
-### `/builder/forms/[id]/submissions`
-
-Source: `src/app/(dashboard)/(rest)/builder/forms/[id]/submissions/page.tsx`
-
-### Builder: Library
-
-### `/builder/library`
-
-Source: `src/app/(dashboard)/(rest)/builder/library/page.tsx`
-
-Before testing: Use existing library content or create/import a library item first if required.
-
-Test it thoroughly:
-- Browse/search/filter library items.
-- Open a library detail page and inspect preview/metadata.
-- Duplicate or insert a library item into a form/funnel where available.
-- Verify unavailable/invalid item IDs produce a clean not-found state.
-
-### `/builder/library/[id]`
-
-Source: `src/app/(dashboard)/(rest)/builder/library/[id]/page.tsx`
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 14. Analytics, Reports, and Revenue
-
-### `/analytics`
-
-Source: `src/app/(dashboard)/(rest)/analytics/page.tsx`
-
-Before testing: Seed data first. For funnel analytics, use `/funnels/[funnelId]/analytics` routes.
-
-Test it thoroughly:
-- Change date ranges and inspect cards/charts.
-- Confirm empty state when no data exists for a narrow range.
-- Compare high-level numbers with dashboard/reports.
-- Check chart rendering on mobile and desktop.
-
-### `/reports`
-
-Source: `src/app/(dashboard)/(rest)/reports/page.tsx`
-
-Before testing: Seed data includes 60 days of payments, memberships, bookings, and check-ins.
-
-Test it thoroughly:
-- Review revenue trend, attendance, membership trend, and forecast sections.
-- Change date ranges and compare totals to cards/tables.
-- Check chart tooltip formatting and empty-state behavior.
-- Follow related analytics/revenue pages for deeper checks.
-
-### `/revenue`
-
-Source: `src/app/(dashboard)/(rest)/revenue/page.tsx`
-
-Before testing: Seed data includes succeeded, failed, and refunded payments.
-
-Test it thoroughly:
-- Check totals, refunds/failures, by-plan/by-category breakdowns, and date filters.
-- Compare with `/reports` forecast and dashboard revenue cards.
-- Open linked contacts/memberships if available.
-- Confirm currency formatting is consistent.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 15. Invoices and Billing
-
-### `/invoices`
-
-Source: `src/app/(dashboard)/(rest)/invoices/page.tsx`
-
-Before testing: Seed data includes paid, sent, draft, and bank-transfer related invoices.
-
-Test it thoroughly:
-- Create/send/pay/void invoices and verify totals/amount due.
-- Create templates and recurring invoices, then apply them to new invoices.
-- Open public view/pay routes from invoice links and test invalid IDs.
-- Check Stripe/bank transfer missing-config and paid-invoice lockout states.
-
-### `/invoices/recurring`
-
-Source: `src/app/(dashboard)/(rest)/invoices/recurring/page.tsx`
-
-### `/invoices/templates`
-
-Source: `src/app/(dashboard)/(rest)/invoices/templates/page.tsx`
-
-### `/invoices/view/[invoiceId]` (public)
-
-Source: `src/app/(public)/invoices/view/[invoiceId]/page.tsx`
-
-### `/invoices/pay/[invoiceId]` (public)
-
-Source: `src/app/(public)/invoices/pay/[invoiceId]/page.tsx`
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 16. Agency, Clients, and Multi-Tenant Administration
-
-### `/clients`
-
-Source: `src/app/(dashboard)/(rest)/clients/page.tsx`
-
-Before testing: Use an agency/admin account with org permissions.
-
-Test it thoroughly:
-- Create a new client/subaccount and switch into it.
-- Check client list search/status and workspace metadata.
-- Verify tenant isolation by comparing contacts/workflows across clients.
-- Test lower-permission user access.
-
-### `/clients/new`
-
-Source: `src/app/(dashboard)/(rest)/clients/new/page.tsx`
-
-### `/invites`
-
-Source: `src/app/(dashboard)/(rest)/invites/page.tsx`
-
-Before testing: Use an email address that is not already in the workspace.
-
-Test it thoroughly:
-- Create invites with each role you support.
-- Resend and cancel pending invites.
-- Open invite link through `/invitation/[id]` and accept it.
-- Verify membership/role and active workspace after acceptance.
-
-### `/notifications`
-
-Source: `src/app/(dashboard)/(rest)/notifications/page.tsx`
-
-Before testing: Generate notifications through requests, invites, substitutions, or workflow actions if supported.
-
-Test it thoroughly:
-- Read/unread notifications and refresh.
-- Click notification links and confirm they navigate to the source record.
-- Verify realtime updates through the notification stream.
-- Check empty state and lower-permission visibility.
-
-### `/waivers`
-
-Source: `src/app/(dashboard)/(rest)/waivers/page.tsx`
-
-Before testing: Create at least one waiver and assign it to a seeded contact.
-
-Test it thoroughly:
-- Create/edit/publish waiver content.
-- Assign waiver and verify signed/unsigned filters.
-- Complete public/member signing flow if available.
-- Confirm contact/member profile reflects signed status.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 17. Credentials and Webhooks
-
-### `/credentials/new`
-
-Source: `src/app/(dashboard)/(rest)/credentials/new/page.tsx`
-
-### `/credentials/[credentialId]`
-
-Source: `src/app/(dashboard)/(rest)/credentials/[credentialId]/page.tsx`
-
-Before testing: Use test keys only.
-
-Test it thoroughly:
-- Create a credential with type/name/value and workspace scope.
-- Open/edit credential and confirm secret masking/encryption behavior.
-- Use the credential from a workflow node where applicable.
-- Delete or rotate credentials and verify dependent workflows handle it.
-
-### `/webhooks/new`
-
-Source: `src/app/(dashboard)/(rest)/webhooks/new/page.tsx`
-
-### `/webhooks/[webhookId]`
-
-Source: `src/app/(dashboard)/(rest)/webhooks/[webhookId]/page.tsx`
-
-Before testing: Create a test webhook and keep the generated signing secret available.
-
-Test it thoroughly:
-- Create/edit webhook name/provider/URL/secret.
-- Open detail page, inspect delivery logs or metadata if present.
-- Rotate secret and verify old signatures fail where supported.
-- Delete/archive and confirm related workflows do not silently break.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 18. Settings
-
-All settings routes share the same base test approach: open directly and through the settings sidebar, change a safe setting, save, refresh, confirm persistence, and verify validation for required fields and permission failures. Test with an admin/owner account first, then a lower-permission user if roles are available.
-
-### General Settings
-
-- `/settings/workspace` — `src/app/(dashboard)/settings/workspace/page.tsx`
-- `/settings/profile` — `src/app/(dashboard)/settings/profile/page.tsx`
-- `/settings/branding` — `src/app/(dashboard)/settings/branding/page.tsx`
-- `/settings/styles` — `src/app/(dashboard)/(rest)/settings/styles/page.tsx`
-- `/settings/members` — `src/app/(dashboard)/settings/members/page.tsx`
-- `/settings/modules` — `src/app/(dashboard)/settings/modules/page.tsx`
-- `/settings/notifications` — `src/app/(dashboard)/settings/notifications/page.tsx`
-
-### Billing and Payments Settings
-
-- `/settings/billing` — `src/app/(dashboard)/settings/billing/page.tsx`
-- `/settings/payments` — `src/app/(dashboard)/settings/payments/page.tsx`
-- `/settings/bank-transfer` — `src/app/(dashboard)/settings/bank-transfer/page.tsx`
-- `/settings/studio-billing` — `src/app/(dashboard)/settings/studio-billing/page.tsx`
-- `/settings/dunning` — `src/app/(dashboard)/settings/dunning/page.tsx`
-- `/settings/instructor-payouts` — `src/app/(dashboard)/settings/instructor-payouts/page.tsx`
-
-### Developer and Integration Settings
-
-- `/settings/developer` — `src/app/(dashboard)/settings/developer/page.tsx`
-- `/settings/credentials` — `src/app/(dashboard)/settings/credentials/page.tsx`
-- `/settings/webhooks` — `src/app/(dashboard)/settings/webhooks/page.tsx`
-- `/settings/apps` — `src/app/(dashboard)/settings/apps/page.tsx`
-- `/settings/widgets` — `src/app/(dashboard)/settings/widgets/page.tsx`
-- `/settings/integrations/calcom` — `src/app/(dashboard)/settings/integrations/calcom/page.tsx`
-
-### Booking Settings
-
-- `/settings/bookings/calendar` — `src/app/(dashboard)/settings/bookings/calendar/page.tsx`
-
-Also verify for all settings routes:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 19. Worker Portal
-
-All worker portal routes share the same test approach: authenticate through the portal auth route, then verify each section reflects admin-side data.
-
-Source routes:
-- `/portal/[workerId]/auth` — `src/app/portal/[workerId]/auth/page.tsx`
-- `/portal/[workerId]/dashboard` — `src/app/portal/[workerId]/dashboard/page.tsx`
-- `/portal/[workerId]/schedule` — `src/app/portal/[workerId]/schedule/page.tsx`
-- `/portal/[workerId]/profile` — `src/app/portal/[workerId]/profile/page.tsx`
-- `/portal/[workerId]/documents` — `src/app/portal/[workerId]/documents/page.tsx`
-- `/portal/[workerId]/earnings` — `src/app/portal/[workerId]/earnings/page.tsx`
-- `/portal/[workerId]/requests` — `src/app/portal/[workerId]/requests/page.tsx`
-- `/portal/[workerId]/time-logs` — `src/app/portal/[workerId]/time-logs/page.tsx`
-
-Before testing: Open a valid worker from `/workers` and use its portal/auth path.
-
-Test it thoroughly:
-- Authenticate or enter through the worker portal auth route.
-- Check dashboard, schedule, profile, documents, earnings, requests, and time logs.
-- Make a change in dashboard admin routes and confirm the portal reflects it.
-- Test invalid worker ID, expired token, and mobile layout.
-
-Also verify:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
-
----
-
-## 20. Public, Embed, and Member Portal Routes
-
-### `/[slug]`
-
-Source: `src/app/(public)/[slug]/page.tsx`
-
-Before testing: Create or publish a funnel/page from builder routes first.
-
-Test it thoroughly:
-- Open preview and published public URLs.
-- Submit forms and verify submissions/contacts/analytics events.
-- Check unpublished/unknown slug behavior.
-- Confirm preview does not count as a production conversion unless intended.
-
-### `/f/[funnelId]/[slug]`
-
-Source: `src/app/(public)/f/[funnelId]/[slug]/page.tsx`
-
-### `/preview/f/[funnelId]/[slug]`
-
-Source: `src/app/(preview)/preview/f/[funnelId]/[slug]/page.tsx`
-
-### `/schedule/[slug]`
-
-Source: `src/app/(public)/schedule/[slug]/page.tsx`
-
-### `/embed/schedule`
-
-Source: `src/app/embed/schedule/page.tsx`
-
-Before testing: Use a public studio slug and seeded future classes.
-
-Test it thoroughly:
-- Open full public schedule and embedded schedule at iframe-like widths.
-- Filter classes, inspect capacity, and start a booking/waitlist flow.
-- Confirm intro offers and public booking routes connect cleanly.
-- Test invalid slug, fully booked class, and mobile layout.
-
-### `/member-portal/[token]`
-
-Source: `src/app/member-portal/[token]/page.tsx`
-
-Before testing: Generate or locate a valid member portal token from a contact/member.
-
-Test it thoroughly:
-- Open valid, expired, and invalid tokens.
-- Review profile, bookings, memberships, payments, and documents where available.
-- Make a dashboard-side change and verify portal reflects it.
-- Check mobile layout and logged-out privacy.
-
-### `/unsubscribe`
-
-Source: `src/app/(public)/unsubscribe/page.tsx`
-
-Before testing: Use a valid unsubscribe token/link from a campaign recipient if available and one invalid token.
-
-Test it thoroughly:
-- Open token/email validation flow.
-- Confirm unsubscribe and repeat the same link.
-- Verify contact email-unsubscribed state in dashboard.
-- Check privacy-safe errors for invalid tokens/emails.
-
-Also verify for all routes in this section:
-- Watch browser console and network requests for errors while loading and interacting.
-- Refresh the route directly, then navigate away and back using the app navigation.
-- Test loading, empty, populated, permission-denied, and invalid-parameter states where the route supports them.
-- Check mobile width and a desktop width. Important controls should stay visible and text should not overlap.
+# Aurea Wellness Studio Manual Route Test Plan
+
+Current as of 2026-07-18. This is the canonical, onboarding-first manual QA
+guide for the current worktree. It covers all 167 `page.tsx` files, the 166
+unique page URL patterns they resolve to, all 44 API route patterns, and all 85
+report variants behind the dynamic report route.
+
+Run this in order. The sequence deliberately creates each prerequisite before
+testing the route that consumes it.
+
+## Safety first
+
+Use a disposable local or staging database and a brand-new organization. Do
+not run this walkthrough in a real or shared customer tenant.
+
+> **Only use `Populate demo data` in a dedicated demo organization.** The
+> current operation never deletes or overwrites existing records, requires
+> `demo.manage`, exact confirmation, an empty location, and no organization-wide
+> loyalty/referral configuration. Provider fixtures are disconnected and all
+> delivery or execution fixtures are terminal or inert. There is deliberately
+> no bulk cleanup action for immutable finance and audit records.
+
+There is currently no organization/location deletion UI. A disposable database
+is the only clean one-step teardown. When using a persistent test database,
+prefix every record with the run label and expect to remove records
+individually.
+
+Third-party test rules:
+
+- Use Stripe test mode and a disposable Express account only.
+- Use a Resend sandbox/test domain and inboxes you own.
+- Use sandbox SMS numbers, a test Cal.com account, test Google/Microsoft
+  accounts, and a test Telegram bot.
+- Select the exact QA organization and location before connecting an account.
+- Verify the UI shows the account's organization/location ownership.
+- Never treat an environment key, platform Stripe key, or webhook secret as
+  tenant authorization. Every operation must retain and revalidate the internal
+  provider-account binding.
+- Do not send campaigns, messages, refunds, payouts, or live checkouts merely
+  for route coverage.
+
+## Test run worksheet
+
+Use a fresh suffix for every run. The examples below use `QA-20260714-A`.
+
+| Fixture              | Value to create                                                           | Actual ID, slug, token, or URL |
+| -------------------- | ------------------------------------------------------------------------- | ------------------------------ |
+| Organization         | `QA-20260714-A Wellness`                                                  |                                |
+| Primary location     | `QA-20260714-A London`                                                    |                                |
+| Scope-check location | `QA-20260714-A Manchester`                                                |                                |
+| Rooms                | `QA-A Main Studio` capacity 2; `QA-A Treatment Room` capacity 1           |                                |
+| Class types          | `QA-A Reformer Fundamentals`; `QA-A Restorative Yoga`                     |                                |
+| Service types        | One group class; one private appointment                                  |                                |
+| Instructors          | `QA-A Alex Instructor`; `QA-A Sam Cover`                                  |                                |
+| Pricing              | Drop-in, five-class pack, monthly membership, intro offer                 |                                |
+| Products             | `QA-A Grip Socks`; `QA-A Yoga Mat`                                        |                                |
+| Clients              | Alice Active, Ben Trial, Cara Churn, Dana Parent, Eli Child, Finn Walk-in |                                |
+| Classes              | Past/check-in, today/capacity 2, future/full, recurring series            |                                |
+| CRM                  | Pipeline `QA-A Studio Leads`; four deals; one client task                 |                                |
+| Marketing            | Audience, template, and draft campaign prefixed `QA-A`                    |                                |
+| Builder              | Intro funnel, trial form, and schedule publication prefixed `QA-A`        |                                |
+| Automation           | Draft workflow `QA-A Trial Follow-up`                                     |                                |
+
+Use owned email aliases where delivery is deliberately tested. Otherwise use
+`example.invalid` addresses and clearly fake phone numbers that cannot reach a
+person.
+
+## Pass criteria for every page
+
+For every route below:
+
+1. Reach it from its owning parent/navigation flow, then refresh it directly.
+2. Check loading, empty, populated, validation/error, and invalid-ID states.
+3. Check desktop at 1440x900 and mobile at 390x844 with no horizontal overflow,
+   overlap, clipped controls, or inaccessible actions.
+4. Use keyboard navigation for the primary action, dialogs, menus, and forms.
+5. Watch browser console and failed network requests while interacting.
+6. Verify back/forward navigation and a hard refresh preserve safe state.
+7. Repeat sensitive routes as owner/admin and as a lower-permission user.
+8. Switch between the London and Manchester QA locations and prove records do
+   not leak or silently inherit when they should be exact-location resources.
+9. After a mutation, confirm the resulting record, audit/operations entry, and
+   dependent page rather than trusting only a success toast.
+
+## Stage 1: Authentication and first workspace
+
+### 1.1 Entry and authentication
+
+| Done  | Route                | How to test                                                                                                                                              | Expected result                                                                                        |
+| ----- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| - [ ] | `/`                  | Open signed out and signed in on the base host.                                                                                                          | Signed-out users get the login/sign-up gateway; signed-in users follow the authenticated entry policy. |
+| - [ ] | `/sign-up`           | Test empty, malformed, weak-password, duplicate-email, and valid registration.                                                                           | Clear field errors; one user/session; safe redirect into onboarding.                                   |
+| - [ ] | `/login`             | Test invalid and valid credentials, Google auth cancellation, refresh, and a protected callback URL.                                                     | No account enumeration; session persists; same-origin deep link is restored.                           |
+| - [ ] | `/onboarding/studio` | Choose **Start from scratch**. Test back navigation, required fields, studio profile, first-location contact/address/country/timezone, then finish once. | Exactly one organization and first location are created and selected.                                  |
+| - [ ] | `/location/new`      | Create Manchester after London, switch between them, then refresh.                                                                                       | New location becomes selectable; each active-location view is isolated.                                |
+| - [ ] | `/invitation/[id]`   | Later, create an invite at `/invites`; test valid, expired, fake, signed-in, and signed-out acceptance.                                                  | Membership and role are correct; invalid tokens fail without leaking org data.                         |
+
+The root URL is also claimed by `src/app/page.tsx` and
+`src/app/(public)/page.tsx`. The second source is tested with custom-host public
+pages in Stage 11; both source files must remain covered.
+
+### 1.2 Dashboard and launchpad unlock order
+
+| Done  | Route                    | How to test                                                                                                                                                                                                                                                         | Expected result                                                                                                                               |
+| ----- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/dashboard`             | Load the empty dashboard. Use demo population only in a dedicated disposable organization. Confirm a fresh active run cannot be recovered, while a run interrupted for more than 30 minutes requires the exact displayed recovery phrase. Check every quick action. | Empty state is useful, metrics do not fabricate values, and recovery closes only the stuck run without deleting records or calling providers. |
+| - [ ] | `/launchpad`             | Record initial completion, then return after every following step.                                                                                                                                                                                                  | Completion reflects database postconditions, not button clicks.                                                                               |
+| - [ ] | `/launchpad/rooms`       | Create the two worksheet rooms; reject blank name, zero/negative capacity, and duplicates if disallowed.                                                                                                                                                            | Rooms appear in launchpad and `/studio/rooms`.                                                                                                |
+| - [ ] | `/launchpad/class-types` | Create the two worksheet class types and distinct colors.                                                                                                                                                                                                           | Class types appear in launchpad and `/studio/class-types`.                                                                                    |
+| - [ ] | `/launchpad/instructors` | Create Alex and Sam with owned/fake aliases as appropriate.                                                                                                                                                                                                         | Instructor records are location-scoped and selectable by classes.                                                                             |
+| - [ ] | `/launchpad/memberships` | Create a monthly test plan without initiating payment.                                                                                                                                                                                                              | Plan appears in launchpad and membership/pricing selectors.                                                                                   |
+| - [ ] | `/launchpad/first-class` | Confirm it is locked before prerequisites; then create the first class.                                                                                                                                                                                             | Unlock requires room, class type, and instructor; the class appears on schedules.                                                             |
+
+Known navigation check: the current dashboard quick actions contain three URLs
+that do not have page routes: `/studio/bookings/new`, `/studio/payments/new`,
+and `/marketing/campaigns/new`. Record these as navigation defects rather than
+mistaking them for pages omitted from this route inventory.
+
+## Stage 2: Workspace, brand, permissions, and integrations
+
+### 2.1 Workspace and design settings
+
+| Done  | Route                         | How to test                                                                                                                                                                                                                                                                                                                                                            | Expected result                                                                                                                                                                                                                                                                                                                     |
+| ----- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/settings`                   | Open the settings index as an administrator and a lower-permission user; follow every category link and return with browser back.                                                                                                                                                                                                                                      | The index exposes every authorized settings surface once, omits inaccessible actions, and has no dead links.                                                                                                                                                                                                                        |
+| - [ ] | `/settings/profile`           | Update only the disposable user's display/profile settings, cancel once, then save.                                                                                                                                                                                                                                                                                    | Cancel is inert; saved profile persists across refresh.                                                                                                                                                                                                                                                                             |
+| - [ ] | `/settings/notifications`     | Toggle each preference, reload, and generate one harmless notification later.                                                                                                                                                                                                                                                                                          | Preferences persist and affect the correct user only.                                                                                                                                                                                                                                                                               |
+| - [ ] | `/settings/workspace`         | Review organization/location names, timezone, currency, contact fields, and role restrictions.                                                                                                                                                                                                                                                                         | Settings change only the intended scope and display clear inheritance.                                                                                                                                                                                                                                                              |
+| - [ ] | `/settings/modules`           | Enable the studio modules needed by this run, then test a reduced module set.                                                                                                                                                                                                                                                                                          | Navigation and capabilities change predictably without losing data.                                                                                                                                                                                                                                                                 |
+| - [ ] | `/settings/branding`          | Save QA logo/name assets, then inspect public pages later. Use no sensitive upload.                                                                                                                                                                                                                                                                                    | Brand is versioned/scoped and appears on the intended public surfaces.                                                                                                                                                                                                                                                              |
+| - [ ] | `/settings/styles`            | Change a few QA theme tokens, preview, cancel, save, and restore.                                                                                                                                                                                                                                                                                                      | Preview and published styling agree without copying another product's style.                                                                                                                                                                                                                                                        |
+| - [ ] | `/settings/publication`       | Review targets, domain health, version, pause, consent, rollback, and drift states.                                                                                                                                                                                                                                                                                    | Unpublished targets stay private; invalid targets cannot publish.                                                                                                                                                                                                                                                                   |
+| - [ ] | `/settings/widgets`           | Create schedule, instructor, membership, appointment, intro-offer, event, public-free video, and referral widgets; select exact-scope sources, configure one exact website origin, publish, copy each code, then change a source and confirm the stale state.                                                                                                          | Only exact-location sources appear; private instructor/provider/payment/referral fields never enter snapshots; appointment choices come only from the connected location Cal.com account; events stay discovery-only; on-demand only exposes published public zero-cost media; source drift hides embed controls until republished. |
+| - [ ] | `/settings/bookings/calendar` | Configure timezone, booking window, capacity/waitlist policies, and reload.                                                                                                                                                                                                                                                                                            | Later schedule/public booking behavior matches these settings.                                                                                                                                                                                                                                                                      |
+| - [ ] | `/settings/bookings/policies` | Configure scheduling, cancellation, waitlist, and guest-booking defaults; test organization inheritance and a materially different location override.                                                                                                                                                                                                                  | Versioned policies resolve field by field for the active scope and drive booking behavior without changing historical bookings.                                                                                                                                                                                                      |
+| - [ ] | `/settings/customers`         | Exercise profile fields, tags, note templates, and household tabs; create, reorder, archive, and cancel disposable definitions where supported.                                                                                                                                                                                                                         | Definitions are scoped, validated, permission-gated, and remain consistent in client forms and household behavior.                                                                                                                                                                                                                  |
+| - [ ] | `/settings/staff`             | Exercise operations and compensation tabs as permitted; test availability, clock/break defaults, compensation templates, assignments, inheritance, and cancel/save.                                                                                                                                                                                                    | Operations and compensation permissions remain separate; versions are scoped and do not rewrite historical pay records.                                                                                                                                                                                                            |
+| - [ ] | `/settings/communications`    | Open Email, SMS, Voice, Inbox, and Usage tabs; inspect sender/number selection, transactional and reminder controls, routing, limits, disabled states, and provider readiness without sending live traffic.                                                                                                                                                              | Every channel shows its scoped provider binding and truthful readiness; credentials and message content are not exposed in logs or responses.                                                                                                                                                                                        |
+| - [ ] | `/settings/commerce`          | Open directly and confirm the compatibility redirect, then use each commerce tab.                                                                                                                                                                                                                                                                                     | The route redirects to `/settings/commerce/tax` without losing workspace scope.                                                                                                                                                                                                                                                      |
+| - [ ] | `/settings/commerce/[section]` | Test `tax`, `revenue`, `payments`, `documents`, and `guest-passes`, plus an invalid section; use disposable definitions and cancel before saving once.                                                                                                                                                                                                                   | Valid sections persist exact scoped definitions, invalid sections return not found, and configuration never implies provider execution.                                                                                                                                                                                             |
+| - [ ] | `/settings/cancellations`     | Create a default test policy and a class-specific override; confirm archived policies disappear from assignment; apply confirmed single and bulk no-show/late-cancel outcomes; inspect fee pagination; test missing-card, failed/retry, successful Stripe test collection, webhook replay, and waiver; repeat as attendance-only and viewer roles and at mobile width. | The confirmation names affected members and previews fees, credits, and automatic collection; policies and fees stay in the active location; destination account/application fee and ledger agree; duplicate outcomes/webhooks have one effect; denied roles cannot act; waived allocations restore once.                           |
+
+### 2.2 Provider and payment control plane
+
+Test every page empty first. Connect only disposable sandbox accounts. Return to
+the operations pages after later flows create receipts.
+
+| Done  | Route                            | How to test                                                                                                                               | Expected result                                                                                      |
+| ----- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| - [ ] | `/settings/provider-accounts`    | Create organization and location test accounts where supported; test disabled, wrong-location, inheritance off/on, health, and redaction. | Location account wins; non-inheritable org account is excluded; secrets never return to the browser. |
+| - [ ] | `/settings/payments`             | Start/cancel Stripe test Express onboarding and verify capability/health states.                                                          | Only test-mode Express accounts are accepted; no manual-transfer configuration.                      |
+| - [ ] | `/settings/payments/operations`  | Initially verify empty state; later inspect checkout/refund/reconciliation receipts and failures.                                         | Operations retain internal Stripe account, organization, location, exact money, and idempotency.     |
+| - [ ] | `/settings/payments/recovery`    | Filter active/all cases by target, owner, status, and search; inspect history; then retry, resend, reassign, and cancel only synthetic cases. | Queue totals, case history, and operator actions remain exact-location scoped and fully auditable.   |
+| - [ ] | `/settings/studio-billing`       | Configure test billing/tax/application-fee policy without charging.                                                                       | Money remains decimal/minor-unit safe; Stripe account requirement is explicit.                       |
+| - [ ] | `/settings/bank-transfer`        | Add a clearly labelled offline test method, disable it, and inspect checkout visibility.                                                  | Only active methods in the correct scope are offered.                                                |
+| - [ ] | `/settings/dunning`              | Configure harmless invoice, membership, and booking policies; test location inheritance, validation, save a new version, and do not send. | Immutable versions persist; inheritance is explicit and no retroactive live collection starts.       |
+| - [ ] | `/settings/instructor-payouts`   | Configure test pay rules after instructors exist.                                                                                         | Rules are effective-dated/scoped and do not imply a completed payout.                                |
+| - [ ] | `/settings/apps`                 | Inspect available integrations and their connect/disconnect/health states.                                                                | Apps cannot borrow another location's account or a global credential.                                |
+| - [ ] | `/settings/integrations/calcom`  | Connect a test Cal.com account, inspect sync/webhook health, then disconnect after testing.                                               | Account and webhook are bound to the exact org/location credential.                                  |
+| - [ ] | `/settings/credentials`          | Create test-only workflow credentials; test type validation, redaction, defaults, and wrong-location access.                              | Encrypted values are never readable; ambiguous defaults fail closed.                                 |
+| - [ ] | `/settings/webhooks`             | Review outbound webhook inventory and health before using create/detail routes later.                                                     | No secret is exposed and scope is visible.                                                           |
+| - [ ] | `/settings/developer`            | Create separate read-only and write-test API keys for the active location, copy once, test scopes later, then revoke.                     | Secret is one-time; keys are exact-location scoped and unbound legacy keys fail closed.               |
+| - [ ] | `/settings/messaging/operations` | Inspect empty state now and delivery/inbound receipts after Stage 8.                                                                      | Queue, provider receipt, retries, suppression, and failure state are distinct.                       |
+
+## Stage 3: Studio catalogue and scheduling foundation
+
+### 3.1 Catalogue and class configuration
+
+| Done  | Route                       | How to test                                                                                                                                                                                                        | Expected result                                                                                                                                        |
+| ----- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| - [ ] | `/studio/rooms`             | Edit the launchpad rooms, test capacity validation, active/inactive state, and dependent-class visibility.                                                                                                         | Existing classes remain coherent and scope is exact.                                                                                                   |
+| - [ ] | `/studio/class-types`       | Edit colors/names, deactivate one, and inspect dependent class selectors.                                                                                                                                          | Historical classes retain identity; inactive options are not offered for new work.                                                                     |
+| - [ ] | `/studio/service-types`     | Create group and appointment services, filter/search, and inspect empty/deactivated states.                                                                                                                        | Services expose clear schedule, duration, capacity, and pricing relationships.                                                                         |
+| - [ ] | `/studio/service-types/new` | Test required fields, duration/capacity bounds, room/staff relationships, cancel, and save.                                                                                                                        | One scoped service appears in the list and dependent selectors.                                                                                        |
+| - [ ] | `/studio/service-types/[serviceTypeId]/edit` | Open from the service list, edit one field, cancel, then save; test a fake and another-location ID.                                                                                                  | Existing values load exactly, cancel is inert, save updates only the scoped service, and inaccessible IDs fail safely.                                  |
+| - [ ] | `/studio/classes/new`       | Create today, future-full, and past fixture classes with controlled capacity.                                                                                                                                      | Times honor location timezone; staff/room conflicts and invalid ranges fail.                                                                           |
+| - [ ] | `/studio/classes`           | Search/filter/sort, open records, and compare list counts with schedule.                                                                                                                                           | No duplicate classes; filters and counts agree.                                                                                                        |
+| - [ ] | `/studio/classes/[classId]` | Open from list, test responsive roster/table scrolling, class policy reassignment, booking, waitlist, cancel, check-in, and confirmed no-show/late-cancel for one and multiple members; refresh and try a fake ID. | Capacity and attendance remain consistent; financial outcomes require explicit impact confirmation; active policy changes persist; invalid ID is safe. |
+| - [ ] | `/studio/class-series`      | Create a short recurring series, alter one occurrence, and inspect future/all behavior.                                                                                                                            | Recurrence creates bounded occurrences and exceptions do not corrupt the series.                                                                       |
+| - [ ] | `/studio/schedule`          | Test day/week navigation, filters, class opening, timezone, empty day, and location switch.                                                                                                                        | Schedule agrees with class list and never mixes locations.                                                                                             |
+| - [ ] | `/studio/check-in`          | Check in Alice, mark one no-show/late cancel if supported, then revisit class detail.                                                                                                                              | Attendance status changes once and is reflected everywhere.                                                                                            |
+| - [ ] | `/studio/substitutions`     | Offer the future class to Sam, test accept/decline/expiry, and inspect assignments.                                                                                                                                | Only eligible scoped staff can act; class ownership updates once.                                                                                      |
+
+### 3.2 Imports, tested last within setup
+
+| Done  | Route              | How to test                                                                                                 | Expected result                                                                          |
+| ----- | ------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| - [ ] | `/studio/import`   | Upload a disposable, non-sensitive fixture; test mapping, validation, duplicate preview, cancel, and retry. | Nothing commits before confirmation; counts/errors are explicit.                         |
+| - [ ] | `/studio/mindbody` | Use a disposable sandbox/export only; test connection/import preview and failure recovery.                  | Import is scoped, idempotent where promised, and never requires a production credential. |
+
+Do not upload real client or instructor documents during manual route QA. The
+current UploadThing middleware identifies callers as `public` rather than an
+authenticated tenant identity, so sensitive uploads are a release blocker until
+that boundary is corrected.
+
+## Stage 4: Clients, households, waivers, and CRM
+
+| Done  | Route                          | How to test                                                                                                                    | Expected result                                                               |
+| ----- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| - [ ] | `/clients/new`                 | Create the six worksheet clients with varied lifecycle/status/source; test duplicate email, malformed phone/email, and cancel. | One record per intended client, normalized identity, correct active location. |
+| - [ ] | `/clients`                     | Search/filter/sort/select, open the client detail surface, edit, assign, tag, save audience, and inspect timeline.             | List, detail, audience, payments, bookings, inbox, and timeline agree.        |
+| - [ ] | `/clients/[clientId]`          | Open a real client from the list, exercise each profile tab and action, refresh, then try a fake and another-location ID.       | The profile remains exact-scope, related data agrees with owning pages, and inaccessible IDs reveal nothing. |
+| - [ ] | `/members/[memberId]`          | Open the same profile through a member link and compare it with the canonical client URL.                                      | Both routes enforce the same tenant permissions and show one underlying member record. |
+| - [ ] | `/households/new`              | Create Dana/Eli household, choose primary and relationship roles, then cancel a second attempt.                                | One household with valid primary and no cross-location members.               |
+| - [ ] | `/households`                  | Search, edit notes/roles, remove and re-add Eli, then inspect client records.                                                  | Both sides of the relationship stay consistent.                               |
+| - [ ] | `/waivers`                     | Create/assign a disposable waiver, inspect unsigned/signed/expired states without forging a signature.                         | Status and version are auditable and linked to the right client.              |
+| - [ ] | `/pipelines/new`               | Create `QA-A Studio Leads` with meaningful stages and validation errors.                                                       | Pipeline is scoped and stages have stable order/IDs.                          |
+| - [ ] | `/pipelines`                   | Filter/list/create entry points and location isolation.                                                                        | Pipeline counts and empty states are correct.                                 |
+| - [ ] | `/pipelines/[pipelineId]`      | Open from list, move deals across stages, reload, and use a fake ID.                                                           | Stage transitions persist once and deal counts agree.                         |
+| - [ ] | `/pipelines/[pipelineId]/edit` | Rename/reorder safe stages and test deletion protection for stages in use.                                                     | Existing deals remain attached or a clear migration choice is required.       |
+| - [ ] | `/deals/new`                   | Create new, qualified, won, and lost test deals linked to clients.                                                             | Required pipeline/stage/client ownership is validated.                        |
+| - [ ] | `/deals`                       | Search/filter/sort, change stage, assign members, and compare pipeline counts.                                                 | List and pipeline views stay consistent.                                      |
+| - [ ] | `/deals/[dealId]`              | Edit value/status/links, add activity, refresh, and test a fake ID.                                                            | Timeline and exact decimal value persist without cross-tenant access.         |
+
+## Stage 5: Team, permissions, payroll, and instructor experience
+
+Test with an owner/admin, manager, viewer, and invited instructor. A forbidden
+action must be absent/disabled server-side as well as visually hidden.
+
+| Done  | Route                         | How to test                                                                                                              | Expected result                                                                        |
+| ----- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| - [ ] | `/team`                       | Search/filter staff, inspect identity/role/location status, suspend/archive only disposable staff, and switch locations. | Canonical identity is not duplicated and inactive users lose capability.               |
+| - [ ] | `/team/new`                   | Create a disposable manager/viewer or instructor record; test duplicate email and role validation.                       | User/staff/instructor linkage is explicit and scoped.                                  |
+| - [ ] | `/invites`                    | Invite an owned alias with a lower role, resend/revoke only the disposable invite, and copy its URL.                     | Invite state, expiry, role, and location are clear; no plaintext bearer appears later. |
+| - [ ] | `/instructors/[instructorId]` | Open Alex from team, edit profile/availability/pay settings, then test fake and other-location IDs.                      | Details persist and authorization is exact.                                            |
+| - [ ] | `/instructor-signup`          | Use a valid `?token=...&id=...`, then missing/expired/fake values.                                                       | Valid setup creates the intended account once; invalid tokens reveal nothing.          |
+| - [ ] | `/payroll`                    | Inspect calculated test earnings and approval/export controls without executing real payroll.                            | Values trace to classes/time/pay rules; page never claims funds moved.                 |
+| - [ ] | `/time-logs`                  | Review scoped entries, filters, edits/approvals by role, and totals.                                                     | Entries and payroll totals agree.                                                      |
+| - [ ] | `/time-logs/clock-in`         | Clock a disposable instructor in/out once and test double-click/reload.                                                  | One bounded session is created; duplicate clock actions are prevented.                 |
+| - [ ] | `/time-logs/timesheet`        | Review daily/weekly totals and correction permissions.                                                                   | Totals match time logs and timezone boundaries.                                        |
+| - [ ] | `/rotas`                      | Open directly.                                                                                                           | Compatibility route redirects to `/studio/schedule`.                                   |
+| - [ ] | `/requests`                   | Open directly.                                                                                                           | Compatibility route redirects to `/studio/substitutions`.                              |
+| - [ ] | `/my-schedule`                | Sign in as instructor and inspect assigned classes/location switch.                                                      | Only the instructor's permitted schedule is visible.                                   |
+| - [ ] | `/my-classes`                 | Open assigned class detail/actions as instructor.                                                                        | Instructor can perform only allowed attendance/class actions.                          |
+| - [ ] | `/my-earnings`                | Compare earnings with class/time/pay fixtures.                                                                           | No other instructor's earnings are exposed.                                            |
+
+Current role expectations:
+
+- Owner/location AGENCY or ADMIN: full platform capabilities.
+- Org admin: broad management, but current commerce/reconciliation differences
+  must be checked explicitly.
+- Manager: operational management and exports, but no provider management,
+  refunds/reconciliation, team management, settings management, or privacy
+  erasure.
+- STANDARD: checkout plus team/customer/schedule read.
+- LIMITED: messaging view/send plus customer/schedule read.
+- VIEWER: read-only domains.
+
+## Stage 6: Pricing, commerce, invoicing, and POS
+
+Create catalogue records first, then use Stripe test mode only. Verify every
+financial action in `/settings/payments/operations` and never rely only on the
+redirect or toast.
+
+| Done  | Route                         | How to test                                                                                                                   | Expected result                                                                 |
+| ----- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| - [ ] | `/studio/pricing-options/new` | Create drop-in and five-class pack; test currencies, decimals, interval, credits, visibility, and cancel.                     | Exact money persists and invalid/unsupported combinations fail.                 |
+| - [ ] | `/studio/pricing-options`     | Search/filter, create a monthly membership, attach access, deactivate, and inspect public eligibility/source drift.            | Recurrence and access are explicit; existing purchases remain traceable and inactive options cannot be newly sold. |
+| - [ ] | `/studio/pricing-options/[pricingOptionId]` | Open each materially different pricing type, inspect access/sales/history, edit safely, and test fake or another-location IDs. | Detail, eligibility, exact price, and historical purchases agree; inaccessible IDs fail without leaking data. |
+| - [ ] | `/intro-offers`               | Create one limited intro offer and test eligibility/redemption bounds.                                                        | Existing/non-eligible client rules are consistent with acquisition reports.     |
+| - [ ] | `/studio/add-ons`             | Create an optional add-on and test applicability/price validation.                                                            | Add-on appears only with eligible products/services.                            |
+| - [ ] | `/studio/products`            | Create socks/mat, variants, supplier, stock, tax, deactivate/reactivate.                                                      | Inventory and POS reflect the same exact quantities/prices.                     |
+| - [ ] | `/studio/pos`                 | Build a disposable order, test quantity/discount/tax/client association, cancel, then complete one test/offline sale if safe. | One ledgered sale; no float drift or duplicate on retry.                        |
+| - [ ] | `/studio/promo-codes`         | Create bounded percentage/fixed test promos; test dates, limits, applicability, invalid code.                                 | Discount is exact and only eligible once/as configured.                         |
+| - [ ] | `/studio/gift-cards`          | Create/inspect a test gift card, redeem partially, retry, and test insufficient balance.                                      | Balance is exact, non-negative, and redemption is idempotent.                   |
+| - [ ] | `/studio/account-credit`      | Grant/revoke disposable credit with reason and spend part through a test flow.                                                | Ledger balance equals operations and cannot cross clients/locations.            |
+| - [ ] | `/invoices/templates`         | Create a reusable test template and preview sanitised output.                                                                 | Template/version and totals render predictably.                                 |
+| - [ ] | `/invoices/recurring`         | Create then disable a disposable recurring schedule before any live send.                                                     | Schedule state is explicit; no immediate duplicate invoice/send.                |
+| - [ ] | `/invoices`                   | Create/view/edit a test invoice, queue a reminder only to an owned sandbox inbox if intended, and test access grants.         | Invoice totals, status, outbox acceptance, and public tokens are distinct.      |
+| - [ ] | `/revenue`                    | Compare totals with test POS/invoice/payment ledger and change date/currency filters.                                         | Revenue follows provider-backed commerce truth and exposes reconciliation gaps. |
+
+## Stage 7: Daily member operations
+
+| Done  | Route                    | How to test                                                                                                     | Expected result                                                  |
+| ----- | ------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| - [ ] | `/tasks`                 | Create/assign/complete a client-linked task, filter by owner/status/date, and test lower-role access.           | Task appears once in client/work views and history is auditable. |
+| - [ ] | `/archives`              | Archive a disposable workflow, open the archive list, search it, restore it once, and try a lower-permission user.             | Only scoped archived workflows appear and restoration preserves the workflow as an inert draft. |
+| - [ ] | `/notifications`         | Generate a harmless notification, read/archive if supported, and use two tabs for realtime behavior.            | Badge/list update without refresh and remain user-scoped.        |
+| - [ ] | `/member-portal/[token]` | Generate a real disposable member token, test schedule/account actions, expiry, fake token, and another client. | Token grants only its purpose/client and can expire/revoke.      |
+
+Class booking, waitlist, cancellation, attendance, and substitution should now
+be rerun end-to-end across `/studio/schedule`, `/studio/classes/[classId]`,
+`/studio/check-in`, `/studio/substitutions`, and the public surfaces in Stage 11.
+
+## Stage 8: Inbox, campaigns, and retention
+
+Keep campaigns in draft. A real delivery is optional and must use only a
+scoped sandbox provider plus controlled recipients.
+
+| Done  | Route                  | How to test                                                                                                                           | Expected result                                                                              |
+| ----- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| - [ ] | `/inbox`               | Configure a scoped inbound route, create/assign/close/reopen a test conversation, queue a reply, and ingest one signed sandbox reply. | Outbound queue state is not presented as delivery; inbound receipt is idempotent and scoped. |
+| - [ ] | `/sms`                 | Test empty/disabled provider state, validation, queue acceptance, suppression, and sandbox delivery only if intended.                 | No global credential fallback; exact account ID persists and is revalidated.                 |
+| - [ ] | `/campaigns/templates` | Create/preview a QA template with variables and invalid/missing values.                                                               | Rendering is bounded/sanitised and does not send.                                            |
+| - [ ] | `/campaigns/domains`   | Inspect sandbox domain verification and sender-profile restrictions.                                                                  | Domain health is provider/account-specific and secrets are absent.                           |
+| - [ ] | `/campaigns/new`       | Choose a saved audience, configure content/settings, inspect recipient snapshot, and save draft.                                      | No delivery occurs; snapshot size and exclusions are visible.                                |
+| - [ ] | `/campaigns`           | Filter drafts/status, inspect counts, duplicate/archive only QA records.                                                              | Status reflects preparation/outbox/provider state accurately.                                |
+| - [ ] | `/campaigns/[id]`      | Test Editor, Recipients, Settings, preview, validation, and fake/other-location ID.                                                   | Draft remains inert until explicit authorized send.                                          |
+| - [ ] | `/acquisition`         | Move Ben through controlled stages and compare source/intro/referral data.                                                            | Counts and client lifecycle agree.                                                           |
+| - [ ] | `/churn`               | Inspect Cara's signals/actions and compare attendance/membership history.                                                             | Risk is explainable, scoped, and not silently mutating lifecycle.                            |
+| - [ ] | `/loyalty`             | Configure test points/reward and verify a disposable transaction.                                                                     | Balance equals transaction ledger and workflow awards remain attributable.                   |
+| - [ ] | `/referrals`           | Create a test code/referral and inspect pending/converted/rewarded states.                                                            | Client/source/reward relationships are consistent.                                           |
+| - [ ] | `/intro-offers`        | Revisit redemption/conversion after Ben's lifecycle changes.                                                                          | Commerce, client, acquisition, and report views agree.                                       |
+
+## Stage 9: Forms, funnels, publication, and embeds
+
+### 9.1 Builders and templates
+
+| Done  | Route                             | How to test                                                                                                    | Expected result                                                                         |
+| ----- | --------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| - [ ] | `/builder/forms`                  | Create `QA-A Trial Request`, filter/duplicate/archive only QA forms.                                           | Draft/version/status and submission counts are truthful.                                |
+| - [ ] | `/builder/forms/[id]/editor`      | Add several safe fields, validation, mapping, retention, workflow, preview, save/version/publish, and fake ID. | Immutable published snapshot; payment/file/signature fields remain blocked.             |
+| - [ ] | `/builder/forms/[id]/submissions` | Submit once publicly, retry same idempotency key, export/delete a disposable response if allowed.              | One mirrored receipt/submission, correct mapping/scope, bounded export.                 |
+| - [ ] | `/builder/library`                | Browse/search/filter reusable templates and create from one if supported.                                      | Template use creates an independent tenant-owned draft.                                 |
+| - [ ] | `/builder/library/[id]`           | Open from library, preview/clone, then test fake ID.                                                           | Source template is not mutated and invalid ID is safe.                                  |
+| - [ ] | `/funnels`                        | Register/create `QA-A Intro Funnel`, test empty/list/status/publish controls.                                  | Funnel is scoped and publication state is explicit.                                     |
+| - [ ] | `/funnels/[funnelId]/editor`      | Edit pages/blocks/settings, undo/redo, preview, publish, change draft, inspect drift, rollback, and fake ID.   | Preview/live parity, immutable versions, no custom-code XSS, and no silent publication. |
+
+### 9.2 Public and preview publication routes
+
+Public routes are fully exercised in Stage 11 after all required slugs/tokens
+exist. At this stage verify the handoff links created by the editor:
+
+- `/preview/f/[funnelId]/[slug]`
+- `/f/[funnelId]/[slug]`
+- `/[slug]`
+- `/p/[organizationSlug]/[targetSlug]/[[...path]]`
+- `/embed/[orgSlug]/[type]`
+- `/embed/schedule`
+
+## Stage 10: Workflows, bundles, credentials, and executions
+
+Start with a manual trigger and a harmless deterministic action. Add a sandbox
+provider node only after the draft/manual flow is proven.
+
+| Done  | Route                         | How to test                                                                                                                                                                                                           | Expected result                                                                                                                                       |
+| ----- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/credentials/new`            | Create a disposable workflow credential, test validation and cancel.                                                                                                                                                  | Secret is encrypted/redacted and bound to exact scope.                                                                                                |
+| - [ ] | `/credentials/[credentialId]` | Edit metadata/health/defaults, rotate only the test value, then fake/other-location ID.                                                                                                                               | Existing executions retain account identity; secret is never readable.                                                                                |
+| - [ ] | `/webhooks/new`               | Create a test outbound webhook with owned endpoint, method/headers/signing/retry config, then disable it.                                                                                                             | URL and secret policy validate; disabled webhook is inert.                                                                                            |
+| - [ ] | `/webhooks/[webhookId]`       | Inspect/edit/disable/health and test fake/other-location ID.                                                                                                                                                          | Scope and bounded errors are visible without leaking secret/body data.                                                                                |
+| - [ ] | `/workflows`                  | Create draft, filter/search/archive/restore QA workflow.                                                                                                                                                              | Draft does not execute and archive is inert.                                                                                                          |
+| - [ ] | `/workflows/[workflowId]`     | Add manual trigger/action, variables, branching, save/reload, invalid graph, activation confirmation, run once, and fake ID.                                                                                          | Invalid/disconnected/cyclic/unsupported graphs cannot activate.                                                                                       |
+| - [ ] | `/executions`                 | Filter runs, then open Automation insights and filter attribution by rolling date, event, workflow, customer name/email, and source trigger. Compare one success, one safe failure, and duplicate signals on one run. | Every run has exact scope; conversion rate counts distinct successful converted runs and cannot exceed 100%; event names never leak across locations. |
+| - [ ] | `/executions/[executionId]`   | Inspect node timeline, inputs/outputs/errors/retry and fake/other-location ID.                                                                                                                                        | Sensitive values are redacted and retry semantics are clear.                                                                                          |
+| - [ ] | `/bundles`                    | Create/clone/archive a reusable draft bundle.                                                                                                                                                                         | Bundle is scoped, inert, and reusable without a trigger.                                                                                              |
+| - [ ] | `/bundles/[bundleId]`         | Edit a connected reusable graph, save/reload, insert into a workflow, and fake ID.                                                                                                                                    | Bundle definition remains independent and valid.                                                                                                      |
+
+The unscoped compatibility `/api/webhooks/google-form` endpoint is not suitable
+for live workflow testing: it accepts a `workflowId` without signed,
+provider-account authentication. Keep it off public/live integrations until
+that boundary is corrected.
+
+## Stage 11: Public customer journeys
+
+Open these signed out, on desktop and mobile, with valid and invalid values.
+For paid flows use Stripe test mode and a disposable purchaser. Verify the
+internal operations ledger after success, cancellation, refresh, and retry.
+
+| Done  | Route                                            | How to test                                                                                                                                                                                                                                                         | Expected result                                                                                                                                                                                                                                                            |
+| ----- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/schedule/[slug]`                               | Open the valid location slug, filter dates, book/cancel/waitlist a disposable client, then fake slug.                                                                                                                                                               | Public availability matches internal capacity/timezone; missing studio is safe.                                                                                                                                                                                            |
+| - [ ] | `/pricing/[orgSlug]/[pricingSlug]`               | Open published drop-in/plan, test ineligible/direct purchase, cancel, test checkout, refresh/retry, fake slug.                                                                                                                                                      | One destination-charge test checkout; source drift/paused policy blocks purchase.                                                                                                                                                                                          |
+| - [ ] | `/gift-cards/[orgSlug]`                          | Test presets/custom amount/recipient/message, invalid values, cancel, test checkout, and fake org.                                                                                                                                                                  | Exact positive amount, one gift-card ledger record, no duplicate retry.                                                                                                                                                                                                    |
+| - [ ] | `/invoices/view/[invoiceId]`                     | Use the signed VIEW grant, not internal ID; test expiry/revocation/wrong purpose/fake token.                                                                                                                                                                        | Read-only invoice access is purpose-scoped and reveals no other tenant.                                                                                                                                                                                                    |
+| - [ ] | `/invoices/pay/[invoiceId]`                      | Use signed PAY grant in Stripe test mode; test cancel/success/retry/expiry/revocation.                                                                                                                                                                              | Exactly one scoped payment/receipt and correct invoice status.                                                                                                                                                                                                             |
+| - [ ] | `/recover-payment/[token]`                       | Open valid invoice, membership, appointment, and class-booking recovery links; test expired, resolved, cancelled, wrong-scope, refresh, checkout cancel, and Stripe test success.                                                                                   | The signed link reveals only bounded payment context and creates a destination only after confirmation; every provider call uses the case's persisted exact-scope account binding.                                                                                         |
+| - [ ] | `/member-portal/[token]`                         | Repeat member journey signed out with valid/expired/revoked/fake token.                                                                                                                                                                                             | Only the intended member and allowed actions are exposed.                                                                                                                                                                                                                  |
+| - [ ] | `/unsubscribe`                                   | Use a sandbox email's link plus invalid/expired/repeated token. Confirm only for synthetic recipient.                                                                                                                                                               | Confirmation writes suppression/consent once; validation is read-only.                                                                                                                                                                                                     |
+| - [ ] | `/preview/f/[funnelId]/[slug]`                   | Open authenticated preview for current draft and fake page slug.                                                                                                                                                                                                    | Draft preview is isolated from public live version.                                                                                                                                                                                                                        |
+| - [ ] | `/f/[funnelId]/[slug]`                           | Open direct published fallback URL, submit harmless form, test consent/GPC and unpublished/fake IDs.                                                                                                                                                                | Only published immutable version renders; submission/tracking are scoped.                                                                                                                                                                                                  |
+| - [ ] | `/[slug]`                                        | Use the actual funnel custom/subdomain host and a valid page slug; test fake slug.                                                                                                                                                                                  | Host selects the right published funnel without exposing another tenant.                                                                                                                                                                                                   |
+| - [ ] | `/`                                              | On the funnel custom/subdomain host, open its root.                                                                                                                                                                                                                 | `src/app/(public)/page.tsx` redirects to the first published page; base host still uses `src/app/page.tsx`.                                                                                                                                                                |
+| - [ ] | `/p/[organizationSlug]/[targetSlug]/[[...path]]` | Open the managed publication URL, optional valid/invalid path, pause, rollback, form submit, consent decline/GPC.                                                                                                                                                   | Kind/path policy is enforced; live version and tracking consent are exact.                                                                                                                                                                                                 |
+| - [ ] | `/embed/schedule`                                | Confirm the legacy route only redirects when given a canonical publication reference; try raw `widget`/`org`, paused, wrong-type, wrong-location, and invalid snapshots.                                                                                            | Raw IDs never render and every mismatch fails generically.                                                                                                                                                                                                                 |
+| - [ ] | `/p/[organizationSlug]/[targetSlug]` widget      | Embed every supported widget from one allowed and one blocked website origin; then test paused, rolled-back, wrong-location, source drift, Cal disconnect, paid/team/approval appointments, restricted video assets, inactive events, and referral-program changes. | CSP permits only exact origins; immutable versions render the correct type; private data stays excluded; drift fails closed; appointment links only target verified scoped Cal.com handles; events and referrals remain read-only; restricted or paid videos never render. |
+| - [ ] | `/embed/[orgSlug]/[type]`                        | Confirm the compatibility route requires a canonical publication target; test `schedule`, `instructors`, unsupported types, and raw widget IDs.                                                                                                                     | Supported references redirect to `/p`; raw and unsupported inputs fail safely.                                                                                                                                                                                             |
+
+## Stage 12: Analytics and reports
+
+Generate controlled visits, form submissions, bookings, check-ins, POS sales,
+invoice/payment receipts, campaign drafts, time logs, and workflow executions
+before asserting metrics.
+
+### 12.1 General and funnel analytics
+
+| Done  | Route                                                  | How to test                                                                                                              | Expected result                                                            |
+| ----- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| - [ ] | `/analytics`                                           | Change date range/dimensions and compare totals with source records.                                                     | Definitions, timezone, currency, freshness, and gaps are visible.          |
+| - [ ] | `/acquisition`                                         | Compare lifecycle/source counts with the six clients and funnel submissions.                                             | Attribution does not invent revenue or cross locations.                    |
+| - [ ] | `/churn`                                               | Compare Cara's risk inputs with attendance/membership events.                                                            | Score and factors are explainable and current.                             |
+| - [ ] | `/reports`                                             | Open directly.                                                                                                           | Redirects to `/reports/sales`.                                             |
+| - [ ] | `/reports/[groupId]`                                   | Visit all five group IDs below, filter/search the catalogue, and test invalid group.                                     | Only contracted reports appear; invalid group is safe.                     |
+| - [ ] | `/reports/[groupId]/[reportId]`                        | Open every concrete report variant in the next section; test filters, columns, saved view, CSV, empty state, invalid ID. | Table/chart/export share one metric contract and formula-safe CSV.         |
+| - [ ] | `/funnels/[funnelId]/analytics`                        | Check overview after controlled traffic.                                                                                 | Summary agrees with child pages and declares freshness.                    |
+| - [ ] | `/funnels/[funnelId]/analytics/realtime`               | Open, create one consented page view, then close.                                                                        | SSE connects, shows one bounded event, and disconnects cleanly.            |
+| - [ ] | `/funnels/[funnelId]/analytics/events`                 | Compare event names/counts with controlled journey.                                                                      | Browser events are telemetry, never payment truth.                         |
+| - [ ] | `/funnels/[funnelId]/analytics/sessions`               | Inspect a consented desktop and mobile session.                                                                          | Identity, duration, source, and scope are coherent.                        |
+| - [ ] | `/funnels/[funnelId]/analytics/visitors`               | Search/filter visitors, export if allowed, inspect privacy controls.                                                     | Tombstoned visitors stay hidden and scope is exact.                        |
+| - [ ] | `/funnels/[funnelId]/analytics/visitors/[anonymousId]` | Open from visitor list; test export/erase on disposable visitor and fake/other-funnel ID.                                | Journey is scoped; export flags partial; erasure prevents reingestion.     |
+| - [ ] | `/funnels/[funnelId]/analytics/web-vitals`             | Load funnel on desktop/mobile and compare reported vital freshness.                                                      | Bounded vitals attach to the correct canonical session.                    |
+| - [ ] | `/funnels/[funnelId]/analytics/sources`                | Use controlled direct/referral/UTM visits.                                                                               | Source definitions and unattributed bucket are honest.                     |
+| - [ ] | `/funnels/[funnelId]/analytics/utm`                    | Use one known campaign/source/medium and compare sessions/submissions.                                                   | UTM dimensions retain exact values without claiming unverified revenue.    |
+| - [ ] | `/funnels/[funnelId]/analytics/ads`                    | With no sandbox ad account, verify disabled state; with one, inspect account-bound delivery only.                        | No global token fallback or browser conversion truth.                      |
+| - [ ] | `/funnels/[funnelId]/analytics/geography`              | Compare local/test traffic and privacy mode.                                                                             | No third-party global geolocation call; unknown/local states are truthful. |
+| - [ ] | `/funnels/[funnelId]/analytics/devices`                | Compare controlled desktop/mobile sessions.                                                                              | Device totals agree with sessions.                                         |
+| - [ ] | `/funnels/[funnelId]/analytics/funnel`                 | Complete and abandon known steps.                                                                                        | Stage order and conversion denominator are explicit.                       |
+| - [ ] | `/funnels/[funnelId]/analytics/performance`            | Compare page timing and vital samples.                                                                                   | No empty/partial sample is presented as universal performance.             |
+
+### 12.2 All report variants
+
+For each report: test a narrow date containing the fixture, an empty date, a
+location switch, column controls, saved view, and CSV. Payment reports must
+show provider/reconciliation state; currency must never be silently converted.
+
+**Sales (21)**
+
+- [ ] `/reports/sales/sales`
+- [ ] `/reports/sales/daily-closeout`
+- [ ] `/reports/sales/cash-drawer`
+- [ ] `/reports/sales/sales-by-service`
+- [ ] `/reports/sales/sales-by-category`
+- [ ] `/reports/sales/sales-by-product`
+- [ ] `/reports/sales/gift-cards`
+- [ ] `/reports/sales/sales-by-supplier`
+- [ ] `/reports/sales/manage-online-orders`
+- [ ] `/reports/sales/invoice`
+- [ ] `/reports/sales/earned-revenue`
+- [ ] `/reports/sales/outstanding-series`
+- [ ] `/reports/sales/sales-promotions`
+- [ ] `/reports/sales/revenue-by-class`
+- [ ] `/reports/sales/average-revenue-analysis`
+- [ ] `/reports/sales/returns`
+- [ ] `/reports/sales/contract-sales`
+- [ ] `/reports/sales/best-sellers`
+- [ ] `/reports/sales/sales-tax`
+- [ ] `/reports/sales/voided-sales`
+- [ ] `/reports/sales/gift-card-analysis`
+
+**Payment processing (10)**
+
+- [ ] `/reports/payment-processing/transactions`
+- [ ] `/reports/payment-processing/approved-transactions`
+- [ ] `/reports/payment-processing/autopay-detail`
+- [ ] `/reports/payment-processing/settled-transactions`
+- [ ] `/reports/payment-processing/autopay-summary`
+- [ ] `/reports/payment-processing/pending-transactions`
+- [ ] `/reports/payment-processing/voided-rejected-transactions`
+- [ ] `/reports/payment-processing/autopay-expirations`
+- [ ] `/reports/payment-processing/autopay-cc-expirations`
+- [ ] `/reports/payment-processing/card-updater`
+
+**Clients (30)**
+
+- [ ] `/reports/clients/membership`
+- [ ] `/reports/clients/mailing-lists`
+- [ ] `/reports/clients/client-ratings-and-reviews`
+- [ ] `/reports/clients/account-balances`
+- [ ] `/reports/clients/entry-logs`
+- [ ] `/reports/clients/client-health-check`
+- [ ] `/reports/clients/client-cancellations`
+- [ ] `/reports/clients/first-visit`
+- [ ] `/reports/clients/unpaid-visits`
+- [ ] `/reports/clients/last-visit`
+- [ ] `/reports/clients/attendance-analysis`
+- [ ] `/reports/clients/pricing-option-expirations`
+- [ ] `/reports/clients/new-members`
+- [ ] `/reports/clients/visits-remaining`
+- [ ] `/reports/clients/attendance-without-revenue`
+- [ ] `/reports/clients/client-schedule-at-a-glance`
+- [ ] `/reports/clients/retention`
+- [ ] `/reports/clients/big-spenders`
+- [ ] `/reports/clients/client-indexes`
+- [ ] `/reports/clients/referral-types`
+- [ ] `/reports/clients/no-return`
+- [ ] `/reports/clients/client-promotions`
+- [ ] `/reports/clients/retention-management`
+- [ ] `/reports/clients/clients-per-teacher`
+- [ ] `/reports/clients/no-shows`
+- [ ] `/reports/clients/client-arrivals`
+- [ ] `/reports/clients/online-metrics`
+- [ ] `/reports/clients/referrers`
+- [ ] `/reports/clients/event-payments`
+- [ ] `/reports/clients/locker`
+
+**Staff (16)**
+
+- [ ] `/reports/staff/payroll`
+- [ ] `/reports/staff/staff-schedule-at-a-glance`
+- [ ] `/reports/staff/time-clock`
+- [ ] `/reports/staff/staff-ratings-and-reviews`
+- [ ] `/reports/staff/staff-cancellations`
+- [ ] `/reports/staff/staff-schedule`
+- [ ] `/reports/staff/phone-book`
+- [ ] `/reports/staff/staff-performance`
+- [ ] `/reports/staff/staff-clients-per-teacher`
+- [ ] `/reports/staff/appointment-metrics`
+- [ ] `/reports/staff/pay-rates`
+- [ ] `/reports/staff/staff-activity`
+- [ ] `/reports/staff/staff-retail-sales-performance`
+- [ ] `/reports/staff/tasks`
+- [ ] `/reports/staff/assistants`
+- [ ] `/reports/staff/trainer-conversions`
+
+**Inventory (8)**
+
+- [ ] `/reports/inventory/inventory-on-hand`
+- [ ] `/reports/inventory/inventory-sales-by-product`
+- [ ] `/reports/inventory/cost-of-goods-sold`
+- [ ] `/reports/inventory/inventory-sales-by-supplier`
+- [ ] `/reports/inventory/inventory-manage-online-orders`
+- [ ] `/reports/inventory/inventory-change-log`
+- [ ] `/reports/inventory/inventory-retail-sales-performance`
+- [ ] `/reports/inventory/inventory-age`
+
+## Stage 13: Internal and isolated surfaces
+
+These are not part of a customer's onboarding journey. Test them last and only
+in local/non-production environments.
+
+| Done  | Route                         | How to test                                                                                                       | Expected result                                                                                               |
+| ----- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/qa/routes`                  | Search/filter routes and notes; add, edit, and clear a note; use With notes; mark progress; reload; then reset progress. | All canonical items render in onboarding order; completion and notes persist in this browser; resetting progress retains notes. |
+| - [ ] | `/onboarding/preview`         | Exercise the visual preloader phases at mobile/desktop without creating an organization.                          | Internal preview renders and does not mutate tenant data.                                                     |
+| - [ ] | `/test/spot-booking/[roomId]` | Use a disposable room ID, inspect valid/full/invalid room states, and do not use live inventory.                  | Test harness remains isolated and clearly non-production.                                                     |
+
+## API boundary checklist
+
+API routes are not additional browser pages. Test them through the owning UI or
+provider fixture unless explicitly marked as a safe direct negative probe.
+
+### A. Test through the owning UI
+
+| Done  | API route                                        | Owning flow and policy                                                                                    |
+| ----- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/api/auth/[...all]`                             | Cover through login, sign-up, invitation, sign-out, and account switching.                                |
+| - [ ] | `/api/ai/chat`                                   | Use the dashboard assistant with a scoped Gemini test credential and harmless question; verify usage log. |
+| - [ ] | `/api/chat`                                      | Legacy model-action route; do not invoke directly. Confirm the UI uses `/api/ai/chat`.                    |
+| - [ ] | `/api/external-funnels/[funnelId]/realtime`      | Cover through funnel realtime analytics and a controlled event.                                           |
+| - [ ] | `/api/notifications/stream`                      | Cover through two authenticated tabs and a harmless notification.                                         |
+| - [ ] | `/api/publications/forms/[targetId]/submissions` | Cover through one disposable published form submission and its submissions page.                          |
+| - [ ] | `/api/publications/tracking/events`              | Cover through consented/declined/GPC published-page journeys.                                             |
+| - [ ] | `/api/unsubscribe/validate`                      | Open valid and invalid test unsubscribe links; GET is read-only.                                          |
+| - [ ] | `/api/unsubscribe`                               | Confirm only for a synthetic recipient; this commits suppression/consent changes.                         |
+| - [ ] | `/api/uploadthing`                               | Cover only with non-sensitive disposable files through owning upload UIs.                                 |
+| - [ ] | `/api/trpc/[trpc]`                               | Generic application transport; never hand-compose mutation requests.                                      |
+
+### B. External funnel and telemetry fixtures
+
+| Done  | API route                            | Safe test                                                                                       |
+| ----- | ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| - [ ] | `/api/external-funnels/forms/submit` | Submit through the registered test funnel/SDK; verify mirror, workflow, idempotency, DNT/GPC.   |
+| - [ ] | `/api/track/events`                  | Navigate the registered test funnel with consent; never fabricate purchase/conversion events.   |
+| - [ ] | `/api/track/web-vitals`              | Let the browser SDK report desktop/mobile samples; verify canonical session scope.              |
+| - [ ] | `/api/track/delete`                  | Safe direct POST must return `410`; use authenticated privacy UI for actual disposable erasure. |
+
+### C. Developer API with disposable keys
+
+Create separate read-only and write-test keys for the active location at
+`/settings/developer`, test missing key (`401`), unbound legacy key (`403`),
+wrong location (`403`), and missing scope (`403`), then revoke both afterward.
+
+| Done  | API route             | Safe test                                                                                                       |
+| ----- | --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| - [ ] | `/api/v1/classes`     | GET with `classes:read`; test date/class-type/instructor/capacity filters and limit.                            |
+| - [ ] | `/api/v1/instructors` | GET with `instructors:read`; compare with team/instructor records.                                              |
+| - [ ] | `/api/v1/memberships` | GET with `memberships:read`; compare with membership plans.                                                     |
+| - [ ] | `/api/v1/members`     | GET pagination/search with `members:read`; POST one labelled lead with `members:write`, then retry same email.  |
+| - [ ] | `/api/v1/bookings`    | GET filters with `bookings:read`; POST one disposable booking with `bookings:write`, retry, then test capacity. |
+
+### D. Provider webhooks
+
+Never send invented payloads. Bind the exact organization/location sandbox
+account, use the provider's signed fixture or one harmless event, then inspect
+operations/executions.
+
+| Done  | API route                                  | Provider-safe test                                                                             |
+| ----- | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| - [ ] | `/api/webhooks/calcom/[credentialId]`      | Test create/reschedule/cancel from test Cal.com; verify credential-scoped secret and workflow. |
+| - [ ] | `/api/webhooks/gmail`                      | Test one uniquely titled message on a scoped test mailbox and active subscription.             |
+| - [ ] | `/api/webhooks/google-calendar`            | Test one disposable event with matching channel/resource/token subscription.                   |
+| - [ ] | `/api/webhooks/google-form`                | **Do not expose/use with a live workflow** until signed tenant authentication exists.          |
+| - [ ] | `/api/webhooks/onedrive`                   | Change one disposable file with matching subscription/client state.                            |
+| - [ ] | `/api/webhooks/outlook`                    | Receive one unique test message/event with matching subscription/client state.                 |
+| - [ ] | `/api/webhooks/resend/[providerAccountId]` | Use the account-specific Svix secret and sandbox event; verify outbox/inbox receipt.           |
+| - [ ] | `/api/webhooks/stripe`                     | Stripe test checkout only; verify connected-account scope and commerce ledger.                 |
+| - [ ] | `/api/webhooks/stripe-invoices`            | Compatibility test endpoint with disposable test invoice only.                                 |
+| - [ ] | `/api/webhooks/stripe-memberships`         | Test subscription/customer/test clock and membership ledger.                                   |
+| - [ ] | `/api/webhooks/stripe-connect-instructor`  | Disposable instructor Express test account and test event only.                                |
+| - [ ] | `/api/webhooks/telegram`                   | Test bot, active scoped credential, URL credential ID, and secret token.                       |
+| - [ ] | `/api/webhooks/twilio/sms/inbound`         | Receive one signed sandbox SMS; verify exact provider-account routing, idempotency, inbox receipt, and opt-out handling. |
+| - [ ] | `/api/webhooks/twilio/sms/status`          | Send only to an owned sandbox number and verify signed queued/delivered/failed transitions update one outbox item. |
+| - [ ] | `/api/webhooks/twilio/voice/inbound`       | Place one sandbox inbound call; verify signed routing and bounded TwiML for the exact configured number. |
+| - [ ] | `/api/webhooks/twilio/voice/recording`     | Use a consented disposable recording fixture; verify signature, scoped receipt, retention state, and no public locator leakage. |
+| - [ ] | `/api/webhooks/twilio/voice/status`        | Place one sandbox call and verify signed lifecycle transitions are idempotent and exact-account scoped. |
+
+### E. Internal, operational, and retired endpoints
+
+| Done  | API route                 | Policy / expected result                                                                                     |
+| ----- | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| - [ ] | `/api/admin/reindex`      | Never run during onboarding; paid/scoped embedding operation for controlled non-production maintenance only. |
+| - [ ] | `/api/inngest`            | Protocol endpoint; use Inngest dev/provider tooling, never manual browser/POST/replay.                       |
+| - [ ] | `/api/sentry-example-api` | Deliberately throws; invoke once only in a dedicated non-production Sentry diagnostic.                       |
+| - [ ] | `/api/stripe/connect`     | Retired safe GET probe returns `410 Gone`.                                                                   |
+| - [ ] | `/api/stripe/callback`    | Retired safe GET probe returns `410 Gone`.                                                                   |
+| - [ ] | `/api/webhooks/calcom`    | Retired safe POST probe returns `410 Gone`; use credential-scoped route.                                     |
+| - [ ] | `/api/webhooks/resend`    | Retired safe POST probe returns `410 Gone`; use account-scoped route.                                        |
+
+`OPTIONS` handlers on form/tracking endpoints are CORS plumbing covered by the
+browser flows; they are not separate user journeys.
+
+## Scope and permission stress pass
+
+After the happy path, repeat this compact matrix:
+
+| Test                                                | Pass condition                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------- |
+| London record while Manchester active               | Not listed; direct ID is denied/not found.                                    |
+| Organization-level provider with inheritance off    | Not eligible for London work.                                                 |
+| Organization-level provider with inheritance on     | Eligible only where the product explicitly permits inheritance.               |
+| Exact London provider plus inheritable org provider | London provider wins deterministically.                                       |
+| Disabled/disconnected provider                      | UI blocks action before dispatch and operations show actionable health.       |
+| Viewer/limited user mutating URL/API                | Server denies even if a request is manually attempted.                        |
+| Duplicate submit/send/checkout webhook              | One business effect; duplicate receipt is visible/idempotent.                 |
+| Currency/timezone boundary                          | Exact money and local service date remain consistent across UI/report/export. |
+| DNT/GPC/declined consent                            | No disallowed tracking data, pixels, user-agent, or IP retention.             |
+
+## Teardown
+
+1. Disable/unpublish workflows, campaigns, forms, funnels, widgets, and public
+   targets first.
+2. Revoke test API keys, webhook subscriptions, OAuth grants, provider accounts,
+   and Stripe test onboarding bindings. Confirm no queued outbox/executions are
+   still active.
+3. Cancel future classes/series and disposable recurring invoices/memberships
+   before removing dependent catalogue records.
+4. Remove invites and test users last so owner access remains available.
+5. Reset the disposable database when possible. If not, preserve the run label
+   in the retained QA location and document anything that cannot be removed.
+6. Never use `Populate demo data` as teardown; it only populates an empty scope.
+
+## Defect log template
+
+Record one row per failure. Do not combine unrelated routes into one issue.
+
+| Field                          | Value |
+| ------------------------------ | ----- |
+| Run label                      |       |
+| Route and source flow          |       |
+| Role, organization, location   |       |
+| Desktop/mobile                 |       |
+| Fixture IDs                    |       |
+| Exact steps                    |       |
+| Expected                       |       |
+| Actual                         |       |
+| Console/network/correlation ID |       |
+| Reproducible after refresh     |       |
+| Data cleanup required          |       |
+
+## Coverage verification
+
+After routes or reports change, run:
+
+```bash
+node scripts/check-manual-route-coverage.mjs
+```
+
+The checker fails when a current page route, API route, duplicate root source,
+or report variant is missing from this playbook.

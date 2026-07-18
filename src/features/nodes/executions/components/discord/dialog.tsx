@@ -134,7 +134,7 @@ export const DiscordDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Discord Configuration</SheetTitle>
           <SheetDescription>
@@ -142,7 +142,7 @@ export const DiscordDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -162,7 +162,7 @@ export const DiscordDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the result in other nodes: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "myApiCall"}.text}}`}
                     </span>{" "}
                   </FormDescription>
@@ -210,7 +210,7 @@ export const DiscordDialog: React.FC<Props> = ({
                       variant="link"
                       className="px-0 text-xs h-auto"
                     >
-                      <Link href="/webhooks" prefetch>
+                      <Link href="/settings/webhooks" prefetch>
                         Manage webhooks
                       </Link>
                     </Button>
@@ -239,15 +239,15 @@ export const DiscordDialog: React.FC<Props> = ({
 
                   <FormDescription className="text-xs mt-2 leading-5 flex gap-1">
                     Get this from Discord: <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       Channel Settings
                     </span>{" "}
                     <ChevronRight className="size-3" />{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       Integrations
                     </span>{" "}
                     <ChevronRight className="size-3" />{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       Webhooks
                     </span>{" "}
                   </FormDescription>
@@ -274,12 +274,12 @@ export const DiscordDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     The message you want to send to the Discord server. <br />{" "}
                     Use{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{variables}}"}
                     </span>{" "}
                     for simple values.
                     <br /> Alternatively, use{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{json variable}}"}
                     </span>{" "}
                     to stringify objects.

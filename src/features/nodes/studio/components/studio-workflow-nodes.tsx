@@ -4,29 +4,42 @@ import { memo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import {
   Bell,
-  CalendarCheck,
   CalendarX,
   CreditCard,
   Gift,
+  Handshake,
   HeartPulse,
-  MessageSquare,
-  Tag,
   Trophy,
-  UserCheck,
   UserMinus,
   Users,
 } from "lucide-react";
 
 import { BaseExecutionNode } from "@/features/nodes/executions/base-execution-node";
 import { BaseTriggerNode } from "@/features/nodes/triggers/base-trigger-node";
+import type {
+  MembershipExpiringTriggerConfig,
+  PricingOptionCreditTriggerConfig,
+} from "@/features/nodes/studio/lib/studio-node-config";
+import { MembershipExpiringTriggerDialog } from "./membership-expiring-trigger-dialog";
+import { PricingOptionCreditTriggerDialog } from "./pricing-option-credit-trigger-dialog";
+import { useStudioNodeSettings } from "./use-studio-node-settings";
+
+export {
+  ClassBookedTriggerNode,
+  MemberCheckedInTriggerNode,
+  MemberClassCountTriggerNode,
+} from "./class-attendance-trigger-nodes";
+export {
+  ClientTagAddedTriggerNode,
+  ClientTagRemovedTriggerNode,
+} from "./client-tag-trigger-nodes";
+export { SendSmsNode } from "./send-sms-node";
 
 type StudioNodeData = {
   variableName?: string;
   clientId?: string;
-  tag?: string;
-  message?: string;
   points?: number;
-  targetCount?: number;
+  firstPaymentOnly?: boolean;
 };
 
 type StudioNodeType = Node<StudioNodeData>;
@@ -39,38 +52,15 @@ function valueLabel(value?: string | number): string | undefined {
   return String(value);
 }
 
-export const ClassBookedTriggerNode: React.FC<NodeProps<StudioNodeType>> = memo(
-  (props) => (
+export const ClassCancelledTriggerNode: React.FC<NodeProps<StudioNodeType>> =
+  memo((props) => (
     <BaseTriggerNode
       {...props}
-      icon={CalendarCheck}
-      name="Class booked"
-      description="Runs when a member books a class"
+      icon={CalendarX}
+      name="Class cancelled"
+      description="Runs when a class booking is cancelled"
     />
-  ),
-);
-
-export const ClassCancelledTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={CalendarX}
-    name="Class cancelled"
-    description="Runs when a class booking is cancelled"
-  />
-));
-
-export const MemberCheckedInTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={UserCheck}
-    name="Member checked in"
-    description="Runs after a member checks in"
-  />
-));
+  ));
 
 export const MemberNoShowTriggerNode: React.FC<NodeProps<StudioNodeType>> =
   memo((props) => (
@@ -82,27 +72,44 @@ export const MemberNoShowTriggerNode: React.FC<NodeProps<StudioNodeType>> =
     />
   ));
 
-export const MembershipCreatedTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Users}
-    name="Membership created"
-    description="Runs when a new membership starts"
-  />
-));
+export const MembershipCreatedTriggerNode: React.FC<NodeProps<StudioNodeType>> =
+  memo((props) => (
+    <BaseTriggerNode
+      {...props}
+      icon={Users}
+      name="Membership created"
+      description="Runs when a new membership starts"
+    />
+  ));
 
 export const MembershipExpiringTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Bell}
-    name="Membership expiring"
-    description="Runs when a membership is nearing expiry"
-  />
-));
+  NodeProps<Node<Partial<MembershipExpiringTriggerConfig>>>
+> = memo((props) => {
+  const settings =
+    useStudioNodeSettings<MembershipExpiringTriggerConfig>(props.id);
+  return (
+    <>
+      <MembershipExpiringTriggerDialog
+        open={settings.open}
+        onOpenChange={settings.setOpen}
+        onSubmit={settings.save}
+        defaultValues={props.data}
+      />
+      <BaseTriggerNode
+        {...props}
+        icon={Bell}
+        name={
+          props.data.membershipKind === "PACKAGE"
+            ? "Package expiring soon"
+            : "Subscription expiring"
+        }
+        description={`${props.data.daysBefore ?? 7} days before expiry`}
+        onSettings={settings.openSettings}
+        onDoubleClick={settings.openSettings}
+      />
+    </>
+  );
+});
 
 export const MembershipCancelledTriggerNode: React.FC<
   NodeProps<StudioNodeType>
@@ -138,60 +145,52 @@ export const IntroOfferRedeemedTriggerNode: React.FC<
 ));
 
 export const IntroOfferCompletedTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Gift}
-    name="Intro offer completed"
-    description="Runs when a member completes an intro offer"
-  />
-));
+  NodeProps<Node<Partial<PricingOptionCreditTriggerConfig>>>
+> = memo((props) => {
+  const settings =
+    useStudioNodeSettings<PricingOptionCreditTriggerConfig>(props.id);
+  const isCreditTrigger = props.data.creditThreshold !== undefined;
+  return (
+    <>
+      {isCreditTrigger ? (
+        <PricingOptionCreditTriggerDialog
+          open={settings.open}
+          onOpenChange={settings.setOpen}
+          onSubmit={settings.save}
+          defaultValues={props.data}
+        />
+      ) : null}
+      <BaseTriggerNode
+        {...props}
+        icon={Gift}
+        name={
+          isCreditTrigger
+            ? props.data.creditThreshold === 0
+              ? "Pricing option credits used"
+              : "Package credits running low"
+            : "Intro offer completed"
+        }
+        description={
+          isCreditTrigger
+            ? `${props.data.creditThreshold} credits remaining`
+            : "Runs when a member completes an intro offer"
+        }
+        onSettings={isCreditTrigger ? settings.openSettings : undefined}
+        onDoubleClick={isCreditTrigger ? settings.openSettings : undefined}
+      />
+    </>
+  );
+});
 
-export const MemberClassCountTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Trophy}
-    name="Class milestone"
-    description={
-      valueLabel(props.data?.targetCount)
-        ? `${props.data.targetCount} classes reached`
-        : "Runs when a member reaches a class count"
-    }
-  />
-));
-
-export const ClientTagAddedTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Tag}
-    name="Member tag added"
-    description={
-      valueLabel(props.data?.tag)
-        ? `Tag: ${props.data.tag}`
-        : "Runs when a member tag is added"
-    }
-  />
-));
-
-export const ClientTagRemovedTriggerNode: React.FC<
-  NodeProps<StudioNodeType>
-> = memo((props) => (
-  <BaseTriggerNode
-    {...props}
-    icon={Tag}
-    name="Member tag removed"
-    description={
-      valueLabel(props.data?.tag)
-        ? `Tag: ${props.data.tag}`
-        : "Runs when a member tag is removed"
-    }
-  />
-));
+export const ReferralConvertedTriggerNode: React.FC<NodeProps<StudioNodeType>> =
+  memo((props) => (
+    <BaseTriggerNode
+      {...props}
+      icon={Handshake}
+      name="Referral converted"
+      description="Runs when a referred member converts"
+    />
+  ));
 
 export const StudioPaymentSucceededTriggerNode: React.FC<
   NodeProps<StudioNodeType>
@@ -199,8 +198,16 @@ export const StudioPaymentSucceededTriggerNode: React.FC<
   <BaseTriggerNode
     {...props}
     icon={CreditCard}
-    name="Payment succeeded"
-    description="Runs when a studio payment succeeds"
+    name={
+      props.data.firstPaymentOnly
+        ? "First subscription payment"
+        : "Payment succeeded"
+    }
+    description={
+      props.data.firstPaymentOnly
+        ? "Runs when a subscription's first payment succeeds"
+        : "Runs when a studio payment succeeds"
+    }
   />
 ));
 
@@ -250,18 +257,3 @@ export const CalculateChurnScoreNode: React.FC<NodeProps<StudioNodeType>> =
       description="Refresh a member churn prediction"
     />
   ));
-
-export const SendSmsNode: React.FC<NodeProps<StudioNodeType>> = memo(
-  (props) => (
-    <BaseExecutionNode
-      {...props}
-      icon={MessageSquare}
-      name="Send SMS"
-      description={
-        valueLabel(props.data?.message)
-          ? props.data.message
-          : "Send an SMS message"
-      }
-    />
-  ),
-);

@@ -45,7 +45,7 @@ export const GoogleDriveUploadFileNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_DRIVE_UPLOAD_FILE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleDriveUploadFileRealtimeToken as any,
+    refreshToken: fetchGoogleDriveUploadFileRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleDriveUploadFileFormValues) => {

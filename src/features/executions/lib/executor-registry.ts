@@ -25,6 +25,9 @@ import { clientCreatedTriggerExecutor } from "@/features/nodes/triggers/componen
 import { clientUpdatedTriggerExecutor } from "@/features/nodes/triggers/components/client-updated-trigger/executor";
 import { clientFieldChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-field-changed-trigger/executor";
 import { birthdayTriggerExecutor } from "@/features/nodes/triggers/components/birthday-trigger/executor";
+import { formSubmittedTriggerExecutor } from "@/features/nodes/triggers/components/form-submitted-trigger/executor";
+import { pricingOptionPurchasedTriggerExecutor } from "@/features/nodes/triggers/components/pricing-option-purchased-trigger/executor";
+import { clientInactivityTriggerExecutor } from "@/features/nodes/triggers/components/client-inactivity-trigger/executor";
 import { clientDeletedTriggerExecutor } from "@/features/nodes/triggers/components/client-deleted-trigger/executor";
 import { clientTypeChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-type-changed-trigger/executor";
 import { clientLifecycleStageChangedTriggerExecutor } from "@/features/nodes/triggers/components/client-lifecycle-stage-changed-trigger/executor";
@@ -137,6 +140,7 @@ import { membershipCancelledTriggerExecutor } from "@/features/nodes/triggers/co
 import { waitlistSpotOpenedTriggerExecutor } from "@/features/nodes/triggers/components/waitlist-spot-opened-trigger/executor";
 import { introOfferRedeemedTriggerExecutor } from "@/features/nodes/triggers/components/intro-offer-redeemed-trigger/executor";
 import { introOfferCompletedTriggerExecutor } from "@/features/nodes/triggers/components/intro-offer-completed-trigger/executor";
+import { referralConvertedTriggerExecutor } from "@/features/nodes/triggers/components/referral-converted-trigger/executor";
 import { memberClassCountTriggerExecutor } from "@/features/nodes/triggers/components/member-class-count-trigger/executor";
 import { clientTagAddedTriggerExecutor } from "@/features/nodes/triggers/components/client-tag-added-trigger/executor";
 import { clientTagRemovedTriggerExecutor } from "@/features/nodes/triggers/components/client-tag-removed-trigger/executor";
@@ -146,6 +150,9 @@ import { sendClassReminderExecutor } from "@/features/nodes/executions/component
 import { awardLoyaltyPointsExecutor } from "@/features/nodes/executions/components/award-loyalty-points/executor";
 import { calculateChurnScoreExecutor } from "@/features/nodes/executions/components/calculate-churn-score/executor";
 import { sendSmsExecutor } from "@/features/nodes/executions/components/send-sms/executor";
+import { sendEmailExecutor } from "@/features/nodes/executions/components/send-email/executor";
+import { createTaskExecutor } from "@/features/nodes/executions/components/create-task/executor";
+import { studioBookingActionExecutor } from "@/features/nodes/executions/components/studio-booking-action/executor";
 
 export const executorRegistry: Record<NodeType, NodeExecutor> = {
   // Core
@@ -155,7 +162,8 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
 
   // Google Triggers
   [NodeType.GOOGLE_FORM_TRIGGER]: googleFormTriggerExecutor,
-  [NodeType.GOOGLE_CALENDAR_TRIGGER]: googleCalendarTriggerExecutor,
+  [NodeType.GOOGLE_CALENDAR_TRIGGER]:
+    googleCalendarTriggerExecutor as NodeExecutor,
   [NodeType.GOOGLE_CALENDAR_EVENT_CREATED]: googleCalendarEventCreatedExecutor,
   [NodeType.GOOGLE_CALENDAR_EVENT_UPDATED]: googleCalendarEventUpdatedExecutor,
   [NodeType.GOOGLE_CALENDAR_EVENT_DELETED]: googleCalendarEventDeletedExecutor,
@@ -166,23 +174,35 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.GOOGLE_DRIVE_FOLDER_CREATED]: googleDriveFolderCreatedExecutor,
 
   // Google Executions
-  [NodeType.GOOGLE_CALENDAR_EXECUTION]: googleCalendarActionExecutor,
-  [NodeType.GOOGLE_CALENDAR_CREATE_EVENT]: googleCalendarCreateEventExecutor as NodeExecutor,
-  [NodeType.GOOGLE_CALENDAR_UPDATE_EVENT]: googleCalendarUpdateEventExecutor as NodeExecutor,
-  [NodeType.GOOGLE_CALENDAR_DELETE_EVENT]: googleCalendarDeleteEventExecutor as NodeExecutor,
-  [NodeType.GOOGLE_CALENDAR_FIND_AVAILABLE_TIMES]: googleCalendarFindAvailableTimesExecutor as NodeExecutor,
+  [NodeType.GOOGLE_CALENDAR_EXECUTION]:
+    googleCalendarActionExecutor as NodeExecutor,
+  [NodeType.GOOGLE_CALENDAR_CREATE_EVENT]:
+    googleCalendarCreateEventExecutor as NodeExecutor,
+  [NodeType.GOOGLE_CALENDAR_UPDATE_EVENT]:
+    googleCalendarUpdateEventExecutor as NodeExecutor,
+  [NodeType.GOOGLE_CALENDAR_DELETE_EVENT]:
+    googleCalendarDeleteEventExecutor as NodeExecutor,
+  [NodeType.GOOGLE_CALENDAR_FIND_AVAILABLE_TIMES]:
+    googleCalendarFindAvailableTimesExecutor as NodeExecutor,
   [NodeType.GMAIL_EXECUTION]: gmailExecutor,
   [NodeType.GMAIL_SEND_EMAIL]: gmailSendEmailExecutor as NodeExecutor,
   [NodeType.GMAIL_REPLY_TO_EMAIL]: gmailReplyToEmailExecutor as NodeExecutor,
   [NodeType.GMAIL_SEARCH_EMAILS]: gmailSearchEmailsExecutor as NodeExecutor,
   [NodeType.GMAIL_ADD_LABEL]: gmailAddLabelExecutor as NodeExecutor,
-  [NodeType.GOOGLE_DRIVE_UPLOAD_FILE]: googleDriveUploadFileExecutor as NodeExecutor,
-  [NodeType.GOOGLE_DRIVE_DOWNLOAD_FILE]: googleDriveDownloadFileExecutor as NodeExecutor,
-  [NodeType.GOOGLE_DRIVE_MOVE_FILE]: googleDriveMoveFileExecutor as NodeExecutor,
-  [NodeType.GOOGLE_DRIVE_DELETE_FILE]: googleDriveDeleteFileExecutor as NodeExecutor,
-  [NodeType.GOOGLE_DRIVE_CREATE_FOLDER]: googleDriveCreateFolderExecutor as NodeExecutor,
-  [NodeType.GOOGLE_FORM_READ_RESPONSES]: googleFormReadResponsesExecutor as NodeExecutor,
-  [NodeType.GOOGLE_FORM_CREATE_RESPONSE]: googleFormCreateResponseExecutor as NodeExecutor,
+  [NodeType.GOOGLE_DRIVE_UPLOAD_FILE]:
+    googleDriveUploadFileExecutor as NodeExecutor,
+  [NodeType.GOOGLE_DRIVE_DOWNLOAD_FILE]:
+    googleDriveDownloadFileExecutor as NodeExecutor,
+  [NodeType.GOOGLE_DRIVE_MOVE_FILE]:
+    googleDriveMoveFileExecutor as NodeExecutor,
+  [NodeType.GOOGLE_DRIVE_DELETE_FILE]:
+    googleDriveDeleteFileExecutor as NodeExecutor,
+  [NodeType.GOOGLE_DRIVE_CREATE_FOLDER]:
+    googleDriveCreateFolderExecutor as NodeExecutor,
+  [NodeType.GOOGLE_FORM_READ_RESPONSES]:
+    googleFormReadResponsesExecutor as NodeExecutor,
+  [NodeType.GOOGLE_FORM_CREATE_RESPONSE]:
+    googleFormCreateResponseExecutor as NodeExecutor,
 
   // Microsoft Triggers
   [NodeType.OUTLOOK_TRIGGER]: outlookTriggerExecutor,
@@ -193,24 +213,32 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.ONEDRIVE_FILE_CREATED]: onedriveFileCreatedExecutor,
   [NodeType.ONEDRIVE_FILE_UPDATED]: onedriveFileUpdatedExecutor,
   [NodeType.ONEDRIVE_FILE_DELETED]: onedriveFileDeletedExecutor,
-  [NodeType.OUTLOOK_CALENDAR_EVENT_CREATED]: outlookCalendarEventCreatedExecutor,
-  [NodeType.OUTLOOK_CALENDAR_EVENT_UPDATED]: outlookCalendarEventUpdatedExecutor,
-  [NodeType.OUTLOOK_CALENDAR_EVENT_DELETED]: outlookCalendarEventDeletedExecutor,
+  [NodeType.OUTLOOK_CALENDAR_EVENT_CREATED]:
+    outlookCalendarEventCreatedExecutor,
+  [NodeType.OUTLOOK_CALENDAR_EVENT_UPDATED]:
+    outlookCalendarEventUpdatedExecutor,
+  [NodeType.OUTLOOK_CALENDAR_EVENT_DELETED]:
+    outlookCalendarEventDeletedExecutor,
 
   // Microsoft Executions
   [NodeType.OUTLOOK_EXECUTION]: outlookExecutor,
   [NodeType.OUTLOOK_SEND_EMAIL]: outlookSendEmailExecutor as NodeExecutor,
-  [NodeType.OUTLOOK_REPLY_TO_EMAIL]: outlookReplyToEmailExecutor as NodeExecutor,
+  [NodeType.OUTLOOK_REPLY_TO_EMAIL]:
+    outlookReplyToEmailExecutor as NodeExecutor,
   [NodeType.OUTLOOK_MOVE_EMAIL]: outlookMoveEmailExecutor as NodeExecutor,
   [NodeType.OUTLOOK_SEARCH_EMAILS]: outlookSearchEmailsExecutor as NodeExecutor,
   [NodeType.ONEDRIVE_EXECUTION]: oneDriveExecutor,
   [NodeType.ONEDRIVE_UPLOAD_FILE]: onedriveUploadFileExecutor as NodeExecutor,
-  [NodeType.ONEDRIVE_DOWNLOAD_FILE]: onedriveDownloadFileExecutor as NodeExecutor,
+  [NodeType.ONEDRIVE_DOWNLOAD_FILE]:
+    onedriveDownloadFileExecutor as NodeExecutor,
   [NodeType.ONEDRIVE_MOVE_FILE]: onedriveMoveFileExecutor as NodeExecutor,
   [NodeType.ONEDRIVE_DELETE_FILE]: onedriveDeleteFileExecutor as NodeExecutor,
-  [NodeType.OUTLOOK_CALENDAR_CREATE_EVENT]: outlookCalendarCreateEventExecutor as NodeExecutor,
-  [NodeType.OUTLOOK_CALENDAR_UPDATE_EVENT]: outlookCalendarUpdateEventExecutor as NodeExecutor,
-  [NodeType.OUTLOOK_CALENDAR_DELETE_EVENT]: outlookCalendarDeleteEventExecutor as NodeExecutor,
+  [NodeType.OUTLOOK_CALENDAR_CREATE_EVENT]:
+    outlookCalendarCreateEventExecutor as NodeExecutor,
+  [NodeType.OUTLOOK_CALENDAR_UPDATE_EVENT]:
+    outlookCalendarUpdateEventExecutor as NodeExecutor,
+  [NodeType.OUTLOOK_CALENDAR_DELETE_EVENT]:
+    outlookCalendarDeleteEventExecutor as NodeExecutor,
 
   // Communication & Social Triggers
   [NodeType.SLACK_NEW_MESSAGE]: slackNewMessageExecutor,
@@ -237,13 +265,18 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.TELEGRAM_EXECUTION]: telegramExecutionExecutor,
   [NodeType.TELEGRAM_SEND_MESSAGE]: telegramSendMessageExecutor as NodeExecutor,
   [NodeType.TELEGRAM_SEND_PHOTO]: telegramSendPhotoExecutor as NodeExecutor,
-  [NodeType.TELEGRAM_SEND_DOCUMENT]: telegramSendDocumentExecutor as NodeExecutor,
+  [NodeType.TELEGRAM_SEND_DOCUMENT]:
+    telegramSendDocumentExecutor as NodeExecutor,
 
   // CRM Client Triggers
   [NodeType.CLIENT_CREATED_TRIGGER]: clientCreatedTriggerExecutor,
   [NodeType.CLIENT_UPDATED_TRIGGER]: clientUpdatedTriggerExecutor,
   [NodeType.CLIENT_FIELD_CHANGED_TRIGGER]: clientFieldChangedTriggerExecutor,
   [NodeType.BIRTHDAY_TRIGGER]: birthdayTriggerExecutor,
+  [NodeType.FORM_SUBMITTED_TRIGGER]: formSubmittedTriggerExecutor,
+  [NodeType.PRICING_OPTION_PURCHASED_TRIGGER]:
+    pricingOptionPurchasedTriggerExecutor,
+  [NodeType.CLIENT_INACTIVITY_TRIGGER]: clientInactivityTriggerExecutor,
   [NodeType.CLIENT_DELETED_TRIGGER]: clientDeletedTriggerExecutor,
   [NodeType.CLIENT_TYPE_CHANGED_TRIGGER]: clientTypeChangedTriggerExecutor,
   [NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
@@ -255,7 +288,8 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.DELETE_CLIENT]: deleteClientExecutor as NodeExecutor,
   [NodeType.FIND_CLIENTS]: findClientsExecutor as NodeExecutor,
   [NodeType.ADD_TAG_TO_CLIENT]: addTagToClientExecutor as NodeExecutor,
-  [NodeType.REMOVE_TAG_FROM_CLIENT]: removeTagFromClientExecutor as NodeExecutor,
+  [NodeType.REMOVE_TAG_FROM_CLIENT]:
+    removeTagFromClientExecutor as NodeExecutor,
 
   // CRM Deal Triggers
   [NodeType.DEAL_CREATED_TRIGGER]: dealCreatedTriggerExecutor,
@@ -289,7 +323,8 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.STRIPE_SUBSCRIPTION_CANCELLED]: stripeSubscriptionCancelledExecutor,
 
   // Stripe Executions
-  [NodeType.STRIPE_CREATE_CHECKOUT_SESSION]: stripeCreateCheckoutSessionExecutor as NodeExecutor,
+  [NodeType.STRIPE_CREATE_CHECKOUT_SESSION]:
+    stripeCreateCheckoutSessionExecutor as NodeExecutor,
   [NodeType.STRIPE_CREATE_INVOICE]: stripeCreateInvoiceExecutor as NodeExecutor,
   [NodeType.STRIPE_SEND_INVOICE]: stripeSendInvoiceExecutor as NodeExecutor,
   [NodeType.STRIPE_REFUND_PAYMENT]: stripeRefundPaymentExecutor as NodeExecutor,
@@ -326,10 +361,12 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.WAITLIST_SPOT_OPENED_TRIGGER]: waitlistSpotOpenedTriggerExecutor,
   [NodeType.INTRO_OFFER_REDEEMED_TRIGGER]: introOfferRedeemedTriggerExecutor,
   [NodeType.INTRO_OFFER_COMPLETED_TRIGGER]: introOfferCompletedTriggerExecutor,
+  [NodeType.REFERRAL_CONVERTED_TRIGGER]: referralConvertedTriggerExecutor,
   [NodeType.MEMBER_CLASS_COUNT_TRIGGER]: memberClassCountTriggerExecutor,
   [NodeType.CLIENT_TAG_ADDED_TRIGGER]: clientTagAddedTriggerExecutor,
   [NodeType.CLIENT_TAG_REMOVED_TRIGGER]: clientTagRemovedTriggerExecutor,
-  [NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER]: studioPaymentSucceededTriggerExecutor,
+  [NodeType.STUDIO_PAYMENT_SUCCEEDED_TRIGGER]:
+    studioPaymentSucceededTriggerExecutor,
   [NodeType.STUDIO_PAYMENT_FAILED_TRIGGER]: studioPaymentFailedTriggerExecutor,
 
   // Fitness studio actions
@@ -337,6 +374,9 @@ export const executorRegistry: Record<NodeType, NodeExecutor> = {
   [NodeType.AWARD_LOYALTY_POINTS]: awardLoyaltyPointsExecutor,
   [NodeType.CALCULATE_CHURN_SCORE]: calculateChurnScoreExecutor,
   [NodeType.SEND_SMS]: sendSmsExecutor,
+  [NodeType.SEND_EMAIL]: sendEmailExecutor as NodeExecutor,
+  [NodeType.CREATE_TASK]: createTaskExecutor as NodeExecutor,
+  [NodeType.STUDIO_CLASS_ACTION]: studioBookingActionExecutor as NodeExecutor,
 };
 
 export const getExecutor = (type: NodeType): NodeExecutor => {

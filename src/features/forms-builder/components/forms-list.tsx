@@ -1,267 +1,260 @@
 "use client";
 
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColumnOrderState, VisibilityState } from "@tanstack/react-table";
+import { FileText, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTRPC } from "@/trpc/client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import * as React from "react";
+import { toast } from "sonner";
+
+import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { StudioTableToolbar } from "@/features/studio/components/studio-table-toolbar";
+import { useTRPC } from "@/trpc/client";
 import {
-  Plus,
-  MoreVertical,
-  Edit,
-  Copy,
-  Archive,
-  Trash2,
-  Eye,
-  FileText,
-  Search,
-} from "lucide-react";
-import { FormStatus } from "@/db/enums";
-import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+  buildFormColumns,
+  type FormListRow,
+} from "./forms-table-columns";
+import { FormDeleteDialog } from "./form-delete-dialog";
+import { FORM_BLUEPRINT_OPTIONS } from "@/features/forms-builder/lib/form-blueprints";
+
+const DEFAULT_COLUMN_ORDER = [
+  "name",
+  "status",
+  "steps",
+  "responses",
+  "publication",
+  "created",
+  "updated",
+  "actions",
+];
 
 export function FormsList() {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState("");
+  const [search, setSearch] = React.useState("");
+  const [sort, setSort] = React.useState("updated.desc");
+  const [statuses, setStatuses] = React.useState<string[]>([]);
+  const [columnVisibility, setColumnVisibility] =
+    React.useState<VisibilityState>({ steps: false, updated: false });
+  const [columnOrder, setColumnOrder] =
+    React.useState<ColumnOrderState>(DEFAULT_COLUMN_ORDER);
+  const [deletingForm, setDeletingForm] = React.useState<FormListRow | null>(
+    null,
+  );
 
-  const { data: forms, isLoading } = useQuery({
-    ...trpc.forms.list.queryOptions(),
-  });
-
-  const { mutate: createForm, isPending: isCreating } = useMutation(
+  const formsQuery = useQuery(trpc.forms.list.queryOptions());
+  const publicationsQuery = useQuery(
+    trpc.publications.list.queryOptions({ kind: "FORM" }),
+  );
+  const createForm = useMutation(
     trpc.forms.create.mutationOptions({
-      onSuccess: (data) => {
-        queryClient.invalidateQueries();
-        router.push(`/builder/forms/${data.id}/editor`);
-      },
-      onError: (error) => {
-        toast.error("Failed to create form", {
-          description: error.message,
-        });
-      },
-    })
+      onSuccess: (form) => router.push(`/builder/forms/${form.id}/editor`),
+      onError: (error) => toast.error(error.message),
+    }),
   );
-
-  const { mutate: deleteForm } = useMutation(
-    trpc.forms.delete.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Form deleted");
-      },
-      onError: (error) => {
-        toast.error("Failed to delete form", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const { mutate: archiveForm } = useMutation(
+  const archiveForm = useMutation(
     trpc.forms.archive.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
+      onSuccess: async () => {
+        await queryClient.invalidateQueries(trpc.forms.list.queryOptions());
         toast.success("Form archived");
       },
-      onError: (error) => {
-        toast.error("Failed to archive form", {
-          description: error.message,
-        });
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+  const duplicateForm = useMutation(
+    trpc.forms.duplicate.mutationOptions({
+      onSuccess: async (form) => {
+        await queryClient.invalidateQueries(trpc.forms.list.queryOptions());
+        toast.success("Form duplicated");
+        router.push(`/builder/forms/${form.id}/editor`);
       },
-    })
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+  const deleteForm = useMutation(
+    trpc.forms.delete.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries(trpc.forms.list.queryOptions());
+        setDeletingForm(null);
+        toast.success("Form deleted");
+      },
+      onError: (error) => toast.error(error.message),
+    }),
   );
 
-  const handleCreateForm = () => {
-    createForm({
-      name: "Untitled Form",
-      isMultiStep: false,
+  const forms = React.useMemo(() => {
+    let rows = formsQuery.data ?? [];
+    if (search.trim()) {
+      const query = search.trim().toLowerCase();
+      rows = rows.filter((form) =>
+        [form.name, form.description]
+          .filter(Boolean)
+          .some((value) => value?.toLowerCase().includes(query)),
+      );
+    }
+    if (statuses.length > 0) {
+      rows = rows.filter((form) => statuses.includes(form.status));
+    }
+    const [field, direction] = sort.split(".");
+    return [...rows].sort((left, right) => {
+      let result = 0;
+      if (field === "name") result = left.name.localeCompare(right.name);
+      if (field === "responses") {
+        result = left._count.formSubmission - right._count.formSubmission;
+      }
+      if (field === "updated") {
+        result =
+          new Date(left.updatedAt).getTime() - new Date(right.updatedAt).getTime();
+      }
+      if (field === "created") {
+        result =
+          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      }
+      return direction === "desc" ? -result : result;
     });
-  };
+  }, [formsQuery.data, search, sort, statuses]);
 
-  const handleDelete = (id: string, name: string) => {
-    if (
-      confirm(
-        `Are you sure you want to delete "${name}"? This action cannot be undone.`
-      )
-    ) {
-      deleteForm({ id });
-    }
-  };
-
-  const filteredForms = forms?.filter((form) =>
-    form.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const columns = React.useMemo(
+    () =>
+      buildFormColumns({
+        onArchive: (form) => archiveForm.mutate({ id: form.id }),
+        onDuplicate: (form) => duplicateForm.mutate({ id: form.id }),
+        onDelete: setDeletingForm,
+        publicationsBySourceKey: new Map(
+          (publicationsQuery.data ?? []).map((target) => [
+            target.sourceKey,
+            target,
+          ]),
+        ),
+      }),
+    [archiveForm, duplicateForm, publicationsQuery.data],
   );
-
-  const getStatusBadge = (status: FormStatus) => {
-    switch (status) {
-      case FormStatus.PUBLISHED:
-        return (
-          <Badge variant="default" className="bg-green-500">
-            Published
-          </Badge>
-        );
-      case FormStatus.DRAFT:
-        return <Badge variant="secondary">Draft</Badge>;
-      case FormStatus.ARCHIVED:
-        return <Badge variant="outline">Archived</Badge>;
-    }
-  };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search forms..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
+    <div>
+      <div className="flex flex-col gap-4 p-6 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Forms</h1>
+          <p className="text-xs text-primary/70">
+            Collect responses, publish forms, and connect follow-up automations.
+          </p>
         </div>
-        <Button onClick={handleCreateForm} disabled={isCreating}>
-          <Plus className="mr-2 h-4 w-4" />
-          {isCreating ? "Creating..." : "Create Form"}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" disabled={createForm.isPending}>
+              <Plus className="size-3.5" />
+              {createForm.isPending ? "Creating..." : "Create form"}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72">
+            {FORM_BLUEPRINT_OPTIONS.map((option) => (
+              <DropdownMenuItem
+                key={option.id}
+                className="items-start py-2"
+                onSelect={() =>
+                  createForm.mutate({
+                    name:
+                      option.id === "BLANK" ? "Untitled Form" : option.name,
+                    blueprint: option.id,
+                    isMultiStep: option.id === "LEAD_NURTURE",
+                  })
+                }
+              >
+                <span>
+                  <span className="block text-xs font-medium">
+                    {option.name}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-4 text-muted-foreground">
+                    {option.description}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-
-      {isLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <p className="text-muted-foreground">Loading forms...</p>
+      <Separator />
+      {formsQuery.isError || publicationsQuery.isError ? (
+        <div className="border-b bg-destructive/5 px-6 py-3 text-xs text-destructive">
+          {formsQuery.error?.message ??
+            publicationsQuery.error?.message ??
+            "Forms could not be loaded."}
         </div>
-      ) : filteredForms && filteredForms.length > 0 ? (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Steps</TableHead>
-                <TableHead>Submissions</TableHead>
-                <TableHead>Workflow</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="w-[70px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredForms.map((form) => (
-                <TableRow
-                  key={form.id}
-                  className="cursor-pointer"
-                  onClick={() => router.push(`/builder/forms/${form.id}/editor`)}
-                >
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      {form.name}
-                    </div>
-                  </TableCell>
-                  <TableCell>{getStatusBadge(form.status)}</TableCell>
-                  <TableCell>
-                    {form._count.formStep} step{form._count.formStep !== 1 && "s"}
-                  </TableCell>
-                  <TableCell>{form._count.formSubmission}</TableCell>
-                  <TableCell>
-                    {form.Workflows ? (
-                      <span className="text-sm text-muted-foreground">
-                        {form.Workflows.name}
-                      </span>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">None</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDistanceToNow(new Date(form.updatedAt), {
-                      addSuffix: true,
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/builder/forms/${form.id}/editor`);
-                          }}
-                        >
-                          <Edit className="mr-2 h-4 w-4" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            router.push(`/builder/forms/${form.id}/submissions`);
-                          }}
-                        >
-                          <Eye className="mr-2 h-4 w-4" />
-                          View Submissions
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            archiveForm({ id: form.id });
-                          }}
-                        >
-                          <Archive className="mr-2 h-4 w-4" />
-                          Archive
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(form.id, form.name);
-                          }}
-                          className="text-destructive"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="flex h-64 flex-col items-center justify-center gap-4 rounded-md border border-dashed">
-          <FileText className="h-12 w-12 text-muted-foreground" />
-          <div className="text-center">
-            <h3 className="font-semibold">No forms yet</h3>
-            <p className="text-sm text-muted-foreground">
-              Create your first form to get started
-            </p>
+      ) : null}
+      <DataTable
+        columns={columns}
+        data={forms}
+        isLoading={formsQuery.isLoading || publicationsQuery.isLoading}
+        getRowId={(form) => form.id}
+        onRowClick={(form) => router.push(`/builder/forms/${form.id}/editor`)}
+        columnVisibility={columnVisibility}
+        onColumnVisibilityChange={setColumnVisibility}
+        columnOrder={columnOrder}
+        onColumnOrderChange={setColumnOrder}
+        initialColumnOrder={DEFAULT_COLUMN_ORDER}
+        enableGlobalSearch={false}
+        toolbar={{
+          filters: ({ table }) => (
+            <StudioTableToolbar
+              search={search}
+              onSearchChange={setSearch}
+              searchPlaceholder="Search forms..."
+              filterGroups={[
+                {
+                  label: "Status",
+                  options: [
+                    { value: "DRAFT", label: "Draft" },
+                    { value: "PUBLISHED", label: "Published" },
+                    { value: "ARCHIVED", label: "Archived" },
+                  ],
+                  selectedValues: statuses,
+                  onChange: setStatuses,
+                },
+              ]}
+              sortOptions={[
+                { value: "updated.desc", label: "Recently updated" },
+                { value: "updated.asc", label: "Oldest updated" },
+                { value: "created.desc", label: "Newest created" },
+                { value: "created.asc", label: "Oldest created" },
+                { value: "name.asc", label: "Name A-Z" },
+                { value: "name.desc", label: "Name Z-A" },
+                { value: "responses.desc", label: "Most responses" },
+              ]}
+              sortValue={sort}
+              onSortChange={setSort}
+              table={table}
+              columnVisibility={columnVisibility}
+              columnOrder={columnOrder}
+              onColumnOrderChange={setColumnOrder}
+              initialColumnOrder={DEFAULT_COLUMN_ORDER}
+              primaryColumnId="name"
+            />
+          ),
+        }}
+        emptyState={
+          <div className="flex flex-col items-center gap-2 py-12 text-center">
+            <FileText className="size-8 text-primary/20" />
+            <p className="text-sm text-primary/50">No forms match this view.</p>
           </div>
-          <Button onClick={handleCreateForm} disabled={isCreating}>
-            <Plus className="mr-2 h-4 w-4" />
-            {isCreating ? "Creating..." : "Create Form"}
-          </Button>
-        </div>
-      )}
+        }
+      />
+      <FormDeleteDialog
+        formName={deletingForm?.name ?? null}
+        pending={deleteForm.isPending}
+        onClose={() => setDeletingForm(null)}
+        onConfirm={() =>
+          deletingForm && deleteForm.mutate({ id: deletingForm.id })
+        }
+      />
     </div>
   );
 }

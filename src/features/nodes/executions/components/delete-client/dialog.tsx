@@ -104,7 +104,7 @@ export const DeleteClientDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Delete Client Configuration</SheetTitle>
           <SheetDescription>
@@ -112,7 +112,7 @@ export const DeleteClientDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -144,7 +144,7 @@ export const DeleteClientDialog: React.FC<Props> = ({
                   <div className="flex items-center justify-between mb-2">
                     <FormLabel>Client ID</FormLabel>
                     <div className="flex items-center space-x-2">
-                      <Label htmlFor="use-variable-delete-client" className="text-xs text-white/60 cursor-pointer">
+                      <Label htmlFor="use-variable-delete-client" className="text-xs text-muted-foreground cursor-pointer">
                         Use variables
                       </Label>
                       <Switch
@@ -178,12 +178,12 @@ export const DeleteClientDialog: React.FC<Props> = ({
                               <div className="flex flex-col">
                                 <span className="font-medium">{client.name}</span>
                                 {client.email && (
-                                  <span className="text-xs text-white/60">{client.email}</span>
+                                  <span className="text-xs text-muted-foreground">{client.email}</span>
                                 )}
                               </div>
                             </SelectItem>
                           )) ?? (
-                            <div className="px-2 py-4 text-sm text-white/60">No clients found</div>
+                            <div className="px-2 py-4 text-sm text-muted-foreground">No clients found</div>
                           )}
                         </SelectContent>
                       </Select>
@@ -192,8 +192,8 @@ export const DeleteClientDialog: React.FC<Props> = ({
                   <FormDescription>
                     {useVariableInput ? (
                       <>
-                        Type <span className="text-white font-medium">@</span> or{" "}
-                        <span className="text-white font-medium">/</span> to insert
+                        Type <span className="text-primary font-medium">@</span> or{" "}
+                        <span className="text-primary font-medium">/</span> to insert
                         context variables. This action is permanent.
                       </>
                     ) : (

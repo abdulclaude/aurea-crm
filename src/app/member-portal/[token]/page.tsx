@@ -17,9 +17,11 @@ import {
   Clock,
   Dumbbell,
   Flame,
+  QrCode,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { MemberCheckInPass } from "@/features/studio/components/member-checkin-pass";
 
 function MembershipStatusBadge({ status }: { status: string }) {
   if (status === "ACTIVE")
@@ -37,6 +39,12 @@ function MembershipStatusBadge({ status }: { status: string }) {
   return <Badge variant="outline">{status}</Badge>;
 }
 
+function formatCurrency(amount: number, currency = "GBP"): string {
+  return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(
+    amount,
+  );
+}
+
 export default function MemberPortalPage({
   params,
 }: {
@@ -52,7 +60,11 @@ export default function MemberPortalPage({
 
   const bookMutation = useMutation(
     trpc.memberPortal.bookClass.mutationOptions({
-      onSuccess: () => {
+      onSuccess: (result) => {
+        if (result.checkout?.url) {
+          window.location.assign(result.checkout.url);
+          return;
+        }
         toast.success("Class booked!");
         queryClient.invalidateQueries({
           queryKey: trpc.memberPortal.getPortalData.queryOptions({ token })
@@ -112,7 +124,7 @@ export default function MemberPortalPage({
 
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
         {/* Stats Bar */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card className="p-4 text-center">
             <p className="text-2xl font-bold">{client.attendanceCount}</p>
             <p className="text-xs text-muted-foreground mt-1">
@@ -140,6 +152,15 @@ export default function MemberPortalPage({
                 <p className="text-xs text-muted-foreground mt-1">Unlimited</p>
               </>
             )}
+          </Card>
+          <Card className="p-4 text-center">
+            <p className="text-2xl font-bold">
+              {formatCurrency(
+                client.accountCreditBalance,
+                client.accountCreditCurrency,
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">Account credit</p>
           </Card>
         </div>
 
@@ -202,6 +223,10 @@ export default function MemberPortalPage({
               <CreditCard className="h-3.5 w-3.5 mr-1.5" />
               Payments
             </TabsTrigger>
+            <TabsTrigger value="pass" className="flex-1">
+              <QrCode className="h-3.5 w-3.5 mr-1.5" />
+              Pass
+            </TabsTrigger>
           </TabsList>
 
           {/* Upcoming Classes */}
@@ -222,7 +247,28 @@ export default function MemberPortalPage({
                     <Card key={cls.id} className="p-4">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-semibold">{cls.name}</p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold">{cls.name}</p>
+                            {(cls.serviceType ?? cls.classType) && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px]"
+                                style={{
+                                  borderColor: `${
+                                    cls.serviceType?.calendarColor ??
+                                    cls.classType?.color ??
+                                    ""
+                                  }55`,
+                                  color:
+                                    cls.serviceType?.calendarColor ??
+                                    cls.classType?.color ??
+                                    undefined,
+                                }}
+                              >
+                                {cls.serviceType?.name ?? cls.classType?.name}
+                              </Badge>
+                            )}
+                          </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {format(
                               new Date(cls.startTime),
@@ -333,6 +379,10 @@ export default function MemberPortalPage({
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="pass" className="mt-4">
+            <MemberCheckInPass token={data.memberCheckInPass} />
           </TabsContent>
         </Tabs>
       </div>

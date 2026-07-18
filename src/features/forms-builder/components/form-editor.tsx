@@ -1,361 +1,179 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useTRPC } from "@/trpc/client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import * as React from "react";
+
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import {
-  Plus,
-  Save,
-  Upload,
-  Settings,
-  Eye,
-  ArrowLeft,
-  Trash2,
-} from "lucide-react";
-import { toast } from "sonner";
-import { FormFieldType, FormStatus } from "@/db/enums";
+import { Skeleton } from "@/components/ui/skeleton";
+import { FormBuilderPreview } from "@/features/forms-builder/components/form-builder-preview";
+import { FormBuilderSidebar } from "@/features/forms-builder/components/form-builder-sidebar";
+import { FormEditorHeader } from "@/features/forms-builder/components/form-editor-header";
+import type { FormFieldUpdate } from "@/features/forms-builder/components/form-field-editor";
+import type { FormFieldPreset } from "@/features/forms-builder/components/form-field-presets";
+import type { FormSettingsDraft } from "@/features/forms-builder/components/form-editor-types";
+import { useFormEditorMutations } from "@/features/forms-builder/components/use-form-editor-mutations";
+import { formThemeSchema } from "@/features/forms-builder/lib/form-theme";
+import { useTRPC } from "@/trpc/client";
 
-interface FormEditorProps {
-  formId: string;
-}
-
-export function FormEditor({ formId }: FormEditorProps) {
-  const router = useRouter();
+export function FormEditor({ formId }: { formId: string }) {
   const trpc = useTRPC();
-  const queryClient = useQueryClient();
-  const [formName, setFormName] = useState("");
+  const formQuery = useQuery(trpc.forms.get.queryOptions({ id: formId }));
+  const themesQuery = useQuery(trpc.globalStyles.list.queryOptions());
+  const [draft, setDraft] = React.useState<FormSettingsDraft | null>(null);
+  const mutations = useFormEditorMutations(formId);
 
-  const { data: form, isLoading } = useQuery({
-    ...trpc.forms.get.queryOptions({ id: formId }),
-  });
-
-  const { mutate: updateForm } = useMutation(
-    trpc.forms.update.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Form updated");
-      },
-      onError: (error) => {
-        toast.error("Failed to update form", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const { mutate: publishForm } = useMutation(
-    trpc.forms.publish.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Form published");
-      },
-      onError: (error) => {
-        toast.error("Failed to publish form", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const { mutate: addStep } = useMutation(
-    trpc.forms.addStep.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Step added");
-      },
-      onError: (error) => {
-        toast.error("Failed to add step", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const { mutate: addField } = useMutation(
-    trpc.forms.addField.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Field added");
-      },
-      onError: (error) => {
-        toast.error("Failed to add field", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const { mutate: deleteField } = useMutation(
-    trpc.forms.deleteField.mutationOptions({
-      onSuccess: () => {
-        queryClient.invalidateQueries();
-        toast.success("Field deleted");
-      },
-      onError: (error) => {
-        toast.error("Failed to delete field", {
-          description: error.message,
-        });
-      },
-    })
-  );
-
-  const handleSave = () => {
-    if (formName !== form?.name) {
-      updateForm({ id: formId, name: formName });
-    }
-  };
-
-  const handlePublish = () => {
-    publishForm({ id: formId });
-  };
-
-  const handleAddStep = () => {
-    const stepCount = (form as any)?.formStep?.length || 0;
-    addStep({
-      formId,
-      name: `Step ${stepCount + 1}`,
+  React.useEffect(() => {
+    if (!formQuery.data) return;
+    setDraft({
+      name: formQuery.data.name,
+      description: formQuery.data.description ?? "",
+      isMultiStep: formQuery.data.isMultiStep,
+      showProgress: formQuery.data.showProgress,
+      progressDisplay:
+        formQuery.data.progressDisplay === "RING" ||
+        formQuery.data.progressDisplay === "STEPS"
+          ? formQuery.data.progressDisplay
+          : "BAR",
+      successMessage: formQuery.data.successMessage,
+      redirectUrl: formQuery.data.redirectUrl ?? "",
+      stylePresetId: formQuery.data.stylePresetId,
+      primaryColor: formQuery.data.primaryColor,
+      buttonTextColor: formQuery.data.buttonTextColor,
+      backgroundColor: formQuery.data.backgroundColor,
+      textColor: formQuery.data.textColor,
     });
-  };
+  }, [formQuery.data]);
 
-  const handleAddField = (stepId: string, type: FormFieldType) => {
-    addField({
-      stepId,
-      type,
-      label: `New ${type.toLowerCase().replace("_", " ")} field`,
-      required: false,
-    });
-  };
-
-  if (isLoading) {
+  if (formQuery.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-muted-foreground">Loading form...</p>
+      <div className="grid h-full grid-cols-1 lg:grid-cols-2">
+        <Skeleton className="m-6 h-[70vh] rounded-none" />
+        <Skeleton className="m-6 hidden h-[70vh] rounded-none lg:block" />
       </div>
     );
   }
-
-  if (!form) {
+  if (formQuery.isError) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-muted-foreground">Form not found</p>
+      <div className="flex h-full items-center justify-center p-6 text-center">
+        <div>
+          <h1 className="text-sm font-semibold">Form unavailable</h1>
+          <p className="mt-1 max-w-md text-xs text-destructive">
+            {formQuery.error.message}
+          </p>
+          <Button asChild variant="outline" size="sm" className="mt-4">
+            <Link href="/builder/forms">Back to forms</Link>
+          </Button>
+        </div>
       </div>
     );
+  }
+  if (!draft) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading form settings...
+      </div>
+    );
+  }
+  const form = formQuery.data;
+  if (!form) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Form not found
+      </div>
+    );
+  }
+  const settingsDraft = draft;
+  const themes = themesQuery.data ?? [];
+  const activeTheme =
+    themes.find((theme) => theme.id === settingsDraft.stylePresetId) ??
+    themes.find((theme) => theme.isDefault);
+
+  function saveSettings(): void {
+    mutations.updateForm.mutate({
+      id: formId,
+      name: settingsDraft.name.trim(),
+      description: settingsDraft.description.trim(),
+      isMultiStep: settingsDraft.isMultiStep,
+      showProgress: settingsDraft.showProgress,
+      progressDisplay: settingsDraft.progressDisplay,
+      successMessage: settingsDraft.successMessage.trim(),
+      redirectUrl: settingsDraft.redirectUrl.trim() || null,
+      stylePresetId: settingsDraft.stylePresetId,
+      primaryColor: settingsDraft.primaryColor,
+      buttonTextColor: settingsDraft.buttonTextColor,
+      backgroundColor: settingsDraft.backgroundColor,
+      textColor: settingsDraft.textColor,
+    });
+  }
+
+  function addPreset(stepId: string, preset: FormFieldPreset): void {
+    if (preset.disabledReason) return;
+    mutations.addField.mutate({
+      stepId,
+      type: preset.type,
+      label: preset.defaultLabel,
+      placeholder: preset.placeholder,
+      required: preset.required ?? false,
+      options: preset.options,
+      validation:
+        preset.type === "RATING"
+          ? { min: 1, max: 5, step: 1 }
+          : preset.type === "SLIDER"
+            ? { min: 0, max: 10, step: 1 }
+            : undefined,
+    });
+  }
+
+  function saveField(value: FormFieldUpdate): void {
+    mutations.setUpdatingFieldId(value.id);
+    mutations.updateField.mutate(value);
   }
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between border-b bg-background p-4">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push("/builder/forms")}
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
-          </Button>
-          <div>
-            <Input
-              value={formName || form.name}
-              onChange={(e) => setFormName(e.target.value)}
-              onBlur={handleSave}
-              className="border-none text-xl font-semibold focus-visible:ring-0"
-            />
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Badge variant={form.status === FormStatus.PUBLISHED ? "default" : "secondary"}>
-                {form.status}
-              </Badge>
-              <span>•</span>
-              <span>{(form as any)._count?.formSubmission || 0} submissions</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <Eye className="mr-2 h-4 w-4" />
-            Preview
-          </Button>
-          <Button size="sm" onClick={handlePublish}>
-            <Upload className="mr-2 h-4 w-4" />
-            Publish
-          </Button>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Steps and Fields Panel */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-3xl space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Form Builder</h2>
-              {form.isMultiStep && (
-                <Button variant="outline" size="sm" onClick={handleAddStep}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Step
-                </Button>
-              )}
-            </div>
-
-            {(form as any).formStep?.map((step: any, stepIndex: number) => (
-              <div key={step.id} className="rounded-lg border p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">
-                    {form.isMultiStep ? step.name : "Form Fields"}
-                  </h3>
-                  <Select
-                    onValueChange={(value) =>
-                      handleAddField(step.id, value as FormFieldType)
-                    }
-                  >
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Add field" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={FormFieldType.SHORT_TEXT}>
-                        Short Text
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.LONG_TEXT}>
-                        Long Text
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.EMAIL}>Email</SelectItem>
-                      <SelectItem value={FormFieldType.PHONE}>Phone</SelectItem>
-                      <SelectItem value={FormFieldType.NUMBER}>
-                        Number
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.SELECT}>
-                        Dropdown
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.RADIO}>
-                        Radio Buttons
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.CHECKBOX}>
-                        Checkbox
-                      </SelectItem>
-                      <SelectItem value={FormFieldType.DATE}>Date</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {step.formField?.length === 0 ? (
-                  <div className="flex h-32 items-center justify-center rounded-md border border-dashed">
-                    <p className="text-sm text-muted-foreground">
-                      No fields yet. Add a field to get started.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {step.formField?.map((field: any) => (
-                      <div
-                        key={field.id}
-                        className="flex items-center justify-between rounded-md border p-4"
-                      >
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <Label className="font-medium">{field.label}</Label>
-                            {field.required && (
-                              <Badge variant="outline" className="text-xs">
-                                Required
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground">
-                            {field.type.replace("_", " ").toLowerCase()}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => deleteField({ id: field.id })}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Settings Panel */}
-        <div className="w-80 overflow-y-auto border-l bg-muted/30 p-6">
-          <Tabs defaultValue="settings">
-            <TabsList className="w-full">
-              <TabsTrigger value="settings" className="flex-1">
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="settings" className="mt-6 space-y-6">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Form Type</Label>
-                  <Select
-                    value={form.isMultiStep ? "multi" : "single"}
-                    onValueChange={(value) =>
-                      updateForm({
-                        id: formId,
-                        isMultiStep: value === "multi",
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="single">Single Step</SelectItem>
-                      <SelectItem value="multi">Multi-Step</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Success Message</Label>
-                  <Input
-                    value={form.successMessage}
-                    onChange={(e) =>
-                      updateForm({
-                        id: formId,
-                        successMessage: e.target.value,
-                      })
-                    }
-                    placeholder="Thank you for your submission!"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Redirect URL (optional)</Label>
-                  <Input
-                    value={form.redirectUrl || ""}
-                    onChange={(e) =>
-                      updateForm({
-                        id: formId,
-                        redirectUrl: e.target.value || undefined,
-                      })
-                    }
-                    placeholder="https://example.com/thank-you"
-                  />
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-        </div>
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <FormEditorHeader
+        form={form}
+        saving={mutations.updateForm.isPending}
+        saveDisabled={
+          !settingsDraft.name.trim() ||
+          !formThemeSchema.safeParse({
+            primaryColor: settingsDraft.primaryColor,
+            buttonTextColor: settingsDraft.buttonTextColor,
+            backgroundColor: settingsDraft.backgroundColor,
+            textColor: settingsDraft.textColor,
+          }).success
+        }
+        onSave={saveSettings}
+      />
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.95fr)]">
+        <FormBuilderSidebar
+          form={form}
+          draft={settingsDraft}
+          themes={themes}
+          addPending={mutations.addField.isPending}
+          updatePendingId={mutations.updatingFieldId}
+          onDraftChange={setDraft}
+          onAddStep={() =>
+            mutations.addStep.mutate({
+              formId,
+              name: `Step ${form.formStep.length + 1}`,
+            })
+          }
+          onDeleteStep={(id) => mutations.deleteStep.mutate({ id })}
+          deleteStepPending={mutations.deleteStep.isPending}
+          onAddField={addPreset}
+          onUpdateField={saveField}
+          onDeleteField={(id) => mutations.deleteField.mutate({ id })}
+          onReorderFields={(stepId, orderedFieldIds) =>
+            mutations.reorderFields.mutate({ stepId, orderedFieldIds })
+          }
+        />
+        <FormBuilderPreview
+          settings={settingsDraft}
+          steps={form.formStep}
+          theme={activeTheme}
+        />
       </div>
     </div>
   );

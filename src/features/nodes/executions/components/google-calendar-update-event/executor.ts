@@ -1,8 +1,13 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleCalendarUpdateEventChannel } from "@/inngest/channels/google-calendar-update-event";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,6 +16,7 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleCalendarUpdateEventData = {
+  providerAccountId: string;
   variableName?: string;
   eventId: string;
   summary?: string;
@@ -20,46 +26,63 @@ type GoogleCalendarUpdateEventData = {
   location?: string;
 };
 
+type GoogleCalendarEventDateTime = {
+  dateTime: string;
+  timeZone: "UTC";
+};
+
+type GoogleCalendarUpdateEventPayload = {
+  summary?: string;
+  start?: GoogleCalendarEventDateTime;
+  end?: GoogleCalendarEventDateTime;
+  description?: string;
+  location?: string;
+};
+
+const googleCalendarEventResponseSchema = z.object({
+  id: z.string().optional(),
+  htmlLink: z.string().optional(),
+  summary: z.string().optional(),
+  start: z.unknown().optional(),
+  end: z.unknown().optional(),
+  location: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_CALENDAR_UPDATE_EVENT,
+);
+
 export const googleCalendarUpdateEventExecutor: NodeExecutor<GoogleCalendarUpdateEventData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       googleCalendarUpdateEventChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.eventId) {
+      if (!data.providerAccountId || !data.eventId) {
         await publish(
           googleCalendarUpdateEventChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Calendar: Event ID is required"
+          "Google Calendar: Account and event ID are required"
         );
       }
 
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          googleCalendarUpdateEventChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Calendar is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       const eventId = decode(Handlebars.compile(data.eventId)(context));
 
       // Build update payload with only provided fields
-      const updatePayload: any = {};
+      const updatePayload: GoogleCalendarUpdateEventPayload = {};
 
       if (data.summary) {
         updatePayload.summary = decode(Handlebars.compile(data.summary)(context));
@@ -88,7 +111,8 @@ export const googleCalendarUpdateEventExecutor: NodeExecutor<GoogleCalendarUpdat
       }
 
       const response = await step.run("update-calendar-event", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
           {
             method: "PATCH",
@@ -101,11 +125,11 @@ export const googleCalendarUpdateEventExecutor: NodeExecutor<GoogleCalendarUpdat
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Calendar API error: ${error}`);
+          throw new Error(`Google Calendar API rejected the request with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return googleCalendarEventResponseSchema.parse(payload);
       });
 
       await publish(

@@ -165,7 +165,7 @@ export const CreateClientDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-black/10">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 p-6 pb-2 gap-1">
           <SheetTitle>Create Client Configuration</SheetTitle>
           <SheetDescription>
@@ -173,7 +173,7 @@ export const CreateClientDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-4 bg-black/10" />
+        <Separator className="my-4 bg-border" />
 
         <Form {...form}>
           <form

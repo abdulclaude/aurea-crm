@@ -113,7 +113,7 @@ export function AcquisitionToolbar({
         <div className="flex w-80 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 rounded-lg h-8.5">
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
           <Input
-            placeholder="Search clients..."
+            placeholder="Search members..."
             value={searchInput}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="text-xs px-0 border-none bg-transparent! hover:bg-transparent w-full pl-8"

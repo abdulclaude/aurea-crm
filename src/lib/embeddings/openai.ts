@@ -1,18 +1,18 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { embed, embedMany } from "ai";
+import { OPENAI_EMBEDDING_MODEL } from "@/features/ai/constants";
 
-const openai = createOpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-const EMBEDDING_MODEL = "text-embedding-3-small";
 
 /**
  * Generate embedding for a single text
  */
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(
+  text: string,
+  openAiApiKey: string,
+): Promise<number[]> {
+  const openai = createOpenAI({ apiKey: openAiApiKey });
   const { embedding } = await embed({
-    model: openai.embedding(EMBEDDING_MODEL),
+    model: openai.embedding(OPENAI_EMBEDDING_MODEL),
     value: text,
   });
 
@@ -22,13 +22,17 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 /**
  * Generate embeddings for multiple texts
  */
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+export async function generateEmbeddings(
+  texts: string[],
+  openAiApiKey: string,
+): Promise<number[][]> {
   if (texts.length === 0) {
     return [];
   }
 
+  const openai = createOpenAI({ apiKey: openAiApiKey });
   const { embeddings } = await embedMany({
-    model: openai.embedding(EMBEDDING_MODEL),
+    model: openai.embedding(OPENAI_EMBEDDING_MODEL),
     values: texts,
   });
 

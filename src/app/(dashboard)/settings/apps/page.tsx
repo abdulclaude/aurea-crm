@@ -4,6 +4,7 @@ import { HydrateClient } from "@/trpc/server";
 import { requireAuth } from "@/lib/auth-utils";
 import type { SearchParams } from "nuqs";
 import { AppsContainer, AppsList } from "@/features/apps/components/apps";
+import { prefetchApps } from "@/features/apps/server/prefetch";
 
 type Props = {
   searchParams: Promise<SearchParams>;
@@ -12,6 +13,7 @@ type Props = {
 const Page = async ({ searchParams }: Props) => {
   await requireAuth();
   await searchParams;
+  await prefetchApps();
 
   return (
     <AppsContainer>

@@ -36,7 +36,6 @@ export const outlookMoveEmailExecutor: NodeExecutor<OutlookMoveEmailData> = asyn
     const messageId = data.messageId ? decode(Handlebars.compile(data.messageId)(context)) : undefined;
     const destinationFolderId = data.destinationFolderId ? decode(Handlebars.compile(data.destinationFolderId)(context)) : undefined;
 
-    // TODO: Implement Outlook: Move Email logic here
     const result = await step.run("outlook-move-email", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook: Move Email: Not yet implemented");

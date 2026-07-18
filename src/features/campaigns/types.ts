@@ -107,17 +107,3 @@ export interface CampaignVariables extends ClientVariables {
   unsubscribe_url: string;
   view_in_browser_url?: string;
 }
-
-// Segment filter types
-export interface SegmentFilter {
-  types?: string[]; // ClientType values
-  tags?: string[];
-  lifecycleStages?: string[]; // LifecycleStage values
-  countries?: string[];
-  // For custom segments
-  custom?: {
-    field: string;
-    operator: "equals" | "not_equals" | "contains" | "not_contains";
-    value: string;
-  }[];
-}

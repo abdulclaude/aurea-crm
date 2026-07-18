@@ -1,4 +1,3 @@
-import type { OrganizationMemberRole } from "@/db/enums";
 import { ActivityAction } from "@/db/enums";
 import { TRPCError } from "@trpc/server";
 import z from "zod";
@@ -41,6 +40,13 @@ import {
 } from "@/trpc/init";
 import { createNotification } from "@/lib/notifications";
 import { logAnalytics } from "@/lib/analytics-logger";
+import {
+  locationRoleSchema,
+  organizationRoleSchema,
+} from "@/features/permissions/role-matrix";
+import { acceptStaffInvitation } from "@/features/staff-identities/server/accept-invitation";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { regionalTimezoneSchema } from "@/lib/regional-context/contracts";
 
 type ClientFilterOptions = {
   countries: string[];
@@ -338,7 +344,6 @@ export const organizationsRouter = createTRPCRouter({
   createLocation: protectedProcedure
     .input(
       z.object({
-        organizationId: z.string().optional(),
         companyName: z.string().min(2),
         logo: z.url().optional(),
         website: z.url().optional(),
@@ -350,18 +355,27 @@ export const organizationsRouter = createTRPCRouter({
         state: z.string().optional(),
         postalCode: z.string().optional(),
         country: z.string().optional(),
-        timezone: z.string().optional(),
+        timezone: regionalTimezoneSchema.optional(),
         industry: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const organizationId = input.organizationId ?? ctx.orgId;
+      const organizationId = ctx.orgId;
       if (!organizationId) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "No active organization found.",
         });
       }
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId: ctx.locationId,
+        },
+        capability: "settings.manage",
+        resource: { organizationId },
+      });
 
       const slugBase = input.companyName
         .toLowerCase()
@@ -372,34 +386,35 @@ export const organizationsRouter = createTRPCRouter({
 
       const newLocationId = crypto.randomUUID();
 
-      await db.insert(location).values({
-        id: newLocationId,
-        organizationId,
-        companyName: input.companyName,
-        logo: input.logo || null,
-        website: input.website || null,
-        billingEmail: input.billingEmail || null,
-        phone: input.phone || null,
-        addressLine1: input.addressLine1 || null,
-        addressLine2: input.addressLine2 || null,
-        city: input.city || null,
-        state: input.state || null,
-        postalCode: input.postalCode || null,
-        country: input.country || null,
-        timezone: input.timezone || undefined,
-        industry: input.industry || null,
-        createdByUserId: ctx.auth.user.id,
-        slug,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      await db.insert(locationMember).values({
-        id: crypto.randomUUID(),
-        locationId: newLocationId,
-        userId: ctx.auth.user.id,
-        role: "AGENCY",
-        updatedAt: new Date(),
+      await db.transaction(async (tx) => {
+        await tx.insert(location).values({
+          id: newLocationId,
+          organizationId,
+          companyName: input.companyName,
+          logo: input.logo || null,
+          website: input.website || null,
+          billingEmail: input.billingEmail || null,
+          phone: input.phone || null,
+          addressLine1: input.addressLine1 || null,
+          addressLine2: input.addressLine2 || null,
+          city: input.city || null,
+          state: input.state || null,
+          postalCode: input.postalCode || null,
+          country: input.country || null,
+          timezone: input.timezone ?? null,
+          industry: input.industry || null,
+          createdByUserId: ctx.auth.user.id,
+          slug,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        await tx.insert(locationMember).values({
+          id: crypto.randomUUID(),
+          locationId: newLocationId,
+          userId: ctx.auth.user.id,
+          role: "AGENCY",
+          updatedAt: new Date(),
+        });
       });
 
       // Fetch the created location with all related data
@@ -577,93 +592,6 @@ export const organizationsRouter = createTRPCRouter({
         total,
         filters,
       };
-    }),
-
-  /**
-   * Upsert location profile for an organization.
-   */
-  upsertLocation: protectedProcedure
-    .input(
-      z.object({
-        organizationId: z.string(),
-        companyName: z.string().min(1),
-        website: z.string().url().optional().or(z.literal("")),
-        billingEmail: z.string().email().optional().or(z.literal("")),
-        phone: z.string().optional().or(z.literal("")),
-        addressLine1: z.string().optional().or(z.literal("")),
-        addressLine2: z.string().optional().or(z.literal("")),
-        city: z.string().optional().or(z.literal("")),
-        state: z.string().optional().or(z.literal("")),
-        postalCode: z.string().optional().or(z.literal("")),
-        country: z.string().optional().or(z.literal("")),
-        timezone: z.string().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const {
-        organizationId,
-        companyName,
-        website,
-        billingEmail,
-        phone,
-        addressLine1,
-        addressLine2,
-        city,
-        state,
-        postalCode,
-        country,
-        timezone,
-      } = input;
-
-      // Check if the location already exists
-      const existing = await db.query.location.findFirst({
-        where: eq(location.id, organizationId),
-      });
-
-      if (existing) {
-        const [updated] = await db
-          .update(location)
-          .set({
-            companyName,
-            website: website || null,
-            billingEmail: billingEmail || null,
-            phone: phone || null,
-            addressLine1: addressLine1 || null,
-            addressLine2: addressLine2 || null,
-            city: city || null,
-            state: state || null,
-            postalCode: postalCode || null,
-            country: country || null,
-            timezone: timezone || undefined,
-          })
-          .where(eq(location.id, organizationId))
-          .returning();
-        return updated;
-      }
-
-      const [created] = await db
-        .insert(location)
-        .values({
-          id: crypto.randomUUID(),
-          organizationId,
-          companyName,
-          website: website || null,
-          billingEmail: billingEmail || null,
-          phone: phone || null,
-          addressLine1: addressLine1 || null,
-          addressLine2: addressLine2 || null,
-          city: city || null,
-          state: state || null,
-          postalCode: postalCode || null,
-          country: country || null,
-          timezone: timezone || undefined,
-          createdByUserId: ctx.auth.user.id,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .returning();
-
-      return created;
     }),
 
   /**
@@ -1461,7 +1389,7 @@ export const organizationsRouter = createTRPCRouter({
         throw new TRPCError({
           code: "FORBIDDEN",
           message:
-            "You don't have permission to invite users to this organization. Only Agency Owner and Agency Admin can invite members.",
+            "You don't have permission to invite users to this studio. Only Studio Owner and Studio Admin can invite team members.",
         });
       }
 
@@ -1530,7 +1458,10 @@ export const organizationsRouter = createTRPCRouter({
 
       // Send invitation email
       const invitationUrl = `${process.env.APP_URL}/invitation/${inv.id}`;
-      await sendInvitationEmail({
+      const delivery = await sendInvitationEmail({
+        organizationId,
+        locationId: null,
+        invitationId: inv.id,
         to: input.email,
         inviterName: ctx.auth.user.name || ctx.auth.user.email,
         organizationName: org.name,
@@ -1538,6 +1469,15 @@ export const organizationsRouter = createTRPCRouter({
         role: input.role,
         isLocation: false,
       });
+      if (!delivery.success) {
+        throw new TRPCError({
+          code:
+            delivery.status === "SUPPRESSED"
+              ? "PRECONDITION_FAILED"
+              : "INTERNAL_SERVER_ERROR",
+          message: delivery.error,
+        });
+      }
 
       // Send notification
       await createNotification({
@@ -1692,7 +1632,10 @@ export const organizationsRouter = createTRPCRouter({
 
       // Send invitation email
       const invitationUrl = `${process.env.APP_URL}/invitation/${inv.id}`;
-      await sendInvitationEmail({
+      const delivery = await sendInvitationEmail({
+        organizationId: loc.organizationId,
+        locationId,
+        invitationId: inv.id,
         to: input.email,
         inviterName: ctx.auth.user.name || ctx.auth.user.email,
         organizationName: `${loc.companyName} (${loc.organization.name})`,
@@ -1700,6 +1643,15 @@ export const organizationsRouter = createTRPCRouter({
         role: input.role,
         isLocation: true,
       });
+      if (!delivery.success) {
+        throw new TRPCError({
+          code:
+            delivery.status === "SUPPRESSED"
+              ? "PRECONDITION_FAILED"
+              : "INTERNAL_SERVER_ERROR",
+          message: delivery.error,
+        });
+      }
 
       await createNotification({
         type: "INVITE_SENT",
@@ -1817,7 +1769,7 @@ export const organizationsRouter = createTRPCRouter({
         throw new TRPCError({
           code: "FORBIDDEN",
           message:
-            "You don't have permission to revoke invitations. Only Agency Owner and Agency Admin can revoke invitations.",
+            "You don't have permission to revoke invitations. Only Studio Owner and Studio Admin can revoke invitations.",
         });
       }
 
@@ -1968,49 +1920,27 @@ export const organizationsRouter = createTRPCRouter({
       if (isLocationInvite && inv.role) {
         // Location invitation
         const [role, locationId] = inv.role.split(":");
-
-        // Check if already a member
-        const existingMember = await db.query.locationMember.findFirst({
-          where: and(
-            eq(locationMember.locationId, locationId),
-            eq(locationMember.userId, ctx.auth.user.id)
-          ),
-        });
-
-        if (existingMember) {
-          // Already a member, just mark invitation as accepted
-          await db
-            .update(invitation)
-            .set({ status: "accepted" })
-            .where(eq(invitation.id, input.invitationId));
-
-          return {
-            success: true,
-            organizationId: inv.organizationId,
-            locationId,
-          };
+        const parsedRole = locationRoleSchema.safeParse(role);
+        if (!locationId || !parsedRole.success) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "This invitation has an invalid location role.",
+          });
         }
-
-        // Add user to location
-        await db.insert(locationMember).values({
-          id: crypto.randomUUID(),
-          locationId,
-          userId: ctx.auth.user.id,
-          role: role as
-            | "AGENCY"
-            | "ADMIN"
-            | "MANAGER"
-            | "STANDARD"
-            | "LIMITED"
-            | "VIEWER",
-          updatedAt: new Date(),
+        await acceptStaffInvitation({
+          invitationId: inv.id,
+          organizationId: inv.organizationId,
+          user: {
+            id: ctx.auth.user.id,
+            name: ctx.auth.user.name || ctx.auth.user.email,
+            email: ctx.auth.user.email,
+          },
+          target: {
+            type: "location",
+            role: parsedRole.data,
+            locationId,
+          },
         });
-
-        // Mark invitation as accepted
-        await db
-          .update(invitation)
-          .set({ status: "accepted" })
-          .where(eq(invitation.id, input.invitationId));
 
         // Send notification
         await createNotification({
@@ -2052,41 +1982,23 @@ export const organizationsRouter = createTRPCRouter({
         };
       } else {
         // Organization invitation
-        const existingMember = await db.query.member.findFirst({
-          where: and(
-            eq(member.organizationId, inv.organizationId),
-            eq(member.userId, ctx.auth.user.id)
-          ),
-        });
-
-        if (existingMember) {
-          // Already a member, just mark invitation as accepted
-          await db
-            .update(invitation)
-            .set({ status: "accepted" })
-            .where(eq(invitation.id, input.invitationId));
-
-          return {
-            success: true,
-            organizationId: inv.organizationId,
-            locationId: null,
-          };
+        const parsedRole = organizationRoleSchema.safeParse(inv.role);
+        if (!parsedRole.success) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "This invitation has an invalid organization role.",
+          });
         }
-
-        // Add user to organization
-        await db.insert(member).values({
-          id: crypto.randomUUID(),
+        await acceptStaffInvitation({
+          invitationId: inv.id,
           organizationId: inv.organizationId,
-          userId: ctx.auth.user.id,
-          role: inv.role as OrganizationMemberRole,
-          createdAt: new Date(),
+          user: {
+            id: ctx.auth.user.id,
+            name: ctx.auth.user.name || ctx.auth.user.email,
+            email: ctx.auth.user.email,
+          },
+          target: { type: "organization", role: parsedRole.data },
         });
-
-        // Mark invitation as accepted
-        await db
-          .update(invitation)
-          .set({ status: "accepted" })
-          .where(eq(invitation.id, input.invitationId));
 
         // Send notification
         await createNotification({
@@ -2174,21 +2086,15 @@ export const organizationsRouter = createTRPCRouter({
         accentColor,
       } = input;
 
-      // Check if user has permission (must be owner or admin)
-      const memberRecord = await db.query.member.findFirst({
-        where: and(
-          eq(member.organizationId, organizationId),
-          eq(member.userId, ctx.auth.user.id),
-          inArray(member.role, ["owner", "admin"])
-        ),
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "settings.manage",
+        resource: { organizationId, locationId: null },
       });
-
-      if (!memberRecord) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have permission to update this organization",
-        });
-      }
 
       // Update organization
       const updateData: Record<string, unknown> = {};
@@ -2231,7 +2137,6 @@ export const organizationsRouter = createTRPCRouter({
         state: z.string().optional().nullable(),
         postalCode: z.string().optional().nullable(),
         country: z.string().optional().nullable(),
-        timezone: z.string().optional().nullable(),
         industry: z.string().optional().nullable(),
         // Branding fields
         businessEmail: z.string().email().optional().nullable(),
@@ -2247,18 +2152,18 @@ export const organizationsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { locationId: locId, ...updates } = input;
 
-      // Get location to check permissions
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Select an organization before updating a location.",
+        });
+      }
+
       const loc = await db.query.location.findFirst({
-        where: eq(location.id, locId),
-        with: {
-          organization: {
-            with: {
-              members: {
-                where: eq(member.userId, ctx.auth.user.id),
-              },
-            },
-          },
-        },
+        where: and(
+          eq(location.id, locId),
+          eq(location.organizationId, ctx.orgId),
+        ),
       });
 
       if (!loc) {
@@ -2268,17 +2173,15 @@ export const organizationsRouter = createTRPCRouter({
         });
       }
 
-      // Check if user is org member or admin
-      const hasPermission =
-        loc.organization.members.length > 0 &&
-        ["owner", "admin"].includes(loc.organization.members[0].role);
-
-      if (!hasPermission) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "You don't have permission to update this location",
-        });
-      }
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "settings.manage",
+        resource: { organizationId: ctx.orgId, locationId: locId },
+      });
 
       // Update location
       const [updatedLocation] = await db
@@ -2305,8 +2208,27 @@ export const organizationsRouter = createTRPCRouter({
             postalCode: updates.postalCode,
           }),
           ...(updates.country !== undefined && { country: updates.country }),
-          ...(updates.timezone !== undefined && { timezone: updates.timezone }),
           ...(updates.industry !== undefined && { industry: updates.industry }),
+          ...(updates.businessEmail !== undefined && {
+            businessEmail: updates.businessEmail,
+          }),
+          ...(updates.businessPhone !== undefined && {
+            businessPhone: updates.businessPhone,
+          }),
+          ...(updates.taxId !== undefined && { taxId: updates.taxId }),
+          ...(updates.brandColor !== undefined && {
+            brandColor: updates.brandColor,
+          }),
+          ...(updates.accentColor !== undefined && {
+            accentColor: updates.accentColor,
+          }),
+          ...(updates.dunningEnabled !== undefined && {
+            dunningEnabled: updates.dunningEnabled,
+          }),
+          ...(updates.dunningDays !== undefined && {
+            dunningDays: updates.dunningDays,
+          }),
+          updatedAt: new Date(),
         })
         .where(eq(location.id, locId))
         .returning();
@@ -2318,6 +2240,17 @@ export const organizationsRouter = createTRPCRouter({
    * Get current workspace details (organization or location)
    */
   getWorkspaceDetails: protectedProcedure.query(async ({ ctx }) => {
+    if (!ctx.orgId) return null;
+    await requireCapability({
+      actor: {
+        userId: ctx.auth.user.id,
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      },
+      capability: "settings.view",
+      resource: { organizationId: ctx.orgId, locationId: ctx.locationId },
+    });
+
     // If location is active, return location details
     if (ctx.locationId) {
       const loc = await db.query.location.findFirst({
@@ -2558,10 +2491,10 @@ const buildMembers = (
 
     if (isAgencyMember) {
       roleKind = "agency";
-      roleLabel = "Agency member";
+      roleLabel = "Studio member";
     } else if (isClientOwner) {
       roleKind = "client-owner";
-      roleLabel = "Client owner";
+      roleLabel = "Location owner";
     } else if (normalizedRole === "ADMIN") {
       roleLabel = "Admin";
     }
@@ -2591,10 +2524,10 @@ const buildMembers = (
 
     if (isAgencyMember) {
       roleKind = "agency";
-      roleLabel = "Agency member";
+      roleLabel = "Studio member";
     } else if (isClientOwner) {
       roleKind = "client-owner";
-      roleLabel = "Client owner";
+      roleLabel = "Location owner";
     }
 
     members.push({

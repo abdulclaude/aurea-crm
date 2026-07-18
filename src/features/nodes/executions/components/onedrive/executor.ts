@@ -1,20 +1,28 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
 
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { oneDriveChannel } from "@/inngest/channels/onedrive";
-import { auth } from "@/lib/auth";
 
 export type OneDriveExecutionData = {
+  providerAccountId?: string;
   variableName?: string;
   action?: "upload" | "download" | "delete";
   filePath?: string;
   content?: string;
 };
 
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.ONEDRIVE_EXECUTION,
+);
+
 const compileTemplate = (
   template: string | undefined,
-  context: Record<string, unknown>
+  context: Record<string, unknown>,
 ) => {
   if (!template) {
     return undefined;
@@ -29,7 +37,10 @@ const compileTemplate = (
       const path = match.slice(2, -2).trim();
 
       // Try to get value from context.variables first, then root context
-      let value = getNestedValue(context.variables as Record<string, unknown>, path);
+      let value = getNestedValue(
+        context.variables as Record<string, unknown>,
+        path,
+      );
       if (value === undefined) {
         value = getNestedValue(context, path);
       }
@@ -62,7 +73,7 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
 export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -73,7 +84,13 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
 
   try {
     if (!data.variableName) {
-      throw new NonRetriableError("Variable name is required for OneDrive nodes.");
+      throw new NonRetriableError(
+        "Variable name is required for OneDrive nodes.",
+      );
+    }
+
+    if (!data.providerAccountId) {
+      throw new NonRetriableError("Select a OneDrive account for this node.");
     }
 
     if (!data.action) {
@@ -85,11 +102,14 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
     }
 
     const filePath = compileTemplate(data.filePath, context);
-    const content = data.action === "upload" ? compileTemplate(data.content, context) : undefined;
+    const content =
+      data.action === "upload"
+        ? compileTemplate(data.content, context)
+        : undefined;
 
     if (!filePath) {
       throw new NonRetriableError(
-        "Unable to resolve file path. Check your templates."
+        "Unable to resolve file path. Check your templates.",
       );
     }
 
@@ -97,25 +117,23 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
       throw new NonRetriableError("Content is required for upload action.");
     }
 
-    const tokenResponse = await auth.api.getAccessToken({
-      body: {
-        providerId: "microsoft",
-        userId,
+    const grant = await resolveOAuthProviderGrant({
+      providerAccountId: data.providerAccountId,
+      provider: providerBinding.provider,
+      scope: {
+        organizationId: scope.organizationId,
+        locationId: scope.locationId,
       },
+      requiredScopes: providerBinding.requiredScopes,
     });
-
-    const accessToken = tokenResponse?.accessToken;
-    if (!accessToken) {
-      throw new NonRetriableError(
-        "OneDrive is not connected. Please connect Microsoft account."
-      );
-    }
+    const { accessToken } = grant;
 
     let result;
 
     if (data.action === "upload") {
       result = await step.run("onedrive-upload-file", async () => {
-        const response = await fetch(
+        const response = await oauthAuthenticatedFetch(
+          grant,
           `https://graph.microsoft.com/v1.0/me/drive/root:${filePath}:/content`,
           {
             method: "PUT",
@@ -124,13 +142,12 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
               "Content-Type": "text/plain",
             },
             body: content,
-          }
+          },
         );
 
         if (!response.ok) {
-          const errorText = await response.text();
           throw new NonRetriableError(
-            `Microsoft Graph API error (${response.status}): ${errorText}`
+            `Microsoft Graph API rejected the upload with status ${response.status}.`,
           );
         }
 
@@ -138,20 +155,20 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
       });
     } else if (data.action === "download") {
       result = await step.run("onedrive-download-file", async () => {
-        const response = await fetch(
+        const response = await oauthAuthenticatedFetch(
+          grant,
           `https://graph.microsoft.com/v1.0/me/drive/root:${filePath}:/content`,
           {
             method: "GET",
             headers: {
               Authorization: `Bearer ${accessToken}`,
             },
-          }
+          },
         );
 
         if (!response.ok) {
-          const errorText = await response.text();
           throw new NonRetriableError(
-            `Microsoft Graph API error (${response.status}): ${errorText}`
+            `Microsoft Graph API rejected the download with status ${response.status}.`,
           );
         }
 
@@ -160,20 +177,20 @@ export const oneDriveExecutor: NodeExecutor<OneDriveExecutionData> = async ({
       });
     } else if (data.action === "delete") {
       result = await step.run("onedrive-delete-file", async () => {
-        const response = await fetch(
+        const response = await oauthAuthenticatedFetch(
+          grant,
           `https://graph.microsoft.com/v1.0/me/drive/root:${filePath}`,
           {
             method: "DELETE",
             headers: {
               Authorization: `Bearer ${accessToken}`,
             },
-          }
+          },
         );
 
         if (!response.ok) {
-          const errorText = await response.text();
           throw new NonRetriableError(
-            `Microsoft Graph API error (${response.status}): ${errorText}`
+            `Microsoft Graph API rejected the delete with status ${response.status}.`,
           );
         }
 

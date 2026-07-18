@@ -75,10 +75,12 @@ export const topologicalSort = <TNode extends WorkflowNode>(
 
 export const sendWorkflowExecution = async (data: {
   workflowId: string;
+  idempotencyKey?: string;
 } & Record<string, unknown>) => {
+  const { idempotencyKey, ...eventData } = data;
   return inngest.send({
     name: "workflows/execute.workflow",
-    data,
-    id: createId(),
+    data: eventData,
+    id: idempotencyKey ?? createId(),
   });
 };

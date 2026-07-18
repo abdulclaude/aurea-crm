@@ -4,7 +4,6 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
-  useSuspenseQuery,
 } from "@tanstack/react-query";
 import type {
   ColumnDef,
@@ -17,6 +16,7 @@ import { Bell, Check, Plus, UserRoundCheck } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table/data-table";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,18 +45,47 @@ type RouterOutput = inferRouterOutputs<AppRouter>;
 type SubRequest = RouterOutput["instructorSubstitutions"]["list"][number];
 
 const STATUS_COLORS: Record<string, string> = {
-  OPEN: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-  OFFERED: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  ACCEPTED:
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  DECLINED: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  CANCELLED: "bg-primary/5 text-primary/50",
-  EXPIRED: "bg-primary/5 text-primary/50",
+  OPEN: "#f59e0b",
+  OFFERED: "#3b82f6",
+  ACCEPTED: "#10b981",
+  DECLINED: "#f43f5e",
+  CANCELLED: "#64748b",
+  EXPIRED: "#64748b",
 };
 
 const DEFAULT_SORT = "requestedAt.desc";
 const PRIMARY_COLUMN_ID = "class";
 const COLUMN_ORDER_KEY = "substitutions-table.column-order";
+
+function InstructorCell({
+  instructor,
+  fallback,
+}: {
+  instructor: { name: string; profilePhoto: string | null } | null;
+  fallback: string;
+}) {
+  if (!instructor) {
+    return <span className="text-xs text-primary/40">{fallback}</span>;
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <Avatar className="size-8 shrink-0 overflow-hidden rounded-full">
+        <AvatarImage
+          src={instructor.profilePhoto ?? undefined}
+          alt={`${instructor.name} profile`}
+          className="object-cover"
+        />
+        <AvatarFallback className="rounded-full text-[10px]">
+          {instructor.name.slice(0, 1).toUpperCase()}
+        </AvatarFallback>
+      </Avatar>
+      <span className="truncate text-xs text-primary/70">
+        {instructor.name}
+      </span>
+    </div>
+  );
+}
 
 function buildColumns(
   onAccept: (requestId: string) => void,
@@ -73,15 +102,27 @@ function buildColumns(
       enableHiding: false,
       enableSorting: true,
       cell: ({ row }) => (
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-primary truncate">
-            {row.original.studioClass.name}
-          </p>
-          <p className="text-[11px] text-primary/50 whitespace-nowrap">
+        <p className="truncate text-xs font-medium text-primary">
+          {row.original.studioClass.name}
+        </p>
+      ),
+    },
+    {
+      id: "date",
+      accessorFn: (row) => row.studioClass.startTime,
+      header: "Date",
+      meta: { label: "Date" },
+      enableSorting: true,
+      cell: ({ row }) => (
+        <div className="whitespace-nowrap text-xs text-primary/65">
+          <p>
             {format(
               new Date(row.original.studioClass.startTime),
-              "EEE MMM d, h:mm a",
+              "MMM d, yyyy",
             )}
+          </p>
+          <p className="text-[11px] text-primary/45">
+            {format(new Date(row.original.studioClass.startTime), "h:mm a")}
           </p>
         </div>
       ),
@@ -92,22 +133,27 @@ function buildColumns(
       header: "Type",
       meta: { label: "Type" },
       enableSorting: true,
-      cell: ({ row }) =>
-        row.original.studioClass.classType ? (
-          <span
-            className="text-[10px] rounded-md px-2 py-0.5 font-medium"
+      cell: ({ row }) => {
+        const classType = row.original.studioClass.classType;
+        if (!classType) {
+          return <span className="text-xs text-primary/40">—</span>;
+        }
+        const color = classType.color ?? "#6366f1";
+        return (
+          <Badge
+            variant="outline"
+            className="max-w-44 truncate text-[10px] ring-0"
             style={{
-              backgroundColor: row.original.studioClass.classType.color
-                ? `${row.original.studioClass.classType.color}20`
-                : undefined,
-              color: row.original.studioClass.classType.color ?? undefined,
+              backgroundColor: `${color}18`,
+              borderColor: `${color}66`,
+              color,
+              boxShadow: `0 0 0 1px ${color}66`,
             }}
           >
-            {row.original.studioClass.classType.name}
-          </span>
-        ) : (
-          <span className="text-xs text-primary/40">—</span>
-        ),
+            {classType.name}
+          </Badge>
+        );
+      },
     },
     {
       id: "originalInstructor",
@@ -116,9 +162,10 @@ function buildColumns(
       meta: { label: "Instructor" },
       enableSorting: true,
       cell: ({ row }) => (
-        <span className="text-xs text-primary/70">
-          {row.original.originalInstructor?.name ?? "—"}
-        </span>
+        <InstructorCell
+          instructor={row.original.originalInstructor}
+          fallback="—"
+        />
       ),
     },
     {
@@ -126,14 +173,12 @@ function buildColumns(
       accessorFn: (row) => row.substitute?.name ?? "",
       header: "Substitute",
       meta: { label: "Substitute" },
-      cell: ({ row }) =>
-        row.original.substitute ? (
-          <span className="text-xs text-primary/70">
-            {row.original.substitute.name}
-          </span>
-        ) : (
-          <span className="text-xs text-primary/30">Open request</span>
-        ),
+      cell: ({ row }) => (
+        <InstructorCell
+          instructor={row.original.substitute}
+          fallback="Open request"
+        />
+      ),
     },
     {
       id: "reason",
@@ -152,17 +197,24 @@ function buildColumns(
       header: "Status",
       meta: { label: "Status" },
       enableSorting: true,
-      cell: ({ row }) => (
-        <Badge
-          className={
-            STATUS_COLORS[row.original.status] ?? "bg-primary/5 text-primary/60"
-          }
-          variant="secondary"
-        >
-          {row.original.status.charAt(0) +
-            row.original.status.slice(1).toLowerCase()}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const color = STATUS_COLORS[row.original.status] ?? "#64748b";
+        return (
+          <Badge
+            variant="outline"
+            className="text-[10px] ring-0"
+            style={{
+              backgroundColor: `${color}18`,
+              borderColor: `${color}66`,
+              color,
+              boxShadow: `0 0 0 1px ${color}66`,
+            }}
+          >
+            {row.original.status.charAt(0) +
+              row.original.status.slice(1).toLowerCase()}
+          </Badge>
+        );
+      },
     },
     {
       id: "actions",
@@ -183,7 +235,7 @@ function buildColumns(
           !instructorId && req.status === "OFFERED" && req.substitute;
 
         return (
-          <div className="flex items-center gap-1 justify-end">
+          <div className="flex items-center gap-1 justify-start">
             {!instructorId && req.status === "OPEN" && (
               <Button
                 variant="ghost"
@@ -246,7 +298,7 @@ export default function InstructorSubstitutionsPage() {
   const [classId, setClassId] = React.useState("");
   const [reason, setReason] = React.useState("");
 
-  const { data: requests, isFetching } = useSuspenseQuery(
+  const { data: requests, isFetching } = useQuery(
     trpc.instructorSubstitutions.list.queryOptions(),
   );
   const { data: myClasses } = useQuery({

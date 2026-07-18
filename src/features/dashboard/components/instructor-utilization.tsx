@@ -39,7 +39,7 @@ export function InstructorUtilization({
       isEditing={isEditing}
       right={
         <Link
-          href="/instructors"
+          href="/team"
           className="text-[11px] font-medium text-black/40 hover:text-black/70"
         >
           Instructors →

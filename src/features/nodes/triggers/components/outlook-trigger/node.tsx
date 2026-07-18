@@ -9,11 +9,13 @@ import { useNodeStatus } from "@/features/executions/hooks/use-node-status";
 import { OUTLOOK_TRIGGER_CHANNEL_NAME } from "@/inngest/channels/outlook-trigger";
 import { fetchOutlookTriggerRealtimeToken } from "./actions";
 
-type OutlookTriggerNodeData = Partial<OutlookTriggerFormValues>;
+type OutlookTriggerNodeData = Partial<OutlookTriggerFormValues> & {
+  from?: string;
+};
 type OutlookTriggerNodeType = Node<OutlookTriggerNodeData>;
 
-export const OutlookTriggerNode: React.FC<NodeProps<OutlookTriggerNodeType>> = memo(
-  (props) => {
+export const OutlookTriggerNode: React.FC<NodeProps<OutlookTriggerNodeType>> =
+  memo((props) => {
     const [dialogOpen, setDialogOpen] = useState(false);
     const { setNodes } = useReactFlow();
 
@@ -26,24 +28,26 @@ export const OutlookTriggerNode: React.FC<NodeProps<OutlookTriggerNodeType>> = m
 
     const data = props.data || {};
 
-    const description = data.folderName
-      ? `Watching ${data.folderName}${data.subject ? ` (${data.subject})` : ""}`
+    const description = data.providerAccountId
+      ? `Watching Inbox${data.subject ? ` (${data.subject})` : ""}`
       : "Not configured";
 
     const handleSubmit = (values: OutlookTriggerFormValues) => {
       setNodes((nodes) =>
         nodes.map((node) => {
           if (node.id === props.id) {
+            const nextData = { ...node.data } as Record<string, unknown>;
+            delete nextData.from;
             return {
               ...node,
               data: {
-                ...node.data,
+                ...nextData,
                 ...values,
               },
             };
           }
           return node;
-        })
+        }),
       );
     };
 
@@ -56,12 +60,11 @@ export const OutlookTriggerNode: React.FC<NodeProps<OutlookTriggerNodeType>> = m
           onOpenChange={setDialogOpen}
           onSubmit={handleSubmit}
           defaultValues={{
+            providerAccountId: data.providerAccountId || "",
             variableName: data.variableName || "outlookTrigger",
-            folderName: data.folderName || "Inbox",
+            folderName: "Inbox",
             subject: data.subject || "",
-            from: data.from || "",
-            maxResults: data.maxResults ?? 5,
-            pollIntervalMinutes: data.pollIntervalMinutes ?? 5,
+            sender: data.sender || data.from || "",
           }}
           variables={[]}
         />
@@ -76,5 +79,4 @@ export const OutlookTriggerNode: React.FC<NodeProps<OutlookTriggerNodeType>> = m
         />
       </>
     );
-  }
-);
+  });

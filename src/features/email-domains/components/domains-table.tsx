@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useSuspenseQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  useSuspenseQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
 import {
   Globe,
@@ -57,7 +61,11 @@ type DomainStatus = "PENDING" | "VERIFYING" | "VERIFIED" | "FAILED";
 
 const statusConfig: Record<
   DomainStatus,
-  { label: string; icon: React.ElementType; variant: "default" | "secondary" | "destructive" | "outline" }
+  {
+    label: string;
+    icon: React.ElementType;
+    variant: "default" | "secondary" | "destructive" | "outline";
+  }
 > = {
   PENDING: { label: "Pending", icon: Clock, variant: "secondary" },
   VERIFYING: { label: "Verifying", icon: Loader2, variant: "outline" },
@@ -83,48 +91,62 @@ export function DomainsTable() {
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
   const { data: domains } = useSuspenseQuery(
-    trpc.emailDomains.list.queryOptions()
+    trpc.emailDomains.list.queryOptions(),
   );
 
   const deleteMutation = useMutation(
     trpc.emailDomains.delete.mutationOptions({
       onSuccess: () => {
-        toast.success("Domain deleted");
-        queryClient.invalidateQueries({ queryKey: trpc.emailDomains.list.queryKey() });
+        toast.success("Domain release scheduled");
+        queryClient.invalidateQueries({
+          queryKey: trpc.emailDomains.list.queryKey(),
+        });
         setDeleteId(null);
       },
       onError: (error) => {
         toast.error(error.message || "Failed to delete domain");
       },
-    })
+    }),
   );
 
   const verifyMutation = useMutation(
     trpc.emailDomains.verify.mutationOptions({
       onSuccess: () => {
         toast.success("Verification started");
-        queryClient.invalidateQueries({ queryKey: trpc.emailDomains.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.emailDomains.list.queryKey(),
+        });
       },
       onError: (error) => {
         toast.error(error.message || "Failed to verify domain");
       },
-    })
+    }),
   );
 
   const checkStatusMutation = useMutation(
     trpc.emailDomains.checkStatus.mutationOptions({
-      onSuccess: (data) => {
-        if (data.status === "VERIFIED") {
-          toast.success("Domain verified!");
-        } else {
-          toast.info(`Status: ${data.status}`);
-        }
-        queryClient.invalidateQueries({ queryKey: trpc.emailDomains.list.queryKey() });
+      onSuccess: () => {
+        toast.info("Domain status refresh queued");
+        queryClient.invalidateQueries({
+          queryKey: trpc.emailDomains.list.queryKey(),
+        });
       },
       onError: (error) => {
         toast.error(error.message || "Failed to check status");
       },
-    })
+    }),
+  );
+
+  const updateMutation = useMutation(
+    trpc.emailDomains.update.mutationOptions({
+      onSuccess: () => {
+        toast.success("Domain settings updated");
+        queryClient.invalidateQueries({
+          queryKey: trpc.emailDomains.list.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
   );
 
   const copyToClipboard = async (value: string) => {
@@ -191,17 +213,52 @@ export function DomainsTable() {
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label={`More actions for ${domain.domain}`}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
+                        {domain.status === "VERIFIED" &&
+                        !domain.isDefault &&
+                        !domain.isDisabled ? (
+                          <DropdownMenuItem
+                            onClick={() =>
+                              updateMutation.mutate({
+                                id: domain.id,
+                                isDefault: true,
+                              })
+                            }
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-2" />
+                            Set as default
+                          </DropdownMenuItem>
+                        ) : null}
+                        <DropdownMenuItem
+                          onClick={() =>
+                            updateMutation.mutate({
+                              id: domain.id,
+                              isDisabled: !domain.isDisabled,
+                            })
+                          }
+                        >
+                          <AlertCircle className="h-4 w-4 mr-2" />
+                          {domain.isDisabled
+                            ? "Enable domain"
+                            : "Disable domain"}
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         {Boolean(domain.dnsRecords) && (
                           <DropdownMenuItem
                             onClick={() =>
                               setDnsDialogDomain({
                                 domain: domain.domain,
-                                records: domain.dnsRecords as unknown as DnsRecord[],
+                                records:
+                                  domain.dnsRecords as unknown as DnsRecord[],
                               })
                             }
                           >
@@ -213,14 +270,18 @@ export function DomainsTable() {
                         {domain.status !== "VERIFIED" && (
                           <>
                             <DropdownMenuItem
-                              onClick={() => verifyMutation.mutate({ id: domain.id })}
+                              onClick={() =>
+                                verifyMutation.mutate({ id: domain.id })
+                              }
                               disabled={verifyMutation.isPending}
                             >
                               <RefreshCw className="h-4 w-4 mr-2" />
                               Verify Domain
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => checkStatusMutation.mutate({ id: domain.id })}
+                              onClick={() =>
+                                checkStatusMutation.mutate({ id: domain.id })
+                              }
                               disabled={checkStatusMutation.isPending}
                             >
                               <RefreshCw className="h-4 w-4 mr-2" />
@@ -286,6 +347,7 @@ export function DomainsTable() {
                         size="icon"
                         className="h-6 w-6"
                         onClick={() => copyToClipboard(record.name)}
+                        aria-label={`Copy DNS record name ${record.name}`}
                       >
                         {copiedValue === record.name ? (
                           <Check className="h-3 w-3" />
@@ -296,7 +358,9 @@ export function DomainsTable() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">Value:</span>
+                    <span className="text-xs text-muted-foreground">
+                      Value:
+                    </span>
                     <div className="flex items-center gap-2">
                       <code className="text-xs bg-muted/50 px-2 py-1 rounded max-w-[400px] truncate">
                         {record.value}
@@ -306,6 +370,7 @@ export function DomainsTable() {
                         size="icon"
                         className="h-6 w-6"
                         onClick={() => copyToClipboard(record.value)}
+                        aria-label={`Copy DNS record value for ${record.name}`}
                       >
                         {copiedValue === record.value ? (
                           <Check className="h-3 w-3" />
@@ -328,14 +393,16 @@ export function DomainsTable() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Domain</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this domain? You will need to re-verify
-              it to use it again.
+              Are you sure you want to delete this domain? You will need to
+              re-verify it to use it again.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => deleteId && deleteMutation.mutate({ id: deleteId })}
+              onClick={() =>
+                deleteId && deleteMutation.mutate({ id: deleteId })
+              }
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete

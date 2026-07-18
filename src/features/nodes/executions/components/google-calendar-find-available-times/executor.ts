@@ -43,7 +43,6 @@ export const googleCalendarFindAvailableTimesExecutor: NodeExecutor<GoogleCalend
     const timeMin = data.timeMin ? decode(Handlebars.compile(data.timeMin)(context)) : undefined;
     const timeMax = data.timeMax ? decode(Handlebars.compile(data.timeMax)(context)) : undefined;
 
-    // TODO: Implement Google Calendar: Find Available Times logic here
     const result = await step.run("google-calendar-find-available-times", async () => {
       // Add implementation here
       throw new NonRetriableError("Google Calendar: Find Available Times: Not yet implemented");

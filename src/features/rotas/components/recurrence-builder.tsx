@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -54,13 +59,11 @@ export function RecurrenceBuilder({
   const [enabled, setEnabled] = useState(!!value);
   const [frequency, setFrequency] = useState<RecurrenceFrequency>("WEEKLY");
   const [interval, setInterval] = useState(1);
-  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([
-    startTime.getDay(),
-  ]);
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([startTime.getDay()]);
   const [dayOfMonth, setDayOfMonth] = useState(startTime.getDate());
   const [endType, setEndType] = useState<"never" | "date" | "count">("never");
   const [endDate, setEndDate] = useState<string>(
-    format(addDays(new Date(), 90), "yyyy-MM-dd")
+    format(addDays(new Date(), 90), "yyyy-MM-dd"),
   );
   const [count, setCount] = useState(10);
 
@@ -101,7 +104,9 @@ export function RecurrenceBuilder({
     // onChange intentionally excluded to prevent infinite loop
   ]);
 
-  const handleTemplateSelect = (templateKey: keyof typeof RECURRENCE_TEMPLATES) => {
+  const handleTemplateSelect = (
+    templateKey: keyof typeof RECURRENCE_TEMPLATES,
+  ) => {
     const template = RECURRENCE_TEMPLATES[templateKey];
     const pattern = template.pattern;
 
@@ -121,7 +126,9 @@ export function RecurrenceBuilder({
 
   const toggleDayOfWeek = (day: number) => {
     setDaysOfWeek((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()
+      prev.includes(day)
+        ? prev.filter((d) => d !== day)
+        : [...prev, day].sort(),
     );
   };
 
@@ -294,9 +301,12 @@ export function RecurrenceBuilder({
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            The selected date ({format(startTime, "EEEE, MMM d")}) doesn't match this recurrence pattern.
-            The first occurrence will be on{" "}
-            {preview.length > 0 ? format(preview[0].startTime, "EEEE, MMM d, yyyy") : "a future date"}.
+            The selected date ({format(startTime, "EEEE, MMM d")}) doesn't match
+            this recurrence pattern. The first occurrence will be on{" "}
+            {preview.length > 0
+              ? format(preview[0].startTime, "EEEE, MMM d, yyyy")
+              : "a future date"}
+            .
           </AlertDescription>
         </Alert>
       )}
@@ -316,11 +326,12 @@ export function RecurrenceBuilder({
         </Select>
 
         {endType === "date" && (
-          <Input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            min={format(addDays(startTime, 1), "yyyy-MM-dd")}
+          <DatePicker
+            date={parseDateValue(endDate)}
+            onSelect={(date) => setEndDate(formatDateValue(date))}
+            minDate={addDays(startTime, 1)}
+            placeholder="Pick an end date"
+            ariaLabel="Recurrence end date"
           />
         )}
 

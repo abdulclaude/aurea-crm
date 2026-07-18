@@ -1,0 +1,2 @@
+ALTER TYPE "public"."PaymentRecoveryActionType"
+  ADD VALUE IF NOT EXISTS 'DISPATCH_WORKFLOW';

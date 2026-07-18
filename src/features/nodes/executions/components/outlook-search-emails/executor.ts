@@ -29,7 +29,6 @@ export const outlookSearchEmailsExecutor: NodeExecutor<OutlookSearchEmailsData> 
     // Compile fields with Handlebars
     const query = data.query ? decode(Handlebars.compile(data.query)(context)) : undefined;
 
-    // TODO: Implement Outlook: Search Emails logic here
     const result = await step.run("outlook-search-emails", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook: Search Emails: Not yet implemented");

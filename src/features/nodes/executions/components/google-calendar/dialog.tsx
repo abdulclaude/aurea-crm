@@ -27,8 +27,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
+import { requiredWorkflowProviderBindingSchema } from "@/features/workflows/lib/workflow-provider-binding";
 
 const formSchema = z.object({
+  providerAccountId: requiredWorkflowProviderBindingSchema.shape.providerAccountId,
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -70,6 +74,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
   const form = useForm<GoogleCalendarActionFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues.providerAccountId || "",
       variableName: defaultValues.variableName || "calendarEvent",
       calendarId: defaultValues.calendarId || "primary",
       summary: defaultValues.summary || "New event",
@@ -83,6 +88,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues.providerAccountId || "",
         variableName: defaultValues.variableName || "calendarEvent",
         calendarId: defaultValues.calendarId || "primary",
         summary: defaultValues.summary || "New event",
@@ -92,7 +98,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
         timezone: defaultValues.timezone || "UTC",
       });
     }
-  }, [open, defaultValues.variableName, defaultValues.calendarId, defaultValues.summary, defaultValues.description, defaultValues.startDateTime, defaultValues.endDateTime, defaultValues.timezone, form]);
+  }, [open, defaultValues.providerAccountId, defaultValues.variableName, defaultValues.calendarId, defaultValues.summary, defaultValues.description, defaultValues.startDateTime, defaultValues.endDateTime, defaultValues.timezone, form]);
 
   const handleSubmit = (values: GoogleCalendarActionFormValues) => {
     onSubmit(values);
@@ -101,7 +107,7 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Google Calendar Event</SheetTitle>
           <SheetDescription>
@@ -110,13 +116,29 @@ export const GoogleCalendarActionDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 px-6"
           >
+            <FormField
+              control={form.control}
+              name="providerAccountId"
+              render={({ field }) => (
+                <FormItem>
+                  <WorkflowProviderAccountSelect
+                    id="google-calendar-account"
+                    nodeType={NodeType.GOOGLE_CALENDAR_EXECUTION}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="variableName"

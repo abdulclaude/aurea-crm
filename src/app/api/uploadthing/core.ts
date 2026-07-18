@@ -1,29 +1,19 @@
 import { createUploadthing, type FileRouter } from "uploadthing/next";
 
+import { authorizeUploadRequest } from "@/features/uploads/upload-authorization";
+import { createUploadReceipt } from "@/features/uploads/upload-receipt";
+
 const f = createUploadthing();
 
-const auth = async () => ({ id: "public" }); // Simple auth for now
-
-// FileRouter for your app, can contain multiple FileRoutes
 export const uploadRouter = {
-  // Define as many FileRoutes as you like, each with a unique routeSlug
   orgLogo: f({
     image: {
       maxFileSize: "8MB",
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "orgLogo"))
+    .onUploadComplete(async ({ file }) => {
       return { url: file.ufsUrl };
     }),
   profilePicture: f({
@@ -32,17 +22,8 @@ export const uploadRouter = {
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] profile picture upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "profilePicture"))
+    .onUploadComplete(async ({ file }) => {
       return { url: file.ufsUrl };
     }),
   workspaceLogo: f({
@@ -51,17 +32,8 @@ export const uploadRouter = {
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] workspace logo upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "workspaceLogo"))
+    .onUploadComplete(async ({ file }) => {
       return { url: file.ufsUrl };
     }),
   instructorProfilePhoto: f({
@@ -70,17 +42,10 @@ export const uploadRouter = {
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] instructor profile photo upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-      });
+    .middleware(({ req }) =>
+      authorizeUploadRequest(req, "instructorProfilePhoto"),
+    )
+    .onUploadComplete(async ({ file }) => {
       return { url: file.ufsUrl };
     }),
   instructorDocument: f({
@@ -101,19 +66,8 @@ export const uploadRouter = {
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] instructor document upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-        fileName: file.name,
-        fileSize: file.size,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "instructorDocument"))
+    .onUploadComplete(async ({ file }) => {
       return {
         url: file.ufsUrl,
         fileName: file.name,
@@ -127,18 +81,8 @@ export const uploadRouter = {
       maxFileCount: 250,
     },
   })
-    .middleware(async () => {
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] Mindbody import file upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-        fileName: file.name,
-        fileSize: file.size,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "mindbodyImportFile"))
+    .onUploadComplete(async ({ file }) => {
       return {
         url: file.ufsUrl,
         uploadKey: file.key,
@@ -157,24 +101,37 @@ export const uploadRouter = {
       maxFileCount: 1,
     },
   })
-    .middleware(async () => {
-      // Allow anyone for now; wire to real auth later
-      const user = await auth();
-      return { userId: user.id };
-    })
-    .onUploadComplete(async ({ metadata, file }) => {
-      console.log("[UT] invoice document upload complete", {
-        userId: metadata.userId,
-        url: file.ufsUrl,
-        key: file.key,
-        fileName: file.name,
-        fileSize: file.size,
-      });
+    .middleware(({ req }) => authorizeUploadRequest(req, "invoiceDocument"))
+    .onUploadComplete(async ({ file }) => {
       return {
         url: file.ufsUrl,
         fileName: file.name,
         fileSize: file.size,
         mimeType: file.type,
+      };
+    }),
+  waiverDocument: f({
+    pdf: {
+      maxFileSize: "16MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(({ req }) => authorizeUploadRequest(req, "waiverDocument"))
+    .onUploadComplete(async ({ metadata, file }) => {
+      return {
+        url: file.ufsUrl,
+        uploadKey: file.key,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        uploadReceipt: createUploadReceipt({
+          key: file.key,
+          locationId: metadata.locationId,
+          organizationId: metadata.organizationId ?? "",
+          route: "waiverDocument",
+          url: file.ufsUrl,
+          userId: metadata.userId,
+        }),
       };
     }),
 } satisfies FileRouter;

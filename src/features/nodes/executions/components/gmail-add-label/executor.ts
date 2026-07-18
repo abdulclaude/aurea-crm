@@ -1,8 +1,12 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveGoogleMailProviderGrant } from "@/features/nodes/lib/resolve-google-mail-provider-grant";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
 import { gmailAddLabelChannel } from "@/inngest/channels/gmail-add-label";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,13 +15,29 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GmailAddLabelData = {
+  providerAccountId?: string;
   variableName?: string;
   messageId: string;
   labelName: string;
 };
 
+const gmailLabelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+const gmailLabelsResponseSchema = z.object({
+  labels: z.array(gmailLabelSchema).optional(),
+});
+
+const gmailModifyMessageResponseSchema = z.object({
+  id: z.string().optional(),
+  threadId: z.string().optional(),
+  labelIds: z.array(z.string()).optional(),
+});
+
 export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       gmailAddLabelChannel().status({ nodeId, status: "loading" })
     );
@@ -32,26 +52,14 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
         );
       }
 
-      // Get Gmail OAuth token
-      const tokenResponse = await step.run("get-gmail-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          gmailAddLabelChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Gmail is not connected. Please connect Gmail in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-gmail-token", async () =>
+        resolveGoogleMailProviderGrant({
+          nodeType: NodeType.GMAIL_ADD_LABEL,
+          providerAccountId: data.providerAccountId,
+          scope,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const messageId = decode(Handlebars.compile(data.messageId)(context));
@@ -60,7 +68,8 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
       // Get or create label
       const labelId = await step.run("get-or-create-label", async () => {
         // First, try to find existing label
-        const listRes = await fetch(
+        const listRes = await oauthAuthenticatedFetch(
+          grant,
           "https://gmail.googleapis.com/gmail/v1/users/me/labels",
           {
             headers: {
@@ -70,13 +79,13 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
         );
 
         if (!listRes.ok) {
-          const error = await listRes.text();
-          throw new Error(`Gmail API error: ${error}`);
+          throw new Error(`Gmail API rejected the label list with status ${listRes.status}.`);
         }
 
-        const labelsData = await listRes.json();
+        const labelsPayload: unknown = await listRes.json();
+        const labelsData = gmailLabelsResponseSchema.parse(labelsPayload);
         const existingLabel = labelsData.labels?.find(
-          (l: any) => l.name.toLowerCase() === labelName.toLowerCase()
+          (label) => label.name.toLowerCase() === labelName.toLowerCase()
         );
 
         if (existingLabel) {
@@ -84,7 +93,8 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
         }
 
         // Create new label if it doesn't exist
-        const createRes = await fetch(
+        const createRes = await oauthAuthenticatedFetch(
+          grant,
           "https://gmail.googleapis.com/gmail/v1/users/me/labels",
           {
             method: "POST",
@@ -101,17 +111,18 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
         );
 
         if (!createRes.ok) {
-          const error = await createRes.text();
-          throw new Error(`Gmail API error creating label: ${error}`);
+          throw new Error(`Gmail API rejected label creation with status ${createRes.status}.`);
         }
 
-        const newLabel = await createRes.json();
+        const newLabelPayload: unknown = await createRes.json();
+        const newLabel = gmailLabelSchema.parse(newLabelPayload);
         return newLabel.id;
       });
 
       // Add label to message
       const response = await step.run("add-label-to-message", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
           {
             method: "POST",
@@ -126,11 +137,11 @@ export const gmailAddLabelExecutor: NodeExecutor<GmailAddLabelData> =
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Gmail API error: ${error}`);
+          throw new Error(`Gmail API rejected the label update with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return gmailModifyMessageResponseSchema.parse(payload);
       });
 
       await publish(

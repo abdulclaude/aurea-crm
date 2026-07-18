@@ -8,9 +8,19 @@ import {
   funnelPixelIntegration as funnelPixelIntegrationTable,
 } from "@/db/schema";
 import {
-  generatePublishedPageHTML,
+  LEGACY_PUBLISHED_FUNNEL_RENDER_POLICY,
   type PublishedPageData,
 } from "@/features/funnel-builder/lib/published-funnel-renderer";
+import { PublishedFunnelDocument } from "@/features/funnel-builder/lib/published-funnel-document";
+import { publicationSeoConfigSchema } from "@/features/publications/contracts";
+import { redirectPublishedChannel } from "@/features/publications/public/channel-redirect";
+import { getPublishedFunnelPage } from "@/features/publications/public/funnel-snapshot";
+import { PublishedTargetFunnel } from "@/features/publications/public/published-target-funnel";
+import { PublishedSchedule } from "@/features/publications/public/published-schedule";
+import {
+  getPublicationControlByDomain,
+  getPublishedPublicationByDomain,
+} from "@/features/publications/public/resolver";
 import type { Metadata } from "next";
 
 interface DomainFunnelPageProps {
@@ -24,18 +34,20 @@ interface DomainFunnelPageProps {
  */
 async function getFunnelFromDomain(host: string) {
   // Remove port if present (e.g., "testing.localhost:3000" -> "testing.localhost")
-  const hostWithoutPort = host.split(":")[0];
+  const hostWithoutPort = host.split(":")[0].toLowerCase().replace(/\.$/, "");
 
   // Check if it's a custom domain
-  let funnel = await db.query.funnel.findFirst({
+  const customDomainFunnels = await db.query.funnel.findMany({
     where: and(
       eq(funnelTable.customDomain, hostWithoutPort),
       eq(funnelTable.status, "PUBLISHED"),
-      eq(funnelTable.domainType, "CUSTOM")
+      eq(funnelTable.domainType, "CUSTOM"),
+      eq(funnelTable.domainVerified, true),
     ),
+    limit: 2,
   });
-
-  if (funnel) return funnel;
+  if (customDomainFunnels.length === 1) return customDomainFunnels[0];
+  if (customDomainFunnels.length > 1) return null;
 
   // Check if it's a subdomain
   // Extract subdomain from host (e.g., "testing.localhost" -> "testing")
@@ -47,19 +59,28 @@ async function getFunnelFromDomain(host: string) {
     const subdomain = parts[0];
 
     // Don't treat "www" or the base domain as a subdomain
-    if (subdomain !== "www" && subdomain !== "localhost" && !hostWithoutPort.startsWith("localhost")) {
-      funnel = await db.query.funnel.findFirst({
+    if (
+      subdomain !== "www" &&
+      subdomain !== "localhost" &&
+      !hostWithoutPort.startsWith("localhost")
+    ) {
+      const subdomainFunnels = await db.query.funnel.findMany({
         where: and(
           eq(funnelTable.subdomain, subdomain),
           eq(funnelTable.status, "PUBLISHED"),
-          eq(funnelTable.domainType, "SUBDOMAIN")
+          eq(funnelTable.domainType, "SUBDOMAIN"),
         ),
+        limit: 2,
       });
+      return subdomainFunnels.length === 1 ? subdomainFunnels[0] : null;
     }
   }
 
-  return funnel;
+  return null;
 }
+
+const normalizeHostHeader = (host: string) =>
+  host.split(":")[0]?.toLowerCase().replace(/\.$/, "") ?? "";
 
 /**
  * Generate metadata for SEO
@@ -71,6 +92,42 @@ export async function generateMetadata({
   const headersList = await headers();
   const host = headersList.get("host") || "";
 
+  const publishedTarget = await getPublishedPublicationByDomain(
+    normalizeHostHeader(host),
+  );
+  if (publishedTarget) {
+    const seo = publicationSeoConfigSchema.parse(publishedTarget.seoSnapshot);
+    if (publishedTarget.kind !== "FUNNEL") {
+      return {
+        title: seo.title ?? publishedTarget.name,
+        description: seo.description ?? undefined,
+        robots: { index: seo.index, follow: seo.follow },
+      };
+    }
+    try {
+      const page = getPublishedFunnelPage({
+        snapshot: publishedTarget.snapshot,
+        pageSlug: slug,
+      }).data.page;
+      const title = seo.title ?? page.metaTitle ?? page.name;
+      const description = seo.description ?? page.metaDescription ?? undefined;
+      const image = seo.imageUrl ?? page.metaImage;
+      return {
+        title,
+        description,
+        alternates: seo.canonicalUrl ? { canonical: seo.canonicalUrl } : undefined,
+        robots: { index: seo.index, follow: seo.follow },
+        openGraph: { title, description, images: image ? [image] : [] },
+      };
+    } catch {
+      return { title: "Page Not Found", robots: { index: false } };
+    }
+  }
+
+  if (await getPublicationControlByDomain(normalizeHostHeader(host))) {
+    return { title: "Page Not Found", robots: { index: false } };
+  }
+
   const funnel = await getFunnelFromDomain(host);
   if (!funnel) {
     return {
@@ -79,10 +136,13 @@ export async function generateMetadata({
   }
 
   const page = await db.query.funnelPage.findFirst({
-    where: and(eq(funnelPageTable.funnelId, funnel.id), eq(funnelPageTable.slug, slug)),
+    where: and(
+      eq(funnelPageTable.funnelId, funnel.id),
+      eq(funnelPageTable.slug, slug),
+    ),
   });
 
-  if (!page) {
+  if (!page || !page.isPublished) {
     return {
       title: "Page Not Found",
     };
@@ -113,6 +173,46 @@ export default async function DomainFunnelPage({
   const headersList = await headers();
   const host = headersList.get("host") || "";
 
+  const publishedTarget = await getPublishedPublicationByDomain(
+    normalizeHostHeader(host),
+  );
+  if (publishedTarget) {
+    if (publishedTarget.kind === "SCHEDULE") {
+      return (
+        <PublishedSchedule
+          locationId={publishedTarget.locationId}
+          organizationId={publishedTarget.organizationId}
+          snapshot={publishedTarget.snapshot}
+          themeSnapshot={publishedTarget.themeSnapshot}
+        />
+      );
+    }
+    if (publishedTarget.kind === "WIDGET") notFound();
+    if (publishedTarget.kind !== "FUNNEL") {
+      redirectPublishedChannel({
+        kind: publishedTarget.kind,
+        organizationSlug: publishedTarget.organizationSlug,
+        sourceId: publishedTarget.sourceId,
+        snapshot: publishedTarget.snapshot,
+        targetSlug: publishedTarget.slug,
+      });
+    }
+    return (
+      <PublishedTargetFunnel
+        pageSlug={slug}
+        snapshot={publishedTarget.snapshot}
+        targetId={publishedTarget.id}
+        versionId={publishedTarget.versionId}
+        themeSnapshot={publishedTarget.themeSnapshot}
+        consentSnapshot={publishedTarget.consentSnapshot}
+      />
+    );
+  }
+
+  if (await getPublicationControlByDomain(normalizeHostHeader(host))) {
+    notFound();
+  }
+
   // Find funnel by domain
   const funnel = await getFunnelFromDomain(host);
   if (!funnel) {
@@ -121,7 +221,10 @@ export default async function DomainFunnelPage({
 
   // Fetch page with all blocks, breakpoints, tracking events
   const page = await db.query.funnelPage.findFirst({
-    where: and(eq(funnelPageTable.funnelId, funnel.id), eq(funnelPageTable.slug, slug)),
+    where: and(
+      eq(funnelPageTable.funnelId, funnel.id),
+      eq(funnelPageTable.slug, slug),
+    ),
     with: {
       funnelBlocks: {
         with: {
@@ -133,7 +236,7 @@ export default async function DomainFunnelPage({
     },
   });
 
-  if (!page) {
+  if (!page || !page.isPublished) {
     notFound();
   }
 
@@ -141,38 +244,37 @@ export default async function DomainFunnelPage({
   const pixelIntegrations = await db.query.funnelPixelIntegration.findMany({
     where: and(
       eq(funnelPixelIntegrationTable.funnelId, funnel.id),
-      eq(funnelPixelIntegrationTable.enabled, true)
+      eq(funnelPixelIntegrationTable.enabled, true),
     ),
   });
 
   const renderPage: PublishedPageData["page"] = {
     ...page,
-    blocks: page.funnelBlocks.map(({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
-      ...block,
-      breakpoints: funnelBreakpoints,
-      trackingEvent: funnelBlockEvents[0] ?? null,
-    })),
+    blocks: page.funnelBlocks.map(
+      ({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
+        ...block,
+        breakpoints: funnelBreakpoints,
+        trackingEvent: funnelBlockEvents[0] ?? null,
+      }),
+    ),
   };
 
-  // Generate complete HTML with tracking
-  const html = generatePublishedPageHTML({
+  const renderData = {
     page: renderPage,
     pixelIntegrations,
-  });
+  } satisfies PublishedPageData;
 
-  // Return raw HTML response
   return (
-    <div
-      dangerouslySetInnerHTML={{
-        __html: html,
-      }}
+    <PublishedFunnelDocument
+      data={renderData}
+      policy={LEGACY_PUBLISHED_FUNNEL_RENDER_POLICY}
     />
   );
 }
 
 /**
  * Force dynamic rendering (disable static generation)
- * This ensures tracking scripts are always fresh
+ * This keeps the legacy source state fresh while publication migration is pending.
  */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

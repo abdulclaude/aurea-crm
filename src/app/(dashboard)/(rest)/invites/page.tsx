@@ -28,7 +28,7 @@ function InvitesPageContent() {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
         <p className="text-sm text-muted-foreground">
-          No organization or workspace found
+          No studio or location found
         </p>
       </div>
     );
@@ -45,13 +45,13 @@ function InvitesPageContent() {
           Invite team members to join{" "}
           {activeLocation
             ? activeLocation.companyName
-            : (activeOrg?.name ?? "Organization")}
+            : (activeOrg?.name ?? "Studio")}
         </p>
       </div>
 
       <InviteMembersSection
         mode={activeLocation ? "location" : "organization"}
-        organizationName={activeOrg?.name ?? "Organization"}
+        organizationName={activeOrg?.name ?? "Studio"}
         locationName={activeLocation?.companyName}
       />
     </div>

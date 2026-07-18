@@ -45,7 +45,7 @@ export const GoogleDriveDownloadFileNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_DRIVE_DOWNLOAD_FILE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleDriveDownloadFileRealtimeToken as any,
+    refreshToken: fetchGoogleDriveDownloadFileRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleDriveDownloadFileFormValues) => {

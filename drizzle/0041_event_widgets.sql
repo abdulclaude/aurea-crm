@@ -1,0 +1,1 @@
+ALTER TYPE "public"."WidgetType" ADD VALUE IF NOT EXISTS 'EVENT';

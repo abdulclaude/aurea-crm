@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { CompletionRing } from "@/features/studio/components/launchpad/launchpad-progress";
 import { cn } from "@/lib/utils";
 import {
   Rocket,
@@ -17,46 +18,9 @@ import {
   ChevronLeft,
   CheckCircle2,
   Lock,
+  CalendarCheck2,
+  WalletCards,
 } from "lucide-react";
-
-function CompletionRing({ pct, size = 16 }: { pct: number; size?: number }) {
-  const sw = 2;
-  const r = (size - sw) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - pct / 100);
-  const cx = size / 2;
-  const color = pct >= 66 ? "#14b8a6" : pct >= 33 ? "#f59e0b" : "#ef4444";
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className="shrink-0"
-    >
-      <circle
-        cx={cx}
-        cy={cx}
-        r={r}
-        fill="none"
-        stroke="#e5e7eb"
-        strokeWidth={sw}
-      />
-      <circle
-        cx={cx}
-        cy={cx}
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth={sw}
-        strokeDasharray={circ}
-        strokeDashoffset={offset}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${cx} ${cx})`}
-        style={{ transition: "stroke-dashoffset 0.5s ease, stroke 0.5s ease" }}
-      />
-    </svg>
-  );
-}
 
 export default function LaunchpadLayout({
   children,
@@ -67,26 +31,15 @@ export default function LaunchpadLayout({
   const router = useRouter();
   const trpc = useTRPC();
 
-  const { data: plans } = useQuery(
-    trpc.membershipPlans.list.queryOptions({ includeInactive: false }),
-  );
-  const { data: rooms } = useQuery(trpc.rooms.list.queryOptions());
-  const { data: classTypes } = useQuery(trpc.classTypes.list.queryOptions({}));
-  const { data: instructors } = useQuery(trpc.instructors.list.queryOptions({}));
-  const { data: classes } = useQuery(
-    trpc.studioClassesEnhanced.list.queryOptions({ pageSize: 1 }),
-  );
-
-  const hasPlans = (plans?.length ?? 0) > 0;
-  const hasRooms = (rooms?.length ?? 0) > 0;
-  const hasClassTypes = (classTypes?.length ?? 0) > 0;
-  const hasInstructors = (instructors?.items?.length ?? 0) > 0;
-  const hasClasses = (classes?.classes?.length ?? 0) > 0;
+  const { data: progress } = useQuery(trpc.launchpad.progress.queryOptions());
+  const hasRooms = progress?.hasRooms ?? false;
+  const hasClassTypes = progress?.hasClassTypes ?? false;
+  const hasInstructors = progress?.hasInstructors ?? false;
   const canScheduleClass = hasRooms && hasClassTypes && hasInstructors;
 
   const sections = [
     {
-      title: "Studio setup",
+      title: "Foundation",
       items: [
         {
           title: "Studio profile",
@@ -112,7 +65,7 @@ export default function LaunchpadLayout({
       ],
     },
     {
-      title: "Team",
+      title: "Business setup",
       items: [
         {
           title: "Instructors",
@@ -121,29 +74,40 @@ export default function LaunchpadLayout({
           isComplete: hasInstructors,
           locked: false,
         },
-      ],
-    },
-    {
-      title: "Billing",
-      items: [
         {
-          title: "Membership plans",
-          href: "/launchpad/memberships",
-          icon: CreditCard,
-          isComplete: hasPlans,
+          title: "Pricing",
+          href: "/studio/pricing-options/new",
+          icon: WalletCards,
+          isComplete: progress?.hasValidPricing ?? false,
           locked: false,
         },
       ],
     },
     {
-      title: "Schedule",
+      title: "Go live",
       items: [
         {
-          title: "First class",
+          title: "Bookable class",
           href: "/launchpad/first-class",
           icon: CalendarDays,
-          isComplete: hasClasses,
+          isComplete: progress?.hasFutureBookableClass ?? false,
           locked: !canScheduleClass,
+        },
+        {
+          title: "Publication",
+          href: "/settings/publication",
+          icon: CalendarCheck2,
+          isComplete: progress?.hasPublishedBookingSurface ?? false,
+          locked: false,
+        },
+        {
+          title: "Payments",
+          href: "/settings/payments",
+          icon: CreditCard,
+          isComplete:
+            !(progress?.paymentProviderRequired ?? false) ||
+            (progress?.paymentProviderReady ?? false),
+          locked: false,
         },
       ],
     },
@@ -199,7 +163,7 @@ export default function LaunchpadLayout({
                     <h3 className="text-xs font-medium text-primary/50">
                       {section.title}
                     </h3>
-                    <CompletionRing pct={sectionPct} size={14} />
+                    <CompletionRing percentage={sectionPct} size={14} />
                   </div>
 
                   {section.items.map((item) => {

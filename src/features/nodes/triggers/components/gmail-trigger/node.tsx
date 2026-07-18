@@ -56,6 +56,7 @@ export const GmailTriggerNode: React.FC<NodeProps<GmailTriggerNodeType>> = memo(
           onOpenChange={setDialogOpen}
           onSubmit={handleSubmit}
           defaultValues={{
+            providerAccountId: data.providerAccountId || "",
             variableName: data.variableName || "gmailTrigger",
             labelId: data.labelId || "INBOX",
             query: data.query || "",

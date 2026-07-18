@@ -29,7 +29,6 @@ export const outlookCalendarDeleteEventExecutor: NodeExecutor<OutlookCalendarDel
     // Compile fields with Handlebars
     const eventId = data.eventId ? decode(Handlebars.compile(data.eventId)(context)) : undefined;
 
-    // TODO: Implement Outlook Calendar: Delete Event logic here
     const result = await step.run("outlook-calendar-delete-event", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook Calendar: Delete Event: Not yet implemented");

@@ -26,8 +26,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { resolveOutlookTriggerSender } from "@/features/outlook/lib/trigger-config";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
 
 const formSchema = z.object({
+  providerAccountId: z.string().trim().min(1, "Select an Outlook account."),
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -35,30 +39,21 @@ const formSchema = z.object({
       message:
         "Variable name must start with a letter or underscore and contain only letters, numbers, and underscores.",
     }),
-  folderName: z
-    .string()
-    .min(1, { message: "Folder name is required (try Inbox)." }),
+  folderName: z.literal("Inbox"),
   subject: z.string().optional(),
-  from: z.string().optional(),
-  maxResults: z.coerce
-    .number()
-    .min(1, "Must be at least 1.")
-    .max(50, "Must be at most 50.")
-    .default(5),
-  pollIntervalMinutes: z.coerce
-    .number()
-    .min(1, "Must be at least 1.")
-    .max(60, "Must be at most 60 minutes.")
-    .default(5),
+  sender: z.string().optional(),
 });
 
 export type OutlookTriggerFormValues = z.infer<typeof formSchema>;
+export type OutlookTriggerDefaultValues = Partial<OutlookTriggerFormValues> & {
+  from?: string;
+};
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: OutlookTriggerFormValues) => void;
-  defaultValues?: Partial<OutlookTriggerFormValues>;
+  defaultValues?: OutlookTriggerDefaultValues;
   variables: VariableItem[];
 }
 
@@ -70,29 +65,35 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
   variables,
 }) => {
   const form = useForm<OutlookTriggerFormValues>({
-    resolver: zodResolver(formSchema) as any,
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "outlookTrigger",
-      folderName: defaultValues?.folderName || "Inbox",
+      folderName: "Inbox",
       subject: defaultValues?.subject || "",
-      from: defaultValues?.from || "",
-      maxResults: defaultValues?.maxResults ?? 5,
-      pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
+      sender: resolveOutlookTriggerSender(defaultValues ?? {}) || "",
     },
   });
 
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "outlookTrigger",
-        folderName: defaultValues?.folderName || "Inbox",
+        folderName: "Inbox",
         subject: defaultValues?.subject || "",
-        from: defaultValues?.from || "",
-        maxResults: defaultValues?.maxResults ?? 5,
-        pollIntervalMinutes: defaultValues?.pollIntervalMinutes ?? 5,
+        sender: resolveOutlookTriggerSender(defaultValues ?? {}) || "",
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.folderName, defaultValues?.subject, defaultValues?.from, defaultValues?.maxResults, defaultValues?.pollIntervalMinutes, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.subject,
+    defaultValues?.sender,
+    defaultValues?.from,
+    form,
+  ]);
 
   const handleSubmit = (values: OutlookTriggerFormValues) => {
     onSubmit(values);
@@ -101,8 +102,11 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent side="right" className="overflow-y-auto p-0">
-        <div className="sticky top-0 z-10 border-b border-white/5 bg-[#202e32] px-6 py-4">
+      <ResizableSheetContent
+        side="right"
+        className="overflow-y-auto border-border bg-background p-0"
+      >
+        <div className="sticky top-0 z-10 border-b border-border bg-background px-6 py-4">
           <SheetHeader>
             <SheetTitle>Outlook Trigger</SheetTitle>
             <SheetDescription>
@@ -117,6 +121,21 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
               onSubmit={form.handleSubmit(handleSubmit)}
               className="space-y-6"
             >
+              <FormField
+                control={form.control}
+                name="providerAccountId"
+                render={({ field }) => (
+                  <FormItem>
+                    <WorkflowProviderAccountSelect
+                      nodeType={NodeType.OUTLOOK_TRIGGER}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormField
                 control={form.control}
                 name="variableName"
@@ -134,24 +153,7 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
                 )}
               />
 
-              <Separator className="bg-white/5" />
-
-              <FormField
-                control={form.control}
-                name="folderName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Folder Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Inbox" {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      Mail folder to monitor (e.g., Inbox, Sent Items)
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <Separator className="bg-border" />
 
               <FormField
                 control={form.control}
@@ -172,7 +174,7 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
 
               <FormField
                 control={form.control}
-                name="from"
+                name="sender"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>From Filter (Optional)</FormLabel>
@@ -187,41 +189,7 @@ export const OutlookTriggerDialog: React.FC<Props> = ({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="maxResults"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Max Results</FormLabel>
-                    <FormControl>
-                      <Input type="number" min={1} max={50} {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      Maximum number of emails to retrieve per check
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="pollIntervalMinutes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Poll Interval (Minutes)</FormLabel>
-                    <FormControl>
-                      <Input type="number" min={1} max={60} {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      How often to check for new emails
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <SheetFooter className="sticky bottom-0 border-t border-white/5 bg-[#202e32] px-6 py-4">
+              <SheetFooter className="sticky bottom-0 border-t border-border bg-background px-6 py-4">
                 <Button type="submit">Save Configuration</Button>
               </SheetFooter>
             </form>

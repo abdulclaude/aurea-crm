@@ -1,3 +1,6 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import { updateVariableReferences } from "../update-variable-references";
 import type { Node, Edge } from "@xyflow/react";
 
@@ -44,16 +47,16 @@ describe("updateVariableReferences", () => {
     );
 
     // node1 should not be updated (it's the source)
-    expect(result[0].data).toEqual({ variableName: "form" });
+    assert.deepEqual(result[0].data, { variableName: "form" });
 
     // node2 should have updated references
-    expect(result[1].data).toEqual({
+    assert.deepEqual(result[1].data, {
       name: "{{googleForm.responses.Name}}",
       email: "{{googleForm.responses.Email}}",
     });
 
     // node3 should have updated references
-    expect(result[2].data).toEqual({
+    assert.deepEqual(result[2].data, {
       to: "{{googleForm.responses.Email}}",
       subject: "Hello {{googleForm.responses.Name}}",
     });
@@ -86,7 +89,7 @@ describe("updateVariableReferences", () => {
     );
 
     // Should return the same nodes array
-    expect(result).toBe(nodes);
+    assert.equal(result, nodes);
   });
 
   it("should handle nested objects and arrays", () => {
@@ -122,7 +125,7 @@ describe("updateVariableReferences", () => {
       edges
     );
 
-    expect(result[1].data).toEqual({
+    assert.deepEqual(result[1].data, {
       config: {
         nested: {
           field: "{{googleForm.data}}",
@@ -164,7 +167,7 @@ describe("updateVariableReferences", () => {
       edges
     );
 
-    expect(result[1].data).toEqual({
+    assert.deepEqual(result[1].data, {
       correct: "{{googleForm.data}}",
       formData: "{{formData.value}}", // Unchanged
       platform: "{{platform.name}}", // Unchanged

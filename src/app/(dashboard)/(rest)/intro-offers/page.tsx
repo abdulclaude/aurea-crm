@@ -126,7 +126,7 @@ export default function IntroOffersPage() {
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
-          <Plus className="size-3.5" />
+          <Plus className="size-3" />
           Create offer
         </Button>
       </div>
@@ -146,12 +146,12 @@ export default function IntroOffersPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Intro Offer</DialogTitle>
+            <DialogTitle>Create intro offer</DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Offer Name</Label>
+            <div className="space-y-2">
+              <Label>Offer name</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -159,7 +159,7 @@ export default function IntroOffersPage() {
               />
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <Label>Offer type</Label>
               <Select
                 value={offerType}
@@ -179,7 +179,7 @@ export default function IntroOffersPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label>Price</Label>
                 <Input
                   type="number"
@@ -189,7 +189,7 @@ export default function IntroOffersPage() {
                   placeholder="0.00"
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 <Label>Duration (days)</Label>
                 <Input
                   type="number"
@@ -202,8 +202,8 @@ export default function IntroOffersPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Class Credits</Label>
+              <div className="space-y-2">
+                <Label>Class credits</Label>
                 <Input
                   type="number"
                   min={1}
@@ -212,8 +212,8 @@ export default function IntroOffersPage() {
                   placeholder="Unlimited if empty"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label>Max Redemptions</Label>
+              <div className="space-y-2">
+                <Label>Max redemptions</Label>
                 <Input
                   type="number"
                   min={1}
@@ -224,8 +224,8 @@ export default function IntroOffersPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Allowed Class types</Label>
+            <div className="space-y-2">
+              <Label>Allowed class types</Label>
               <Popover open={classTypesOpen} onOpenChange={setClassTypesOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -327,8 +327,8 @@ export default function IntroOffersPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              {createMutation.isPending ? "Creating..." : "Create Offer"}
+            <Button onClick={handleCreate} className="w-max" variant="gradient" disabled={createMutation.isPending}>
+              {createMutation.isPending ? "Creating..." : "Create offer"}
             </Button>
           </DialogFooter>
         </DialogContent>

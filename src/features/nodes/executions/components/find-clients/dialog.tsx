@@ -47,6 +47,7 @@ const formSchema = z.object({
     .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
       message: "Variable name must start with a letter or underscore.",
     }),
+  clientId: z.string().optional(),
   email: z.string().optional(),
   name: z.string().optional(),
   companyName: z.string().optional(),
@@ -82,6 +83,7 @@ export const FindClientsDialog: React.FC<Props> = ({
     resolver: zodResolver(formSchema),
     defaultValues: {
       variableName: defaultValues.variableName || "foundClients",
+      clientId: defaultValues.clientId || "",
       email: defaultValues.email || "",
       name: defaultValues.name || "",
       companyName: defaultValues.companyName || "",
@@ -101,6 +103,7 @@ export const FindClientsDialog: React.FC<Props> = ({
     if (open) {
       form.reset({
         variableName: defaultValues.variableName || "foundClients",
+        clientId: defaultValues.clientId || "",
         email: defaultValues.email || "",
         name: defaultValues.name || "",
         companyName: defaultValues.companyName || "",
@@ -124,7 +127,7 @@ export const FindClientsDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Find clients configuration</SheetTitle>
           <SheetDescription>
@@ -153,6 +156,28 @@ export const FindClientsDialog: React.FC<Props> = ({
                     <span className="text-primary font-medium tracking-wide">
                       {`@${field.value || "foundClients"}`}
                     </span>
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="clientId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Client ID (optional)</FormLabel>
+                  <FormControl>
+                    <VariableInput
+                      placeholder="{{purchase.clientId}}"
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      variables={variables}
+                    />
+                  </FormControl>
+                  <FormDescription className="text-xs">
+                    Match one exact client, including after a wait node.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

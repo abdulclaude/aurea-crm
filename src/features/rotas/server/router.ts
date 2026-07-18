@@ -8,6 +8,7 @@ import { RotaStatus } from "@/db/enums";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, addHours } from "date-fns";
 import crypto from "crypto";
 import { generateShiftOccurrences } from "../lib/recurrence-utils";
+import { generateInstructorMagicLinkToken } from "@/features/instructors/lib/magic-link-token";
 
 // ============================================================================
 // Input Schemas
@@ -284,16 +285,20 @@ export const rotasRouter = createTRPCRouter({
       // This prevents database bloat and allows editing the recurrence rule
 
       // Send magic link if requested
+      let magicLinkDelivery:
+        | { status: "NOT_REQUESTED" }
+        | { status: "QUEUED"; deliveryId: string }
+        | { status: "FAILED"; error: string } = { status: "NOT_REQUESTED" };
       if (input.sendMagicLink && foundInstructor.email) {
         const MAGIC_LINK_EXPIRY_HOURS = 72;
 
         // Generate a secure token
-        const token = crypto.randomBytes(32).toString("hex");
+        const { token, tokenDigest } = generateInstructorMagicLinkToken();
 
         // Update instructor with portal token
         await db.update(instructor)
           .set({
-            portalToken: token,
+            portalToken: tokenDigest,
             portalTokenExpiry: addHours(new Date(), MAGIC_LINK_EXPIRY_HOURS),
           })
           .where(eq(instructor.id, foundInstructor.id));
@@ -305,6 +310,10 @@ export const rotasRouter = createTRPCRouter({
         try {
           const { sendMagicLinkEmail } = await import("@/features/instructors/lib/send-magic-link");
           const result = await sendMagicLinkEmail({
+            organizationId: foundInstructor.organizationId,
+            locationId: foundInstructor.locationId,
+            instructorId: foundInstructor.id,
+            tokenDigest,
             to: foundInstructor.email,
             instructorName: foundInstructor.name,
             magicLink,
@@ -313,17 +322,32 @@ export const rotasRouter = createTRPCRouter({
           });
 
           if (!result.success) {
-            // Don't fail the whole operation if email sending fails
-            console.error("Failed to send magic link email:", result.error);
+            magicLinkDelivery = { status: "FAILED", error: result.error };
+          } else {
+            magicLinkDelivery = {
+              status: "QUEUED",
+              deliveryId: result.deliveryId,
+            };
           }
         } catch (error) {
-          console.error("Error sending magic link:", error);
+          magicLinkDelivery = {
+            status: "FAILED",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to queue magic link email",
+          };
         }
       } else if (input.sendMagicLink && !foundInstructor.email) {
-        console.warn("Cannot send magic link: Instructor does not have an email address");
+        magicLinkDelivery = {
+          status: "FAILED",
+          error: "Instructor does not have an email address",
+        };
       }
 
-      return createdRota;
+      return createdRota
+        ? { ...createdRota, magicLinkDelivery }
+        : createdRota;
     }),
 
   /**

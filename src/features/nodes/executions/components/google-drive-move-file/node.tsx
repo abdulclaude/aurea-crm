@@ -45,7 +45,7 @@ export const GoogleDriveMoveFileNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_DRIVE_MOVE_FILE_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleDriveMoveFileRealtimeToken as any,
+    refreshToken: fetchGoogleDriveMoveFileRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleDriveMoveFileFormValues) => {

@@ -24,6 +24,10 @@ import type {
 } from "@/features/rotas/components/event-calendar";
 import { EventCalendar } from "@/features/rotas/components/event-calendar";
 import { CalendarContext } from "@/features/rotas/components/event-calendar/calendar-context";
+import {
+  calendarTimeBounds,
+  workspaceWeekStartIndex,
+} from "@/features/workspace-settings/lib/schedule-display";
 
 export default function MySchedulePage() {
   const trpc = useTRPC();
@@ -45,6 +49,10 @@ export default function MySchedulePage() {
     violet: true,
     orange: true,
   });
+  const { data: displaySettings } = useQuery(
+    trpc.workspaceSettings.getScheduleDisplaySettings.queryOptions(),
+  );
+  const weekStartsOn = workspaceWeekStartIndex(displaySettings?.weekStart);
 
   const range = useMemo(() => {
     if (view === "month") {
@@ -66,10 +74,10 @@ export default function MySchedulePage() {
       };
     }
     return {
-      start: startOfWeek(currentDate, { weekStartsOn: 1 }),
-      end: endOfWeek(currentDate, { weekStartsOn: 1 }),
+      start: startOfWeek(currentDate, { weekStartsOn }),
+      end: endOfWeek(currentDate, { weekStartsOn }),
     };
-  }, [currentDate, view]);
+  }, [currentDate, view, weekStartsOn]);
 
   const { data: schedule, isLoading } = useQuery({
     ...trpc.instructors.getMySchedule.queryOptions({
@@ -105,20 +113,12 @@ export default function MySchedulePage() {
   }, [schedule]);
 
   const timeBounds = useMemo(() => {
-    if (events.length === 0) {
-      return { startHour: 7, endHour: 22 };
-    }
-
-    let earliestHour = 23;
-    for (const event of events) {
-      earliestHour = Math.min(earliestHour, event.start.getHours());
-    }
-
-    return {
-      startHour: Math.max(0, earliestHour - 1),
-      endHour: 24,
-    };
-  }, [events]);
+    return calendarTimeBounds({
+      startMinutes: displaySettings?.startMinutes,
+      endMinutes: displaySettings?.endMinutes,
+      events,
+    });
+  }, [displaySettings, events]);
 
   return (
     <div className="flex flex-col h-full">
@@ -159,6 +159,8 @@ export default function MySchedulePage() {
             events={events}
             initialView="week"
             timeBounds={timeBounds}
+            weekStartsOn={weekStartsOn}
+            slotMinutes={displaySettings?.slotMinutes ?? 15}
             onViewChange={setView}
             onEventSelect={(event) => {
               router.push(`/studio/classes/${event.id}`);

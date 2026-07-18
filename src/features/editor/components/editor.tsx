@@ -14,8 +14,7 @@ import {
   type Connection,
   Background,
   Controls,
-  MiniMap,
-  getBezierPath,
+  getSmoothStepPath,
   Panel,
   type EdgeProps,
 } from "@xyflow/react";
@@ -45,6 +44,7 @@ import { WorkflowContextProvider } from "../store/workflow-context";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { getExampleContextForNodeType } from "@/features/workflows/lib/build-node-context";
+import { isWorkflowTriggerNodeType } from "@/features/workflows/lib/workflow-node-types";
 
 export function CustomEdge({
   id,
@@ -56,75 +56,40 @@ export function CustomEdge({
   sourcePosition,
   targetPosition,
 }: EdgeProps) {
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
+    offset: 28,
+    borderRadius: 8,
   });
 
-  // Determine edge label based on sourceHandleId
-  let label = "";
-  let labelBgColor = "";
-  let labelTextColor = "";
-  let labelBorderColor = "";
-  let labelTextSize = "";
-
-  if (sourceHandleId === "true") {
-    label = "TRUE";
-    labelBgColor = "rgb(34 197 94)"; // bg-green-500
-    labelTextColor = "rgb(255 255 255)"; // text-white
-    labelBorderColor = "rgb(22 163 74)"; // border-green-600
-    labelTextSize = "6px";
-  } else if (sourceHandleId === "false") {
-    label = "FALSE";
-    labelBgColor = "rgb(239 68 68)"; // bg-red-500
-    labelTextColor = "rgb(255 255 255)"; // text-white
-    labelBorderColor = "rgb(220 38 38)"; // border-red-600
-    labelTextSize = "6px";
-  }
+  const label =
+    sourceHandleId === "true"
+      ? "True"
+      : sourceHandleId === "false"
+        ? "False"
+        : "";
 
   return (
     <>
       <BaseEdge id={id} path={edgePath} />
       {label && (
         <g transform={`translate(${labelX}, ${labelY})`}>
-          {/* Border/shadow effect */}
-          <rect
-            x={-20}
-            y={-8}
-            width={40}
-            height={16}
-            rx={4}
-            fill={labelBorderColor}
-            opacity={0.2}
-          />
-          {/* Main background */}
-          <rect
-            x={-19}
-            y={-7}
-            width={38}
-            height={14}
-            rx={3}
-            fill={labelBgColor}
-          />
-          {/* Text */}
-          <text
-            x={0}
-            y={0}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            style={{
-              fontSize: labelTextSize,
-              fontWeight: 700,
-              fill: labelTextColor,
-              letterSpacing: "0.5px",
-            }}
-          >
-            {label}
-          </text>
+          <foreignObject x={-22} y={-10} width={44} height={20}>
+            <div
+              className={
+                label === "True"
+                  ? "flex size-full items-center justify-center rounded-full border border-emerald-600/50 bg-emerald-100 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300"
+                  : "flex size-full items-center justify-center rounded-full border border-rose-600/50 bg-rose-100 text-[9px] font-semibold text-rose-700 dark:text-rose-300"
+              }
+            >
+              {label}
+            </div>
+          </foreignObject>
         </g>
       )}
     </>
@@ -135,14 +100,83 @@ const edgeTypes = {
   "custom-edge": CustomEdge,
 };
 
-const initialEdges = [
-  {
-    id: "n1-n2",
-    source: "n1",
-    target: "n2",
-    type: "custom-edge",
-  },
-];
+function humanizeNodeType(type?: string) {
+  if (!type) return "Unconfigured node";
+  return type
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getNodeLabel(node: Node) {
+  const label = node.data.label;
+  if (typeof label === "string" && label.trim()) return label;
+
+  const name = node.data.name;
+  if (typeof name === "string" && name.trim()) return name;
+
+  return humanizeNodeType(node.type);
+}
+
+function WorkflowSummaryPanel({ nodes }: { nodes: Node[] }) {
+  const configuredNodes = nodes.filter(
+    (node) => node.type !== NodeType.INITIAL,
+  );
+  const trigger = configuredNodes.find((node) =>
+    isWorkflowTriggerNodeType(node.type),
+  );
+  const actions = configuredNodes.filter((node) => node.id !== trigger?.id);
+
+  return (
+    <div className="hidden w-64 overflow-hidden rounded-lg border border-black/10 bg-background/95 shadow-sm backdrop-blur dark:border-white/10 md:block">
+      <div className="px-4 py-3">
+        <p className="text-[10px] font-medium uppercase text-primary/40">
+          Workflow summary
+        </p>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-primary">
+            {configuredNodes.length}{" "}
+            {configuredNodes.length === 1 ? "node" : "nodes"}
+          </span>
+          <span className="rounded-md bg-primary-foreground/40 px-2 py-1 text-[10px] text-primary/55">
+            {actions.length} {actions.length === 1 ? "action" : "actions"}
+          </span>
+        </div>
+      </div>
+      <div className="border-t border-black/5 dark:border-white/5">
+        <div className="px-4 py-3">
+          <p className="text-[10px] text-primary/40">Trigger</p>
+          <p className="mt-1 truncate text-xs font-medium text-primary">
+            {trigger ? getNodeLabel(trigger) : "Add a trigger to start this workflow"}
+          </p>
+        </div>
+        {actions.length > 0 ? (
+          <div className="border-t border-black/5 px-4 py-3 dark:border-white/5">
+            <p className="mb-2 text-[10px] text-primary/40">Actions</p>
+            <div className="space-y-2">
+              {actions.slice(0, 4).map((node, index) => (
+                <div key={node.id} className="flex min-w-0 items-center gap-2">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-black/10 bg-primary-foreground/20 text-[9px] text-primary/55 dark:border-white/10">
+                    {index + 1}
+                  </span>
+                  <span className="truncate text-[11px] text-primary/70">
+                    {getNodeLabel(node)}
+                  </span>
+                </div>
+              ))}
+              {actions.length > 4 ? (
+                <p className="pl-7 text-[10px] text-primary/40">
+                  +{actions.length - 4} more
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export const Editor = ({ workflowId }: { workflowId: string }) => {
   const { data: workflow } = useSuspenseWorkflow(workflowId);
@@ -260,11 +294,27 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
     []
   );
   const onConnect = useCallback(
-    (params: Connection) =>
+    (params: Connection) => {
+      const sourceNode = nodes.find((node) => node.id === params.source);
+      const targetNode = nodes.find((node) => node.id === params.target);
+      const isConditionBranch =
+        sourceNode?.type === NodeType.IF_ELSE &&
+        params.sourceHandle === "branch" &&
+        targetNode;
+      const sourceHandle = isConditionBranch
+        ? targetNode.position.x < sourceNode.position.x
+          ? "false"
+          : "true"
+        : params.sourceHandle;
+
       setEdges((edgesSnapshot) =>
-        addEdge({ ...params, type: "custom-edge" }, edgesSnapshot)
-      ),
-    []
+        addEdge(
+          { ...params, sourceHandle, type: "custom-edge" },
+          edgesSnapshot,
+        ),
+      );
+    },
+    [nodes],
   );
 
   const setEditor = useSetAtom(editorAtom);
@@ -289,7 +339,7 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
         parentWorkflowContext,
       }}
     >
-      <div className="size-full bg-background">
+      <div className="size-full bg-[#f7f8fa] dark:bg-[#101416]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -300,6 +350,7 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
           nodeTypes={nodeComponents}
           onInit={setEditor}
           fitView
+          fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
           snapGrid={[10, 10]}
           snapToGrid
           panOnScroll
@@ -309,9 +360,15 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
             hideAttribution: true,
           }}
         >
-          <Background />
-          <Controls showInteractive={false} />
-          <Panel position="top-right">
+          <Background gap={18} size={1} color="rgba(100,116,139,0.22)" />
+          <Controls
+            showInteractive={false}
+            className="overflow-hidden rounded-lg border border-black/10 bg-background shadow-sm dark:border-white/10"
+          />
+          <Panel position="top-left" className="m-3">
+            <WorkflowSummaryPanel nodes={nodes} />
+          </Panel>
+          <Panel position="top-right" className="m-3">
             <AddNodeButton isBundle={isBundle} />
           </Panel>
 

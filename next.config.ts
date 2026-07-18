@@ -3,7 +3,14 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  reactCompiler: true,
+  // The compiler uses Babel and materially slows on-demand route compilation.
+  // Keep the production optimization without paying that cost during local dev.
+  reactCompiler: process.env.NODE_ENV === "production",
+  experimental: {
+    // Next 16's Turbopack cache can grow without bound in this large app.
+    // Cache compaction was blocking local RSC navigations for over a minute.
+    turbopackFileSystemCacheForDev: false,
+  },
   serverExternalPackages: [
     "geoip-lite",
     "pg",
@@ -36,20 +43,6 @@ const nextConfig: NextConfig = {
         source: "/onboarding/agency",
         destination: "/onboarding/studio",
         permanent: true,
-      },
-    ];
-  },
-  // Allow subdomain access in development
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Access-Control-Allow-Origin",
-            value: "*",
-          },
-        ],
       },
     ];
   },

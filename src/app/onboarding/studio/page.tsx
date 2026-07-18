@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import z from "zod";
@@ -25,34 +25,17 @@ import {
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { authClient } from "@/lib/auth-client";
 import { OrgLogoUploader } from "@/components/uploader/orgLogo";
 import { uploadFiles } from "@/utils/uploadthing";
 import {
   Building2,
-  Check,
   ChevronLeft,
-  ChevronsUpDown,
   Database,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import PhoneInput from "react-phone-number-input";
-import "react-phone-number-input/style.css";
-import { Country, State } from "country-state-city";
+import { City, Country, State } from "country-state-city";
 import { useTimezoneSelect, allTimezones } from "react-timezone-select";
 import { OnboardingPreloader } from "@/components/onboarding-preloader";
 import { toast } from "sonner";
@@ -66,6 +49,10 @@ import {
   uploadKey,
   uploadUrl,
 } from "@/features/studio/import/lib/upload-responses";
+import {
+  LocationPhoneInput,
+  SearchCombobox,
+} from "@/features/organizations/components/location-form-controls";
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -92,97 +79,6 @@ type Step1Values = z.infer<typeof step1Schema>;
 type Step2Values = z.infer<typeof step2Schema>;
 type OnboardingMode = "mindbody" | "scratch";
 
-// ─── Phone custom input ───────────────────────────────────────────────────────
-
-const PhoneInputField = React.forwardRef<
-  HTMLInputElement,
-  React.InputHTMLAttributes<HTMLInputElement>
->((props, ref) => (
-  <input
-    ref={ref}
-    {...props}
-    className="flex-1 h-full bg-transparent outline-none text-sm placeholder:text-muted-foreground min-w-0"
-  />
-));
-PhoneInputField.displayName = "PhoneInputField";
-
-// ─── Searchable combobox ───────────────────────────────────────────────────────
-
-function SearchCombobox({
-  value,
-  onChange,
-  options,
-  placeholder = "Select…",
-  searchPlaceholder = "Search…",
-  emptyText = "No results.",
-  disabled,
-}: {
-  value: string | undefined;
-  onChange: (value: string) => void;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  searchPlaceholder?: string;
-  emptyText?: string;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((o) => o.value === value);
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className={cn(
-            "w-full justify-between truncate font-normal",
-            !selected && "text-black/50",
-          )}
-        >
-          <span className="truncate">
-            {selected ? selected.label : placeholder}
-          </span>
-          <ChevronsUpDown className="ml-2 size-3.5 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="p-0 w-[--radix-popover-trigger-width]"
-        align="start"
-      >
-        <Command>
-          <CommandInput placeholder={searchPlaceholder} />
-          <CommandList>
-            <CommandEmpty>{emptyText}</CommandEmpty>
-            <CommandGroup>
-              {options.map((option) => (
-                <CommandItem
-                  key={option.value}
-                  value={option.label}
-                  onSelect={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 size-3.5 shrink-0",
-                      value === option.value ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  {option.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
 function StepIndicator({
@@ -196,20 +92,20 @@ function StepIndicator({
     <div className="flex items-center justify-center gap-2 mb-6">
       {([0, 1, 2] as const).map((step) => (
         <div key={step} className="flex items-center gap-2">
-          <motion.div
-            className={cn(
-              "flex size-6 items-center justify-center rounded-full text-[11px] font-semibold",
-              step === current
-                ? "bg-linear-to-b from-sky-400 to-sky-500 border border-sky-300/20 border-b-sky-500/70 shadow-sm text-primary-foreground"
-                : step < current
-                  ? "bg-primary/20 text-primary"
-                  : "bg-muted text-muted-foreground",
-            )}
-            animate={{ scale: step === current ? 1.12 : 1 }}
-            transition={{ type: "spring", stiffness: 320, damping: 22 }}
-          >
-            {step + 1}
-          </motion.div>
+          <div className="flex size-7 shrink-0 items-center justify-center">
+            <div
+              className={cn(
+                "flex aspect-square shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                step === current
+                  ? "size-7 bg-linear-to-b from-sky-400 to-sky-500 border border-sky-300/20 border-b-sky-500/70 shadow-sm text-primary-foreground"
+                  : step < current
+                    ? "size-6 bg-primary/20 text-primary"
+                    : "size-6 bg-muted text-muted-foreground",
+              )}
+            >
+              {step + 1}
+            </div>
+          </div>
 
           <motion.span
             className={cn(
@@ -304,6 +200,7 @@ export default function StudioOnboardingPage() {
     ? State.getStatesOfCountry(selectedCountryCode).map((s) => ({
         value: s.name,
         label: s.name,
+        isoCode: s.isoCode,
       }))
     : [];
 
@@ -333,6 +230,17 @@ export default function StudioOnboardingPage() {
       postalCode: "",
     },
   });
+
+  const selectedState = step2Form.watch("state");
+  const selectedStateCode = stateOptions.find(
+    (state) => state.value === selectedState,
+  )?.isoCode;
+  const cityOptions = selectedCountryCode
+    ? (selectedStateCode
+        ? City.getCitiesOfState(selectedCountryCode, selectedStateCode)
+        : City.getCitiesOfCountry(selectedCountryCode) ?? []
+      ).map((city) => ({ value: city.name, label: city.name }))
+    : [];
 
   const createAgency = useMutation(
     trpc.organizations.createAgency.mutationOptions(),
@@ -851,16 +759,10 @@ export default function StudioOnboardingPage() {
                             <FormItem>
                               <FormLabel>Phone</FormLabel>
                               <FormControl>
-                                <div className="flex h-9 w-full items-center rounded-md border border-input bg-background px-3 shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring">
-                                  <PhoneInput
-                                    international
-                                    defaultCountry="GB"
-                                    value={field.value}
-                                    onChange={(v) => field.onChange(v ?? "")}
-                                    inputComponent={PhoneInputField}
-                                    className="flex items-center w-full gap-2 h-full"
-                                  />
-                                </div>
+                                <LocationPhoneInput
+                                  value={field.value}
+                                  onChange={field.onChange}
+                                />
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -883,6 +785,7 @@ export default function StudioOnboardingPage() {
                                     field.onChange(code);
                                     setSelectedCountryCode(code);
                                     step2Form.setValue("state", "");
+                                    step2Form.setValue("city", "");
                                   }}
                                   options={countryOptions}
                                   placeholder="Select country…"
@@ -961,7 +864,18 @@ export default function StudioOnboardingPage() {
                             <FormItem>
                               <FormLabel>City</FormLabel>
                               <FormControl>
-                                <Input placeholder="London" {...field} />
+                                {cityOptions.length > 0 ? (
+                                  <SearchCombobox
+                                    value={field.value}
+                                    onChange={field.onChange}
+                                    options={cityOptions}
+                                    placeholder="Select city..."
+                                    searchPlaceholder="Search cities..."
+                                    emptyText="No city found."
+                                  />
+                                ) : (
+                                  <Input placeholder="London" {...field} />
+                                )}
                               </FormControl>
                               <FormMessage />
                             </FormItem>
@@ -978,7 +892,10 @@ export default function StudioOnboardingPage() {
                                 {stateOptions.length > 0 ? (
                                   <SearchCombobox
                                     value={field.value}
-                                    onChange={field.onChange}
+                                    onChange={(state) => {
+                                      field.onChange(state);
+                                      step2Form.setValue("city", "");
+                                    }}
                                     options={stateOptions}
                                     placeholder="Select state…"
                                     searchPlaceholder="Search states…"

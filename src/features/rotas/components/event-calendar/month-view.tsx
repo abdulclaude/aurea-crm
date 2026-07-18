@@ -37,6 +37,7 @@ interface MonthViewProps {
   events: CalendarEvent[];
   onEventSelect: (event: CalendarEvent) => void;
   onEventCreate?: (startTime: Date, endTime?: Date) => void;
+  weekStartsOn?: 0 | 1 | 6;
 }
 
 type MonthDayEvents = {
@@ -117,22 +118,23 @@ export function MonthView({
   events,
   onEventSelect,
   onEventCreate,
+  weekStartsOn = 1,
 }: MonthViewProps) {
   const days = useMemo(() => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
-    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
-    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn });
 
     return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
-  }, [currentDate]);
+  }, [currentDate, weekStartsOn]);
 
   const weekdays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
-      const date = addDays(startOfWeek(new Date()), i);
+      const date = addDays(startOfWeek(new Date(), { weekStartsOn }), i);
       return format(date, "EEE");
     });
-  }, []);
+  }, [weekStartsOn]);
 
   const weeks = useMemo(() => {
     const result = [];

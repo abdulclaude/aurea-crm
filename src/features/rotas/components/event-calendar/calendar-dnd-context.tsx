@@ -173,16 +173,9 @@ export function CalendarDndProvider({
       if (time !== undefined && activeView !== "month") {
         const newTime = new Date(date);
 
-        // Calculate hours and minutes with 15-minute precision
+        // Droppable cells already provide the configured calendar precision.
         const hours = Math.floor(time);
-        const fractionalHour = time - hours;
-
-        // Map to nearest 15 minute interval (0, 0.25, 0.5, 0.75)
-        let minutes = 0;
-        if (fractionalHour < 0.125) minutes = 0;
-        else if (fractionalHour < 0.375) minutes = 15;
-        else if (fractionalHour < 0.625) minutes = 30;
-        else minutes = 45;
+        const minutes = Math.round((time - hours) * 60);
 
         newTime.setHours(hours, minutes, 0, 0);
 
@@ -266,14 +259,7 @@ export function CalendarDndProvider({
       // If time is provided (for week/day views), set the hours and minutes
       if (time !== undefined) {
         const hours = Math.floor(time);
-        const fractionalHour = time - hours;
-
-        // Map to nearest 15 minute interval (0, 0.25, 0.5, 0.75)
-        let minutes = 0;
-        if (fractionalHour < 0.125) minutes = 0;
-        else if (fractionalHour < 0.375) minutes = 15;
-        else if (fractionalHour < 0.625) minutes = 30;
-        else minutes = 45;
+        const minutes = Math.round((time - hours) * 60);
 
         newStart.setHours(hours, minutes, 0, 0);
       } else {

@@ -22,8 +22,8 @@ const Page = async ({ params }: PageProps) => {
   prefetchExecution(executionId);
 
   return (
-    <div className="p-4 md:px-10 md:py-6 h-full">
-      <div className="mx-auto max-w-3xl w-full flex flex-col gap-y-8 h-full">
+    <div className="min-h-full bg-background">
+      <div className="mx-auto w-full max-w-[1500px]">
         <HydrateClient>
           <ErrorBoundary fallback={<ExecutionsError />}>
             <Suspense fallback={<ExecutionsLoading />}>

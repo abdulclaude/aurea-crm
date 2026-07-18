@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { IconPayment } from "central-icons/IconPayment";
 
@@ -30,7 +30,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GlobeIcon, MoreHorizontalIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  GlobeIcon,
+  LayoutTemplateIcon,
+  MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  SparklesIcon,
+  Trash2Icon,
+} from "lucide-react";
 
 import { IconCursorClick as MousePointerIcon } from "central-icons/IconCursorClick";
 
@@ -56,10 +67,11 @@ import {
   useCreateTemplateFromWorkflow,
   useCreateWorkflowFromTemplate,
   useInstallStudioStarterTemplates,
+  useMoveWorkflowToFolder,
   useUpdateTemplateMeta,
+  useWorkflowFolders,
 } from "../hooks/use-workflows";
 
-import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 import { useWorkflowsParams } from "../hooks/use-workflows-params";
 import { useEntitySearch } from "@/hooks/use-entity-search";
 
@@ -69,13 +81,14 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import Image from "next/image";
-import type { JsonValue } from "@/db/json";
+import { WorkflowFolders, type WorkflowFolder } from "./workflow-folders";
+import { toast } from "sonner";
 
 type WorkflowNodePreview = {
   id?: string;
   type?: NodeType;
   createdAt?: string | Date | null;
-  position?: JsonValue;
+  position?: unknown;
 };
 
 type WorkflowEntity = Omit<Workflows, "nodes"> & {
@@ -91,53 +104,111 @@ const WorkflowsList = () => {
   if (view === "templates") {
     return <TemplatesList />;
   }
-  return <AllWorkflowsList />;
+  return (
+    <div className="space-y-4">
+      <WorkflowFolders />
+      <AllWorkflowsList />
+    </div>
+  );
 };
 
 export default WorkflowsList;
 
 const AllWorkflowsList = () => {
   const workflows = useSuspenseWorkflows();
+  const folders = useWorkflowFolders();
+  const [params, setParams] = useWorkflowsParams();
   return (
-    <EntityList
-      items={workflows.data.items}
-      getKey={(workflow) => workflow.id}
-      renderItem={(workflow) => <WorkflowItem data={workflow} />}
-      emptyView={<WorkflowsEmpty />}
-    />
+    <>
+      <EntityList
+        items={workflows.data.items}
+        getKey={(workflow) => workflow.id}
+        renderItem={(workflow) => (
+          <WorkflowItem data={workflow} folders={folders.data?.folders ?? []} />
+        )}
+        emptyView={<WorkflowsEmpty />}
+      />
+      <EntityPagination
+        disabled={workflows.isFetching}
+        totalPages={workflows.data.totalPages}
+        page={workflows.data.page}
+        onPageChange={(page) => setParams({ ...params, page })}
+      />
+    </>
   );
 };
 
 export const WorkflowsHeader = ({ disabled }: { disabled?: boolean }) => {
   const createWorkflow = useCreateWorkflow();
-  const { handleError, modal } = useUpgradeModal();
 
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [params] = useWorkflowsParams();
+  const studioEvent = searchParams.get("studioEvent");
+  const serviceTypeId = searchParams.get("serviceTypeId");
+  const pricingOptionId = searchParams.get("pricingOptionId");
+  const formId = searchParams.get("formId");
+  const resourceName = searchParams.get("resourceName");
+  const isServiceBookingStarter =
+    studioEvent === "CLASS_BOOKED" && Boolean(serviceTypeId);
+  const isPricingPurchaseStarter =
+    studioEvent === "PRICING_OPTION_PURCHASED" && Boolean(pricingOptionId);
+  const isFormSubmissionStarter =
+    studioEvent === "FORM_SUBMITTED" && Boolean(formId);
 
   const handleCreate = () => {
-    createWorkflow.mutate(undefined, {
-      onSuccess: (data) => {
-        router.push(`/workflows/${data.id}`);
+    const folderId =
+      params.folder !== "all" && params.folder !== "unfiled"
+        ? params.folder
+        : null;
+    createWorkflow.mutate(
+      {
+        folderId,
+        starter:
+          isServiceBookingStarter && serviceTypeId
+            ? { event: "CLASS_BOOKED", serviceTypeId }
+            : isPricingPurchaseStarter && pricingOptionId
+              ? { event: "PRICING_OPTION_PURCHASED", pricingOptionId }
+              : isFormSubmissionStarter && formId
+                ? { event: "FORM_SUBMITTED", formId }
+            : undefined,
       },
-      onError: (error) => {
-        // open upgrade modal
-        handleError(error);
+      {
+        onSuccess: (data) => {
+          router.push(`/workflows/${data.id}`);
+        },
+        onError: (error) => {
+          toast.error(error.message);
+        },
       },
-    });
+    );
   };
 
   return (
-    <>
-      {modal}
-      <EntityHeader
-        title="Workflows"
-        description="Create and manage your workflows"
-        onNew={handleCreate}
-        newButtonLabel="New workflow"
-        disabled={disabled}
-        isCreating={createWorkflow.isPending}
-      />
-    </>
+    <EntityHeader
+      title="Workflows"
+      description={
+        isServiceBookingStarter
+          ? `Create an automation already connected to ${resourceName ?? "this service"}.`
+          : isPricingPurchaseStarter
+            ? `Create an automation that starts when ${resourceName ?? "this pricing option"} is purchased.`
+            : isFormSubmissionStarter
+              ? `Create an automation that starts when ${resourceName ?? "this form"} is submitted.`
+          : "Create and manage your workflows"
+      }
+      onNew={handleCreate}
+      newButtonLabel={
+        isServiceBookingStarter
+          ? "Create booking automation"
+          : isPricingPurchaseStarter
+            ? "Create purchase automation"
+            : isFormSubmissionStarter
+              ? "Create response automation"
+            : "New workflow"
+      }
+      disabled={disabled}
+      isCreating={createWorkflow.isPending}
+    />
   );
 };
 
@@ -146,11 +217,7 @@ export const WorkflowsContainer = ({
 }: {
   children: React.ReactNode;
 }) => {
-  return (
-    <EntityContainer pagination={<WorkflowsPagination />}>
-      {children}
-    </EntityContainer>
-  );
+  return <EntityContainer>{children}</EntityContainer>;
 };
 
 export const WorkflowsSearch = ({ className }: { className?: string }) => {
@@ -170,31 +237,6 @@ export const WorkflowsSearch = ({ className }: { className?: string }) => {
   );
 };
 
-export const WorkflowsPagination = () => {
-  const [params] = useWorkflowsParams();
-  const view = params.view || "all";
-  if (view === "archived") {
-    return <ArchivedWorkflowsPagination />;
-  }
-  if (view === "templates") {
-    return null;
-  }
-  return <AllWorkflowsPagination />;
-};
-
-const AllWorkflowsPagination = () => {
-  const workflows = useSuspenseWorkflows();
-  const [params, setParams] = useWorkflowsParams();
-  return (
-    <EntityPagination
-      disabled={workflows.isFetching}
-      totalPages={workflows.data.totalPages}
-      page={workflows.data.page}
-      onPageChange={(page) => setParams({ ...params, page })}
-    />
-  );
-};
-
 export const WorkflowsLoading = () => {
   return <LoadingView message="Loading workflows..." />;
 };
@@ -205,38 +247,50 @@ export const WorkflowsError = () => {
 
 export const WorkflowsEmpty = () => {
   const createWorkflow = useCreateWorkflow();
-  const { handleError, modal } = useUpgradeModal();
 
   const router = useRouter();
+  const [params] = useWorkflowsParams();
 
   const handleCreate = () => {
-    createWorkflow.mutate(undefined, {
-      onSuccess: (data) => {
-        router.push(`/workflows/${data.id}`);
+    const folderId =
+      params.folder !== "all" && params.folder !== "unfiled"
+        ? params.folder
+        : null;
+    createWorkflow.mutate(
+      { folderId },
+      {
+        onSuccess: (data) => {
+          router.push(`/workflows/${data.id}`);
+        },
+        onError: (error) => {
+          toast.error(error.message);
+        },
       },
-      onError: (error) => {
-        handleError(error);
-      },
-    });
+    );
   };
 
   return (
-    <>
-      {modal}
-      <EmptyView
-        title="No workflows"
-        label="workflow"
-        onNew={handleCreate}
-        message="No workflows have been found. Get started by creating a workflow."
-      />
-    </>
+    <EmptyView
+      title="No workflows"
+      label="workflow"
+      onNew={handleCreate}
+      message="No workflows have been found. Get started by creating a workflow."
+    />
   );
 };
 
 // Workflow Item
 
-export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
+export const WorkflowItem = ({
+  data,
+  folders = [],
+}: {
+  data: WorkflowEntity;
+  folders?: WorkflowFolder[];
+}) => {
   const removeWorkflow = useRemoveWorkflow();
+  const moveWorkflow = useMoveWorkflowToFolder();
+  const updateArchived = useUpdateWorkflowArchived();
 
   const handleRemove = () => {
     removeWorkflow.mutate({ id: data.id });
@@ -267,6 +321,7 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
   return (
     <EntityItem
       href={`/workflows/${data.id}`}
+      className="rounded-lg"
       title={
         <div className="flex items-center gap-2">
           <span>{data.name}</span>
@@ -288,7 +343,61 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
           <NodePreviewIcon type={lastIconType} />
         </div>
       }
-      menuItems={<></>}
+      menuItems={
+        <>
+          {archived ? (
+            <DropdownMenuItem
+              className="text-xs"
+              disabled={updateArchived.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                updateArchived.mutate({ id: data.id, archived: false });
+              }}
+            >
+              <RotateCcwIcon className="mr-2 size-3.5" />
+              {updateArchived.isPending ? "Restoring..." : "Restore workflow"}
+            </DropdownMenuItem>
+          ) : null}
+          {data.folderId ? (
+            <DropdownMenuItem
+              className="text-xs"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                moveWorkflow.mutate({ workflowId: data.id, folderId: null });
+              }}
+            >
+              <FolderOpenIcon className="mr-2 size-3.5" />
+              Remove from folder
+            </DropdownMenuItem>
+          ) : null}
+          {folders.map((folder) => (
+            <DropdownMenuItem
+              key={folder.id}
+              className="text-xs"
+              disabled={data.folderId === folder.id}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                moveWorkflow.mutate({
+                  workflowId: data.id,
+                  folderId: folder.id,
+                });
+              }}
+            >
+              <FolderIcon
+                className="mr-2 size-3.5"
+                style={folder.color ? { color: folder.color } : undefined}
+              />
+              Move to {folder.name}
+            </DropdownMenuItem>
+          ))}
+          {(data.folderId || folders.length > 0) && (
+            <Separator className="my-1" />
+          )}
+        </>
+      }
       onRemove={handleRemove}
       isRemoving={removeWorkflow.isPending}
     />
@@ -299,32 +408,35 @@ export const WorkflowItem = ({ data }: { data: WorkflowEntity }) => {
 
 export const ArchivedWorkflowsList = () => {
   const workflows = useSuspenseArchivedWorkflows();
-  return (
-    <EntityList
-      items={workflows.data.items}
-      getKey={(workflow) => workflow.id}
-      renderItem={(workflow) => <WorkflowItem data={workflow} />}
-      emptyView={
-        <EmptyView
-          title="No archived workflows"
-          label="workflow"
-          message="No archived workflows have been found. Get started by creating archiving a workflow."
-        />
-      }
-    />
-  );
-};
-
-export const ArchivedWorkflowsPagination = () => {
-  const workflows = useSuspenseArchivedWorkflows();
   const [params, setParams] = useWorkflowsParams();
   return (
-    <EntityPagination
-      disabled={workflows.isFetching}
-      totalPages={workflows.data.totalPages}
-      page={workflows.data.page}
-      onPageChange={(page) => setParams({ ...params, page })}
-    />
+    <div className="space-y-4">
+      <CatalogueSectionHeader
+        icon={ArchiveIcon}
+        title="Archived workflows"
+        description="Inactive automations stay here until you are ready to restore them."
+        count={workflows.data.totalCount}
+        countLabel="archived workflow"
+      />
+      <EntityList
+        items={workflows.data.items}
+        getKey={(workflow) => workflow.id}
+        renderItem={(workflow) => <WorkflowItem data={workflow} />}
+        emptyView={
+          <EmptyView
+            title="No archived workflows"
+            label="workflow"
+            message="Workflows you archive will appear here for safekeeping."
+          />
+        }
+      />
+      <EntityPagination
+        disabled={workflows.isFetching}
+        totalPages={workflows.data.totalPages}
+        page={workflows.data.page}
+        onPageChange={(page) => setParams({ ...params, page })}
+      />
+    </div>
   );
 };
 
@@ -333,23 +445,12 @@ export const ArchivedWorkflowsPagination = () => {
 export const TemplatesList = () => {
   const templates = useSuspenseTemplates();
   const installStarterTemplates = useInstallStudioStarterTemplates();
+  const [params, setParams] = useWorkflowsParams();
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={installStarterTemplates.isPending}
-          onClick={() => installStarterTemplates.mutate()}
-        >
-          {installStarterTemplates.isPending
-            ? "Installing..."
-            : "Install studio starters"}
-        </Button>
-      </div>
       <EntityList
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+        className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
         items={templates.data.items as WorkflowEntity[]}
         getKey={(t) => t.id}
         renderItem={(t) => <TemplateCard data={t} />}
@@ -361,76 +462,55 @@ export const TemplatesList = () => {
           />
         }
       />
+
+      <EntityPagination
+        disabled={templates.isFetching}
+        totalPages={templates.data.totalPages}
+        page={templates.data.page}
+        onPageChange={(page) => setParams({ ...params, page })}
+      />
     </div>
   );
 };
 
-export const TemplateItem = ({ data }: { data: WorkflowEntity }) => {
-  const createFromTemplate = useCreateWorkflowFromTemplate();
-  const removeWorkflow = useRemoveWorkflow();
-  const router = useRouter();
-
-  const handleRemove = () => {
-    removeWorkflow.mutate({ id: data.id });
-  };
+const CatalogueSectionHeader = ({
+  icon: Icon,
+  title,
+  description,
+  count,
+  countLabel,
+  action,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  count: number;
+  countLabel: string;
+  action?: React.ReactNode;
+}) => {
+  const label = count === 1 ? countLabel : `${countLabel}s`;
 
   return (
-    <EntityItem
-      href={`/workflows/${data.id}`}
-      title={data.name}
-      subtitle={
-        <>
-          Created{" "}
-          {formatDistanceToNow(new Date(data.createdAt), { addSuffix: true })}{" "}
-          &bull; Updated{" "}
-          {formatDistanceToNow(new Date(data.updatedAt), {
-            addSuffix: true,
-          })}{" "}
-        </>
-      }
-      image={
-        <div className="size-8 flex items-center justify-center">
-          <IconPayment className="size-4 text-white fill-white" />
+    <div className="flex flex-col gap-4 rounded-xl border border-black/10 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-white/10">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-background text-primary shadow-sm dark:border-white/10">
+          <Icon className="size-4" />
         </div>
-      }
-      actions={
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="bg-[#202E32] border-white/10 hover:bg-[#202E32] hover:brightness-110"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              createFromTemplate.mutate(
-                { id: data.id },
-                {
-                  onSuccess: (d) => {
-                    router.push(`/workflows/${d.id}`);
-                  },
-                },
-              );
-            }}
-          >
-            Use template
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-white/80 hover:text-white hover:bg-white/10"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              router.push(`/workflows/${data.id}`);
-            }}
-          >
-            View template
-          </Button>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-medium text-primary">{title}</h2>
+            <Badge
+              variant="secondary"
+              className="h-5 rounded-full px-2 text-[10px]"
+            >
+              {count} {label}
+            </Badge>
+          </div>
+          <p className="mt-0.5 text-xs text-primary/50">{description}</p>
         </div>
-      }
-      onRemove={handleRemove}
-      isRemoving={removeWorkflow.isPending}
-    />
+      </div>
+      {action}
+    </div>
   );
 };
 
@@ -471,7 +551,7 @@ const getTriggerIcon = (nodes?: WorkflowNodePreview[]) => {
       );
     case NodeType.MANUAL_TRIGGER:
     default:
-      return <MousePointerIcon className="size-4 text-white" />;
+      return <MousePointerIcon className="size-4 text-primary" />;
   }
 };
 
@@ -525,6 +605,7 @@ const nodeIconDescriptors: Partial<Record<NodeType, NodeIconDescriptor>> = {
   [NodeType.SLACK]: { image: "/logos/slack.svg", alt: "Slack" },
   [NodeType.WAIT]: { icon: IconPayment, alt: "Wait" },
   [NodeType.CREATE_CLIENT]: { icon: IconPayment, alt: "Create Client" },
+  [NodeType.CREATE_TASK]: { icon: IconPayment, alt: "Create task" },
   [NodeType.UPDATE_CLIENT]: { icon: IconPayment, alt: "Update Client" },
   [NodeType.DELETE_CLIENT]: { icon: IconPayment, alt: "Delete Client" },
   [NodeType.CREATE_DEAL]: { icon: IconPayment, alt: "Create deal" },
@@ -694,34 +775,48 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
 
   return (
     <>
-      <Card className="bg-[#1A2326] border-white/5 rounded-md p-3 h-full">
-        <CardContent className="p-0 h-full flex flex-col justify-between">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <div className="bg-[#202E32] rounded-sm p-2">
-                {getTriggerIcon(data.nodes)}
+      <Card className="group h-full overflow-hidden rounded-xl border-black/10 bg-background p-0 shadow-none transition hover:border-black/20 hover:shadow-xs dark:border-white/10 dark:hover:border-white/20">
+        <CardContent className="flex h-full flex-col justify-between p-0">
+          <div className="flex flex-col gap-2 px-6">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <CardTitle className="line-clamp-2 text-sm font-medium leading-5 text-primary">
+                  {data.name}
+                </CardTitle>
               </div>
-
-              <CardTitle className="text-sm font-medium line-clamp-2 text-white">
-                {data.name}
-              </CardTitle>
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-full ring-emerald-500/50 bg-emerald-500/10 px-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+              >
+                Template
+              </Badge>
             </div>
 
-            <div className="space-y-1">
-              {!!data.description && (
-                <CardDescription className="text-xs text-white/50 line-clamp-3 leading-5">
-                  {data.description}
-                </CardDescription>
-              )}
-            </div>
+            <CardDescription className="line-clamp-3 min-h-12 text-xs leading-5 text-primary/50 max-w-[45ch]">
+              {data.description ||
+                "A reusable workflow ready to customise for your studio."}
+            </CardDescription>
           </div>
 
-          <div className="flex items-center justify-between mt-4">
-            <div className="flex items-center gap-2">
+          <Separator />
+
+          <div className=" flex items-center justify-between gap-2 dark:border-white/5 p-6 pb-0">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+
               <Button
                 size="sm"
-                variant="outline"
-                className="bg-[#202E32] text-white hover:text-white text-xs border-none hover:bg-[#202E32] hover:brightness-110"
+                variant="ghost"
+                className="h-8 text-xs text-primary/60 hover:text-primary"
+                onClick={() => router.push(`/workflows/${data.id}`)}
+              >
+                Preview
+              </Button>
+
+              <Button
+                size="sm"
+                className="h-8 text-xs w-max"
+                variant="gradient"
+                disabled={createFromTemplate.isPending}
                 onClick={() =>
                   createFromTemplate.mutate(
                     { id: data.id },
@@ -733,15 +828,7 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                   )
                 }
               >
-                Use template
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-white/80 hover:text-white hover:bg-white/10 text-xs"
-                onClick={() => router.push(`/workflows/${data.id}`)}
-              >
-                View template
+                {createFromTemplate.isPending ? "Creating..." : "Use template"}
               </Button>
             </div>
 
@@ -750,26 +837,24 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                 <Button
                   size="icon"
                   variant="ghost"
-                  className="hover:bg-[#1A2326]! hover:brightness-110 hover:text-white transition duration-150 text-white"
+                  className="size-8 shrink-0 text-primary/60 hover:text-primary"
+                  aria-label={`Manage ${data.name}`}
                 >
                   <MoreHorizontalIcon className="size-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="bg-[#1A2326] text-white border-white/5 transition duration-150"
-              >
-                <DropdownMenuItem
-                  className="bg-[#1A2326] hover:bg-[#202E32]! hover:text-white! transition duration-150 w-full"
-                  onSelect={() => setOpen(true)}
-                >
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setOpen(true)}>
+
                   Edit template
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={removeWorkflow.isPending}
                   onClick={() => removeWorkflow.mutate({ id: data.id })}
-                  className="bg-[#1A2326] hover:bg-[#202E32]! hover:text-white! transition duration-150 w-full"
+                  className="text-rose-600 focus:text-rose-700"
                 >
-                  Delete
+
+                  {removeWorkflow.isPending ? "Deleting..." : "Delete template"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -778,15 +863,12 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          className="bg-[#1A2326] border-white/10 text-white p-0"
-          showCloseButton
-        >
+        <DialogContent className="p-0 sm:max-w-lg" showCloseButton>
           <DialogHeader className="p-6 pb-2">
             <DialogTitle>Edit template</DialogTitle>
           </DialogHeader>
 
-          <Separator />
+          <Separator className="bg-black/10 dark:bg-white/10" />
 
           <div className="flex flex-col gap-6 p-6 pt-2 pb-2">
             <div className="flex flex-col gap-3">
@@ -795,7 +877,7 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className=" border-white/10 rounded-sm bg-[#202E32]"
+                className="rounded-sm"
               />
             </div>
 
@@ -805,13 +887,21 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="bg-[#202E32] border border-white/10 rounded-sm p-2 text-sm min-h-24"
+                className="min-h-24 rounded-sm p-2 text-sm"
               />
             </div>
           </div>
 
-          <DialogFooter className="p-6 pt-0">
+          <DialogFooter className="gap-2 p-6 pt-0">
             <Button
+              type="button"
+              variant="outline"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
               onClick={() =>
                 updateTemplateMeta.mutate(
                   { id: data.id, name, description },
@@ -821,9 +911,8 @@ export const TemplateCard = ({ data }: { data: WorkflowEntity }) => {
                 )
               }
               disabled={updateTemplateMeta.isPending}
-              className="bg-[#202E32] hover:bg-[#202E32]! hover:brightness-110"
             >
-              Save
+              {updateTemplateMeta.isPending ? "Saving..." : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

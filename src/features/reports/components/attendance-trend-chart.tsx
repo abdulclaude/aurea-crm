@@ -19,7 +19,11 @@ interface AttendanceDataPoint {
   capacity: number;
 }
 
-export function AttendanceTrendChart({ data }: { data: AttendanceDataPoint[] }) {
+export function AttendanceTrendChart({
+  data,
+}: {
+  data: AttendanceDataPoint[];
+}) {
   if (!data.length) return null;
 
   return (
@@ -30,8 +34,15 @@ export function AttendanceTrendChart({ data }: { data: AttendanceDataPoint[] }) 
       <CardContent>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 4, right: 12, left: 12, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
+            <BarChart
+              data={data}
+              margin={{ top: 4, right: 12, left: 12, bottom: 4 }}
+            >
+              <CartesianGrid
+                strokeDasharray="3 3"
+                vertical={false}
+                stroke="rgba(0,0,0,0.06)"
+              />
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 11, fill: "rgba(0,0,0,0.5)" }}
@@ -52,8 +63,18 @@ export function AttendanceTrendChart({ data }: { data: AttendanceDataPoint[] }) 
                 }}
               />
               <Legend wrapperStyle={{ fontSize: "12px" }} />
-              <Bar dataKey="checkedIn" name="Checked In" fill="#10b981" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="booked" name="Booked" fill="#6366f1" radius={[3, 3, 0, 0]} />
+              <Bar
+                dataKey="checkedIn"
+                name="Checked In"
+                fill="#10b981"
+                radius={[3, 3, 0, 0]}
+              />
+              <Bar
+                dataKey="booked"
+                name="Booked"
+                fill="#6366f1"
+                radius={[3, 3, 0, 0]}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>

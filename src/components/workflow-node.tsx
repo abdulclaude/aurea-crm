@@ -28,41 +28,42 @@ export const WorkflowNode: React.FC<WorkflowNodeProps> = ({
   return (
     <>
       {showToolbar && (
-        <NodeToolbar className="bg-background text-primary border border-black/10 rounded-sm">
+        <NodeToolbar className="overflow-hidden rounded-lg border border-black/10 bg-background text-primary shadow-sm dark:border-white/10">
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             onClick={onSettings}
-            className="hover:bg-primary-foreground/40 hover:text-primary transition duration-150 rounded-none rounded-l-sm  px-8"
+            className="rounded-none border-r border-black/5 transition duration-150 hover:bg-primary-foreground/40 hover:text-primary dark:border-white/5"
+            aria-label="Configure node"
           >
-            <SettingsIcon className="size-4" />
+            <SettingsIcon className="size-3.5" />
           </Button>
 
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
             onClick={onDelete}
-            className="hover:bg-primary-foreground/40 hover:text-primary transition duration-150 rounded-none rounded-r-sm  px-8"
+            className="rounded-none transition duration-150 hover:bg-rose-500/10 hover:text-rose-600"
+            aria-label="Delete node"
           >
-            <TrashIcon className="size-4" />
+            <TrashIcon className="size-3.5" />
           </Button>
         </NodeToolbar>
       )}
       {children}
 
-      {name && (
+      {name ? (
         <NodeToolbar
           position={Position.Bottom}
           isVisible
-          className="max-w-[150px] text-center space-y-1"
+          className="max-w-[180px] space-y-1 text-center"
         >
-          <p className=" text-xs font-medium text-primary">{name}</p>
-
-          {description && (
-            <p className="text-primary/60 truncate text-xs">{description}</p>
-          )}
+          <p className="text-xs font-medium text-primary">{name}</p>
+          {description ? (
+            <p className="truncate text-xs text-primary/60">{description}</p>
+          ) : null}
         </NodeToolbar>
-      )}
+      ) : null}
     </>
   );
 };

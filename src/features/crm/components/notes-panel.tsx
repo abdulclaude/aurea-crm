@@ -14,6 +14,7 @@ interface NotesPanelProps {
   dealId?: string;
   members: MentionableMember[];
   className?: string;
+  layout?: "list" | "grid";
 }
 
 export const NotesPanel = ({
@@ -21,6 +22,7 @@ export const NotesPanel = ({
   dealId,
   members,
   className,
+  layout = "list",
 }: NotesPanelProps) => {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -70,15 +72,31 @@ export const NotesPanel = ({
         isSubmitting={createNote.isPending}
       />
 
-      <div className="space-y-3">
+      <div
+        className={cn(
+          "space-y-3",
+          layout === "grid" &&
+            "grid grid-cols-1 gap-3 space-y-0 sm:grid-cols-2 xl:grid-cols-4",
+        )}
+      >
         {isLoading && (
-          <p className="text-xs text-primary/50 dark:text-white/40">
+          <p
+            className={cn(
+              "text-xs text-primary/50 dark:text-white/40",
+              layout === "grid" && "col-span-full",
+            )}
+          >
             Loading notes...
           </p>
         )}
 
         {!isLoading && notes.length === 0 && (
-          <p className="text-xs text-primary/50 dark:text-white/40">
+          <p
+            className={cn(
+              "text-xs text-primary/50 dark:text-white/40",
+              layout === "grid" && "col-span-full",
+            )}
+          >
             No notes yet. Add the first update above.
           </p>
         )}

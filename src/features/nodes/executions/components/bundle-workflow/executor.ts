@@ -6,8 +6,12 @@ import { db } from "@/db";
 import { workflows as workflowsTable } from "@/db/schema";
 import { bundleWorkflowChannel } from "@/inngest/channels/bundle-workflow";
 import { topologicalSort } from "@/inngest/utils";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { BundleWorkflowFormValues } from "./dialog";
+import {
+  bundleWorkflowMatchesExecutionScope,
+  deriveBundleWorkflowScope,
+} from "@/features/executions/lib/workflow-execution-scope";
 
 // Helper function to get nested values from object using dot notation
 function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
@@ -80,6 +84,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
     step,
     publish,
     userId,
+    scope,
     nodeLevelContext,
     parentWorkflow,
   } = params;
@@ -94,9 +99,19 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
 
   try {
     // Load the bundle workflow
-    const bundleWorkflow = await step.run("load-bundle-workflow", async () => {
+    const bundleWorkflow = await step.run(
+      `load-bundle-workflow-${scope.workflowId}-${nodeId}`,
+      async () => {
       const workflow = await db.query.workflows.findFirst({
-        where: eq(workflowsTable.id, config.bundleWorkflowId),
+        where: and(
+          eq(workflowsTable.id, config.bundleWorkflowId),
+          eq(workflowsTable.organizationId, scope.organizationId),
+          eq(workflowsTable.archived, false),
+          eq(workflowsTable.isTemplate, false),
+          scope.locationId
+            ? eq(workflowsTable.locationId, scope.locationId)
+            : isNull(workflowsTable.locationId),
+        ),
         with: {
           nodes: true,
           connections: true,
@@ -109,14 +124,27 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
         );
       }
 
-      if (!workflow.isBundle) {
+      if (!bundleWorkflowMatchesExecutionScope(workflow, scope)) {
         throw new NonRetriableError(
-          `Workflow ${config.bundleWorkflowId} is not a bundle workflow`
+          `Bundle workflow ${config.bundleWorkflowId} is not executable in this scope`,
         );
       }
 
       return workflow;
-    });
+      },
+    );
+
+    const bundleScope = (() => {
+      try {
+        return deriveBundleWorkflowScope(scope, bundleWorkflow.id);
+      } catch (error) {
+        throw new NonRetriableError(
+          error instanceof Error
+            ? error.message
+            : "Invalid bundle workflow scope.",
+        );
+      }
+    })();
 
     // Prepare bundle inputs from mappings
     const bundleInputs: Record<string, unknown> = {};
@@ -218,6 +246,7 @@ export const bundleWorkflowExecutor: NodeExecutor = async (params) => {
         data: node.data as Record<string, unknown>,
         nodeId: node.id,
         userId,
+        scope: bundleScope,
         context: bundleContext,
         step,
         publish,

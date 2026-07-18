@@ -23,6 +23,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { normalizeNotificationPreferences } from "@/features/notifications/lib/preferences";
 
 const NOTIFICATIONS_PAGE_SIZE = 20;
 
@@ -57,21 +58,6 @@ const scopedNotificationConditions = ({
   eq(notification.userId, userId),
   ...contextConditions({ organizationId, locationId }),
 ];
-
-const preferenceRecord = (value: unknown): Record<string, boolean> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const preferences: Record<string, boolean> = {};
-  const record = value as Record<string, unknown>;
-  for (const [key, enabled] of Object.entries(record)) {
-    if (typeof enabled === "boolean") {
-      preferences[key] = enabled;
-    }
-  }
-  return preferences;
-};
 
 export const notificationsRouter = createTRPCRouter({
   /**
@@ -303,7 +289,7 @@ export const notificationsRouter = createTRPCRouter({
     if (existingPrefs) {
       return {
         ...existingPrefs,
-        preferences: preferenceRecord(existingPrefs.preferences),
+        preferences: normalizeNotificationPreferences(existingPrefs.preferences),
       };
     }
 
@@ -322,7 +308,7 @@ export const notificationsRouter = createTRPCRouter({
 
     return {
       ...prefs,
-      preferences: preferenceRecord(prefs.preferences),
+      preferences: normalizeNotificationPreferences(prefs.preferences),
     };
   }),
 
@@ -368,7 +354,7 @@ export const notificationsRouter = createTRPCRouter({
 
       return {
         ...prefs,
-        preferences: preferenceRecord(prefs.preferences),
+        preferences: normalizeNotificationPreferences(prefs.preferences),
       };
     }),
 

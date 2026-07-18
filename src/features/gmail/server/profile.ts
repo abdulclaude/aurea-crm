@@ -1,5 +1,8 @@
 "use server";
 
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import type { ResolvedOAuthGrant } from "@/features/provider-accounts/server/oauth-resolver";
+
 export type GmailProfile = {
   emailAddress: string;
   messagesTotal?: number;
@@ -7,12 +10,13 @@ export type GmailProfile = {
   historyId?: string;
 };
 
-export async function fetchGmailProfile(accessToken: string): Promise<GmailProfile> {
-  const response = await fetch(
+export async function fetchGmailProfile(grant: ResolvedOAuthGrant): Promise<GmailProfile> {
+  const response = await oauthAuthenticatedFetch(
+    grant,
     "https://gmail.googleapis.com/gmail/v1/users/me/profile",
     {
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${grant.accessToken}`,
       },
     }
   );
@@ -25,4 +29,3 @@ export async function fetchGmailProfile(accessToken: string): Promise<GmailProfi
 
   return payload as GmailProfile;
 }
-

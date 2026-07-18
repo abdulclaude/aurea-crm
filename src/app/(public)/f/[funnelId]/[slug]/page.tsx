@@ -6,9 +6,17 @@ import {
   funnelPixelIntegration as funnelPixelIntegrationTable,
 } from "@/db/schema";
 import {
-  generatePublishedPageHTML,
+  LEGACY_PUBLISHED_FUNNEL_RENDER_POLICY,
   type PublishedPageData,
 } from "@/features/funnel-builder/lib/published-funnel-renderer";
+import { PublishedFunnelDocument } from "@/features/funnel-builder/lib/published-funnel-document";
+import { publicationSeoConfigSchema } from "@/features/publications/contracts";
+import { getPublishedFunnelPage } from "@/features/publications/public/funnel-snapshot";
+import { PublishedTargetFunnel } from "@/features/publications/public/published-target-funnel";
+import {
+  getPublicationControlBySource,
+  getPublishedPublicationBySource,
+} from "@/features/publications/public/resolver";
 import type { Metadata } from "next";
 
 interface PublishedFunnelPageProps {
@@ -27,18 +35,56 @@ export async function generateMetadata({
   const { funnelId, slug } = await params;
 
   const page = await db.query.funnelPage.findFirst({
-    where: and(eq(funnelPageTable.funnelId, funnelId), eq(funnelPageTable.slug, slug)),
+    where: and(
+      eq(funnelPageTable.funnelId, funnelId),
+      eq(funnelPageTable.slug, slug),
+    ),
     with: {
       funnel: {
-        columns: { status: true },
+        columns: { status: true, organizationId: true, locationId: true },
       },
     },
   });
 
-  if (!page || page.funnel.status !== "PUBLISHED") {
+  if (!page) {
     return {
       title: "Page Not Found",
     };
+  }
+
+  const source = {
+    organizationId: page.funnel.organizationId,
+    locationId: page.funnel.locationId,
+    kind: "FUNNEL" as const,
+    sourceKey: `funnel:${funnelId}`,
+  };
+  const control = await getPublicationControlBySource(source);
+  if (control) {
+    const published = await getPublishedPublicationBySource(source);
+    if (!published) return { title: "Page Not Found" };
+    try {
+      const snapshotPage = getPublishedFunnelPage({
+        snapshot: published.snapshot,
+        pageSlug: slug,
+      }).data.page;
+      const seo = publicationSeoConfigSchema.parse(published.seoSnapshot);
+      const title = seo.title ?? snapshotPage.metaTitle ?? snapshotPage.name;
+      const description = seo.description ?? snapshotPage.metaDescription ?? undefined;
+      const image = seo.imageUrl ?? snapshotPage.metaImage;
+      return {
+        title,
+        description,
+        alternates: seo.canonicalUrl ? { canonical: seo.canonicalUrl } : undefined,
+        robots: { index: seo.index, follow: seo.follow },
+        openGraph: { title, description, images: image ? [image] : [] },
+      };
+    } catch {
+      return { title: "Page Not Found" };
+    }
+  }
+
+  if (!page.isPublished || page.funnel.status !== "PUBLISHED") {
+    return { title: "Page Not Found" };
   }
 
   return {
@@ -56,9 +102,8 @@ export async function generateMetadata({
  * Published Funnel Page
  *
  * Renders a published funnel page with:
- * - All tracking scripts injected
- * - Block-level event tracking
- * - Custom CSS/JS
+ * - Tracking disabled until the funnel is moved to consent-aware publication
+ * - Explicitly policy-gated custom CSS/JS
  * - SEO metadata
  */
 export default async function PublishedFunnelPage({
@@ -68,10 +113,13 @@ export default async function PublishedFunnelPage({
 
   // Fetch page with all blocks, breakpoints, tracking events
   const page = await db.query.funnelPage.findFirst({
-    where: and(eq(funnelPageTable.funnelId, funnelId), eq(funnelPageTable.slug, slug)),
+    where: and(
+      eq(funnelPageTable.funnelId, funnelId),
+      eq(funnelPageTable.slug, slug),
+    ),
     with: {
       funnel: {
-        columns: { status: true },
+        columns: { status: true, organizationId: true, locationId: true },
       },
       funnelBlocks: {
         with: {
@@ -83,7 +131,33 @@ export default async function PublishedFunnelPage({
     },
   });
 
-  if (!page || page.funnel.status !== "PUBLISHED") {
+  if (!page) {
+    notFound();
+  }
+
+  const source = {
+    organizationId: page.funnel.organizationId,
+    locationId: page.funnel.locationId,
+    kind: "FUNNEL" as const,
+    sourceKey: `funnel:${funnelId}`,
+  };
+  const control = await getPublicationControlBySource(source);
+  if (control) {
+    const published = await getPublishedPublicationBySource(source);
+    if (!published) notFound();
+    return (
+      <PublishedTargetFunnel
+        pageSlug={slug}
+        snapshot={published.snapshot}
+        targetId={published.id}
+        versionId={published.versionId}
+        themeSnapshot={published.themeSnapshot}
+        consentSnapshot={published.consentSnapshot}
+      />
+    );
+  }
+
+  if (!page.isPublished || page.funnel.status !== "PUBLISHED") {
     notFound();
   }
 
@@ -91,38 +165,37 @@ export default async function PublishedFunnelPage({
   const pixelIntegrations = await db.query.funnelPixelIntegration.findMany({
     where: and(
       eq(funnelPixelIntegrationTable.funnelId, funnelId),
-      eq(funnelPixelIntegrationTable.enabled, true)
+      eq(funnelPixelIntegrationTable.enabled, true),
     ),
   });
 
   const renderPage: PublishedPageData["page"] = {
     ...page,
-    blocks: page.funnelBlocks.map(({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
-      ...block,
-      breakpoints: funnelBreakpoints,
-      trackingEvent: funnelBlockEvents[0] ?? null,
-    })),
+    blocks: page.funnelBlocks.map(
+      ({ funnelBreakpoints, funnelBlockEvents, ...block }) => ({
+        ...block,
+        breakpoints: funnelBreakpoints,
+        trackingEvent: funnelBlockEvents[0] ?? null,
+      }),
+    ),
   };
 
-  // Generate complete HTML with tracking
-  const html = generatePublishedPageHTML({
+  const renderData = {
     page: renderPage,
     pixelIntegrations,
-  });
+  } satisfies PublishedPageData;
 
-  // Return raw HTML response
   return (
-    <div
-      dangerouslySetInnerHTML={{
-        __html: html,
-      }}
+    <PublishedFunnelDocument
+      data={renderData}
+      policy={LEGACY_PUBLISHED_FUNNEL_RENDER_POLICY}
     />
   );
 }
 
 /**
  * Force dynamic rendering (disable static generation)
- * This ensures tracking scripts are always fresh
+ * This keeps the legacy source state fresh while publication migration is pending.
  */
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

@@ -7,6 +7,10 @@ import { StartHour, EndHour } from "@/features/rotas/components/event-calendar/c
 export function useCurrentTimeIndicator(
   currentDate: Date,
   view: "day" | "week",
+  options: {
+    timeBounds?: { startHour: number; endHour: number };
+    weekStartsOn?: 0 | 1 | 6;
+  } = {},
 ) {
   const [currentTimePosition, setCurrentTimePosition] = useState<number>(0);
   const [currentTimeVisible, setCurrentTimeVisible] = useState<boolean>(false);
@@ -16,27 +20,36 @@ export function useCurrentTimeIndicator(
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
-      const totalMinutes = (hours - StartHour) * 60 + minutes;
-      const dayStartMinutes = 0; // 12am
-      const dayEndMinutes = (EndHour - StartHour) * 60; // 12am next day
+      const timeBounds = options.timeBounds ?? {
+        startHour: StartHour,
+        endHour: EndHour,
+      };
+      const totalMinutes = hours * 60 + minutes;
+      const dayStartMinutes = timeBounds.startHour * 60;
+      const dayEndMinutes = timeBounds.endHour * 60;
 
       // Calculate position as percentage of day
       const position =
         ((totalMinutes - dayStartMinutes) / (dayEndMinutes - dayStartMinutes)) *
         100;
+      const isInsideTimeBounds =
+        totalMinutes >= dayStartMinutes && totalMinutes <= dayEndMinutes;
 
       // Check if current day is in view based on the calendar view
       let isCurrentTimeVisible = false;
 
       if (view === "day") {
-        isCurrentTimeVisible = isSameDay(now, currentDate);
+        isCurrentTimeVisible = isSameDay(now, currentDate) && isInsideTimeBounds;
       } else if (view === "week") {
-        const startOfWeekDate = startOfWeek(currentDate, { weekStartsOn: 0 });
-        const endOfWeekDate = endOfWeek(currentDate, { weekStartsOn: 0 });
-        isCurrentTimeVisible = isWithinInterval(now, {
-          start: startOfWeekDate,
-          end: endOfWeekDate,
-        });
+        const weekStartsOn = options.weekStartsOn ?? 0;
+        const startOfWeekDate = startOfWeek(currentDate, { weekStartsOn });
+        const endOfWeekDate = endOfWeek(currentDate, { weekStartsOn });
+        isCurrentTimeVisible =
+          isInsideTimeBounds &&
+          isWithinInterval(now, {
+            start: startOfWeekDate,
+            end: endOfWeekDate,
+          });
       }
 
       setCurrentTimePosition(position);
@@ -50,7 +63,7 @@ export function useCurrentTimeIndicator(
     const interval = setInterval(calculateTimePosition, 60000);
 
     return () => clearInterval(interval);
-  }, [currentDate, view]);
+  }, [currentDate, options.timeBounds, options.weekStartsOn, view]);
 
   return { currentTimePosition, currentTimeVisible };
 }

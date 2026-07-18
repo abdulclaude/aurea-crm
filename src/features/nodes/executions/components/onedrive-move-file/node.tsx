@@ -50,7 +50,7 @@ export const OnedriveMoveFileNode: React.FC<NodeProps<OnedriveMoveFileNodeType>>
       nodeId: props.id,
       channel: ONEDRIVE_MOVE_FILE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOnedriveMoveFileRealtimeToken as any,
+      refreshToken: fetchOnedriveMoveFileRealtimeToken,
     });
 
     const handleOpenSettings = () => {

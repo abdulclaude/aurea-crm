@@ -1,9 +1,11 @@
 import { generateEmbeddings, entityToText } from "./openai";
-import { storeVectors, deleteVectorsByLocation } from "@/lib/vector/store";
+import { replaceVectorsForLocation } from "@/lib/vector/store";
 import type { VectorDocument, EntityType } from "@/lib/vector/types";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { CredentialType } from "@/db/enums";
 import { client as clientTable, deal as dealTable, location as locationTable, pipeline as pipelineTable, pipelineStage, workflows as workflowTable } from "@/db/schema";
+import { resolveScopedAiCredential } from "@/features/ai/server/scoped-credential";
 
 interface SyncResult {
   clients: number;
@@ -18,15 +20,33 @@ interface SyncResult {
  */
 export async function syncLocationEmbeddings(
   locationId: string,
-  options?: { onProgress?: (message: string) => void }
+  options?: {
+    credentialId?: string;
+    onProgress?: (message: string) => void;
+  },
 ): Promise<SyncResult> {
   const log = options?.onProgress ?? console.log;
 
   log(`Starting embedding sync for location: ${locationId}`);
 
-  // Clear existing vectors for this location
-  const deleted = await deleteVectorsByLocation(locationId);
-  log(`Deleted ${deleted} existing vectors`);
+  const [targetLocation] = await db
+    .select({
+      id: locationTable.id,
+      organizationId: locationTable.organizationId,
+    })
+    .from(locationTable)
+    .where(eq(locationTable.id, locationId))
+    .limit(1);
+  if (!targetLocation) {
+    throw new Error("Cannot sync embeddings for an unknown location.");
+  }
+
+  const scopedCredential = await resolveScopedAiCredential({
+    organizationId: targetLocation.organizationId,
+    locationId: targetLocation.id,
+    type: CredentialType.OPENAI,
+    credentialId: options?.credentialId,
+  });
 
   const documents: {
     id: string;
@@ -36,20 +56,23 @@ export async function syncLocationEmbeddings(
 
   // Fetch clients
   const clients = await db.query.client.findMany({
-    where: eq(clientTable.locationId, locationId),
-    with: {
-      clientAssignees: {
-        with: {
-          locationMember: {
-            with: { user: true },
-          },
-        },
-      },
-      notes: {
-        columns: {
-          content: true,
-        },
-      },
+    where: and(
+      eq(clientTable.organizationId, targetLocation.organizationId),
+      eq(clientTable.locationId, locationId),
+    ),
+    columns: {
+      id: true,
+      name: true,
+      companyName: true,
+      position: true,
+      type: true,
+      lifecycleStage: true,
+      source: true,
+      tags: true,
+      score: true,
+      country: true,
+      city: true,
+      updatedAt: true,
     },
   });
 
@@ -58,32 +81,25 @@ export async function syncLocationEmbeddings(
   for (const client of clients) {
     const fields = {
       name: client.name,
-      email: client.email,
       companyName: client.companyName,
-      phone: client.phone,
       position: client.position,
       type: client.type,
       lifecycleStage: client.lifecycleStage,
       source: client.source,
-      website: client.website,
-      linkedin: client.linkedin,
       tags: client.tags,
       score: client.score,
       country: client.country,
       city: client.city,
-      notes: client.notes.map((note) => note.content),
-      assignees: client.clientAssignees
-        .map((a) => a.locationMember.user?.name)
-        .filter(Boolean),
     };
 
     documents.push({
-      id: `client:${client.id}`,
+      id: `${targetLocation.organizationId}:${locationId}:client:${client.id}`,
       text: entityToText("client", fields),
       metadata: {
         entityType: "client" as EntityType,
         entityId: client.id,
         name: client.name,
+        organizationId: targetLocation.organizationId,
         locationId,
         fields,
         updatedAt: client.updatedAt.toISOString(),
@@ -93,25 +109,22 @@ export async function syncLocationEmbeddings(
 
   // Fetch deals
   const deals = await db.query.deal.findMany({
-    where: eq(dealTable.locationId, locationId),
-    with: {
-      pipeline: true,
-      pipelineStage: true,
-      dealAssignees: {
-        with: {
-          locationMember: {
-            with: { user: true },
-          },
-        },
-      },
-      dealClients: {
-        with: { client: true },
-      },
-      notes: {
-        columns: {
-          content: true,
-        },
-      },
+    where: and(
+      eq(dealTable.organizationId, targetLocation.organizationId),
+      eq(dealTable.locationId, locationId),
+    ),
+    columns: {
+      id: true,
+      name: true,
+      value: true,
+      currency: true,
+      pipelineId: true,
+      pipelineStageId: true,
+      source: true,
+      tags: true,
+      description: true,
+      deadline: true,
+      updatedAt: true,
     },
   });
 
@@ -122,26 +135,22 @@ export async function syncLocationEmbeddings(
       name: deal.name,
       value: deal.value?.toString(),
       currency: deal.currency,
-      pipeline: deal.pipeline?.name,
-      stage: deal.pipelineStage?.name,
+      pipelineId: deal.pipelineId,
+      pipelineStageId: deal.pipelineStageId,
       source: deal.source,
       tags: deal.tags,
       description: deal.description,
-      notes: deal.notes.map((note) => note.content),
       deadline: deal.deadline?.toISOString(),
-      members: deal.dealAssignees
-        .map((m) => m.locationMember.user?.name)
-        .filter(Boolean),
-      clients: deal.dealClients.map((c) => c.client.name),
     };
 
     documents.push({
-      id: `deal:${deal.id}`,
+      id: `${targetLocation.organizationId}:${locationId}:deal:${deal.id}`,
       text: entityToText("deal", fields),
       metadata: {
         entityType: "deal" as EntityType,
         entityId: deal.id,
         name: deal.name,
+        organizationId: targetLocation.organizationId,
         locationId,
         fields,
         updatedAt: deal.updatedAt.toISOString(),
@@ -151,7 +160,10 @@ export async function syncLocationEmbeddings(
 
   // Fetch pipelines
   const pipelines = await db.query.pipeline.findMany({
-    where: eq(pipelineTable.locationId, locationId),
+    where: and(
+      eq(pipelineTable.organizationId, targetLocation.organizationId),
+      eq(pipelineTable.locationId, locationId),
+    ),
     with: {
       pipelineStages: {
         orderBy: asc(pipelineStage.position),
@@ -175,12 +187,13 @@ export async function syncLocationEmbeddings(
     };
 
     documents.push({
-      id: `pipeline:${pipeline.id}`,
+      id: `${targetLocation.organizationId}:${locationId}:pipeline:${pipeline.id}`,
       text: entityToText("pipeline", fields),
       metadata: {
         entityType: "pipeline" as EntityType,
         entityId: pipeline.id,
         name: pipeline.name,
+        organizationId: targetLocation.organizationId,
         locationId,
         fields,
         updatedAt: pipeline.updatedAt.toISOString(),
@@ -190,7 +203,10 @@ export async function syncLocationEmbeddings(
 
   // Fetch workflows
   const workflows = await db.query.workflows.findMany({
-    where: eq(workflowTable.locationId, locationId),
+    where: and(
+      eq(workflowTable.organizationId, targetLocation.organizationId),
+      eq(workflowTable.locationId, locationId),
+    ),
     with: {
       nodes: true,
     },
@@ -217,12 +233,13 @@ export async function syncLocationEmbeddings(
     };
 
     documents.push({
-      id: `workflow:${workflow.id}`,
+      id: `${targetLocation.organizationId}:${locationId}:workflow:${workflow.id}`,
       text: entityToText("workflow", fields),
       metadata: {
         entityType: "workflow" as EntityType,
         entityId: workflow.id,
         name: workflow.name,
+        organizationId: targetLocation.organizationId,
         locationId,
         fields,
         updatedAt: workflow.updatedAt.toISOString(),
@@ -231,6 +248,12 @@ export async function syncLocationEmbeddings(
   }
 
   if (documents.length === 0) {
+    const replacement = await replaceVectorsForLocation({
+      organizationId: targetLocation.organizationId,
+      locationId,
+      documents: [],
+    });
+    log(`Removed ${replacement.removed} stale vectors`);
     log("No documents to embed");
     return {
       clients: clients.length,
@@ -255,7 +278,10 @@ export async function syncLocationEmbeddings(
       }/${Math.ceil(documents.length / BATCH_SIZE)}`
     );
 
-    const embeddings = await generateEmbeddings(texts);
+    const embeddings = await generateEmbeddings(
+      texts,
+      scopedCredential.apiKey,
+    );
 
     for (let j = 0; j < batch.length; j++) {
       vectorDocs.push({
@@ -266,9 +292,14 @@ export async function syncLocationEmbeddings(
     }
   }
 
-  // Store all vectors
-  log(`Storing ${vectorDocs.length} vectors`);
-  await storeVectors(vectorDocs);
+  const replacement = await replaceVectorsForLocation({
+    organizationId: targetLocation.organizationId,
+    locationId,
+    documents: vectorDocs,
+  });
+  log(
+    `Stored ${replacement.stored} vectors and removed ${replacement.removed} stale vectors`,
+  );
 
   log("Embedding sync complete");
 

@@ -1,8 +1,10 @@
 import {
   REPORT_CATALOG,
   REPORT_CATEGORIES,
+  REPORT_CURRENCY_FIELD,
   REPORT_FIELDS_BY_ID,
   REPORT_GROUPS,
+  SUPPORTED_REPORT_IDS,
 } from "./constants";
 import type {
   ReportCatalogItem,
@@ -29,7 +31,10 @@ export function getReportGroupLabel(groupId: ReportGroupId): string {
 export function getReportsForGroup(
   groupId: ReportGroupId,
 ): readonly ReportCatalogItem[] {
-  return REPORT_CATALOG.filter((report) => report.groupId === groupId);
+  return REPORT_CATALOG.filter(
+    (report) =>
+      report.groupId === groupId && SUPPORTED_REPORT_IDS.has(report.id),
+  );
 }
 
 export function getReportCategoryGroups(
@@ -77,7 +82,10 @@ export function getReportById(
 ): ReportCatalogItem | null {
   return (
     REPORT_CATALOG.find(
-      (report) => report.groupId === groupId && report.id === reportId,
+      (report) =>
+        report.groupId === groupId &&
+        report.id === reportId &&
+        SUPPORTED_REPORT_IDS.has(report.id),
     ) ?? null
   );
 }
@@ -88,11 +96,28 @@ export function getReportFields(
   const fieldsById: Readonly<Record<string, readonly ReportField[]>> =
     REPORT_FIELDS_BY_ID;
 
-  return fieldsById[report.id] ?? fieldsById.sales;
+  const fields = fieldsById[report.id] ?? fieldsById.sales;
+  if (
+    fields.some((field) => field.type === "Currency") &&
+    !fields.some((field) => field.id === REPORT_CURRENCY_FIELD.id)
+  ) {
+    return [...fields, REPORT_CURRENCY_FIELD];
+  }
+  return fields;
 }
 
 export function toReportSentenceCase(value: string): string {
-  const acronymTokens = ["ACH", "API", "CC", "CRM", "GBP", "ID", "POS", "SKU", "URL"];
+  const acronymTokens = [
+    "ACH",
+    "API",
+    "CC",
+    "CRM",
+    "GBP",
+    "ID",
+    "POS",
+    "SKU",
+    "URL",
+  ];
   let label = value.toLocaleLowerCase("en-GB");
 
   for (const token of acronymTokens) {
@@ -110,6 +135,9 @@ export function getCategoryCount(
   category: string,
 ): number {
   return REPORT_CATALOG.filter(
-    (report) => report.groupId === groupId && report.category === category,
+    (report) =>
+      report.groupId === groupId &&
+      report.category === category &&
+      SUPPORTED_REPORT_IDS.has(report.id),
   ).length;
 }

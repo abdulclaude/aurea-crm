@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
 import { format } from "date-fns";
-import { asc, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { invoice as invoiceTable, invoiceLineItem } from "@/db/schema";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { InvoiceStatus } from "@/db/enums";
 import { cn } from "@/lib/utils";
 import { InvoicePaymentActions } from "@/features/invoicing/components/invoice-payment-actions";
+import { InvoiceStatusBadge } from "@/features/invoicing/components/invoice-status-badge";
+import { PublicInvoiceAccessNotFoundError } from "@/features/invoicing/server/invoice-access-tokens";
+import { getPublicInvoice } from "@/features/invoicing/server/public-invoice-access";
 
 interface InvoicePaymentPageProps {
   params: Promise<{
@@ -23,73 +22,19 @@ const formatCurrency = (amount: string, currency: string = "USD") => {
   }).format(numAmount);
 };
 
-const getStatusBadge = (status: InvoiceStatus) => {
-  const variants: Record<InvoiceStatus, { label: string; className: string }> =
-    {
-      DRAFT: {
-        label: "Draft",
-        className: "bg-gray-500/10 text-gray-500 ring-gray-500/20",
-      },
-      SENT: {
-        label: "Sent",
-        className: "bg-blue-500/10 text-blue-500 ring-blue-500/20",
-      },
-      VIEWED: {
-        label: "Viewed",
-        className: "bg-purple-500/10 text-purple-500 ring-purple-500/20",
-      },
-      PAID: {
-        label: "Paid",
-        className: "bg-green-500/10 text-green-500 ring-green-500/20",
-      },
-      PARTIALLY_PAID: {
-        label: "Partial",
-        className: "bg-yellow-500/10 text-yellow-500 ring-yellow-500/20",
-      },
-      OVERDUE: {
-        label: "Overdue",
-        className: "bg-red-500/10 text-red-500 ring-red-500/20",
-      },
-      CANCELLED: {
-        label: "Cancelled",
-        className: "bg-gray-500/10 text-gray-500 ring-gray-500/20",
-      },
-    };
-
-  const variant = variants[status];
-
-  return (
-    <Badge variant="outline" className={cn("text-xs", variant.className)}>
-      {variant.label}
-    </Badge>
-  );
-};
-
 export default async function InvoicePaymentPage({
   params,
 }: InvoicePaymentPageProps) {
-  const { invoiceId } = await params;
-
-  const invoice = await db.query.invoice.findFirst({
-    where: eq(invoiceTable.id, invoiceId),
-    with: {
-      invoiceLineItems: {
-        orderBy: [asc(invoiceLineItem.order)],
-      },
-    },
+  const { invoiceId: accessToken } = await params;
+  const invoice = await getPublicInvoice({
+    token: accessToken,
+    purpose: "PAY",
+  }).catch((error: unknown) => {
+    if (error instanceof PublicInvoiceAccessNotFoundError) {
+      notFound();
+    }
+    throw error;
   });
-
-  if (!invoice) {
-    notFound();
-  }
-
-  // Mark invoice as viewed if not already
-  if (invoice.status === InvoiceStatus.SENT) {
-    await db
-      .update(invoiceTable)
-      .set({ status: InvoiceStatus.VIEWED, updatedAt: new Date() })
-      .where(eq(invoiceTable.id, invoiceId));
-  }
 
   const isOverdue =
     new Date(invoice.dueDate) < new Date() &&
@@ -112,7 +57,7 @@ export default async function InvoicePaymentPage({
                   <p className="text-primary/75 text-sm">{invoice.title}</p>
                 )}
               </div>
-              {getStatusBadge(invoice.status)}
+              <InvoiceStatusBadge status={invoice.status} />
             </div>
           </div>
 
@@ -131,11 +76,6 @@ export default async function InvoicePaymentPage({
                   <p className="text-xs text-primary/75">
                     {invoice.clientName}
                   </p>
-                  {invoice.clientEmail && (
-                    <p className="text-xs text-primary/75">
-                      {invoice.clientEmail}
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -189,12 +129,12 @@ export default async function InvoicePaymentPage({
                   </thead>
 
                   <tbody>
-                    {invoice.invoiceLineItems.map((item, index) => (
+                    {invoice.lineItems.map((item, index) => (
                       <tr
                         key={item.id}
                         className={cn(
                           "text-xs text-primary ",
-                          index !== invoice.invoiceLineItems.length - 1 && "border-b"
+                          index !== invoice.lineItems.length - 1 && "border-b"
                         )}
                       >
                         <td className="p-4 px-8">{item.description}</td>
@@ -310,11 +250,11 @@ export default async function InvoicePaymentPage({
 
             {/* Payment Section */}
             <InvoicePaymentActions
-              invoiceId={invoice.id}
+              accessToken={accessToken}
               invoiceNumber={invoice.invoiceNumber}
               amountDue={invoice.amountDue.toString()}
-              currency={invoice.currency}
               isPaid={isPaid}
+              paymentOptions={invoice.paymentOptions}
             />
 
             {/* Notes */}
@@ -348,8 +288,10 @@ export default async function InvoicePaymentPage({
           {/* Footer */}
           <div className="bg-gray-50 dark:bg-gray-900 px-8 py-6 text-center text-xs text-muted-foreground">
             <p>
-              Questions about this invoice? Please client us at{" "}
-              {invoice.clientEmail || "support@example.com"}
+              Questions about this invoice? Contact {invoice.merchant.name}
+              {invoice.merchant.supportEmail
+                ? ` at ${invoice.merchant.supportEmail}`
+                : "."}
             </p>
           </div>
         </div>

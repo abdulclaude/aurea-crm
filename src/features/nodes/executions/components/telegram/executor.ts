@@ -5,7 +5,7 @@ import type { NodeExecutor } from "@/features/executions/types";
 import { NonRetriableError } from "inngest";
 import { decrypt } from "@/lib/encryption";
 import { telegramChannel } from "@/inngest/channels/telegram";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { credential as credentialTable } from "@/db/schema";
@@ -27,7 +27,7 @@ type TelegramApiResponse = {
 
 export const telegramExecutionExecutor: NodeExecutor<
   TelegramExecutionData
-> = async ({ data, nodeId, userId, context, step, publish }) => {
+> = async ({ data, nodeId, scope, context, step, publish }) => {
   await publish(telegramChannel().status({ nodeId, status: "loading" }));
 
   try {
@@ -55,7 +55,15 @@ export const telegramExecutionExecutor: NodeExecutor<
 
     const credential = await step.run("get-telegram-credential", () =>
       db.query.credential.findFirst({
-        where: and(eq(credentialTable.id, data.credentialId!), eq(credentialTable.userId, userId)),
+        where: and(
+          eq(credentialTable.id, data.credentialId!),
+          eq(credentialTable.organizationId, scope.organizationId),
+          scope.locationId
+            ? eq(credentialTable.locationId, scope.locationId)
+            : isNull(credentialTable.locationId),
+          eq(credentialTable.type, "TELEGRAM_BOT"),
+          eq(credentialTable.isActive, true),
+        ),
       })
     );
 

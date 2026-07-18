@@ -50,7 +50,7 @@ export const OnedriveUploadFileNode: React.FC<NodeProps<OnedriveUploadFileNodeTy
       nodeId: props.id,
       channel: ONEDRIVE_UPLOAD_FILE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOnedriveUploadFileRealtimeToken as any,
+      refreshToken: fetchOnedriveUploadFileRealtimeToken,
     });
 
     const handleOpenSettings = () => {

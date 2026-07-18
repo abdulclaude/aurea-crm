@@ -1,327 +1,397 @@
-import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { TRPCError } from "@trpc/server";
-import { Resend } from "resend";
-import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import { and, count, desc, eq, isNull, type SQL } from "drizzle-orm";
-import { db } from "@/db";
-import { campaign, emailDomain } from "@/db/schema";
+import { and, count, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
 
-// Get the shared Resend client (uses system API key)
-function getResendClient() {
-  if (!process.env.RESEND_API_KEY) {
+import { db } from "@/db";
+import {
+  campaign,
+  communicationProvisioningOperation,
+  emailDomain,
+} from "@/db/schema";
+import { requireCommunicationEntitlement } from "@/features/communications/server/profile-service";
+import {
+  requestCommunicationProvisioning,
+} from "@/features/communications/server/provisioning";
+import { ensurePlatformResendBinding } from "@/features/communications/server/resend-binding";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { recordCommunicationAudit } from "@/features/communications/server/audit";
+
+type EmailDomainContext = {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+};
+
+const domainNameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3)
+  .max(253)
+  .regex(
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/,
+    "Enter a valid registrable domain.",
+  );
+
+async function requireProviderManagement(
+  ctx: EmailDomainContext,
+): Promise<string> {
+  if (!ctx.orgId) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: "Resend API key is not configured",
+      message: "Select an organization before managing email domains.",
     });
   }
-  return new Resend(process.env.RESEND_API_KEY);
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability: "provider.manage",
+  });
+  return ctx.orgId;
+}
+
+async function enqueueDomainOperation(input: {
+  organizationId: string;
+  locationId: string | null;
+  emailDomainId: string;
+  providerAccountId: string;
+  userId: string;
+  operationType: "CREATE" | "VERIFY" | "REFRESH" | "RELEASE";
+  idempotencyKey: string;
+  safeInput: Record<string, unknown>;
+}) {
+  const [operation] = await db
+    .insert(communicationProvisioningOperation)
+    .values({
+      id: createId(),
+      organizationId: input.organizationId,
+      locationId: input.locationId,
+      providerAccountId: input.providerAccountId,
+      emailDomainId: input.emailDomainId,
+      service: "RESEND_DOMAIN",
+      operationType: input.operationType,
+      idempotencyKey: input.idempotencyKey,
+      safeInput: input.safeInput,
+      requestedByUserId: input.userId,
+      nextAttemptAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [
+        communicationProvisioningOperation.organizationId,
+        communicationProvisioningOperation.idempotencyKey,
+      ],
+    })
+    .returning();
+  await requestCommunicationProvisioning(input.organizationId);
+  return operation ?? null;
 }
 
 export const emailDomainsRouter = createTRPCRouter({
-  // List all domains for the organization/location
   list: protectedProcedure.query(async ({ ctx }) => {
-    const domains = await db.query.emailDomain.findMany({
-      where: emailDomainScopeWhere(ctx.orgId!, ctx.locationId ?? null),
-      orderBy: [desc(emailDomain.createdAt)],
+    const organizationId = await requireProviderManagement(ctx);
+    return db.query.emailDomain.findMany({
+      where: emailDomainScopeWhere(
+        organizationId,
+        ctx.locationId ?? null,
+      ),
+      orderBy: [desc(emailDomain.isDefault), desc(emailDomain.createdAt)],
     });
-
-    return domains;
   }),
 
-  // Get a single domain by ID
   get: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
+      const organizationId = await requireProviderManagement(ctx);
       const domain = await db.query.emailDomain.findFirst({
-        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
+        where: emailDomainOwnerWhere(
+          input.id,
+          organizationId,
+          ctx.locationId ?? null,
+        ),
       });
-
       if (!domain) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Domain not found",
-        });
+        throw new TRPCError({ code: "NOT_FOUND", message: "Domain not found." });
       }
-
       return domain;
     }),
 
-  // Add a new domain
   create: protectedProcedure
     .input(
       z.object({
-        domain: z.string().min(1, "Domain is required"),
-        defaultFromName: z.string().optional(),
-        defaultFromEmail: z.string().optional(),
+        domain: domainNameSchema,
+        defaultFromName: z.string().trim().min(1).max(120).optional(),
+        defaultFromEmail: z.string().email().optional(),
         defaultReplyTo: z.string().email().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      // Check if domain already exists
-      const existing = await db.query.emailDomain.findFirst({
-        where: eq(emailDomain.domain, input.domain),
+      const organizationId = await requireProviderManagement(ctx);
+      await requireCommunicationEntitlement({
+        organizationId,
+        channel: "EMAIL",
       });
-
-      if (existing) {
+      if (
+        input.defaultFromEmail &&
+        !input.defaultFromEmail.toLowerCase().endsWith(`@${input.domain}`)
+      ) {
         throw new TRPCError({
-          code: "CONFLICT",
-          message: "This domain is already registered",
+          code: "BAD_REQUEST",
+          message: "The default sender must use the domain being added.",
         });
       }
-
-      const resend = getResendClient();
-
-      // Add domain to Resend
-      const { data, error } = await resend.domains.create({
-        name: input.domain,
+      const binding = await ensurePlatformResendBinding({
+        organizationId,
+        createdByUserId: ctx.auth.user.id,
       });
-
-      if (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to add domain to Resend: ${error.message}`,
-        });
-      }
-
-      // Store domain with DNS records
-      const [createdDomain] = await db
-        .insert(emailDomain)
-        .values({
-          id: createId(),
-          organizationId: ctx.orgId!,
+      const now = new Date();
+      const domainId = createId();
+      const operationId = createId();
+      const result = await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ id: emailDomain.id })
+          .from(emailDomain)
+          .where(sql`lower(${emailDomain.domain}) = ${input.domain}`)
+          .limit(1);
+        if (existing) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "This domain is already registered.",
+          });
+        }
+        const [created] = await tx
+          .insert(emailDomain)
+          .values({
+            id: domainId,
+            organizationId,
+            locationId: ctx.locationId ?? null,
+            providerAccountId: binding.id,
+            domain: input.domain,
+            ownershipMode: "PLATFORM_MANAGED",
+            status: "PENDING",
+            lifecycleState: "PROVISIONING",
+            defaultFromName: input.defaultFromName,
+            defaultFromEmail: input.defaultFromEmail,
+            defaultReplyTo: input.defaultReplyTo,
+            updatedAt: now,
+          })
+          .returning();
+        await tx.insert(communicationProvisioningOperation).values({
+          id: operationId,
+          organizationId,
           locationId: ctx.locationId ?? null,
-          domain: input.domain,
-          resendDomainId: data?.id,
-          status: "PENDING",
-          dnsRecords: data?.records ?? null,
-          defaultFromName: input.defaultFromName,
-          defaultFromEmail: input.defaultFromEmail,
-          defaultReplyTo: input.defaultReplyTo,
-          updatedAt: new Date(),
-        })
-        .returning();
-
-      if (!createdDomain) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to save email domain",
+          providerAccountId: binding.id,
+          emailDomainId: domainId,
+          service: "RESEND_DOMAIN",
+          operationType: "CREATE",
+          idempotencyKey: `resend-domain:create:${input.domain}`,
+          safeInput: { kind: "RESEND_DOMAIN_CREATE", domain: input.domain },
+          requestedByUserId: ctx.auth.user.id,
+          nextAttemptAt: now,
         });
-      }
-
-      return createdDomain;
+        return created;
+      });
+      await requestCommunicationProvisioning(organizationId);
+      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.create_requested", resourceType: "EMAIL_DOMAIN", resourceId: result?.id ?? null });
+      return { domain: result, operationId };
     }),
 
-  // Verify domain DNS records
   verify: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await db.query.emailDomain.findFirst({
-        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
-      });
-
-      if (!domain) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Domain not found",
-        });
-      }
-
-      if (!domain.resendDomainId) {
+      const organizationId = await requireProviderManagement(ctx);
+      const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      if (!domain.providerAccountId || !domain.resendDomainId) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Domain is not registered with Resend",
+          message: "Wait for domain registration before requesting verification.",
         });
       }
-
-      const resend = getResendClient();
-
-      // Trigger verification
-      const { data, error } = await resend.domains.verify(domain.resendDomainId);
-
-      if (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to verify domain: ${error.message}`,
-        });
-      }
-
-      // Update status
-      await db
-        .update(emailDomain)
-        .set({
-          status: "VERIFYING",
-          lastCheckedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(emailDomain.id, input.id));
-
-      return { success: true };
+      const operation = await enqueueDomainOperation({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        emailDomainId: domain.id,
+        providerAccountId: domain.providerAccountId,
+        userId: ctx.auth.user.id,
+        operationType: "VERIFY",
+        idempotencyKey: `resend-domain:verify:${domain.id}`,
+        safeInput: { kind: "RESEND_DOMAIN_VERIFY", emailDomainId: domain.id },
+      });
+      return { success: true, operationId: operation?.id ?? null };
     }),
 
-  // Check verification status
   checkStatus: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await db.query.emailDomain.findFirst({
-        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
-      });
-
-      if (!domain) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Domain not found",
-        });
-      }
-
-      if (!domain.resendDomainId) {
+      const organizationId = await requireProviderManagement(ctx);
+      const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      if (!domain.providerAccountId || !domain.resendDomainId) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Domain is not registered with Resend",
+          message: "Wait for domain registration before refreshing status.",
         });
       }
-
-      const resend = getResendClient();
-
-      // Get domain status from Resend
-      const { data, error } = await resend.domains.get(domain.resendDomainId);
-
-      if (error) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: `Failed to check domain status: ${error.message}`,
-        });
-      }
-
-      // Map Resend status to our status
-      let status: "PENDING" | "VERIFYING" | "VERIFIED" | "FAILED" = "PENDING";
-      if (data?.status === "verified") {
-        status = "VERIFIED";
-      } else if (data?.status === "pending") {
-        status = "VERIFYING";
-      } else if (data?.status === "failed") {
-        status = "FAILED";
-      }
-
-      // Update our database
-      const [updatedDomain] = await db
-        .update(emailDomain)
-        .set({
-          status,
-          dnsRecords: data?.records ?? domain.dnsRecords,
-          lastCheckedAt: new Date(),
-          verifiedAt: status === "VERIFIED" ? new Date() : null,
-          updatedAt: new Date(),
-        })
-        .where(eq(emailDomain.id, input.id))
-        .returning();
-
-      if (!updatedDomain) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to update domain status",
-        });
-      }
-
-      return updatedDomain;
+      const minuteBucket = Math.floor(Date.now() / 60_000);
+      const operation = await enqueueDomainOperation({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        emailDomainId: domain.id,
+        providerAccountId: domain.providerAccountId,
+        userId: ctx.auth.user.id,
+        operationType: "REFRESH",
+        idempotencyKey: `resend-domain:refresh:${domain.id}:${minuteBucket}`,
+        safeInput: { kind: "RESEND_DOMAIN_REFRESH", emailDomainId: domain.id },
+      });
+      return { domain, operationId: operation?.id ?? null };
     }),
 
-  // Update domain settings
   update: protectedProcedure
     .input(
       z.object({
-        id: z.string(),
-        defaultFromName: z.string().optional(),
-        defaultFromEmail: z.string().optional(),
+        id: z.string().min(1),
+        defaultFromName: z.string().trim().min(1).max(120).optional(),
+        defaultFromEmail: z.string().email().optional(),
         defaultReplyTo: z.string().email().optional().nullable(),
-      })
+        isDefault: z.boolean().optional(),
+        isDisabled: z.boolean().optional(),
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      const domain = await db.query.emailDomain.findFirst({
-        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
+      const organizationId = await requireProviderManagement(ctx);
+      const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      if (
+        input.defaultFromEmail &&
+        !input.defaultFromEmail
+          .toLowerCase()
+          .endsWith(`@${domain.domain.toLowerCase()}`)
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The default sender must use this email domain.",
+        });
+      }
+      const updated = await db.transaction(async (tx) => {
+        if (input.isDefault) {
+          await tx
+            .update(emailDomain)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(emailDomainScopeWhere(organizationId, ctx.locationId ?? null));
+        }
+        const [updated] = await tx
+          .update(emailDomain)
+          .set({
+            defaultFromName: input.defaultFromName,
+            defaultFromEmail: input.defaultFromEmail,
+            defaultReplyTo: input.defaultReplyTo,
+            isDefault: input.isDefault,
+            isDisabled: input.isDisabled,
+            updatedAt: new Date(),
+          })
+          .where(
+            emailDomainOwnerWhere(
+              input.id,
+              organizationId,
+              ctx.locationId ?? null,
+            ),
+          )
+          .returning();
+        if (!updated) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to update the email domain.",
+          });
+        }
+        return updated;
       });
-
-      if (!domain) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Domain not found",
-        });
-      }
-
-      const [updatedDomain] = await db
-        .update(emailDomain)
-        .set({
-          defaultFromName: input.defaultFromName,
-          defaultFromEmail: input.defaultFromEmail,
-          defaultReplyTo: input.defaultReplyTo,
-          updatedAt: new Date(),
-        })
-        .where(eq(emailDomain.id, input.id))
-        .returning();
-
-      if (!updatedDomain) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to update domain",
-        });
-      }
-
-      return updatedDomain;
+      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.updated", resourceType: "EMAIL_DOMAIN", resourceId: updated.id, safeMetadata: { isDefault: input.isDefault ?? null, isDisabled: input.isDisabled ?? null } });
+      return updated;
     }),
 
-  // Delete a domain
   delete: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const domain = await db.query.emailDomain.findFirst({
-        where: emailDomainOwnerWhere(input.id, ctx.orgId!, ctx.locationId ?? null),
-      });
-
-      if (!domain) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Domain not found",
-        });
-      }
-
-      // Check if domain is used by any campaigns
+      const organizationId = await requireProviderManagement(ctx);
+      const domain = await requireOwnedDomain(ctx, organizationId, input.id);
       const [campaignCount] = await db
         .select({ value: count() })
         .from(campaign)
-        .where(eq(campaign.emailDomainId, input.id));
-      const campaignsUsingDomain = campaignCount?.value ?? 0;
-
-      if (campaignsUsingDomain > 0) {
+        .where(
+          and(
+            eq(campaign.organizationId, organizationId),
+            eq(campaign.emailDomainId, domain.id),
+          ),
+        );
+      if ((campaignCount?.value ?? 0) > 0) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: `This domain is used by ${campaignsUsingDomain} campaign(s). Remove them first.`,
+          message: `This domain is used by ${campaignCount?.value ?? 0} campaign(s). Remove those references first.`,
         });
       }
-
-      // Delete from Resend if it exists
-      if (domain.resendDomainId) {
-        const resend = getResendClient();
-        try {
-          await resend.domains.remove(domain.resendDomainId);
-        } catch {
-          // Ignore errors - domain might already be deleted from Resend
-        }
+      if (!domain.providerAccountId || !domain.resendDomainId) {
+        await db
+          .update(emailDomain)
+          .set({
+            isDisabled: true,
+            lifecycleState: "RELEASED",
+            removedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(emailDomain.id, domain.id));
+        await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.released", resourceType: "EMAIL_DOMAIN", resourceId: domain.id });
+        return { success: true, operationId: null };
       }
-
-      // Delete from our database
-      await db.delete(emailDomain).where(eq(emailDomain.id, input.id));
-
-      return { success: true };
+      const operation = await enqueueDomainOperation({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        emailDomainId: domain.id,
+        providerAccountId: domain.providerAccountId,
+        userId: ctx.auth.user.id,
+        operationType: "RELEASE",
+        idempotencyKey: `resend-domain:delete:${domain.id}`,
+        safeInput: { kind: "RESEND_DOMAIN_DELETE", emailDomainId: domain.id },
+      });
+      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.release_requested", resourceType: "EMAIL_DOMAIN", resourceId: domain.id });
+      return { success: true, operationId: operation?.id ?? null };
     }),
 });
 
-function emailDomainScopeWhere(organizationId: string, locationId: string | null): SQL | undefined {
+async function requireOwnedDomain(
+  ctx: EmailDomainContext,
+  organizationId: string,
+  id: string,
+) {
+  const domain = await db.query.emailDomain.findFirst({
+    where: emailDomainOwnerWhere(id, organizationId, ctx.locationId ?? null),
+  });
+  if (!domain) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Domain not found." });
+  }
+  return domain;
+}
+
+function emailDomainScopeWhere(
+  organizationId: string,
+  locationId: string | null,
+): SQL | undefined {
   return and(
     eq(emailDomain.organizationId, organizationId),
-    locationId ? eq(emailDomain.locationId, locationId) : isNull(emailDomain.locationId)
+    locationId
+      ? eq(emailDomain.locationId, locationId)
+      : isNull(emailDomain.locationId),
   );
 }
 
-function emailDomainOwnerWhere(id: string, organizationId: string, locationId: string | null): SQL | undefined {
-  return and(eq(emailDomain.id, id), emailDomainScopeWhere(organizationId, locationId));
+function emailDomainOwnerWhere(
+  id: string,
+  organizationId: string,
+  locationId: string | null,
+): SQL | undefined {
+  return and(
+    eq(emailDomain.id, id),
+    emailDomainScopeWhere(organizationId, locationId),
+  );
 }

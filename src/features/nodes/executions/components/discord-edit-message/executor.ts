@@ -43,7 +43,6 @@ export const discordEditMessageExecutor: NodeExecutor<DiscordEditMessageData> = 
     const messageId = data.messageId ? decode(Handlebars.compile(data.messageId)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Discord: Edit Message logic here
     const result = await step.run("discord-edit-message", async () => {
       // Add implementation here
       throw new NonRetriableError("Discord: Edit Message: Not yet implemented");

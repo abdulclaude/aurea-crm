@@ -1,69 +1,91 @@
-/**
- * Email Service
- * Handles sending emails via Resend
- */
+import "server-only";
 
-import { Resend } from "resend";
+import type { EmailAttachmentReference } from "@/features/delivery/lib/payload-schemas";
+import type { DeliveryPurpose } from "@/features/delivery/contracts";
+import { enqueueEmail } from "@/features/delivery/server/transactional-email";
 
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
-  : null;
-
-export interface SendEmailOptions {
-  to: string | string[];
+export type SendEmailOptions = {
+  organizationId: string;
+  locationId: string | null;
+  clientId: string | null;
+  sourceType: string;
+  sourceId: string;
+  idempotencyKey: string;
+  to: string;
+  emailDomainId?: string | null;
   from?: string;
   fromName?: string;
   subject: string;
   html: string;
   text?: string;
-  attachments?: Array<{
-    filename: string;
-    content: Buffer | string;
-  }>;
+  attachments?: EmailAttachmentReference[];
   replyTo?: string;
-}
+  purpose?: DeliveryPurpose;
+};
+
+export type EmailQueueResult =
+  | {
+      success: true;
+      queued: true;
+      deliveryId: string;
+      status: "QUEUED";
+    }
+  | {
+      success: false;
+      queued: false;
+      deliveryId?: string;
+      status?: "SUPPRESSED";
+      error: string;
+    };
 
 /**
- * Send an email using Resend
+ * Queue a transactional email through the durable delivery outbox.
  */
-export async function sendEmail(options: SendEmailOptions) {
-  if (!resend) {
-    console.warn("Resend not configured. Email not sent:", {
-      to: options.to,
-      subject: options.subject,
-    });
-    return {
-      success: false,
-      error: "Email service not configured",
-    };
-  }
-
+export async function sendEmail(
+  options: SendEmailOptions,
+): Promise<EmailQueueResult> {
   try {
-    const fromEmail = options.from || process.env.RESEND_FROM_EMAIL || "noreply@yourdomain.com";
-    const fromName = options.fromName || "Aurea CRM";
-    const from = `${fromName} <${fromEmail}>`;
-
-    const data = await resend.emails.send({
-      from,
-      to: Array.isArray(options.to) ? options.to : [options.to],
+    const delivery = await enqueueEmail({
+      organizationId: options.organizationId,
+      locationId: options.locationId,
+      clientId: options.clientId,
+      sourceType: options.sourceType,
+      sourceId: options.sourceId,
+      idempotencyKey: options.idempotencyKey,
+      to: options.to,
+      emailDomainId: options.emailDomainId,
       subject: options.subject,
       html: options.html,
       text: options.text,
-      attachments: options.attachments?.map((att) => ({
-        filename: att.filename,
-        content: att.content,
-      })),
+      fromEmail: options.from,
+      fromName: options.fromName,
       replyTo: options.replyTo,
+      attachments: options.attachments,
+      protectContent: true,
+      purpose: options.purpose ?? "TRANSACTIONAL",
     });
+
+    if (delivery.status === "SUPPRESSED") {
+      return {
+        success: false,
+        queued: false,
+        deliveryId: delivery.id,
+        status: "SUPPRESSED",
+        error:
+          "Email delivery is blocked by an active communication suppression.",
+      };
+    }
 
     return {
       success: true,
-      data,
+      queued: true,
+      deliveryId: delivery.id,
+      status: "QUEUED",
     };
   } catch (error) {
-    console.error("Failed to send email:", error);
     return {
       success: false,
+      queued: false,
       error: error instanceof Error ? error.message : "Failed to send email",
     };
   }
@@ -73,14 +95,29 @@ export async function sendEmail(options: SendEmailOptions) {
  * Send invoice reminder email with PDF attachment
  */
 export async function sendInvoiceReminder(params: {
+  organizationId: string;
+  locationId: string | null;
+  clientId: string | null;
+  invoiceId: string;
+  reminderId: string;
   to: string;
   subject: string;
   message: string;
   invoiceNumber: string;
-  pdfBuffer?: Buffer;
   paymentLink?: string;
-}) {
-  const { to, subject, message, invoiceNumber, pdfBuffer, paymentLink } = params;
+}): Promise<EmailQueueResult> {
+  const {
+    organizationId,
+    locationId,
+    clientId,
+    invoiceId,
+    reminderId,
+    to,
+    subject,
+    message,
+    invoiceNumber,
+    paymentLink,
+  } = params;
 
   // Convert message to HTML with proper formatting
   const htmlMessage = message
@@ -129,26 +166,26 @@ export async function sendInvoiceReminder(params: {
 </html>
   `;
 
-  const attachments = pdfBuffer
-    ? [
-        {
-          filename: `invoice-${invoiceNumber}.pdf`,
-          content: pdfBuffer,
-        },
-      ]
-    : undefined;
-
-  // Get domain from RESEND_FROM_EMAIL
-  const baseDomain = process.env.RESEND_FROM_EMAIL?.split("@")[1] || "yourdomain.com";
-
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId,
+    sourceType: "INVOICE_REMINDER",
+    sourceId: reminderId,
+    idempotencyKey: `invoice-reminder:${reminderId}:email`,
     to,
-    from: `invoices@${baseDomain}`,
     fromName: "Invoices",
     subject,
     html,
     text: message,
-    attachments,
+    attachments: [
+      {
+        kind: "INVOICE_PDF",
+        invoiceId,
+        filename: `invoice-${invoiceNumber}.pdf`,
+        contentType: "application/pdf",
+      },
+    ],
   });
 }
 
@@ -156,20 +193,35 @@ export async function sendInvoiceReminder(params: {
  * Send invoice to client
  */
 export async function sendInvoiceEmail(params: {
+  organizationId: string;
+  locationId: string | null;
+  clientId: string | null;
+  invoiceId: string;
   to: string;
   invoiceNumber: string;
   clientName: string;
   total: string;
   currency: string;
   dueDate: Date;
-  pdfBuffer: Buffer;
   paymentLink: string;
   businessName?: string;
-}) {
-  const { to, invoiceNumber, clientName, total, currency, dueDate, pdfBuffer, paymentLink, businessName } =
-    params;
+}): Promise<EmailQueueResult> {
+  const {
+    organizationId,
+    locationId,
+    clientId,
+    invoiceId,
+    to,
+    invoiceNumber,
+    clientName,
+    total,
+    currency,
+    dueDate,
+    paymentLink,
+    businessName,
+  } = params;
 
-  const subject = `Invoice ${invoiceNumber} from ${businessName || 'Your Business'}`;
+  const subject = `Invoice ${invoiceNumber} from ${businessName || "Your Business"}`;
 
   const html = `
 <!DOCTYPE html>
@@ -197,10 +249,13 @@ export async function sendInvoiceEmail(params: {
         </tr>
         <tr>
           <td style="padding: 8px 0; color: #6b7280;">Amount Due</td>
-          <td style="padding: 8px 0; text-align: right; font-weight: 600; font-size: 18px; color: #3b82f6;">${new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency,
-          }).format(parseFloat(total))}</td>
+          <td style="padding: 8px 0; text-align: right; font-weight: 600; font-size: 18px; color: #3b82f6;">${new Intl.NumberFormat(
+            "en-US",
+            {
+              style: "currency",
+              currency,
+            },
+          ).format(parseFloat(total))}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; color: #6b7280;">Due Date</td>
@@ -210,7 +265,7 @@ export async function sendInvoiceEmail(params: {
               month: "long",
               day: "numeric",
               year: "numeric",
-            }
+            },
           )}</td>
         </tr>
       </table>
@@ -231,19 +286,23 @@ export async function sendInvoiceEmail(params: {
 </html>
   `;
 
-  // Get domain from RESEND_FROM_EMAIL
-  const baseDomain = process.env.RESEND_FROM_EMAIL?.split("@")[1] || "yourdomain.com";
-
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId,
+    sourceType: "INVOICE",
+    sourceId: invoiceId,
+    idempotencyKey: `invoice:${invoiceId}:email`,
     to,
-    from: `invoices@${baseDomain}`,
     fromName: "Invoices",
     subject,
     html,
     attachments: [
       {
         filename: `invoice-${invoiceNumber}.pdf`,
-        content: pdfBuffer,
+        kind: "INVOICE_PDF",
+        invoiceId,
+        contentType: "application/pdf",
       },
     ],
   });
@@ -253,6 +312,11 @@ export async function sendInvoiceEmail(params: {
  * Send payment confirmation email
  */
 export async function sendPaymentConfirmationEmail(params: {
+  organizationId: string;
+  locationId: string | null;
+  clientId: string | null;
+  invoiceId: string;
+  paymentId: string;
   to: string;
   invoiceNumber: string;
   clientName: string;
@@ -260,8 +324,21 @@ export async function sendPaymentConfirmationEmail(params: {
   currency: string;
   paidAt: Date;
   paymentMethod?: string;
-}) {
-  const { to, invoiceNumber, clientName, amountPaid, currency, paidAt, paymentMethod = "Stripe" } = params;
+}): Promise<EmailQueueResult> {
+  const {
+    organizationId,
+    locationId,
+    clientId,
+    invoiceId,
+    paymentId,
+    to,
+    invoiceNumber,
+    clientName,
+    amountPaid,
+    currency,
+    paidAt,
+    paymentMethod = "Stripe",
+  } = params;
 
   const subject = `Payment Received - Invoice ${invoiceNumber}`;
 
@@ -292,10 +369,13 @@ export async function sendPaymentConfirmationEmail(params: {
         </tr>
         <tr>
           <td style="padding: 8px 0; color: #065f46;">Amount Paid</td>
-          <td style="padding: 8px 0; text-align: right; font-weight: 600; font-size: 20px; color: #10b981;">${new Intl.NumberFormat("en-US", {
-            style: "currency",
-            currency,
-          }).format(parseFloat(amountPaid))}</td>
+          <td style="padding: 8px 0; text-align: right; font-weight: 600; font-size: 20px; color: #10b981;">${new Intl.NumberFormat(
+            "en-US",
+            {
+              style: "currency",
+              currency,
+            },
+          ).format(parseFloat(amountPaid))}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; color: #065f46;">Payment Method</td>
@@ -311,7 +391,7 @@ export async function sendPaymentConfirmationEmail(params: {
               year: "numeric",
               hour: "2-digit",
               minute: "2-digit",
-            }
+            },
           )}</td>
         </tr>
       </table>
@@ -354,12 +434,14 @@ If you have any questions about this payment, please don't hesitate to client us
 This is an automated payment confirmation for invoice ${invoiceNumber}.
   `;
 
-  // Get domain from RESEND_FROM_EMAIL
-  const baseDomain = process.env.RESEND_FROM_EMAIL?.split("@")[1] || "yourdomain.com";
-
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId,
+    sourceType: "INVOICE_PAYMENT",
+    sourceId: paymentId,
+    idempotencyKey: `invoice:${invoiceId}:payment:${paymentId}:confirmation`,
     to,
-    from: `payments@${baseDomain}`,
     fromName: "Payments",
     subject,
     html,

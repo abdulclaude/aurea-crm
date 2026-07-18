@@ -1,11 +1,11 @@
 "use client";
 
-import { use } from "react";
+import { use, useEffect, useState } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dumbbell, Clock, Users, ChevronRight } from "lucide-react";
+import { Dumbbell, Clock, Users } from "lucide-react";
 import { format, isSameDay, addDays } from "date-fns";
 
 function groupByDay(
@@ -20,6 +20,10 @@ function groupByDay(
   return groups;
 }
 
+function safeHexColor(value: string | null | undefined): string | null {
+  return value && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+
 export default function PublicSchedulePage({
   params,
 }: {
@@ -27,12 +31,16 @@ export default function PublicSchedulePage({
 }) {
   const { slug } = use(params);
   const trpc = useTRPC();
+  const [isMounted, setIsMounted] = useState(false);
 
-  const { data, isLoading, error } = useQuery(
-    trpc.memberPortal.getPublicSchedule.queryOptions({ slug, days: 7 }),
-  );
+  useEffect(() => setIsMounted(true), []);
 
-  if (isLoading) {
+  const { data, isLoading, error } = useQuery({
+    ...trpc.memberPortal.getPublicSchedule.queryOptions({ slug, days: 7 }),
+    enabled: isMounted,
+  });
+
+  if (!isMounted || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center space-y-2">
@@ -99,6 +107,7 @@ export default function PublicSchedulePage({
               <div className="flex items-center gap-3 mb-3">
                 <h2 className="text-sm font-semibold">
                   {isToday ? "Today" : format(day, "EEEE")}
+                  {" "}
                   <span className="text-muted-foreground font-normal ml-1.5">
                     {format(day, "d MMM")}
                   </span>
@@ -127,6 +136,10 @@ export default function PublicSchedulePage({
                       maxCapacity?: number | null;
                       _count: { studioBooking: number };
                       instructor?: { name: string } | null;
+                      serviceType?: {
+                        name: string;
+                        calendarColor?: string | null;
+                      } | null;
                       classType?: {
                         name: string;
                         color?: string | null;
@@ -136,6 +149,10 @@ export default function PublicSchedulePage({
                       ? c.maxCapacity - c._count.studioBooking
                       : null;
                     const isFull = spotsLeft !== null && spotsLeft <= 0;
+                    const typeLabel = c.serviceType?.name ?? c.classType?.name;
+                    const typeColor = safeHexColor(
+                      c.serviceType?.calendarColor ?? c.classType?.color,
+                    );
 
                     return (
                       <Card
@@ -145,17 +162,17 @@ export default function PublicSchedulePage({
                         <div className="flex items-start justify-between">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              {c.classType && (
+                              {typeLabel && (
                                 <span
                                   className="text-xs font-medium px-1.5 py-0.5 rounded"
                                   style={{
-                                    background: c.classType.color
-                                      ? `${c.classType.color}20`
+                                    background: typeColor
+                                      ? `${typeColor}20`
                                       : undefined,
-                                    color: c.classType.color ?? undefined,
+                                    color: typeColor ?? undefined,
                                   }}
                                 >
-                                  {c.classType.name}
+                                  {typeLabel}
                                 </span>
                               )}
                             </div>
@@ -184,7 +201,9 @@ export default function PublicSchedulePage({
                               >
                                 <Users className="h-3 w-3" />
                                 <span>
-                                  {isFull ? "Full" : `${spotsLeft} spots`}
+                                  {isFull
+                                    ? "Full"
+                                    : `${spotsLeft} ${spotsLeft === 1 ? "spot" : "spots"}`}
                                 </span>
                               </div>
                             )}

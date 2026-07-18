@@ -9,7 +9,7 @@ import { generateText } from "ai";
 import { geminiChannel } from "@/inngest/channels/gemini";
 import type { AVAILABLE_MODELS } from "./dialog";
 import { decrypt } from "@/lib/encryption";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "@/db";
 import { credential as credentialTable } from "@/db/schema";
@@ -30,7 +30,7 @@ type GeminiData = {
 export const geminiExecutor: NodeExecutor<GeminiData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -66,7 +66,15 @@ export const geminiExecutor: NodeExecutor<GeminiData> = async ({
 
     const credential = await step.run("get-credential", () => {
       return db.query.credential.findFirst({
-        where: and(eq(credentialTable.id, data.credentialId!), eq(credentialTable.userId, userId)),
+        where: and(
+          eq(credentialTable.id, data.credentialId!),
+          eq(credentialTable.organizationId, scope.organizationId),
+          scope.locationId
+            ? eq(credentialTable.locationId, scope.locationId)
+            : isNull(credentialTable.locationId),
+          eq(credentialTable.type, "GEMINI"),
+          eq(credentialTable.isActive, true),
+        ),
       });
     });
 

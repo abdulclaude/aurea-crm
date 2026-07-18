@@ -1,6 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { z } from "zod";
 
 // Use a flexible type that accepts any entity type string
 interface EntityReference {
@@ -297,12 +296,18 @@ const intentDefinitions: IntentDefinition[] = [
 export interface RouteResult {
   intent: IntentDefinition;
   confidence: number;
-  extractedParams: Record<string, any>;
+  extractedParams: Record<string, unknown>;
 }
+
+const IntentClassificationSchema = z.object({
+  intent: z.string(),
+  confidence: z.number().min(0).max(1).default(0.8),
+});
 
 export async function routeIntent(
   message: string,
-  entities: EntityReference[]
+  entities: EntityReference[],
+  geminiApiKey: string,
 ): Promise<RouteResult | null> {
   // Check for explicit slash command
   const slashMatch = message.match(/^\/(\S+)/);
@@ -321,7 +326,9 @@ export async function routeIntent(
   }
 
   // Use AI to classify intent
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const intentList = intentDefinitions.map(i => `- ${i.name}: ${i.description}`).join("\n");
 
@@ -347,9 +354,14 @@ JSON:`;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const intentName = parsed.intent;
-      const confidence = parsed.confidence || 0.8;
+      const parsed = IntentClassificationSchema.safeParse(
+        JSON.parse(jsonMatch[0]) as unknown,
+      );
+      if (!parsed.success) {
+        return null;
+      }
+      const intentName = parsed.data.intent;
+      const confidence = parsed.data.confidence;
 
       if (intentName === "none" || !intentName) {
         return null;
@@ -374,8 +386,8 @@ JSON:`;
 function extractParams(
   message: string,
   entities: EntityReference[]
-): Record<string, any> {
-  const params: Record<string, any> = {};
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {};
 
   // Group entities by type
   const clients = entities.filter((e) => e.type === "client");

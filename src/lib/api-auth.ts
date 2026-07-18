@@ -6,18 +6,21 @@ import { eq } from "drizzle-orm";
 
 type ValidatedApiKey = Pick<
   typeof apiKeyTable.$inferSelect,
-  "id" | "organizationId"
+  "id" | "organizationId" | "locationId"
 > & {
   scopes: string[];
 };
 
-export async function validateApiKey(req: NextRequest): Promise<{
-  valid: false;
-  error: string;
-} | {
-  valid: true;
-  apiKey: ValidatedApiKey;
-}> {
+export async function validateApiKey(req: NextRequest): Promise<
+  | {
+      valid: false;
+      error: string;
+    }
+  | {
+      valid: true;
+      apiKey: ValidatedApiKey;
+    }
+> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return { valid: false, error: "Missing or malformed Authorization header" };
@@ -34,6 +37,7 @@ export async function validateApiKey(req: NextRequest): Promise<{
     .select({
       id: apiKeyTable.id,
       organizationId: apiKeyTable.organizationId,
+      locationId: apiKeyTable.locationId,
       scopes: apiKeyTable.scopes,
       isActive: apiKeyTable.isActive,
       expiresAt: apiKeyTable.expiresAt,
@@ -59,6 +63,7 @@ export async function validateApiKey(req: NextRequest): Promise<{
     apiKey: {
       id: apiKey.id,
       organizationId: apiKey.organizationId,
+      locationId: apiKey.locationId,
       scopes: apiKey.scopes ?? [],
     },
   };
@@ -66,12 +71,28 @@ export async function validateApiKey(req: NextRequest): Promise<{
 
 export function requireScope(
   scopes: string[],
-  required: string
+  required: string,
 ): { ok: false; error: string } | { ok: true } {
   if (!scopes.includes(required)) {
-    return { ok: false, error: `This key does not have the '${required}' scope` };
+    return {
+      ok: false,
+      error: `This key does not have the '${required}' scope`,
+    };
   }
   return { ok: true };
+}
+
+export function requireApiKeyLocation(apiKey: {
+  locationId: string | null;
+}): { ok: false; error: string } | { ok: true; locationId: string } {
+  if (!apiKey.locationId) {
+    return {
+      ok: false,
+      error:
+        "This API key is not bound to a location. Create a location-scoped key.",
+    };
+  }
+  return { ok: true, locationId: apiKey.locationId };
 }
 
 export function apiError(message: string, status: number): Response {

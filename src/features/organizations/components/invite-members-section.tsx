@@ -133,7 +133,7 @@ export function InviteMembersSection({
         <CardHeader className="pb-3 gap-1">
           <CardTitle className="text-base flex items-center gap-2 text-primary">
             <InviteIcon className="size-4" />
-            Invite members to {displayName}
+            Invite team members to {displayName}
           </CardTitle>
 
           <CardDescription className="text-xs text-primary/60">
@@ -161,15 +161,15 @@ export function InviteMembersSection({
                 <SelectContent>
                   {mode === "organization" ? (
                     <>
-                      <SelectItem value="owner">Agency Owner</SelectItem>
-                      <SelectItem value="admin">Agency Admin</SelectItem>
-                      <SelectItem value="manager">Agency Manager</SelectItem>
-                      <SelectItem value="staff">Agency Staff</SelectItem>
-                      <SelectItem value="viewer">Agency Viewer</SelectItem>
+                      <SelectItem value="owner">Studio Owner</SelectItem>
+                      <SelectItem value="admin">Studio Admin</SelectItem>
+                      <SelectItem value="manager">Studio Manager</SelectItem>
+                      <SelectItem value="staff">Studio Staff</SelectItem>
+                      <SelectItem value="viewer">Studio Viewer</SelectItem>
                     </>
                   ) : (
                     <>
-                      <SelectItem value="AGENCY">Agency Team</SelectItem>
+                      <SelectItem value="AGENCY">Studio Team</SelectItem>
                       <SelectItem value="ADMIN">Location Admin</SelectItem>
                       <SelectItem value="MANAGER">Manager</SelectItem>
                       <SelectItem value="STANDARD">Standard User</SelectItem>

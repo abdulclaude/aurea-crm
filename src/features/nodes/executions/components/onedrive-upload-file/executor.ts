@@ -36,7 +36,6 @@ export const onedriveUploadFileExecutor: NodeExecutor<OnedriveUploadFileData> = 
     const fileName = data.fileName ? decode(Handlebars.compile(data.fileName)(context)) : undefined;
     const fileContent = data.fileContent ? decode(Handlebars.compile(data.fileContent)(context)) : undefined;
 
-    // TODO: Implement OneDrive: Upload File logic here
     const result = await step.run("onedrive-upload-file", async () => {
       // Add implementation here
       throw new NonRetriableError("OneDrive: Upload File: Not yet implemented");

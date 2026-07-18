@@ -19,6 +19,14 @@ interface DatePickerProps {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  id?: string;
+  minDate?: Date;
+  maxDate?: Date;
+  required?: boolean;
+  ariaLabel?: string;
+  ariaLabelledBy?: string;
+  ariaDescribedBy?: string;
+  invalid?: boolean;
 }
 
 export function DatePicker({
@@ -27,6 +35,14 @@ export function DatePicker({
   placeholder = "Pick a date",
   disabled,
   className,
+  id,
+  minDate,
+  maxDate,
+  required,
+  ariaLabel,
+  ariaLabelledBy,
+  ariaDescribedBy,
+  invalid,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -34,13 +50,20 @@ export function DatePicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
+          id={id}
           variant="outline"
           className={cn(
             "w-full justify-start text-left font-normal bg-background border-black/10 dark:border-white/5 text-primary! text-xs hover:bg-primary-foreground/25 hover:text-black transition duration-150",
             !date && "text-white/50",
-            className
+            className,
           )}
           disabled={disabled}
+          aria-label={ariaLabel}
+          aria-labelledby={ariaLabelledBy}
+          aria-describedby={ariaDescribedBy}
+          aria-invalid={invalid || undefined}
+          aria-required={required || undefined}
         >
           <CalendarIcon className="mr-1 size-4 text-primary/75 dark:text-white/50" />
           {date ? format(date, "PPP") : <span>{placeholder}</span>}
@@ -53,6 +76,12 @@ export function DatePicker({
         <Calendar
           mode="single"
           selected={date}
+          disabled={[
+            ...(minDate ? [{ before: minDate }] : []),
+            ...(maxDate ? [{ after: maxDate }] : []),
+          ]}
+          startMonth={minDate}
+          endMonth={maxDate}
           onSelect={(newDate) => {
             onSelect?.(newDate);
             if (newDate) {

@@ -50,7 +50,7 @@ export const OutlookReplyToEmailNode: React.FC<NodeProps<OutlookReplyToEmailNode
       nodeId: props.id,
       channel: OUTLOOK_REPLY_TO_EMAIL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookReplyToEmailRealtimeToken as any,
+      refreshToken: fetchOutlookReplyToEmailRealtimeToken,
     });
 
     const handleOpenSettings = () => {

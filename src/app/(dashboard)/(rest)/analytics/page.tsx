@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { BarChart3, Users, Workflow, TrendingUp, Activity, CheckCircle2, XCircle, Clock, DollarSign, Receipt, AlertCircle, Calendar } from "lucide-react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
+import { AutomationInsights } from "@/features/executions/components/automation-insights";
 
 export default function AnalyticsPage() {
   const [activeTab, setActiveTab] = useState("overview");
@@ -70,7 +71,7 @@ export default function AnalyticsPage() {
         tabs={[
           { id: "overview", label: "Overview" },
           { id: "invoicing", label: "Invoicing" },
-          { id: "workflows", label: "Workflows" },
+          { id: "workflows", label: "Automations" },
           { id: "clients", label: "Clients" },
           { id: "deals", label: "Deals" },
           { id: "user-behavior", label: "User Behaviour" },
@@ -408,87 +409,7 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {activeTab === "workflows" && (
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Executions</CardTitle>
-                  <BarChart3 className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{workflowAnalytics?.totalExecuted ?? 0}</div>
-                  <p className="text-xs text-muted-foreground">
-                    All time executions
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-                  <CheckCircle2 className="size-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">
-                    {workflowAnalytics?.successRate ? `${workflowAnalytics.successRate.toFixed(1)}%` : 'N/A'}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {workflowAnalytics?.successCount ?? 0} successful
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Failed</CardTitle>
-                  <XCircle className="size-4 text-red-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-red-600">{workflowAnalytics?.failedCount ?? 0}</div>
-                  <p className="text-xs text-muted-foreground">
-                    Execution failures
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Avg Duration</CardTitle>
-                  <Clock className="size-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">
-                    {workflowAnalytics?.avgDuration ? `${(workflowAnalytics.avgDuration / 1000).toFixed(1)}s` : 'N/A'}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Average execution time
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Workflow Performance</CardTitle>
-                <CardDescription>Track execution success rates, duration, and failures</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-md border p-4">
-                  <p className="text-sm text-muted-foreground">
-                    Detailed workflow analytics and performance metrics
-                  </p>
-                  <ul className="text-xs text-muted-foreground mt-4 space-y-2">
-                    <li>• Monitor success vs failure rates</li>
-                    <li>• Analyze execution duration trends</li>
-                    <li>• Identify bottlenecks in workflows</li>
-                    <li>• Track popular workflows by usage</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+        {activeTab === "workflows" && <AutomationInsights />}
 
         {activeTab === "clients" && (
           <div className="space-y-4">
@@ -699,7 +620,7 @@ export default function AnalyticsPage() {
                     <li>• Feature usage heatmaps</li>
                     <li>• Session recordings (if enabled)</li>
                     <li>• User retention cohorts</li>
-                    <li>• Agency vs Client behaviour</li>
+                    <li>• Studio vs location behaviour</li>
                   </ul>
                 </div>
               </CardContent>

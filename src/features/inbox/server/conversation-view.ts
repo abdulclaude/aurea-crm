@@ -1,0 +1,31 @@
+export const inboxConversationViewColumns = {
+  id: true,
+  organizationId: true,
+  locationId: true,
+  clientId: true,
+  routeId: true,
+  assigneeStaffIdentityId: true,
+  assignedAt: true,
+  assignedByUserId: true,
+  channel: true,
+  status: true,
+  subject: true,
+  isRead: true,
+  lastMessageAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+export const inboxMessageViewColumns = {
+  id: true,
+  conversationId: true,
+  direction: true,
+  content: true,
+  isRead: true,
+  senderUserId: true,
+  deliveryId: true,
+  fromAddress: true,
+  toAddress: true,
+  subject: true,
+  createdAt: true,
+} as const;

@@ -30,6 +30,7 @@ type ReportFiltersMenuProps = {
   onToggle: (fieldId: string, value: string) => void;
   open: boolean;
   previewCount: number;
+  previewIsPartial: boolean;
   selectedFilters: ReportFilterState;
   setOpen: (open: boolean) => void;
 };
@@ -42,6 +43,7 @@ export function ReportFiltersMenu({
   onToggle,
   open,
   previewCount,
+  previewIsPartial,
   selectedFilters,
   setOpen,
 }: ReportFiltersMenuProps) {
@@ -101,6 +103,7 @@ export function ReportFiltersMenu({
                       checked={(selectedFilters[filter.fieldId] ?? []).includes(
                         value,
                       )}
+                      id={`${filter.fieldId}-${value}`}
                       label={value}
                       onToggle={() => onToggle(filter.fieldId, value)}
                     />
@@ -122,7 +125,7 @@ export function ReportFiltersMenu({
               onApply();
             }}
           >
-            {`Show ${previewCount} rows`}
+            {`Show ${previewCount} ${previewIsPartial ? "loaded " : ""}rows`}
           </Button>
         </div>
       </DropdownMenuContent>
@@ -132,21 +135,27 @@ export function ReportFiltersMenu({
 
 function FilterOptionRow({
   checked,
+  id: rawId,
   label,
   onToggle,
 }: {
   checked: boolean;
+  id: string;
   label: string;
   onToggle: () => void;
 }) {
+  const id = `report-filter-${rawId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
   return (
-    <div className="flex items-center gap-2 py-2 text-xs text-primary cursor-pointer rounded-lg group">
+    <div className="group flex items-center gap-2 rounded-lg py-2 text-xs text-primary">
       <Checkbox
+        id={id}
         checked={checked}
         onCheckedChange={onToggle}
         className="rounded-lg border-black/5 dark:border-white/5 cursor-pointer group-hover:bg-primary-foreground data-[state=checked]:bg-primary-foreground hover:bg-accent data-[state=checked]:bg-accent data-[state=checked]:border-black/5 dark:data-[state=checked]:border-white/5"
       />
-      <span className="select-none">{label}</span>
+      <label className="cursor-pointer select-none" htmlFor={id}>
+        {label}
+      </label>
     </div>
   );
 }

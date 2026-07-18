@@ -41,12 +41,11 @@ import {
   useSuspenseWebhook,
   useUpdateWebhook,
 } from "../hooks/use-webhooks";
-import { useUpgradeModal } from "@/hooks/use-upgrade-modal";
 
 const formSchema = z.object({
   name: z.string().min(1, "Name is required"),
   provider: z.enum(WebhookProvider),
-  url: z.string().url("Enter a valid webhook URL"),
+  url: z.string(),
   signingSecret: z.string().optional().or(z.literal("")),
   description: z.string().max(500).optional().or(z.literal("")),
 });
@@ -87,7 +86,6 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
   const router = useRouter();
   const createWebhook = useCreateWebhook();
   const updateWebhook = useUpdateWebhook();
-  const { handleError, modal } = useUpgradeModal();
 
   const isEdit = Boolean(initialData?.id);
 
@@ -123,6 +121,11 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
   }, [initialData, form]);
 
   const onSubmit = async (values: FormValues) => {
+    const parsedUrl = z.string().url().safeParse(values.url);
+    if ((!isEdit || values.url) && !parsedUrl.success) {
+      form.setError("url", { message: "Enter a valid webhook URL" });
+      return;
+    }
     const payload = {
       ...values,
       signingSecret: values.signingSecret || undefined,
@@ -148,14 +151,13 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
           toast.success(`Webhook "${data.name}" created.`);
           router.push(`/webhooks/${data.id}`);
         },
-        onError: (error) => handleError(error),
+        onError: (error) => toast.error(error.message),
       });
     }
   };
 
   return (
     <>
-      {modal}
       <Card className="shadow-none px-0">
         <CardHeader>
           <CardTitle>{isEdit ? "Edit webhook" : "Create webhook"}</CardTitle>
@@ -227,7 +229,12 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
                     <FormLabel>Webhook URL</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="https://hooks.slack.com/..."
+                        type="password"
+                        placeholder={
+                          isEdit
+                            ? "Leave blank to keep the current URL"
+                            : "https://hooks.slack.com/..."
+                        }
                         {...field}
                       />
                     </FormControl>
@@ -273,7 +280,7 @@ export const WebhookForm: React.FC<WebhookFormProps> = ({ initialData }) => {
 
               <div className="flex gap-2">
                 <Button type="button" variant="outline" asChild>
-                  <Link href="/webhooks" prefetch>
+                  <Link href="/settings/webhooks" prefetch>
                     Cancel
                   </Link>
                 </Button>

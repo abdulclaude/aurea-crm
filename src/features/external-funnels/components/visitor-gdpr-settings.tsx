@@ -14,8 +14,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useTRPCClient } from "@/trpc/client";
-import { useMutation } from "@tanstack/react-query";
+import { useTRPC, useTRPCClient } from "@/trpc/client";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, Trash2, Shield, CheckCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -38,15 +38,21 @@ export function VisitorGDPRSettings({
   profile,
 }: VisitorGDPRSettingsProps) {
   const trpcClient = useTRPCClient();
+  const trpc = useTRPC();
   const router = useRouter();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const permissions = useQuery(trpc.permissions.getCurrent.queryOptions());
+  const canExport =
+    permissions.data?.capabilities.includes("privacy.export") ?? false;
+  const canErase =
+    permissions.data?.capabilities.includes("privacy.erase") ?? false;
 
   const exportDataMutation = useMutation({
     mutationFn: async (input: { funnelId: string; anonymousId: string }) =>
       trpcClient.externalFunnels.exportVisitorData.mutate(input),
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       // Download as JSON file
       const blob = new Blob([JSON.stringify(data, null, 2)], {
         type: "application/json",
@@ -60,10 +66,15 @@ export function VisitorGDPRSettings({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success("Data exported successfully");
+      const partial = Object.values(data.partial).some(Boolean);
+      if (partial) {
+        toast.warning("Export created with collection limits noted in the file");
+      } else {
+        toast.success("Visitor data exported");
+      }
       setIsExporting(false);
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast.error(`Export failed: ${error.message}`);
       setIsExporting(false);
     },
@@ -72,15 +83,17 @@ export function VisitorGDPRSettings({
   const deleteDataMutation = useMutation({
     mutationFn: async (input: { funnelId: string; anonymousId: string }) =>
       trpcClient.externalFunnels.deleteVisitorData.mutate(input),
-    onSuccess: () => {
-      toast.success("All visitor data has been permanently deleted");
+    onSuccess: (result) => {
+      toast.success(
+        `Erased ${result.deleted.events} events and ${result.deleted.sessions} sessions`,
+      );
       setIsDeleting(false);
       setIsDeleteDialogOpen(false);
       
       // Redirect back to visitors list
       router.push(`/funnels/${funnelId}/analytics?tab=visitors`);
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast.error(`Deletion failed: ${error.message}`);
       setIsDeleting(false);
     },
@@ -111,7 +124,7 @@ export function VisitorGDPRSettings({
             <CardTitle>Privacy & Data Management</CardTitle>
           </div>
           <CardDescription>
-            GDPR-compliant data access and deletion controls
+            Scoped visitor access and erasure controls
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -155,17 +168,17 @@ export function VisitorGDPRSettings({
           </div>
 
           {/* GDPR Actions */}
-          <div className="space-y-3">
+          {(canExport || canErase) && <div className="space-y-3">
             <h4 className="text-sm font-medium">GDPR Rights</h4>
             
             {/* Export Data - Right to Access */}
-            <div className="flex items-start gap-3 p-4 border rounded-lg">
+            {canExport && <div className="flex items-start gap-3 p-4 border rounded-lg">
               <Download className="h-5 w-5 text-blue-600 mt-0.5" />
               <div className="flex-1 space-y-1">
                 <h5 className="text-sm font-medium">Right to Access (GDPR Art. 15)</h5>
                 <p className="text-sm text-muted-foreground">
-                  Export all collected data for this visitor in JSON format, including
-                  profile information, sessions, events, and Core Web Vitals.
+                  Export the visitor profiles, sessions, events, performance metrics,
+                  and identity-linked external form submissions in this workspace.
                 </p>
                 <Button
                   variant="outline"
@@ -178,25 +191,25 @@ export function VisitorGDPRSettings({
                   {isExporting ? "Exporting..." : "Export All Data"}
                 </Button>
               </div>
-            </div>
+            </div>}
 
             {/* Delete Data - Right to Erasure */}
-            <div className="flex items-start gap-3 p-4 border border-red-200 rounded-lg bg-red-50/50">
+            {canErase && <div className="flex items-start gap-3 p-4 border border-red-200 rounded-lg bg-red-50/50">
               <Trash2 className="h-5 w-5 text-red-600 mt-0.5" />
               <div className="flex-1 space-y-1">
                 <h5 className="text-sm font-medium text-red-900">
                   Right to Erasure (GDPR Art. 17)
                 </h5>
                 <p className="text-sm text-red-700">
-                  Permanently delete all data associated with this visitor. This action
-                  cannot be undone and will remove:
+                  Erase scoped tracking and identity-linked external form data. This
+                  action cannot be undone and will remove:
                 </p>
                 <ul className="text-sm text-red-700 list-disc list-inside ml-2 mt-1">
-                  <li>Visitor profile and user properties</li>
-                  <li>All session records ({profile.totalSessions} sessions)</li>
-                  <li>All tracked events ({profile.totalEvents} events)</li>
+                  <li>Identifying profile properties</li>
+                  <li>Session records across this workspace</li>
+                  <li>Tracked events and performance metrics</li>
                   <li>Geographic and device information</li>
-                  <li>Core Web Vitals and performance data</li>
+                  <li>Identity-linked external form submissions</li>
                 </ul>
                 <Button
                   variant="destructive"
@@ -205,11 +218,11 @@ export function VisitorGDPRSettings({
                   className="mt-2"
                 >
                   <Trash2 className="h-4 w-4 mr-2" />
-                  Delete All Data
+                  Erase Visitor Data
                 </Button>
               </div>
-            </div>
-          </div>
+            </div>}
+          </div>}
 
           {/* Privacy Information */}
           <div className="p-4 bg-muted rounded-lg space-y-2">
@@ -218,12 +231,10 @@ export function VisitorGDPRSettings({
               Privacy Information
             </h4>
             <ul className="text-sm text-muted-foreground space-y-1">
-              <li>✓ Cookie-free tracking (uses localStorage)</li>
-              <li>✓ IP address anonymization available</li>
-              <li>✓ Respects Do Not Track (DNT) headers</li>
-              <li>✓ Respects Global Privacy Control (GPC)</li>
-              <li>✓ No data sold to third parties</li>
-              <li>✓ Data stored in secure EU/US servers</li>
+              <li>Browser telemetry is rejected when DNT or GPC is enabled.</li>
+              <li>IP handling follows this funnel&apos;s tracking configuration.</li>
+              <li>CRM clients, bookings, payments, provider copies, and backups are not removed here.</li>
+              <li>Future activity may be collected again when tracking remains permitted.</li>
             </ul>
           </div>
         </CardContent>
@@ -235,14 +246,14 @@ export function VisitorGDPRSettings({
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete all data for
-              visitor <strong>{profile.displayName}</strong> ({anonymousId}), including:
+              This action cannot be undone. It will erase scoped telemetry and
+              identity-linked external form data for <strong>{profile.displayName}</strong>
+              ({anonymousId}), including:
               <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>{profile.totalSessions} session records</li>
-                <li>{profile.totalEvents} tracked events</li>
-                <li>Profile and user properties</li>
+                <li>Sessions, tracked events, and performance metrics</li>
+                <li>Identifying profile properties</li>
                 <li>Geographic and device data</li>
-                <li>Performance metrics</li>
+                <li>Identity-linked external form submissions</li>
               </ul>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -253,7 +264,7 @@ export function VisitorGDPRSettings({
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700"
             >
-              {isDeleting ? "Deleting..." : "Delete Permanently"}
+              {isDeleting ? "Erasing..." : "Erase Permanently"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

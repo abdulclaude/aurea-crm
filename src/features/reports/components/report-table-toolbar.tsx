@@ -29,6 +29,7 @@ import type {
 } from "./report-table-types";
 
 type ReportTableToolbarProps = {
+  actions?: React.ReactNode;
   columnLabels: Readonly<Record<string, string>>;
   columnOrder: ColumnOrderState;
   columnVisibility: VisibilityState;
@@ -41,6 +42,7 @@ type ReportTableToolbarProps = {
   onSortingChange: (sorting: SortingState) => void;
   primaryColumnId: string;
   previewCount: number;
+  previewIsPartial: boolean;
   search: string;
   selectedFilters: ReportFilterState;
   sorting: SortingState;
@@ -48,6 +50,7 @@ type ReportTableToolbarProps = {
 };
 
 export function ReportTableToolbar({
+  actions,
   columnLabels,
   columnOrder,
   columnVisibility,
@@ -60,6 +63,7 @@ export function ReportTableToolbar({
   onSortingChange,
   primaryColumnId,
   previewCount,
+  previewIsPartial,
   search,
   selectedFilters,
   sorting,
@@ -89,9 +93,9 @@ export function ReportTableToolbar({
   React.useEffect(() => setStagedFilters(selectedFilters), [selectedFilters]);
 
   return (
-    <div className="flex justify-between w-full items-center py-4">
-      <div className="flex items-center gap-2 w-full">
-        <div className="flex w-128 items-center bg-background transition duration-250 relative hover:bg-primary-foreground/50 hover:text-black rounded-lg h-8.5">
+    <div className="flex w-full flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <div className="relative flex h-8.5 w-full min-w-0 items-center rounded-lg bg-background transition duration-200 hover:bg-primary-foreground/50 hover:text-black sm:max-w-lg">
           <SearchIcon className="size-3.5 absolute z-10 left-3 top-1/2 -translate-y-1/2 text-primary/50" />
           <Input
             placeholder="Search report data..."
@@ -100,21 +104,26 @@ export function ReportTableToolbar({
               setSearchInput(event.currentTarget.value);
               debouncedSearch(event.currentTarget.value);
             }}
-            className="text-xs px-0 border-none bg-transparent! hover:bg-transparent w-128 pl-8"
+            className="w-full border-none bg-transparent! px-0 pl-8 pr-10 text-xs hover:bg-transparent"
           />
           <ReportFiltersMenu
             dateFilter={dateFilter}
             filters={filters}
-            hasFiltersApplied={hasFiltersApplied || Boolean(dateFilter?.isActive)}
+            hasFiltersApplied={
+              hasFiltersApplied || Boolean(dateFilter?.isActive)
+            }
             onApply={() => {
               onFiltersChange(stagedFilters);
               setFiltersOpen(false);
             }}
             onToggle={(fieldId, value) => {
-              setStagedFilters((previous) => toggleFilter(previous, fieldId, value));
+              setStagedFilters((previous) =>
+                toggleFilter(previous, fieldId, value),
+              );
             }}
             open={filtersOpen}
             previewCount={previewCount}
+            previewIsPartial={previewIsPartial}
             selectedFilters={stagedFilters}
             setOpen={setFiltersOpen}
           />
@@ -145,15 +154,18 @@ export function ReportTableToolbar({
         </DropdownMenu>
       </div>
 
-      <ReportColumnControls
-        columnLabels={columnLabels}
-        columnOrder={columnOrder}
-        columnVisibility={columnVisibility}
-        initialColumnOrder={initialColumnOrder}
-        onColumnOrderChange={onColumnOrderChange}
-        primaryColumnId={primaryColumnId}
-        table={table}
-      />
+      <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+        {actions}
+        <ReportColumnControls
+          columnLabels={columnLabels}
+          columnOrder={columnOrder}
+          columnVisibility={columnVisibility}
+          initialColumnOrder={initialColumnOrder}
+          onColumnOrderChange={onColumnOrderChange}
+          primaryColumnId={primaryColumnId}
+          table={table}
+        />
+      </div>
     </div>
   );
 }

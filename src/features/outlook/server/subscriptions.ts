@@ -1,274 +1,390 @@
 "use server";
 
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/db";
+import { NodeType } from "@/db/enums";
 import {
-  account as accountTable,
-  apps,
   node as workflowNode,
   outlookSubscription,
   outlookTriggerState,
+  providerAccount,
   workflows,
 } from "@/db/schema";
+import {
+  buildMicrosoftNotificationId,
+  generateMicrosoftClientState,
+  hashMicrosoftClientState,
+  microsoftClientStateMatches,
+  type MicrosoftChangeNotification,
+  type MicrosoftSubscriptionScope,
+  type MicrosoftSubscriptionSyncInput,
+  type MicrosoftVerifiedChangeNotification,
+} from "@/features/microsoft/lib/subscription-contracts";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@/db/enums";
+import { resolveOutlookTriggerSender } from "@/features/outlook/lib/trigger-config";
 
-const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
-const SUBSCRIPTION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 3; // 3 days (max allowed by Microsoft)
+const SUBSCRIPTION_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6;
+const SUBSCRIPTION_LIFETIME_MS = 1000 * 60 * 60 * 24 * 3;
 const GRAPH_API_BASE = "https://graph.microsoft.com/v1.0";
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.OUTLOOK_TRIGGER,
+);
 
-export type OutlookTriggerConfig = {
-  folderName?: string;
-  subject?: string;
-  sender?: string;
-  variableName?: string;
-};
+const outlookTriggerConfigSchema = z
+  .object({
+    folderName: z.string().optional(),
+    subject: z.string().optional(),
+    sender: z.string().optional(),
+    from: z.string().optional(),
+    variableName: z.string().optional(),
+  })
+  .transform(({ from, ...config }) => ({
+    ...config,
+    sender: resolveOutlookTriggerSender({ sender: config.sender, from }),
+  }));
 
-type SyncParams = {
-  userId: string;
-};
-type Account = InferSelectModel<typeof accountTable>;
+const outlookMessageSchema = z.object({
+  id: z.string().min(1),
+  subject: z.string().nullable().optional(),
+  from: z
+    .object({
+      emailAddress: z.object({ address: z.string().optional() }),
+    })
+    .nullable()
+    .optional(),
+  receivedDateTime: z.string().optional(),
+  bodyPreview: z.string().optional(),
+});
+
+const outlookMessagesSchema = z.object({
+  value: z.array(outlookMessageSchema).default([]),
+});
+
+const outlookProfileSchema = z.object({
+  mail: z.string().nullable().optional(),
+  userPrincipalName: z.string().min(1),
+});
+
+const graphSubscriptionSchema = z.object({
+  id: z.string().min(1),
+  expirationDateTime: z.string().optional(),
+});
+
+const graphErrorSchema = z.object({
+  error: z.object({ message: z.string().optional() }).optional(),
+});
+
+export type OutlookTriggerConfig = z.infer<typeof outlookTriggerConfigSchema>;
+
 type OutlookNode = Pick<
   InferSelectModel<typeof workflowNode>,
-  "id" | "workflowId" | "data"
->;
+  "id" | "workflowId" | "data" | "providerAccountId"
+> & {
+  organizationId: string;
+  locationId: string | null;
+};
 
-async function getOutlookTriggerNodes(userId: string): Promise<OutlookNode[]> {
-  return await db
+type OutlookTriggerScope = Pick<
+  MicrosoftSubscriptionScope,
+  "organizationId" | "locationId"
+> & {
+  providerAccountId?: string | null;
+};
+
+function exactLocationWhere(locationId: string | null) {
+  return locationId !== null
+    ? eq(workflows.locationId, locationId)
+    : isNull(workflows.locationId);
+}
+
+async function getOutlookTriggerNodes(
+  scope: OutlookTriggerScope,
+): Promise<OutlookNode[]> {
+  const rows = await db
     .select({
       id: workflowNode.id,
       workflowId: workflowNode.workflowId,
       data: workflowNode.data,
+      providerAccountId: workflowNode.providerAccountId,
+      organizationId: workflows.organizationId,
+      locationId: workflows.locationId,
     })
     .from(workflowNode)
     .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
     .where(
       and(
         eq(workflowNode.type, NodeType.OUTLOOK_TRIGGER),
-        eq(workflows.userId, userId),
+        eq(workflows.organizationId, scope.organizationId),
+        scope.providerAccountId
+          ? eq(workflowNode.providerAccountId, scope.providerAccountId)
+          : undefined,
         eq(workflows.archived, false),
         eq(workflows.isTemplate, false),
       ),
     );
+  return rows.flatMap((row) =>
+    row.organizationId ? [{ ...row, organizationId: row.organizationId }] : [],
+  );
 }
 
-async function deleteOutlookTriggerStatesForUser(
-  userId: string,
-  exceptNodeIds?: string[],
+async function deleteOutlookTriggerStates(
+  scope: Pick<MicrosoftSubscriptionScope, "organizationId" | "locationId">,
+  exceptNodeIds: string[] = [],
 ): Promise<void> {
   const rows = await db
     .select({ id: outlookTriggerState.id, nodeId: outlookTriggerState.nodeId })
     .from(outlookTriggerState)
     .innerJoin(workflows, eq(outlookTriggerState.workflowId, workflows.id))
-    .where(eq(workflows.userId, userId));
+    .where(
+      and(
+        eq(workflows.organizationId, scope.organizationId),
+        exactLocationWhere(scope.locationId),
+      ),
+    );
   const ids = rows
-    .filter((row) => !exceptNodeIds || !exceptNodeIds.includes(row.nodeId))
+    .filter((row) => !exceptNodeIds.includes(row.nodeId))
     .map((row) => row.id);
   if (ids.length > 0) {
-    await db.delete(outlookTriggerState).where(inArray(outlookTriggerState.id, ids));
+    await db
+      .delete(outlookTriggerState)
+      .where(inArray(outlookTriggerState.id, ids));
   }
 }
 
-export async function syncOutlookWorkflowSubscriptions({ userId }: SyncParams) {
-  try {
-    const outlookApp = await db.query.apps.findFirst({
-      where: and(eq(apps.userId, userId), eq(apps.provider, AppProvider.MICROSOFT)),
+export async function syncOutlookWorkflowSubscriptions(
+  input: MicrosoftSubscriptionSyncInput,
+): Promise<void> {
+  const nodes = await getOutlookTriggerNodes(input);
+  await deleteOutlookTriggerStates(
+    input,
+    nodes.map((node) => node.id),
+  );
+
+  const providerAccountIds = Array.from(
+    new Set(
+      nodes.flatMap((node) =>
+        node.providerAccountId ? [node.providerAccountId] : [],
+      ),
+    ),
+  );
+  await removeUnusedOutlookWatches(input, new Set(providerAccountIds));
+  const accountRows = providerAccountIds.length
+    ? await db
+        .select({
+          id: providerAccount.id,
+          locationId: providerAccount.locationId,
+        })
+        .from(providerAccount)
+        .where(
+          and(
+            eq(providerAccount.organizationId, input.organizationId),
+            inArray(providerAccount.id, providerAccountIds),
+          ),
+        )
+    : [];
+  const accountLocationById = new Map(
+    accountRows.map((account) => [account.id, account.locationId]),
+  );
+
+  for (const providerAccountId of providerAccountIds) {
+    const boundNode = nodes.find(
+      (node) => node.providerAccountId === providerAccountId,
+    );
+    if (!boundNode || !accountLocationById.has(providerAccountId)) {
+      throw new Error(
+        "A bound Outlook provider account could not be resolved.",
+      );
+    }
+    const grant = await resolveMicrosoftGrant({
+      ...input,
+      locationId: boundNode.locationId,
+      providerAccountId,
     });
-
-    if (!outlookApp) {
-      await stopOutlookWatchForUser(userId);
-      await deleteOutlookTriggerStatesForUser(userId);
-      return;
-    }
-
-    const nodes = await getOutlookTriggerNodes(userId);
-
-    if (nodes.length > 0) {
-      const activeNodeIds = nodes.map((node) => node.id);
-      await deleteOutlookTriggerStatesForUser(userId, activeNodeIds);
-    } else {
-      await deleteOutlookTriggerStatesForUser(userId);
-    }
-
-    if (nodes.length === 0) {
-      await stopOutlookWatchForUser(userId);
-      return;
-    }
-
-    await ensureOutlookSubscription({ userId });
-  } catch (error) {
-    console.error(
-      `[Outlook] Failed to sync workflow subscriptions for user ${userId}:`,
-      error
+    await ensureOutlookSubscription(
+      {
+        ...input,
+        locationId: accountLocationById.get(providerAccountId) ?? null,
+        providerAccountId,
+      },
+      grant,
     );
   }
 }
 
-export async function removeOutlookSubscriptionsForUser(userId: string) {
-  await stopOutlookWatchForUser(userId);
-  await deleteOutlookTriggerStatesForUser(userId);
+export async function removeOutlookSubscriptionsForUser(
+  input: MicrosoftSubscriptionSyncInput,
+): Promise<void> {
+  await stopOutlookWatchesForScope(input);
+  await deleteOutlookTriggerStates(input);
 }
 
-export async function enqueueOutlookNotification({
-  subscriptionId,
-  changeType,
-  resource,
-}: {
+export async function authenticateOutlookNotifications(
+  notifications: MicrosoftChangeNotification[],
+): Promise<MicrosoftVerifiedChangeNotification[]> {
+  const subscriptionIds = Array.from(
+    new Set(notifications.map((notification) => notification.subscriptionId)),
+  );
+  if (subscriptionIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      subscriptionId: outlookSubscription.subscriptionId,
+      clientStateHash: outlookSubscription.clientStateHash,
+    })
+    .from(outlookSubscription)
+    .where(inArray(outlookSubscription.subscriptionId, subscriptionIds));
+  const hashes = new Map(
+    rows.flatMap((row) =>
+      row.subscriptionId
+        ? [[row.subscriptionId, row.clientStateHash] as const]
+        : [],
+    ),
+  );
+
+  return notifications.flatMap(({ clientState, ...notification }) => {
+    const expectedHash = hashes.get(notification.subscriptionId);
+    return expectedHash &&
+      microsoftClientStateMatches(clientState, expectedHash)
+      ? [notification]
+      : [];
+  });
+}
+
+export async function enqueueOutlookNotification(
+  notification: MicrosoftVerifiedChangeNotification,
+): Promise<void> {
+  await inngest.send(buildOutlookNotificationEvent(notification));
+}
+
+export async function enqueueOutlookNotifications(
+  notifications: MicrosoftVerifiedChangeNotification[],
+): Promise<void> {
+  if (notifications.length === 0) return;
+  await inngest.send(notifications.map(buildOutlookNotificationEvent));
+}
+
+function buildOutlookNotificationEvent(
+  notification: MicrosoftVerifiedChangeNotification,
+) {
+  return {
+    name: "outlook/subscription.notification",
+    id: buildMicrosoftNotificationId("outlook", notification),
+    data: {
+      subscriptionId: notification.subscriptionId,
+      changeType: notification.changeType,
+      resource: notification.resource,
+      resourceData: notification.resourceData,
+    },
+  } as const;
+}
+
+export async function processOutlookNotification(input: {
   subscriptionId: string;
   changeType: string;
   resource: string;
-}) {
-  await inngest.send({
-    name: "outlook/subscription.notification",
-    data: {
-      subscriptionId,
-      changeType,
-      resource,
-    },
-  });
-}
-
-export async function processOutlookNotification({
-  subscriptionId,
-}: {
-  subscriptionId: string;
-}) {
+  resourceData?: { id?: string };
+}): Promise<void> {
   const subscription = await db.query.outlookSubscription.findFirst({
-    where: eq(outlookSubscription.subscriptionId, subscriptionId),
+    where: eq(outlookSubscription.subscriptionId, input.subscriptionId),
   });
+  if (!subscription) return;
 
-  if (!subscription) {
-    return;
-  }
-
-  await db
-    .update(outlookSubscription)
-    .set({
-        lastSyncedAt: new Date(),
-    })
-    .where(eq(outlookSubscription.id, subscription.id))
-    .catch(() => {});
-
-  const nodes = await getOutlookTriggerNodes(subscription.userId);
-
+  const grant = await resolveMicrosoftGrant(subscription);
+  const messageId =
+    input.resourceData?.id ?? extractMicrosoftResourceId(input.resource);
+  if (!messageId) return;
+  const nodes = await getOutlookTriggerNodes(subscription);
   if (nodes.length === 0) {
-    await stopOutlookWatchForUser(subscription.userId);
-    return;
-  }
-
-  let accessToken: string;
-  try {
-    accessToken = await ensureMicrosoftAccessToken(subscription.userId);
-  } catch (error) {
-    console.error("[Outlook] Unable to refresh access token:", error);
+    await stopOutlookWatch(subscription);
     return;
   }
 
   for (const node of nodes) {
-    try {
-      await maybeTriggerWorkflowFromNode({
-        node,
-        accessToken,
-      });
-    } catch (error) {
-      console.error(
-        `[Outlook] Failed to process node ${node.id} for workflow ${node.workflowId}:`,
-        error
-      );
-    }
+    await maybeTriggerWorkflowFromNode({
+      node,
+      nodeScope: node,
+      grant,
+      messageId,
+      subscriptionRecordId: subscription.id,
+    });
   }
+
+  await db
+    .update(outlookSubscription)
+    .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
+    .where(eq(outlookSubscription.id, subscription.id));
 }
 
-export async function renewOutlookSubscriptions() {
+export async function renewOutlookSubscriptions(): Promise<number> {
   const threshold = new Date(Date.now() + SUBSCRIPTION_RENEWAL_WINDOW_MS);
   const subscriptions = await db.query.outlookSubscription.findMany({
-    where: lte(outlookSubscription.expiresAt, threshold),
+    where: or(
+      isNull(outlookSubscription.expiresAt),
+      lte(outlookSubscription.expiresAt, threshold),
+    ),
   });
 
   for (const subscription of subscriptions) {
-    try {
-      await ensureOutlookSubscription({
-        userId: subscription.userId,
-        force: true,
-      });
-    } catch (error) {
-      console.error(
-        `[Outlook] Failed to renew subscription for user ${subscription.userId}:`,
-        error
-      );
-    }
+    await ensureOutlookSubscription({ ...subscription, force: true });
   }
 
   return subscriptions.length;
 }
 
-async function maybeTriggerWorkflowFromNode({
-  node,
-  accessToken,
-}: {
+async function maybeTriggerWorkflowFromNode(input: {
   node: OutlookNode;
-  accessToken: string;
-}) {
-  const config = ((node.data || {}) as OutlookTriggerConfig) || {};
-  const variableName = normalizeVariableName(config.variableName);
-
-  // Fetch latest message
-  const folder = config.folderName || "Inbox";
-  const messages = await fetchOutlookMessages({
-    accessToken,
-    folder,
-    top: 1,
-  });
-
-  if (!messages || messages.length === 0) {
+  nodeScope: Pick<MicrosoftSubscriptionScope, "organizationId" | "locationId">;
+  grant: ResolvedMicrosoftGrant;
+  messageId: string;
+  subscriptionRecordId: string;
+}): Promise<void> {
+  const config = outlookTriggerConfigSchema.parse(input.node.data ?? {});
+  const message = await fetchOutlookMessage(input.grant, input.messageId);
+  if (!message) return;
+  if (config.subject && !message.subject?.includes(config.subject))
     return;
-  }
-
-  const latestMessage = messages[0];
-  const latestId = latestMessage.id;
-
-  // Check if this message matches filters
-  if (config.subject && !latestMessage.subject?.includes(config.subject)) {
-    return;
-  }
-
   if (
     config.sender &&
-    !latestMessage.from?.emailAddress?.address?.includes(config.sender)
+    !message.from?.emailAddress.address?.includes(config.sender)
   ) {
     return;
   }
 
   const state = await db.query.outlookTriggerState.findFirst({
-    where: eq(outlookTriggerState.nodeId, node.id),
+    where: eq(outlookTriggerState.nodeId, input.node.id),
   });
+  if (state?.lastMessageId === message.id) return;
 
-  if (state?.lastMessageId === latestId) {
-    return;
-  }
-
+  const variableName = normalizeVariableName(config.variableName);
   const initialData: Record<string, unknown> = {
-    [variableName]: latestMessage,
+    [variableName]: message,
   };
   if (variableName !== "outlookTrigger") {
-    initialData.outlookTrigger = latestMessage;
+    initialData.outlookTrigger = message;
   }
 
   await sendWorkflowExecution({
-    workflowId: node.workflowId,
+    workflowId: input.node.workflowId,
     initialData,
+    expectedOrganizationId: input.nodeScope.organizationId,
+    expectedLocationId: input.nodeScope.locationId,
+    idempotencyKey: `microsoft:outlook:${input.subscriptionRecordId}:${input.node.id}:${message.id}`,
   });
 
   await db
     .insert(outlookTriggerState)
     .values({
       id: crypto.randomUUID(),
-      nodeId: node.id,
-      workflowId: node.workflowId,
-      lastMessageId: latestId,
+      nodeId: input.node.id,
+      workflowId: input.node.workflowId,
+      lastMessageId: message.id,
       lastTriggeredAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -276,311 +392,247 @@ async function maybeTriggerWorkflowFromNode({
     .onConflictDoUpdate({
       target: outlookTriggerState.nodeId,
       set: {
-        lastMessageId: latestId,
+        lastMessageId: message.id,
         lastTriggeredAt: new Date(),
-        workflowId: node.workflowId,
+        workflowId: input.node.workflowId,
         updatedAt: new Date(),
       },
     });
 }
 
-async function ensureOutlookSubscription({
-  userId,
-  force = false,
-}: {
-  userId: string;
-  force?: boolean;
-}) {
-  const webhookUrl = getOutlookWebhookUrl();
-
+async function ensureOutlookSubscription(
+  input: MicrosoftSubscriptionScope & { force?: boolean },
+  existingGrant?: ResolvedMicrosoftGrant,
+): Promise<void> {
+  const grant = existingGrant ?? (await resolveMicrosoftGrant(input));
+  const { providerAccountId } = grant;
   const existing = await db.query.outlookSubscription.findFirst({
-    where: eq(outlookSubscription.userId, userId),
+    where: and(
+      eq(outlookSubscription.providerAccountId, providerAccountId),
+      eq(outlookSubscription.organizationId, input.organizationId),
+      input.locationId !== null
+        ? eq(outlookSubscription.locationId, input.locationId)
+        : isNull(outlookSubscription.locationId),
+    ),
   });
-
   const needsRefresh =
-    force ||
+    input.force === true ||
     !existing ||
     !existing.expiresAt ||
     existing.expiresAt.getTime() - Date.now() < SUBSCRIPTION_RENEWAL_WINDOW_MS;
+  if (!needsRefresh) return;
 
-  if (!needsRefresh) {
-    return;
-  }
-
-  const accessToken = await ensureMicrosoftAccessToken(userId);
-
-  // Delete old subscription if exists
   if (existing?.subscriptionId) {
-    await deleteSubscription(accessToken, existing.subscriptionId).catch(
-      () => {}
-    );
+    await deleteSubscription(grant, existing.subscriptionId);
   }
 
-  // Create new subscription
+  const clientState = generateMicrosoftClientState();
   const expiresAt = new Date(Date.now() + SUBSCRIPTION_LIFETIME_MS);
-  const subscription = await createOutlookSubscription(accessToken, {
+  const remote = await createOutlookSubscription(grant, {
     changeType: "created",
-    notificationUrl: webhookUrl,
+    notificationUrl: getOutlookWebhookUrl(),
     resource: "me/mailFolders('Inbox')/messages",
     expirationDateTime: expiresAt.toISOString(),
+    clientState,
   });
-
-  const profile = await fetchOutlookProfile(accessToken);
-
-  await db
-    .insert(outlookSubscription)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      emailAddress: profile.mail || profile.userPrincipalName,
-      subscriptionId: subscription.id,
-      expiresAt,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: outlookSubscription.userId,
-      set: {
-        emailAddress: profile.mail || profile.userPrincipalName,
-        subscriptionId: subscription.id,
-        expiresAt,
-        lastSyncedAt: new Date(),
-        updatedAt: new Date(),
-      },
-    });
-}
-
-async function stopOutlookWatchForUser(userId: string) {
-  const subscription = await db.query.outlookSubscription.findFirst({
-    where: eq(outlookSubscription.userId, userId),
-  });
-
-  if (!subscription) {
-    return;
-  }
 
   try {
-    const accessToken = await ensureMicrosoftAccessToken(userId);
-    if (subscription.subscriptionId) {
-      await deleteSubscription(accessToken, subscription.subscriptionId);
-    }
+    const profile = await fetchOutlookProfile(grant);
+    await db
+      .insert(outlookSubscription)
+      .values({
+        id: existing?.id ?? crypto.randomUUID(),
+        organizationId: input.organizationId,
+        locationId: input.locationId,
+        providerAccountId,
+        userId: input.userId ?? null,
+        emailAddress: profile.mail ?? profile.userPrincipalName,
+        subscriptionId: remote.id,
+        clientStateHash: hashMicrosoftClientState(clientState),
+        expiresAt,
+        lastSyncedAt: new Date(),
+        createdAt: existing?.createdAt ?? new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: outlookSubscription.providerAccountId,
+        set: {
+          organizationId: input.organizationId,
+          locationId: input.locationId,
+          userId: input.userId ?? null,
+          emailAddress: profile.mail ?? profile.userPrincipalName,
+          subscriptionId: remote.id,
+          clientStateHash: hashMicrosoftClientState(clientState),
+          expiresAt,
+          lastSyncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
   } catch (error) {
-    console.warn(
-      `[Outlook] Failed to stop subscription for user ${userId}:`,
-      error
-    );
+    await deleteSubscription(grant, remote.id).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function stopOutlookWatchesForScope(
+  input: MicrosoftSubscriptionSyncInput,
+): Promise<void> {
+  const subscriptions = await db.query.outlookSubscription.findMany({
+    where: and(
+      eq(outlookSubscription.organizationId, input.organizationId),
+      input.locationId !== null
+        ? eq(outlookSubscription.locationId, input.locationId)
+        : isNull(outlookSubscription.locationId),
+      input.providerAccountId !== null && input.providerAccountId !== undefined
+        ? eq(outlookSubscription.providerAccountId, input.providerAccountId)
+        : undefined,
+    ),
+  });
+  for (const subscription of subscriptions) {
+    await stopOutlookWatch(subscription);
+  }
+}
+
+async function removeUnusedOutlookWatches(
+  input: MicrosoftSubscriptionSyncInput,
+  usedProviderAccountIds: ReadonlySet<string>,
+): Promise<void> {
+  const subscriptions = await db.query.outlookSubscription.findMany({
+    where: eq(outlookSubscription.organizationId, input.organizationId),
+  });
+  for (const subscription of subscriptions) {
+    if (!usedProviderAccountIds.has(subscription.providerAccountId)) {
+      await stopOutlookWatch(subscription);
+    }
+  }
+}
+
+async function stopOutlookWatch(
+  subscription: InferSelectModel<typeof outlookSubscription>,
+): Promise<void> {
+  try {
+    const grant = await resolveMicrosoftGrant(subscription);
+    if (subscription.subscriptionId) {
+      await deleteSubscription(grant, subscription.subscriptionId);
+    }
+  } catch {
+    console.warn("[Outlook] Failed to remove remote subscription.", {
+      providerAccountId: subscription.providerAccountId,
+      subscriptionId: subscription.id,
+    });
   } finally {
     await db
       .delete(outlookSubscription)
-      .where(eq(outlookSubscription.id, subscription.id))
-      .catch(() => {});
+      .where(eq(outlookSubscription.id, subscription.id));
   }
 }
 
+async function resolveMicrosoftGrant(input: MicrosoftSubscriptionSyncInput) {
+  if (!input.providerAccountId) {
+    throw new Error(
+      "Outlook subscriptions require an explicit provider account.",
+    );
+  }
+  return resolveOAuthProviderGrant({
+    providerAccountId: input.providerAccountId,
+    provider: "MICROSOFT_365",
+    scope: {
+      organizationId: input.organizationId,
+      locationId: input.locationId,
+    },
+    requiredScopes: providerBinding.requiredScopes,
+  });
+}
+
+type ResolvedMicrosoftGrant = Awaited<ReturnType<typeof resolveMicrosoftGrant>>;
+
 async function createOutlookSubscription(
-  accessToken: string,
-  {
-    changeType,
-    notificationUrl,
-    resource,
-    expirationDateTime,
-  }: {
+  grant: ResolvedMicrosoftGrant,
+  input: {
     changeType: string;
     notificationUrl: string;
     resource: string;
     expirationDateTime: string;
-  }
+    clientState: string;
+  },
 ) {
-  const response = await fetch(`${GRAPH_API_BASE}/subscriptions`, {
+  const response = await oauthAuthenticatedFetch(grant, `${GRAPH_API_BASE}/subscriptions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${grant.accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      changeType,
-      notificationUrl,
-      resource,
-      expirationDateTime,
-      clientState: "aurea-crm-outlook-webhook",
-    }),
+    body: JSON.stringify(input),
   });
-
-  const payload = await response.json().catch(() => ({}));
-
+  const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const error = graphErrorSchema.safeParse(payload);
     throw new Error(
-      payload?.error?.message || "Failed to create Outlook subscription."
+      error.success
+        ? (error.data.error?.message ??
+            "Failed to create Outlook subscription.")
+        : "Failed to create Outlook subscription.",
     );
   }
-
-  return payload as { id: string; expirationDateTime: string };
+  return graphSubscriptionSchema.parse(payload);
 }
 
-async function deleteSubscription(accessToken: string, subscriptionId: string) {
-  const response = await fetch(
-    `${GRAPH_API_BASE}/subscriptions/${subscriptionId}`,
-    {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    }
+async function deleteSubscription(
+  grant: ResolvedMicrosoftGrant,
+  subscriptionId: string,
+): Promise<void> {
+  const response = await oauthAuthenticatedFetch(
+    grant,
+    `${GRAPH_API_BASE}/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    { headers: { Authorization: `Bearer ${grant.accessToken}` }, method: "DELETE" },
   );
-
   if (!response.ok && response.status !== 404) {
     throw new Error("Failed to delete Outlook subscription.");
   }
 }
 
-async function fetchOutlookMessages({
-  accessToken,
-  folder,
-  top = 10,
-}: {
-  accessToken: string;
-  folder: string;
-  top?: number;
-}) {
-  const response = await fetch(
-    `${GRAPH_API_BASE}/me/mailFolders/${folder}/messages?$top=${top}&$orderby=receivedDateTime desc`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    }
+async function fetchOutlookMessage(
+  grant: ResolvedMicrosoftGrant,
+  messageId: string,
+) {
+  const response = await oauthAuthenticatedFetch(
+    grant,
+    `${GRAPH_API_BASE}/me/messages/${encodeURIComponent(messageId)}`,
+    { headers: { Authorization: `Bearer ${grant.accessToken}` } },
   );
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch Outlook messages.");
-  }
-
-  const data = await response.json();
-  return data.value as Array<{
-    id: string;
-    subject: string;
-    from: { emailAddress: { address: string } };
-    receivedDateTime: string;
-    bodyPreview: string;
-  }>;
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error("Failed to fetch Outlook messages.");
+  const payload: unknown = await response.json();
+  return outlookMessageSchema.parse(payload);
 }
 
-async function fetchOutlookProfile(accessToken: string) {
-  const response = await fetch(`${GRAPH_API_BASE}/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
+function extractMicrosoftResourceId(resource: string): string | null {
+  const segment = resource.split("/").filter(Boolean).at(-1);
+  if (!segment) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchOutlookProfile(grant: ResolvedMicrosoftGrant) {
+  const response = await oauthAuthenticatedFetch(grant, `${GRAPH_API_BASE}/me`, {
+    headers: { Authorization: `Bearer ${grant.accessToken}` },
   });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch Outlook profile.");
-  }
-
-  const data = await response.json();
-  return data as { mail: string; userPrincipalName: string };
+  if (!response.ok) throw new Error("Failed to fetch Outlook profile.");
+  const payload: unknown = await response.json();
+  return outlookProfileSchema.parse(payload);
 }
 
-export async function ensureMicrosoftAccessToken(userId: string) {
-  const selectedAccount = await db.query.account.findFirst({
-    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "microsoft")),
-  });
-
-  if (!selectedAccount) {
-    throw new Error(
-      "Outlook requires a connected Microsoft account. Connect Microsoft 365 under Apps."
-    );
-  }
-
-  if (
-    selectedAccount.accessToken &&
-    selectedAccount.accessTokenExpiresAt &&
-    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
-  ) {
-    return selectedAccount.accessToken;
-  }
-
-  if (!selectedAccount.refreshToken) {
-    throw new Error(
-      "Outlook access token expired and no refresh token is available. Reconnect Microsoft 365."
-    );
-  }
-
-  return refreshMicrosoftAccessToken(selectedAccount);
+function normalizeVariableName(value?: string | null): string {
+  const trimmed = value?.trim() ?? "";
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)
+    ? trimmed
+    : "outlookTrigger";
 }
 
-async function refreshMicrosoftAccessToken(account: Account) {
-  const refreshToken = account.refreshToken;
-  if (!refreshToken) {
-    throw new Error("Microsoft account is missing a refresh token.");
-  }
-
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error("Microsoft OAuth credentials are not configured.");
-  }
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-    scope:
-      "openid email profile offline_access Mail.ReadWrite Mail.Send Files.ReadWrite.All",
-  });
-
-  const response = await fetch(
-    "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: params.toString(),
-    }
-  );
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.error_description ||
-        payload?.error ||
-        "Failed to refresh Microsoft access token."
-    );
-  }
-
-  const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
-
-  await db
-    .update(accountTable)
-    .set({
-      accessToken: payload.access_token,
-      accessTokenExpiresAt: expiresAt,
-      refreshToken: payload.refresh_token ?? refreshToken,
-      updatedAt: new Date(),
-    })
-    .where(eq(accountTable.id, account.id));
-
-  return payload.access_token as string;
-}
-
-function normalizeVariableName(value?: string | null) {
-  const fallback = "outlookTrigger";
-  if (!value) {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
-    return fallback;
-  }
-
-  return trimmed;
-}
-
-function getOutlookWebhookUrl() {
+function getOutlookWebhookUrl(): string {
   const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL;
   if (!baseUrl) {
     throw new Error("Set APP_URL or NEXT_PUBLIC_APP_URL for Outlook webhooks.");

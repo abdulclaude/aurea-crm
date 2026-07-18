@@ -21,7 +21,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-
 const addDomainSchema = z.object({
   domain: z
     .string()
@@ -31,7 +30,11 @@ const addDomainSchema = z.object({
       "Please enter a valid domain (e.g., mail.example.com or aureamedia.co.uk)"
     ),
   defaultFromName: z.string().optional(),
-  defaultFromEmail: z.string().optional(),
+  defaultFromEmail: z
+    .string()
+    .email("Invalid sender email")
+    .optional()
+    .or(z.literal("")),
   defaultReplyTo: z
     .string()
     .email("Invalid email")
@@ -59,7 +62,7 @@ export function AddDomainDialog() {
   const createMutation = useMutation(
     trpc.emailDomains.create.mutationOptions({
       onSuccess: () => {
-        toast.success("Domain added! Check DNS records to verify.");
+        toast.success("Domain provisioning started");
         queryClient.invalidateQueries({
           queryKey: trpc.emailDomains.list.queryKey(),
         });
@@ -128,15 +131,15 @@ export function AddDomainDialog() {
 
           <div className="grid gap-2">
             <Label htmlFor="defaultFromEmail">
-              Default From Email Prefix (optional)
+              Default From Email (optional)
             </Label>
             <Input
               id="defaultFromEmail"
-              placeholder="e.g., hello"
+              placeholder="e.g., hello@mail.example.com"
               {...form.register("defaultFromEmail")}
             />
             <p className="text-xs text-muted-foreground">
-              Will be used as the prefix before @yourdomain.com
+              Must use the domain being added.
             </p>
           </div>
 

@@ -2,7 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
 import { useTRPC } from "@/trpc/client";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -23,6 +27,11 @@ import { format } from "date-fns";
 import { nanoid } from "nanoid";
 
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -52,7 +61,16 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 
-import type { EmailContent, EmailSection, TextSection, ButtonSection, ImageSection, DividerSection } from "../types";
+import type {
+  EmailContent,
+  EmailSection,
+  TextSection,
+  ButtonSection,
+  ImageSection,
+  DividerSection,
+} from "../types";
+import { CampaignAudienceSelector } from "./campaign-audience-selector";
+import { campaignSegmentTypeSchema } from "@/features/campaigns/lib/campaign-audience-contracts";
 
 const campaignFormSchema = z.object({
   name: z.string().min(1, "Campaign name is required"),
@@ -63,7 +81,8 @@ const campaignFormSchema = z.object({
   replyTo: z.string().email("Invalid email").optional().or(z.literal("")),
   emailDomainId: z.string().optional(),
   resendTemplateId: z.string().optional(),
-  segmentType: z.enum(["ALL", "BY_TYPE", "BY_TAGS", "BY_LIFECYCLE", "BY_COUNTRY", "CUSTOM"]),
+  savedAudienceId: z.string().nullable(),
+  segmentType: campaignSegmentTypeSchema,
 });
 
 type CampaignFormData = z.infer<typeof campaignFormSchema>;
@@ -79,6 +98,7 @@ interface CampaignFormProps {
     replyTo?: string | null;
     emailDomainId?: string | null;
     resendTemplateId?: string | null;
+    savedAudienceId?: string | null;
     segmentType: string;
     segmentFilter?: unknown;
     content?: unknown;
@@ -117,12 +137,19 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
 
   // Fetch email domains
   const { data: domains } = useSuspenseQuery(
-    trpc.emailDomains.list.queryOptions()
+    trpc.emailDomains.list.queryOptions(),
   );
   const verifiedDomains = domains?.filter((d) => d.status === "VERIFIED") ?? [];
 
   const { data: resendTemplates } = useSuspenseQuery(
-    trpc.emailTemplates.listResend.queryOptions({ limit: 100 })
+    trpc.emailTemplates.listResend.queryOptions({ limit: 100 }),
+  );
+
+  const { data: savedAudiences } = useSuspenseQuery(
+    trpc.savedAudiences.list.queryOptions({
+      search: "",
+      includeArchived: false,
+    }),
   );
 
   // Email content state
@@ -131,9 +158,11 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
       subject: initialData?.subject || "",
       preheader: initialData?.preheaderText || "",
       sections: [
-        createTextSection("Hello {{client.firstName}},\n\nStart writing your email here..."),
+        createTextSection(
+          "Hello {{client.firstName}},\n\nStart writing your email here...",
+        ),
       ],
-    }
+    },
   );
 
   const form = useForm<CampaignFormData>({
@@ -147,16 +176,20 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
       replyTo: initialData?.replyTo || "",
       emailDomainId: initialData?.emailDomainId || "",
       resendTemplateId: initialData?.resendTemplateId || "",
-      segmentType: (initialData?.segmentType as CampaignFormData["segmentType"]) || "ALL",
+      savedAudienceId: initialData?.savedAudienceId ?? null,
+      segmentType:
+        campaignSegmentTypeSchema.safeParse(initialData?.segmentType).data ??
+        "ALL",
     },
   });
 
   // Get recipient count
   const { data: recipientData } = useSuspenseQuery(
     trpc.campaigns.getRecipientCount.queryOptions({
+      savedAudienceId: form.watch("savedAudienceId"),
       segmentType: form.watch("segmentType"),
       segmentFilter: undefined,
-    })
+    }),
   );
   const recipientCount = recipientData?.count ?? 0;
 
@@ -164,20 +197,24 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
     trpc.campaigns.create.mutationOptions({
       onSuccess: (data) => {
         toast.success("Campaign created");
-        queryClient.invalidateQueries({ queryKey: trpc.campaigns.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.campaigns.list.queryKey(),
+        });
         router.push(`/campaigns/${data.id}`);
       },
       onError: (error) => {
         toast.error(error.message || "Failed to create campaign");
       },
-    })
+    }),
   );
 
   const updateMutation = useMutation(
     trpc.campaigns.update.mutationOptions({
       onSuccess: () => {
         toast.success("Campaign saved");
-        queryClient.invalidateQueries({ queryKey: trpc.campaigns.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.campaigns.list.queryKey(),
+        });
         if (campaignId) {
           queryClient.invalidateQueries({
             queryKey: trpc.campaigns.get.queryKey({ id: campaignId }),
@@ -187,20 +224,22 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
       onError: (error) => {
         toast.error(error.message || "Failed to save campaign");
       },
-    })
+    }),
   );
 
   const sendMutation = useMutation(
     trpc.campaigns.send.mutationOptions({
       onSuccess: () => {
         toast.success("Campaign queued for sending!");
-        queryClient.invalidateQueries({ queryKey: trpc.campaigns.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.campaigns.list.queryKey(),
+        });
         router.push("/campaigns");
       },
       onError: (error) => {
         toast.error(error.message || "Failed to send campaign");
       },
-    })
+    }),
   );
 
   const scheduleMutation = useMutation(
@@ -208,13 +247,15 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
       onSuccess: () => {
         toast.success("Campaign scheduled");
         setScheduleOpen(false);
-        queryClient.invalidateQueries({ queryKey: trpc.campaigns.list.queryKey() });
+        queryClient.invalidateQueries({
+          queryKey: trpc.campaigns.list.queryKey(),
+        });
         router.push("/campaigns");
       },
       onError: (error) => {
         toast.error(error.message || "Failed to schedule campaign");
       },
-    })
+    }),
   );
 
   const onSubmit = async (data: CampaignFormData) => {
@@ -279,12 +320,15 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
 
     // Then schedule
     const scheduledAt = new Date(`${scheduledDate}T${scheduledTime}`);
-    scheduleMutation.mutate({ id: campaignId, scheduledAt: scheduledAt.toISOString() });
+    scheduleMutation.mutate({
+      id: campaignId,
+      scheduledAt: scheduledAt.toISOString(),
+    });
   };
 
   const addSection = (type: EmailSection["type"]) => {
     let newSection: EmailSection;
-    
+
     switch (type) {
       case "text":
         newSection = createTextSection("");
@@ -312,7 +356,7 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
     setContent((prev) => ({
       ...prev,
       sections: prev.sections.map((s, i) =>
-        i === index ? { ...s, ...updates } as EmailSection : s
+        i === index ? ({ ...s, ...updates } as EmailSection) : s,
       ),
     }));
   };
@@ -341,7 +385,8 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
               {isEditing ? "Edit Campaign" : "New Campaign"}
             </h1>
             <p className="text-xs text-muted-foreground">
-              {recipientCount.toLocaleString()} recipient{recipientCount !== 1 ? "s" : ""}
+              {recipientCount.toLocaleString()} recipient
+              {recipientCount !== 1 ? "s" : ""}
             </p>
           </div>
         </div>
@@ -379,12 +424,15 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                   <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
                       <Label htmlFor="schedule-date">Date</Label>
-                      <Input
+                      <DatePicker
                         id="schedule-date"
-                        type="date"
-                        value={scheduledDate}
-                        onChange={(e) => setScheduledDate(e.target.value)}
-                        min={format(new Date(), "yyyy-MM-dd")}
+                        date={parseDateValue(scheduledDate)}
+                        onSelect={(date) =>
+                          setScheduledDate(formatDateValue(date))
+                        }
+                        minDate={new Date()}
+                        placeholder="Pick a send date"
+                        ariaLabel="Campaign send date"
                       />
                     </div>
                     <div className="grid gap-2">
@@ -398,12 +446,19 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                     </div>
                   </div>
                   <DialogFooter>
-                    <Button variant="outline" onClick={() => setScheduleOpen(false)}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setScheduleOpen(false)}
+                    >
                       Cancel
                     </Button>
                     <Button
                       onClick={handleSchedule}
-                      disabled={!scheduledDate || !scheduledTime || scheduleMutation.isPending}
+                      disabled={
+                        !scheduledDate ||
+                        !scheduledTime ||
+                        scheduleMutation.isPending
+                      }
                     >
                       {scheduleMutation.isPending ? (
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -487,7 +542,8 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Use {"{{client.firstName}}"} or {"{{client.name}}"} for personalization
+                    Use {"{{client.firstName}}"} or {"{{client.name}}"} for
+                    personalization
                   </p>
                 </div>
 
@@ -501,13 +557,15 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="resendTemplateId">Resend Template (optional)</Label>
+                  <Label htmlFor="resendTemplateId">
+                    Resend Template (optional)
+                  </Label>
                   <Select
                     value={form.watch("resendTemplateId") || "none"}
                     onValueChange={(value) =>
                       form.setValue(
                         "resendTemplateId",
-                        value === "none" ? "" : value
+                        value === "none" ? "" : value,
                       )
                     }
                   >
@@ -538,7 +596,8 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                   Build your email using sections.
                   {form.watch("resendTemplateId") && (
                     <span className="block text-xs text-muted-foreground">
-                      This content won’t be used while a Resend template is selected.
+                      This content won’t be used while a Resend template is
+                      selected.
                     </span>
                   )}
                 </CardDescription>
@@ -655,43 +714,18 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
 
           {/* Audience Tab */}
           <TabsContent value="audience" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Target Audience</CardTitle>
-                <CardDescription>
-                  Choose who should receive this campaign.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="segmentType">Audience</Label>
-                  <Select
-                    value={form.watch("segmentType")}
-                    onValueChange={(value) =>
-                      form.setValue("segmentType", value as CampaignFormData["segmentType"])
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select audience" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ALL">All clients with email</SelectItem>
-                      <SelectItem value="BY_TYPE">By client type</SelectItem>
-                      <SelectItem value="BY_LIFECYCLE">By lifecycle stage</SelectItem>
-                      <SelectItem value="BY_TAGS">By tags</SelectItem>
-                      <SelectItem value="BY_COUNTRY">By country</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <p className="text-sm">
-                    <span className="font-medium">{recipientCount.toLocaleString()}</span>{" "}
-                    client{recipientCount !== 1 ? "s" : ""} will receive this campaign
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
+            <CampaignAudienceSelector
+              audiences={savedAudiences}
+              recipientCount={recipientCount}
+              savedAudienceId={form.watch("savedAudienceId")}
+              segmentType={form.watch("segmentType")}
+              onChange={(savedAudienceId) => {
+                form.setValue("savedAudienceId", savedAudienceId, {
+                  shouldDirty: true,
+                });
+                form.setValue("segmentType", "ALL", { shouldDirty: true });
+              }}
+            />
           </TabsContent>
 
           {/* Settings Tab */}
@@ -708,7 +742,9 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                   <Label htmlFor="emailDomainId">Sending Domain</Label>
                   <Select
                     value={form.watch("emailDomainId") || ""}
-                    onValueChange={(value) => form.setValue("emailDomainId", value)}
+                    onValueChange={(value) =>
+                      form.setValue("emailDomainId", value)
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select domain" />
@@ -729,7 +765,10 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
                   </Select>
                   {verifiedDomains.length === 0 && (
                     <p className="text-xs text-muted-foreground">
-                      <Link href="/campaigns/domains" className="text-primary hover:underline">
+                      <Link
+                        href="/campaigns/domains"
+                        className="text-primary hover:underline"
+                      >
                         Add a verified domain
                       </Link>{" "}
                       to send emails.

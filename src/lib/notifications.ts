@@ -9,77 +9,19 @@ import {
 } from "@/db/schema";
 import { getPostHogClient } from "@/lib/posthog/server";
 import { and, eq, inArray, lt, type SQL } from "drizzle-orm";
-import { Resend } from "resend";
+import { sendEmail } from "@/lib/email";
+import {
+  isNotificationEventEnabled,
+  normalizeNotificationPreferences,
+  type NotificationPreferenceMap,
+} from "@/features/notifications/lib/preferences";
+import type { NotificationType } from "@/features/notifications/contracts";
+import {
+  EMAIL_NOTIFICATION_TYPES,
+  INSTRUCTOR_NOTIFICATION_TYPES,
+} from "@/features/notifications/settings-registry";
 
 const posthog = getPostHogClient();
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-export type NotificationType =
-  | "WORKFLOW_CREATED"
-  | "WORKFLOW_UPDATED"
-  | "WORKFLOW_DELETED"
-  | "WORKFLOW_ARCHIVED"
-  | "WORKFLOW_RESTORED"
-  | "WORKFLOW_FAILED"
-  | "FUNNEL_CREATED"
-  | "FUNNEL_UPDATED"
-  | "FUNNEL_PUBLISHED"
-  | "FUNNEL_DELETED"
-  | "CAMPAIGN_CREATED"
-  | "CAMPAIGN_UPDATED"
-  | "CAMPAIGN_SCHEDULED"
-  | "CAMPAIGN_SENT"
-  | "CAMPAIGN_CANCELLED"
-  | "CLIENT_CREATED"
-  | "CLIENT_UPDATED"
-  | "CLIENT_DELETED"
-  | "DEAL_CREATED"
-  | "DEAL_UPDATED"
-  | "DEAL_DELETED"
-  | "DEAL_STAGE_CHANGED"
-  | "DEAL_CLOSED"
-  | "TASK_ASSIGNED"
-  | "TASK_COMPLETED"
-  | "TASK_DUE_SOON"
-  | "TASK_OVERDUE"
-  | "NOTE_MENTION"
-  | "INVOICE_PAID"
-  | "INVOICE_SENT"
-  | "INVOICE_REMINDER_SENT"
-  | "INVOICE_PAYMENT_RECORDED"
-  | "INVOICE_DELETED"
-  | "BOOKING_CREATED"
-  | "BOOKING_RESCHEDULED"
-  | "BOOKING_CANCELLED"
-  | "BOOKING_PAID"
-  | "PIPELINE_CREATED"
-  | "PIPELINE_UPDATED"
-  | "PIPELINE_DELETED"
-  | "INVITE_SENT"
-  | "INVITE_ACCEPTED"
-  | "INVITE_DECLINED"
-  | "MEMBER_ROLE_CHANGED"
-  | "MEMBER_REMOVED"
-  | "MEMBER_ONLINE"
-  | "MEMBER_OFFLINE"
-  | "CLASS_BOOKING_NEW"
-  | "CLASS_BOOKING_CANCELLED"
-  | "CLASS_STARTING_SOON"
-  | "CLASS_STARTED"
-  | "CLASS_CANCELLED"
-  | "CLASS_SCHEDULE_CHANGED"
-  | "CLASS_WAITLIST_JOINED"
-  | "SUBSTITUTION_REQUESTED"
-  | "SUBSTITUTION_ACCEPTED"
-  | "SUBSTITUTION_DECLINED"
-  | "PAYOUT_SENT"
-  | "PAYOUT_COMPLETED"
-  | "NO_SHOW_SUMMARY"
-  | "IMPORT_STARTED"
-  | "IMPORT_COMPLETED"
-  | "IMPORT_FAILED"
-  | "IMPORT_NEEDS_REVIEW";
 
 export type EntityType =
   | "workflow"
@@ -95,23 +37,6 @@ export type EntityType =
   | "location"
   | "task"
   | "import";
-
-export const INSTRUCTOR_NOTIFICATION_TYPES: ReadonlySet<NotificationType> =
-  new Set([
-    "CLASS_BOOKING_NEW",
-    "CLASS_BOOKING_CANCELLED",
-    "CLASS_STARTING_SOON",
-    "CLASS_STARTED",
-    "CLASS_CANCELLED",
-    "CLASS_SCHEDULE_CHANGED",
-    "CLASS_WAITLIST_JOINED",
-    "SUBSTITUTION_REQUESTED",
-    "SUBSTITUTION_ACCEPTED",
-    "SUBSTITUTION_DECLINED",
-    "PAYOUT_SENT",
-    "PAYOUT_COMPLETED",
-    "NO_SHOW_SUMMARY",
-  ]);
 
 interface CreateNotificationParams {
   type: NotificationType;
@@ -130,6 +55,7 @@ interface NotificationRecipient {
   email: string;
   name: string;
   shouldEmail: boolean;
+  preferences: NotificationPreferenceMap;
 }
 
 /**
@@ -150,12 +76,13 @@ export async function getNotificationRecipients(
         email: user.email,
         name: user.name,
         emailEnabled: notificationPreference.emailEnabled,
+        preferences: notificationPreference.preferences,
       })
       .from(locationMember)
       .innerJoin(user, eq(locationMember.userId, user.id))
       .leftJoin(
         notificationPreference,
-        eq(notificationPreference.userId, user.id)
+        eq(notificationPreference.userId, user.id),
       )
       .where(eq(locationMember.locationId, locationId));
 
@@ -165,6 +92,7 @@ export async function getNotificationRecipients(
         email: member.email,
         name: member.name,
         shouldEmail: member.emailEnabled ?? true,
+        preferences: normalizeNotificationPreferences(member.preferences),
       });
     }
 
@@ -175,6 +103,7 @@ export async function getNotificationRecipients(
           email: user.email,
           name: user.name,
           emailEnabled: notificationPreference.emailEnabled,
+          preferences: notificationPreference.preferences,
         })
         .from(member)
         .innerJoin(user, eq(member.userId, user.id))
@@ -182,22 +111,25 @@ export async function getNotificationRecipients(
           locationMember,
           and(
             eq(locationMember.userId, member.userId),
-            eq(locationMember.locationId, locationId)
-          )
+            eq(locationMember.locationId, locationId),
+          ),
         )
         .leftJoin(
           notificationPreference,
-          eq(notificationPreference.userId, user.id)
+          eq(notificationPreference.userId, user.id),
         )
         .where(eq(member.organizationId, organizationId));
 
       for (const member of agencyRows) {
-        if (!recipients.find((recipient) => recipient.userId === member.userId)) {
+        if (
+          !recipients.find((recipient) => recipient.userId === member.userId)
+        ) {
           recipients.push({
             userId: member.userId,
             email: member.email,
             name: member.name,
             shouldEmail: member.emailEnabled ?? true,
+            preferences: normalizeNotificationPreferences(member.preferences),
           });
         }
       }
@@ -209,12 +141,13 @@ export async function getNotificationRecipients(
         email: user.email,
         name: user.name,
         emailEnabled: notificationPreference.emailEnabled,
+        preferences: notificationPreference.preferences,
       })
       .from(member)
       .innerJoin(user, eq(member.userId, user.id))
       .leftJoin(
         notificationPreference,
-        eq(notificationPreference.userId, user.id)
+        eq(notificationPreference.userId, user.id),
       )
       .where(eq(member.organizationId, organizationId));
 
@@ -224,6 +157,7 @@ export async function getNotificationRecipients(
         email: member.email,
         name: member.name,
         shouldEmail: member.emailEnabled ?? true,
+        preferences: normalizeNotificationPreferences(member.preferences),
       });
     }
   }
@@ -258,22 +192,33 @@ export async function createNotification(
   );
 
   // Filter out the actor (don't notify yourself)
-  let filteredRecipients = recipients.filter((r) => r.userId !== actorId);
+  let filteredRecipients = recipients.filter(
+    (recipient) =>
+      recipient.userId !== actorId &&
+      isNotificationEventEnabled(recipient.preferences, type),
+  );
 
   // For instructor-specific notifications, only send to users who are instructors
   if (INSTRUCTOR_NOTIFICATION_TYPES.has(type)) {
-    const recipientUserIds = filteredRecipients.map((recipient) => recipient.userId);
+    const recipientUserIds = filteredRecipients.map(
+      (recipient) => recipient.userId,
+    );
     const instructorInstructors =
       recipientUserIds.length > 0
         ? await db
             .select({ userId: instructor.userId })
             .from(instructor)
             .where(
-              and(inArray(instructor.userId, recipientUserIds), eq(instructor.isActive, true))
+              and(
+                inArray(instructor.userId, recipientUserIds),
+                eq(instructor.isActive, true),
+              ),
             )
         : [];
     const instructorUserIds = new Set(
-      instructorInstructors.map((instructor) => instructor.userId).filter(Boolean),
+      instructorInstructors
+        .map((instructor) => instructor.userId)
+        .filter(Boolean),
     );
     filteredRecipients = filteredRecipients.filter((r) =>
       instructorUserIds.has(r.userId),
@@ -284,8 +229,9 @@ export async function createNotification(
     return;
   }
 
-  await db.insert(notification).values(
-    filteredRecipients.map((recipient) => ({
+  const notificationRows = filteredRecipients.map((recipient) => ({
+    recipient,
+    values: {
       id: crypto.randomUUID(),
       userId: recipient.userId,
       organizationId: organizationId ?? null,
@@ -298,8 +244,12 @@ export async function createNotification(
       entityId: entityId ?? null,
       actorId: actorId ?? null,
       createdAt: new Date(),
-    }))
-  );
+    },
+  }));
+
+  await db
+    .insert(notification)
+    .values(notificationRows.map((row) => row.values));
 
   // Track in PostHog
   try {
@@ -320,24 +270,16 @@ export async function createNotification(
   }
 
   // Send email notifications for critical events
-  const criticalTypes: NotificationType[] = [
-    "INVITE_SENT",
-    "INVITE_ACCEPTED",
-    "DEAL_CREATED",
-    "DEAL_CLOSED",
-    "PIPELINE_CREATED",
-    "INVOICE_PAID",
-    "INVOICE_SENT",
-    "BOOKING_CREATED",
-    "BOOKING_PAID",
-  ];
-
-  if (criticalTypes.includes(type)) {
-    for (const recipient of filteredRecipients) {
+  if (EMAIL_NOTIFICATION_TYPES.has(type) && organizationId) {
+    for (const row of notificationRows) {
+      const { recipient } = row;
       if (recipient.shouldEmail) {
         await sendEmailNotification(recipient, title, message, {
+          notificationId: row.values.id,
           entityType,
           entityId,
+          organizationId,
+          locationId: locationId ?? null,
         });
       }
     }
@@ -345,13 +287,19 @@ export async function createNotification(
 }
 
 /**
- * Send email notification via Resend
+ * Queue a critical email notification through the durable delivery outbox.
  */
 async function sendEmailNotification(
   recipient: NotificationRecipient,
   title: string,
   message: string,
-  context: { entityType?: EntityType; entityId?: string },
+  context: {
+    entityType?: EntityType;
+    entityId?: string;
+    organizationId: string;
+    locationId: string | null;
+    notificationId: string;
+  },
 ): Promise<void> {
   try {
     const baseUrl = process.env.APP_URL || "http://localhost:3000";
@@ -378,8 +326,14 @@ async function sendEmailNotification(
       }
     }
 
-    await resend.emails.send({
-      from: "Aurea CRM <notifications@aurea-crm.com>",
+    const result = await sendEmail({
+      organizationId: context.organizationId,
+      locationId: context.locationId,
+      clientId: null,
+      sourceType: "NOTIFICATION",
+      sourceId: context.notificationId,
+      idempotencyKey: `notification:${context.notificationId}:email`,
+      fromName: "Aurea CRM",
       to: recipient.email,
       subject: title,
       html: `
@@ -422,18 +376,30 @@ async function sendEmailNotification(
       `,
     });
 
-    // Track email send in PostHog
+    if (!result.success) {
+      console.error("Failed to queue email notification", {
+        notificationId: context.notificationId,
+        error: result.error,
+      });
+      return;
+    }
+
+    // Provider delivery is tracked by the durable outbox and Resend webhook.
     posthog?.capture({
       distinctId: recipient.userId,
-      event: "notification_email_sent",
+      event: "notification_email_queued",
       properties: {
+        deliveryId: result.deliveryId,
         title,
         entityType: context.entityType,
         entityId: context.entityId,
       },
     });
   } catch (error) {
-    console.error("Failed to send email notification:", error);
+    console.error("Failed to queue email notification", {
+      notificationId: context.notificationId,
+      error: error instanceof Error ? error.message : "Unknown queue error",
+    });
     // Don't throw - email failure shouldn't break the notification system
   }
 }
@@ -451,7 +417,9 @@ export async function markNotificationAsRead(
       read: true,
       readAt: new Date(),
     })
-    .where(and(eq(notification.id, notificationId), eq(notification.userId, userId)));
+    .where(
+      and(eq(notification.id, notificationId), eq(notification.userId, userId)),
+    );
 
   posthog?.capture({
     distinctId: userId,

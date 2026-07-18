@@ -2,11 +2,12 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createHash, randomBytes } from "crypto";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
 import { db } from "@/db";
 import { apiKey } from "@/db/schema";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 function generateApiKey(): { raw: string; hash: string; prefix: string } {
   const raw = `ak_${randomBytes(32).toString("hex")}`;
@@ -27,12 +28,18 @@ const VALID_SCOPES = [
 
 export const apiKeysRouter = createTRPCRouter({
   list: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+    const organizationId = await authorizeApiKeys(ctx, "settings.view");
 
     const keys = await db.query.apiKey.findMany({
-      where: eq(apiKey.organizationId, ctx.orgId),
+      where: and(
+        eq(apiKey.organizationId, organizationId),
+        ctx.locationId
+          ? or(eq(apiKey.locationId, ctx.locationId), isNull(apiKey.locationId))
+          : isNull(apiKey.locationId),
+      ),
       columns: {
         id: true,
+        locationId: true,
         name: true,
         keyPrefix: true,
         scopes: true,
@@ -53,25 +60,32 @@ export const apiKeysRouter = createTRPCRouter({
         name: z.string().min(1).max(100),
         scopes: z.array(z.enum(VALID_SCOPES)).min(1),
         expiresAt: z.coerce.date().optional(),
-      })
+      }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeApiKeys(ctx, "settings.manage");
+      if (!ctx.locationId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Select a location before creating an API key",
+        });
+      }
 
       const { raw, hash, prefix } = generateApiKey();
 
       const now = new Date();
       await db.insert(apiKey).values({
         id: createId(),
-          organizationId: ctx.orgId,
-          name: input.name,
-          keyHash: hash,
-          keyPrefix: prefix,
-          scopes: input.scopes,
-          expiresAt: input.expiresAt,
-          createdBy: ctx.auth.user.id,
-          createdAt: now,
-          updatedAt: now,
+        organizationId,
+        locationId: ctx.locationId,
+        name: input.name,
+        keyHash: hash,
+        keyPrefix: prefix,
+        scopes: input.scopes,
+        expiresAt: input.expiresAt,
+        createdBy: ctx.auth.user.id,
+        createdAt: now,
+        updatedAt: now,
       });
 
       return { key: raw, prefix };
@@ -80,17 +94,17 @@ export const apiKeysRouter = createTRPCRouter({
   revoke: protectedProcedure
     .input(z.object({ id: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeApiKeys(ctx, "settings.manage");
 
       const key = await db.query.apiKey.findFirst({
-        where: and(eq(apiKey.id, input.id), eq(apiKey.organizationId, ctx.orgId)),
+        where: apiKeyMutationWhere(input.id, organizationId, ctx.locationId),
       });
       if (!key) throw new TRPCError({ code: "NOT_FOUND" });
 
       await db
         .update(apiKey)
         .set({ isActive: false, updatedAt: new Date() })
-        .where(eq(apiKey.id, input.id));
+        .where(apiKeyMutationWhere(input.id, organizationId, ctx.locationId));
 
       return { success: true };
     }),
@@ -98,10 +112,10 @@ export const apiKeysRouter = createTRPCRouter({
   rotate: protectedProcedure
     .input(z.object({ id: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeApiKeys(ctx, "settings.manage");
 
       const existing = await db.query.apiKey.findFirst({
-        where: and(eq(apiKey.id, input.id), eq(apiKey.organizationId, ctx.orgId)),
+        where: apiKeyMutationWhere(input.id, organizationId, ctx.locationId),
       });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -109,8 +123,13 @@ export const apiKeysRouter = createTRPCRouter({
 
       await db
         .update(apiKey)
-        .set({ keyHash: hash, keyPrefix: prefix, isActive: true, updatedAt: new Date() })
-        .where(eq(apiKey.id, input.id));
+        .set({
+          keyHash: hash,
+          keyPrefix: prefix,
+          isActive: true,
+          updatedAt: new Date(),
+        })
+        .where(apiKeyMutationWhere(input.id, organizationId, ctx.locationId));
 
       return { key: raw, prefix };
     }),
@@ -118,18 +137,21 @@ export const apiKeysRouter = createTRPCRouter({
   delete: protectedProcedure
     .input(z.object({ id: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) throw new TRPCError({ code: "BAD_REQUEST", message: "No active organisation" });
+      const organizationId = await authorizeApiKeys(ctx, "settings.manage");
 
       const key = await db.query.apiKey.findFirst({
-        where: and(eq(apiKey.id, input.id), eq(apiKey.organizationId, ctx.orgId)),
+        where: apiKeyMutationWhere(input.id, organizationId, ctx.locationId),
       });
       if (!key) throw new TRPCError({ code: "NOT_FOUND" });
 
-      await db.delete(apiKey).where(eq(apiKey.id, input.id));
+      await db
+        .delete(apiKey)
+        .where(apiKeyMutationWhere(input.id, organizationId, ctx.locationId));
       return { success: true };
     }),
 
-  validScopes: protectedProcedure.query(() => {
+  validScopes: protectedProcedure.query(async ({ ctx }) => {
+    await authorizeApiKeys(ctx, "settings.view");
     return {
       scopes: VALID_SCOPES.map((s) => ({
         value: s,
@@ -139,6 +161,46 @@ export const apiKeysRouter = createTRPCRouter({
     };
   }),
 });
+
+type ApiKeyContext = {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+};
+
+async function authorizeApiKeys(
+  ctx: ApiKeyContext,
+  capability: "settings.view" | "settings.manage",
+): Promise<string> {
+  if (!ctx.orgId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "No active organisation",
+    });
+  }
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability,
+    resource: { organizationId: ctx.orgId, locationId: ctx.locationId },
+  });
+  return ctx.orgId;
+}
+
+function apiKeyMutationWhere(
+  id: string,
+  organizationId: string,
+  locationId: string | null,
+) {
+  return and(
+    eq(apiKey.id, id),
+    eq(apiKey.organizationId, organizationId),
+    locationId ? eq(apiKey.locationId, locationId) : isNull(apiKey.locationId),
+  );
+}
 
 const scopeDescriptions: Record<(typeof VALID_SCOPES)[number], string> = {
   "classes:read": "Read class schedules and details",

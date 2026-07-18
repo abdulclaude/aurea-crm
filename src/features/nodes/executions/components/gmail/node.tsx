@@ -42,7 +42,7 @@ export const GmailNode: React.FC<NodeProps<GmailNodeType>> = memo((props) => {
     nodeId: props.id,
     channel: GMAIL_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGmailRealtimeToken as any,
+    refreshToken: fetchGmailRealtimeToken,
   });
 
   const handleSubmit = (values: GmailExecutionFormValues) => {

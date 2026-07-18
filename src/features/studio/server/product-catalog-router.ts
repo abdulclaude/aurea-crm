@@ -4,7 +4,8 @@ import { and, asc, desc, eq, ilike, isNull, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import { studioProduct } from "@/db/schema";
+import { commerceTaxAssignment, studioProduct } from "@/db/schema";
+import { requireCommerceSettingsAccess } from "@/features/commerce-settings/server/access";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const StudioProductTypeSchema = z.enum([
@@ -48,7 +49,10 @@ const catalogScopeConditions = ({
   eq(studioProduct.organizationId, organizationId),
   isNull(studioProduct.deletedAt),
   locationId
-    ? or(eq(studioProduct.locationId, locationId), isNull(studioProduct.locationId))!
+    ? or(
+        eq(studioProduct.locationId, locationId),
+        isNull(studioProduct.locationId),
+      )!
     : isNull(studioProduct.locationId),
 ];
 
@@ -64,16 +68,11 @@ export const productCatalogRouter = createTRPCRouter({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-      }
+      const scope = await requireCommerceSettingsAccess(ctx, "commerce.view");
+      const conditions = catalogScopeConditions(scope);
 
-      const conditions = catalogScopeConditions({
-        organizationId: ctx.orgId,
-        locationId: ctx.locationId ?? null,
-      });
-
-      if (!input?.includeInactive) conditions.push(eq(studioProduct.isActive, true));
+      if (!input?.includeInactive)
+        conditions.push(eq(studioProduct.isActive, true));
       if (input?.type) conditions.push(eq(studioProduct.type, input.type));
       if (input?.search) {
         const pattern = `%${input.search}%`;
@@ -88,82 +87,101 @@ export const productCatalogRouter = createTRPCRouter({
 
       return db.query.studioProduct.findMany({
         where: and(...conditions),
-        orderBy: [asc(studioProduct.type), asc(studioProduct.category), asc(studioProduct.name)],
+        orderBy: [
+          asc(studioProduct.type),
+          asc(studioProduct.category),
+          asc(studioProduct.name),
+        ],
       });
     }),
 
   getById: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-      }
+      const scope = await requireCommerceSettingsAccess(ctx, "commerce.view");
 
       const product = await db.query.studioProduct.findFirst({
         where: and(
           eq(studioProduct.id, input.id),
-          eq(studioProduct.organizationId, ctx.orgId),
+          eq(studioProduct.organizationId, scope.organizationId),
+          scope.locationId
+            ? or(
+                eq(studioProduct.locationId, scope.locationId),
+                isNull(studioProduct.locationId),
+              )
+            : isNull(studioProduct.locationId),
           isNull(studioProduct.deletedAt),
         ),
       });
 
       if (!product) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Product not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Product not found",
+        });
       }
 
       return product;
     }),
 
-  create: protectedProcedure.input(ProductBaseSchema).mutation(async ({ ctx, input }) => {
-    if (!ctx.orgId) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-    }
+  create: protectedProcedure
+    .input(ProductBaseSchema)
+    .mutation(async ({ ctx, input }) => {
+      const scope = await requireCommerceSettingsAccess(ctx, "commerce.manage");
 
-    const now = new Date();
-    const [createdProduct] = await db
-      .insert(studioProduct)
-      .values({
-        id: createId(),
-        organizationId: ctx.orgId,
-        locationId: ctx.locationId ?? null,
-        externalId: input.externalId || null,
-        sku: input.sku || null,
-        name: input.name,
-        description: input.description || null,
-        type: input.type,
-        category: input.category || null,
-        price: input.price.toString(),
-        cost: input.cost?.toString() ?? null,
-        currency: input.currency.toUpperCase(),
-        taxRate: input.taxRate?.toString() ?? null,
-        trackInventory: input.trackInventory,
-        stockQuantity: input.stockQuantity ?? null,
-        lowStockThreshold: input.lowStockThreshold ?? null,
-        isActive: input.isActive,
-        isPublic: input.isPublic,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
+      const now = new Date();
+      const [createdProduct] = await db
+        .insert(studioProduct)
+        .values({
+          id: createId(),
+          organizationId: scope.organizationId,
+          locationId: scope.locationId,
+          externalId: input.externalId || null,
+          sku: input.sku || null,
+          name: input.name,
+          description: input.description || null,
+          type: input.type,
+          category: input.category || null,
+          price: input.price.toString(),
+          cost: input.cost?.toString() ?? null,
+          currency: input.currency.toUpperCase(),
+          taxRate: input.taxRate?.toString() ?? null,
+          trackInventory: input.trackInventory,
+          stockQuantity: input.stockQuantity ?? null,
+          lowStockThreshold: input.lowStockThreshold ?? null,
+          isActive: input.isActive,
+          isPublic: input.isPublic,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
 
-    return createdProduct;
-  }),
+      return createdProduct;
+    }),
 
   update: protectedProcedure
     .input(ProductBaseSchema.partial().extend({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-      }
+      const scope = await requireCommerceSettingsAccess(ctx, "commerce.manage");
 
       const { id, price, cost, taxRate, ...data } = input;
       const existing = await db.query.studioProduct.findFirst({
-        where: and(eq(studioProduct.id, id), eq(studioProduct.organizationId, ctx.orgId)),
+        where: and(
+          eq(studioProduct.id, id),
+          eq(studioProduct.organizationId, scope.organizationId),
+          scope.locationId
+            ? eq(studioProduct.locationId, scope.locationId)
+            : isNull(studioProduct.locationId),
+          isNull(studioProduct.deletedAt),
+        ),
         columns: { id: true },
       });
 
       if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Product not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Product not found",
+        });
       }
 
       const [updatedProduct] = await db
@@ -172,11 +190,23 @@ export const productCatalogRouter = createTRPCRouter({
           ...data,
           ...(data.currency ? { currency: data.currency.toUpperCase() } : {}),
           ...(price !== undefined ? { price: price.toString() } : {}),
-          ...(cost !== undefined ? { cost: cost === null ? null : cost.toString() } : {}),
-          ...(taxRate !== undefined ? { taxRate: taxRate === null ? null : taxRate.toString() } : {}),
+          ...(cost !== undefined
+            ? { cost: cost === null ? null : cost.toString() }
+            : {}),
+          ...(taxRate !== undefined
+            ? { taxRate: taxRate === null ? null : taxRate.toString() }
+            : {}),
           updatedAt: new Date(),
         })
-        .where(eq(studioProduct.id, id))
+        .where(
+          and(
+            eq(studioProduct.id, id),
+            eq(studioProduct.organizationId, scope.organizationId),
+            scope.locationId
+              ? eq(studioProduct.locationId, scope.locationId)
+              : isNull(studioProduct.locationId),
+          ),
+        )
         .returning();
 
       return updatedProduct;
@@ -185,38 +215,76 @@ export const productCatalogRouter = createTRPCRouter({
   archive: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.orgId) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-      }
+      const scope = await requireCommerceSettingsAccess(ctx, "commerce.manage");
 
-      const existing = await db.query.studioProduct.findFirst({
-        where: and(eq(studioProduct.id, input.id), eq(studioProduct.organizationId, ctx.orgId)),
-        columns: { id: true },
+      return db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: studioProduct.id,
+            locationId: studioProduct.locationId,
+          })
+          .from(studioProduct)
+          .where(
+            and(
+              eq(studioProduct.id, input.id),
+              eq(studioProduct.organizationId, scope.organizationId),
+              scope.locationId
+                ? eq(studioProduct.locationId, scope.locationId)
+                : isNull(studioProduct.locationId),
+              isNull(studioProduct.deletedAt),
+            ),
+          )
+          .limit(1)
+          .for("update");
+
+        if (!existing) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Product not found",
+          });
+        }
+
+        const now = new Date();
+        await tx
+          .update(commerceTaxAssignment)
+          .set({
+            archivedAt: now,
+            archivedById: ctx.auth.user.id,
+            updatedById: ctx.auth.user.id,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(commerceTaxAssignment.organizationId, scope.organizationId),
+              scope.locationId
+                ? eq(commerceTaxAssignment.locationId, scope.locationId)
+                : isNull(commerceTaxAssignment.locationId),
+              eq(commerceTaxAssignment.productId, existing.id),
+              isNull(commerceTaxAssignment.archivedAt),
+            ),
+          );
+
+        const [archivedProduct] = await tx
+          .update(studioProduct)
+          .set({ isActive: false, deletedAt: now, updatedAt: now })
+          .where(eq(studioProduct.id, existing.id))
+          .returning();
+
+        return archivedProduct;
       });
-
-      if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Product not found" });
-      }
-
-      const [archivedProduct] = await db
-        .update(studioProduct)
-        .set({ isActive: false, deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(studioProduct.id, input.id))
-        .returning();
-
-      return archivedProduct;
     }),
 
   categories: protectedProcedure.query(async ({ ctx }) => {
-    if (!ctx.orgId) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "No active organization" });
-    }
+    const scope = await requireCommerceSettingsAccess(ctx, "commerce.view");
 
     const rows = await db.query.studioProduct.findMany({
       where: and(
-        eq(studioProduct.organizationId, ctx.orgId),
-        ctx.locationId
-          ? or(eq(studioProduct.locationId, ctx.locationId), isNull(studioProduct.locationId))
+        eq(studioProduct.organizationId, scope.organizationId),
+        scope.locationId
+          ? or(
+              eq(studioProduct.locationId, scope.locationId),
+              isNull(studioProduct.locationId),
+            )
           : isNull(studioProduct.locationId),
         isNull(studioProduct.deletedAt),
       ),
@@ -224,6 +292,8 @@ export const productCatalogRouter = createTRPCRouter({
       orderBy: desc(studioProduct.updatedAt),
     });
 
-    return Array.from(new Set(rows.map((row) => row.category).filter(Boolean))).sort();
+    return Array.from(
+      new Set(rows.map((row) => row.category).filter(Boolean)),
+    ).sort();
   }),
 });

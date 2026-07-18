@@ -1,6 +1,5 @@
 "use client";
 
-import { Group } from "react-aria-components";
 import { RangeCalendar } from "@/components/ui/calendar-rac";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +10,6 @@ import {
 } from "@internationalized/date";
 
 type Props = {
-  label?: string;
   minDate: Date;
   maxDate: Date;
   defaultStart?: Date;
@@ -28,28 +26,7 @@ function toCal(d: Date): CalendarDate {
   return new CalendarDate(cd.year, cd.month, cd.day);
 }
 
-function fmtLabel(start: Date, end: Date) {
-  const fmt = (d: Date) => {
-    const mo = d.toLocaleString("en-US", { month: "short" });
-    const day = d.getDate();
-    const j = day % 10,
-      k = day % 100;
-    const suf =
-      j === 1 && k !== 11
-        ? "st"
-        : j === 2 && k !== 12
-        ? "nd"
-        : j === 3 && k !== 13
-        ? "rd"
-        : "th";
-    const yr = String(d.getFullYear()).slice(-2);
-    return `${mo} ${day}${suf} '${yr}`;
-  };
-  return `${fmt(start)} - ${fmt(end)}`;
-}
-
 export default function DateRangeFilter({
-  label,
   minDate,
   maxDate,
   defaultStart,
@@ -69,12 +46,6 @@ export default function DateRangeFilter({
     end: CalendarDate;
   }>(() => ({ start: toCal(initialStart), end: toCal(initialEnd) }));
 
-  const tz = getLocalTimeZone();
-  const labelText = useMemo(
-    () => fmtLabel(value.start.toDate(tz), value.end.toDate(tz)),
-    [value, tz]
-  );
-
   // external sync
   useEffect(() => {
     if (valueStart && valueEnd) {
@@ -93,7 +64,7 @@ export default function DateRangeFilter({
     <div
       className={cn(
         "*:not-first:mt-2 flex items-center justify-center",
-        className
+        className,
       )}
     >
       <RangeCalendar
@@ -106,8 +77,16 @@ export default function DateRangeFilter({
         value={value}
         onChange={(range) => {
           if (!range) return;
-          let { start, end } = range as any;
-          if (!start || !end) return;
+          let start = new CalendarDate(
+            range.start.year,
+            range.start.month,
+            range.start.day,
+          );
+          let end = new CalendarDate(
+            range.end.year,
+            range.end.month,
+            range.end.day,
+          );
           if (start.compare(minValue) < 0) start = minValue;
           if (end.compare(maxValue) > 0) end = maxValue;
           if (start.compare(end) > 0) {
@@ -118,8 +97,7 @@ export default function DateRangeFilter({
           setValue({ start, end });
           const sJs = start.toDate(getLocalTimeZone());
           const eJs = end.toDate(getLocalTimeZone());
-          const toYMD = (d: Date) => d.toISOString().slice(0, 10);
-          const next = { s: toYMD(sJs), e: toYMD(eJs) };
+          const next = { s: start.toString(), e: end.toString() };
           if (
             !lastSentRef.current ||
             lastSentRef.current.s !== next.s ||

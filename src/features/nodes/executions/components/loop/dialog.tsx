@@ -6,13 +6,6 @@ import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   Form,
   FormControl,
   FormDescription,
@@ -34,6 +27,8 @@ import {
 import {
   ResizableSheetContent,
   Sheet,
+  SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -85,15 +80,18 @@ export const LoopDialog: React.FC<LoopDialogProps> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-black/10">
-        <SheetHeader>
-          <SheetTitle>Configure Loop Node</SheetTitle>
+      <ResizableSheetContent className="overflow-y-auto border-border bg-background">
+        <SheetHeader className="gap-1 border-b border-border px-6 pb-5 pt-8">
+          <SheetTitle>Repeat steps</SheetTitle>
+          <SheetDescription>
+            Repeat the next steps for every item or a fixed number of times.
+          </SheetDescription>
         </SheetHeader>
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-4"
+            className="space-y-4 px-6 py-6"
           >
             <FormField
               control={form.control}
@@ -226,9 +224,9 @@ export const LoopDialog: React.FC<LoopDialogProps> = ({
               )}
             />
 
-            <DialogFooter>
-              <Button type="submit">Save</Button>
-            </DialogFooter>
+            <SheetFooter className="px-0 pt-4">
+              <Button type="submit" className="w-full">Save loop</Button>
+            </SheetFooter>
           </form>
         </Form>
       </ResizableSheetContent>

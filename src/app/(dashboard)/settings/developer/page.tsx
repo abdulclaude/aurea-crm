@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -34,8 +35,8 @@ const SCOPES = [
   { value: "classes:read", label: "Read Classes" },
   { value: "bookings:read", label: "Read bookings" },
   { value: "bookings:write", label: "Create bookings" },
-  { value: "members:read", label: "Read clients" },
-  { value: "members:write", label: "Create clients" },
+  { value: "members:read", label: "Read members" },
+  { value: "members:write", label: "Create members" },
   { value: "memberships:read", label: "Read memberships" },
   { value: "instructors:read", label: "Read instructors" },
 ] as const;
@@ -170,18 +171,16 @@ export default function DeveloperPage() {
                 <Label>Permissions</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {SCOPES.map((scope) => (
-                    <label
+                    <Label
                       key={scope.value}
                       className="flex items-center gap-2 text-xs cursor-pointer"
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedScopes.includes(scope.value)}
-                        onChange={() => toggleScope(scope.value)}
-                        className="rounded"
+                        onCheckedChange={() => toggleScope(scope.value)}
                       />
                       {scope.label}
-                    </label>
+                    </Label>
                   ))}
                 </div>
               </div>
@@ -220,6 +219,9 @@ export default function DeveloperPage() {
                       className="text-xs"
                     >
                       {key.isActive ? "Active" : "Revoked"}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      {key.locationId ? "Current location" : "Legacy workspace"}
                     </Badge>
                   </div>
                   <code className="text-xs text-muted-foreground font-mono">

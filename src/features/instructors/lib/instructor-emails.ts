@@ -3,10 +3,16 @@
  * Handles email notifications for instructors (document expiry, shift changes, etc.)
  */
 
-import { sendEmail } from "@/lib/email";
-import { format, formatDistanceToNow } from "date-fns";
+import "server-only";
+
+import { format } from "date-fns";
+
+import { sendEmail, type EmailQueueResult } from "@/lib/email";
 
 export interface SendDocumentExpiryReminderParams {
+  organizationId: string;
+  locationId: string | null;
+  documentId: string;
   instructorEmail: string;
   instructorName: string;
   documentName: string;
@@ -17,9 +23,12 @@ export interface SendDocumentExpiryReminderParams {
 }
 
 export async function sendDocumentExpiryReminder(
-  params: SendDocumentExpiryReminderParams
-) {
+  params: SendDocumentExpiryReminderParams,
+): Promise<EmailQueueResult> {
   const {
+    organizationId,
+    locationId,
+    documentId,
     instructorEmail,
     instructorName,
     documentName,
@@ -113,6 +122,12 @@ This is an automated reminder from your Instructor Portal.
   `;
 
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId: null,
+    sourceType: "INSTRUCTOR_DOCUMENT",
+    sourceId: documentId,
+    idempotencyKey: `instructor-document:${documentId}:expiry:${expiryDate.toISOString()}`,
     to: instructorEmail,
     subject,
     html,
@@ -121,6 +136,9 @@ This is an automated reminder from your Instructor Portal.
 }
 
 export interface SendShiftAssignedParams {
+  organizationId: string;
+  locationId: string | null;
+  rotaId: string;
   instructorEmail: string;
   instructorName: string;
   shiftTitle: string;
@@ -132,9 +150,12 @@ export interface SendShiftAssignedParams {
 }
 
 export async function sendShiftAssignedNotification(
-  params: SendShiftAssignedParams
-) {
+  params: SendShiftAssignedParams,
+): Promise<EmailQueueResult> {
   const {
+    organizationId,
+    locationId,
+    rotaId,
     instructorEmail,
     instructorName,
     shiftTitle,
@@ -233,6 +254,12 @@ This is an automated notification from your Instructor Portal.
   `;
 
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId: null,
+    sourceType: "ROTA",
+    sourceId: rotaId,
+    idempotencyKey: `rota:${rotaId}:assigned`,
     to: instructorEmail,
     subject,
     html,
@@ -241,6 +268,9 @@ This is an automated notification from your Instructor Portal.
 }
 
 export interface SendShiftCancelledParams {
+  organizationId: string;
+  locationId: string | null;
+  rotaId: string;
   instructorEmail: string;
   instructorName: string;
   shiftTitle: string;
@@ -251,9 +281,12 @@ export interface SendShiftCancelledParams {
 }
 
 export async function sendShiftCancelledNotification(
-  params: SendShiftCancelledParams
-) {
+  params: SendShiftCancelledParams,
+): Promise<EmailQueueResult> {
   const {
+    organizationId,
+    locationId,
+    rotaId,
     instructorEmail,
     instructorName,
     shiftTitle,
@@ -327,6 +360,12 @@ This is an automated notification from your Instructor Portal.
   `;
 
   return sendEmail({
+    organizationId,
+    locationId,
+    clientId: null,
+    sourceType: "ROTA",
+    sourceId: rotaId,
+    idempotencyKey: `rota:${rotaId}:cancelled`,
     to: instructorEmail,
     subject,
     html,

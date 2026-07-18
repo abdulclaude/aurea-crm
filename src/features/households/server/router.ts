@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { createId } from "@paralleldrive/cuid2";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
@@ -10,6 +10,7 @@ import {
   clientHouseholdMember,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 const householdRoles = ["PRIMARY", "PARTNER", "CHILD", "DEPENDENT", "MEMBER"] as const;
 type HouseholdRole = (typeof householdRoles)[number];
@@ -68,10 +69,21 @@ export const householdsRouter = createTRPCRouter({
       ),
       orderBy: [desc(clientHousehold.updatedAt), desc(clientHousehold.createdAt)],
       with: {
-        client: { columns: { id: true, name: true, email: true, phone: true } },
+        client: {
+          columns: { id: true, name: true, email: true, phone: true, logo: true },
+        },
         clientHouseholdMembers: {
           with: {
-            client: { columns: { id: true, name: true, email: true, phone: true, type: true } },
+            client: {
+              columns: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                logo: true,
+                type: true,
+              },
+            },
           },
           orderBy: (member, { asc }) => [asc(member.role), asc(member.createdAt)],
         },
@@ -84,6 +96,105 @@ export const householdsRouter = createTRPCRouter({
       members: clientHouseholdMembers,
     }));
   }),
+
+  getForClient: protectedProcedure
+    .input(z.object({ clientId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.orgId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Organization context is required",
+        });
+      }
+      const targetClient = await db.query.client.findFirst({
+        where: and(
+          eq(client.id, input.clientId),
+          eq(client.organizationId, ctx.orgId),
+          ctx.locationId
+            ? eq(client.locationId, ctx.locationId)
+            : undefined,
+        ),
+        columns: { id: true, locationId: true },
+      });
+      if (!targetClient) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
+      }
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "customer.view",
+        resource: {
+          organizationId: ctx.orgId,
+          locationId: targetClient.locationId,
+        },
+      });
+
+      const households = await db.query.clientHousehold.findMany({
+        where: and(
+          eq(clientHousehold.organizationId, ctx.orgId),
+          targetClient.locationId
+            ? eq(clientHousehold.locationId, targetClient.locationId)
+            : isNull(clientHousehold.locationId),
+          or(
+            eq(clientHousehold.primaryContactId, input.clientId),
+            exists(
+              db
+                .select({ id: clientHouseholdMember.id })
+                .from(clientHouseholdMember)
+                .where(
+                  and(
+                    eq(
+                      clientHouseholdMember.householdId,
+                      clientHousehold.id,
+                    ),
+                    eq(clientHouseholdMember.clientId, input.clientId),
+                  ),
+                ),
+            ),
+          ),
+        ),
+        orderBy: [desc(clientHousehold.updatedAt)],
+        with: {
+          client: {
+            columns: { id: true, name: true, email: true, logo: true },
+          },
+          clientHouseholdMembers: {
+            columns: {
+              id: true,
+              clientId: true,
+              role: true,
+              relationship: true,
+            },
+            with: {
+              client: {
+                columns: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  phone: true,
+                  logo: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      return households.map(
+        ({ client: primaryContact, clientHouseholdMembers, ...household }) => ({
+          ...household,
+          primaryContact,
+          members: clientHouseholdMembers,
+          currentMember:
+            clientHouseholdMembers.find(
+              (member) => member.clientId === input.clientId,
+            ) ?? null,
+        }),
+      );
+    }),
 
   create: protectedProcedure
     .input(

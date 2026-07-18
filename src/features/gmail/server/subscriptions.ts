@@ -1,527 +1,264 @@
 "use server";
 
-import { and, eq, inArray, lte } from "drizzle-orm";
-import type { InferSelectModel } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 
 import { db } from "@/db";
-import {
-  account as accountTable,
-  apps,
-  gmailSubscription,
-  gmailTriggerState,
-  node as workflowNode,
-  workflows,
-} from "@/db/schema";
+import { NodeType } from "@/db/enums";
+import { gmailSubscription } from "@/db/schema";
+import type { ProviderAccountScope } from "@/features/provider-accounts/lib/scope-policy";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { inngest } from "@/inngest/client";
-import { sendWorkflowExecution } from "@/inngest/utils";
-import { AppProvider, NodeType } from "@/db/enums";
-import { fetchGmailMessages, type GmailTriggerConfig } from "./messages";
-import { fetchGmailProfile } from "./profile";
 
-const WATCH_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6; // 6 hours
-const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
+import { processGmailNotification } from "./notification-processor";
+import {
+  gmailNotificationEventId,
+  type GmailNotificationInput,
+} from "./pubsub-contract";
+import {
+  deleteGmailTriggerStatesForOrganization,
+  exactLocationWhere,
+  getGmailSubscriptionsForOrganization,
+  getGmailTriggerNodesForOrganization,
+  type GmailSubscriptionRow,
+} from "./subscription-store";
+import { gmailTriggerLabelSet } from "./trigger-config";
+import { createGmailWatch, stopGmailWatch } from "./watch-api";
 
-type SyncParams = {
-  userId: string;
+const WATCH_RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 6;
+const GMAIL_TRIGGER_SCOPES = getWorkflowProviderBindingSpec(
+  NodeType.GMAIL_TRIGGER,
+).requiredScopes;
+
+export type GmailSubscriptionSyncInput = {
+  actorUserId?: string | null;
+  providerAccountId?: string | null;
+  scope: ProviderAccountScope;
 };
-type Account = InferSelectModel<typeof accountTable>;
-type GmailSubscription = InferSelectModel<typeof gmailSubscription>;
-type TriggerNode = Pick<
-  InferSelectModel<typeof workflowNode>,
-  "id" | "workflowId" | "data"
->;
 
-const gmailWorkflowNodesWhere = (userId: string) =>
-  and(
-    eq(workflowNode.type, NodeType.GMAIL_TRIGGER),
-    eq(workflows.userId, userId),
-    eq(workflows.archived, false),
-    eq(workflows.isTemplate, false),
+export { processGmailNotification };
+
+export async function syncGmailWorkflowSubscriptions(
+  input: GmailSubscriptionSyncInput,
+): Promise<void> {
+  const nodes = await getGmailTriggerNodesForOrganization(
+    input.scope.organizationId,
+  );
+  await deleteGmailTriggerStatesForOrganization(
+    input.scope.organizationId,
+    nodes.map((node) => node.id),
   );
 
-async function getGmailTriggerNodes(userId: string): Promise<TriggerNode[]> {
-  return await db
-    .select({
-      id: workflowNode.id,
-      workflowId: workflowNode.workflowId,
-      data: workflowNode.data,
-    })
-    .from(workflowNode)
-    .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
-    .where(gmailWorkflowNodesWhere(userId));
-}
-
-async function deleteGmailTriggerStatesForUser(
-  userId: string,
-  exceptNodeIds?: string[],
-): Promise<void> {
-  const rows = await db
-    .select({ id: gmailTriggerState.id, nodeId: gmailTriggerState.nodeId })
-    .from(gmailTriggerState)
-    .innerJoin(workflows, eq(gmailTriggerState.workflowId, workflows.id))
-    .where(eq(workflows.userId, userId));
-
-  const ids = rows
-    .filter((row) => !exceptNodeIds || !exceptNodeIds.includes(row.nodeId))
-    .map((row) => row.id);
-
-  if (ids.length > 0) {
-    await db.delete(gmailTriggerState).where(inArray(gmailTriggerState.id, ids));
+  if (nodes.length === 0) {
+    await stopSubscriptionsForOrganization(input.scope.organizationId);
+    return;
   }
-}
 
-export async function syncGmailWorkflowSubscriptions({ userId }: SyncParams) {
-  try {
-    const gmailApp = await db.query.apps.findFirst({
-      where: and(eq(apps.userId, userId), eq(apps.provider, AppProvider.GMAIL)),
+  const existingSubscriptions = await getGmailSubscriptionsForOrganization(
+    input.scope.organizationId,
+  );
+  const nodesByAccount = new Map<string, typeof nodes>();
+  for (const node of nodes) {
+    if (!node.providerAccountId) {
+      throw new Error("Gmail trigger provider account binding is missing.");
+    }
+    nodesByAccount.set(node.providerAccountId, [
+      ...(nodesByAccount.get(node.providerAccountId) ?? []),
+      node,
+    ]);
+  }
+  for (const subscription of existingSubscriptions) {
+    if (!nodesByAccount.has(subscription.providerAccountId)) {
+      await stopSubscription(subscription);
+    }
+  }
+
+  for (const [providerAccountId, accountNodes] of nodesByAccount) {
+    const providerLocationId = accountNodes[0]?.providerAccountLocationId;
+    if (providerLocationId === undefined) {
+      throw new Error("Gmail provider account scope is unavailable.");
+    }
+    const providerScope = {
+      organizationId: input.scope.organizationId,
+      locationId: providerLocationId,
+    };
+    const grant = await resolveOAuthProviderGrant({
+      provider: "GOOGLE_WORKSPACE",
+      providerAccountId,
+      scope: providerScope,
+      requiredScopes: GMAIL_TRIGGER_SCOPES,
     });
-
-    if (!gmailApp) {
-      await stopGmailWatchForUser(userId);
-      await deleteGmailTriggerStatesForUser(userId);
-      return;
-    }
-
-    const nodes = await getGmailTriggerNodes(userId);
-
-    if (nodes.length > 0) {
-      const activeNodeIds = nodes.map((node) => node.id);
-      await deleteGmailTriggerStatesForUser(userId, activeNodeIds);
-    } else {
-      await deleteGmailTriggerStatesForUser(userId);
-    }
-
-    if (nodes.length === 0) {
-      await stopGmailWatchForUser(userId);
-      return;
-    }
-
-    const labelIds = buildLabelSet(nodes);
     await ensureGmailWatch({
-      userId,
-      labelIds,
+      grant,
+      actorUserId: input.actorUserId,
+      labelIds: gmailTriggerLabelSet(accountNodes),
+      providerAccountId: grant.providerAccountId,
+      scope: providerScope,
     });
-  } catch (error) {
-    console.error(
-      `[Gmail] Failed to sync workflow subscriptions for user ${userId}:`,
-      error
-    );
   }
 }
 
-export async function removeGmailSubscriptionsForUser(userId: string) {
-  await stopGmailWatchForUser(userId);
-  await deleteGmailTriggerStatesForUser(userId);
-}
-
-export async function enqueueGmailNotification({
-  subscriptionId,
-  historyId,
-}: {
-  subscriptionId: string;
-  historyId?: string;
-}) {
+export async function enqueueGmailNotification(
+  input: GmailNotificationInput,
+): Promise<void> {
   await inngest.send({
     name: "gmail/subscription.notification",
-    data: {
-      subscriptionId,
-      historyId,
-    },
+    id: gmailNotificationEventId(input.subscriptionId, input.messageId),
+    data: input,
   });
 }
 
-export async function processGmailNotification({
-  subscriptionId,
-  historyId,
-}: {
-  subscriptionId: string;
-  historyId?: string;
-}) {
-  const subscription = await db.query.gmailSubscription.findFirst({
-    where: eq(gmailSubscription.id, subscriptionId),
-  });
-
-  if (!subscription) {
-    return;
-  }
-
-  await db
-    .update(gmailSubscription)
-    .set({
-        historyId: historyId ?? subscription.historyId,
-        lastSyncedAt: new Date(),
-    })
-    .where(eq(gmailSubscription.id, subscriptionId))
-    .catch(() => {});
-
-  const nodes = await getGmailTriggerNodes(subscription.userId);
-
-  if (nodes.length === 0) {
-    await stopGmailWatchForUser(subscription.userId);
-    return;
-  }
-
-  let accessToken: string;
-  try {
-    accessToken = await ensureGoogleAccessToken(subscription.userId);
-  } catch (error) {
-    console.error("[Gmail] Unable to refresh access token:", error);
-    return;
-  }
-
-  for (const node of nodes) {
-    try {
-      await maybeTriggerWorkflowFromNode({
-        node,
-        accessToken,
-      });
-    } catch (error) {
-      console.error(
-        `[Gmail] Failed to process node ${node.id} for workflow ${node.workflowId}:`,
-        error
-      );
-    }
-  }
-}
-
-export async function renewGmailSubscriptions() {
+export async function renewGmailSubscriptions(): Promise<number> {
   const threshold = new Date(Date.now() + WATCH_RENEWAL_WINDOW_MS);
   const subscriptions = await db.query.gmailSubscription.findMany({
     where: lte(gmailSubscription.expiresAt, threshold),
   });
 
   for (const subscription of subscriptions) {
+    const scope = subscriptionScope(subscription);
     try {
-      await ensureGmailWatch({
-        userId: subscription.userId,
-        labelIds: subscription.labelIds ?? [],
-        force: true,
+      const grant = await resolveOAuthProviderGrant({
+        provider: "GOOGLE_WORKSPACE",
+        providerAccountId: subscription.providerAccountId,
+        scope,
+        requiredScopes: GMAIL_TRIGGER_SCOPES,
       });
-    } catch (error) {
-      console.error(
-        `[Gmail] Failed to renew watch for user ${subscription.userId}:`,
-        error
-      );
+      await ensureGmailWatch({
+        grant,
+        actorUserId: subscription.userId,
+        force: true,
+        labelIds: subscription.labelIds ?? [],
+        providerAccountId: subscription.providerAccountId,
+        scope,
+      });
+    } catch {
+      console.error("[Gmail] Watch renewal failed.", {
+        providerAccountId: subscription.providerAccountId,
+        subscriptionId: subscription.id,
+      });
     }
   }
-
   return subscriptions.length;
 }
 
-async function maybeTriggerWorkflowFromNode({
-  node,
-  accessToken,
-}: {
-  node: TriggerNode;
-  accessToken: string;
-}) {
-  const config = ((node.data || {}) as GmailTriggerConfig) || {};
-  const variableName = normalizeVariableName(config.variableName);
-
-  const payload = await fetchGmailMessages({
-    accessToken,
-    config,
-  });
-
-  const latestId = payload.messages[0]?.id;
-
-  const state = await db.query.gmailTriggerState.findFirst({
-    where: eq(gmailTriggerState.nodeId, node.id),
-  });
-
-  if (state?.lastMessageId === latestId) {
-    return;
-  }
-
-  const initialData: Record<string, unknown> = {
-    [variableName]: payload,
-  };
-  if (variableName !== "gmailTrigger") {
-    initialData.gmailTrigger = payload;
-  }
-
-  await sendWorkflowExecution({
-    workflowId: node.workflowId,
-    initialData,
-  });
-
-  await db
-    .insert(gmailTriggerState)
-    .values({
-      id: crypto.randomUUID(),
-      nodeId: node.id,
-      workflowId: node.workflowId,
-      lastMessageId: latestId,
-      lastTriggeredAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: gmailTriggerState.nodeId,
-      set: {
-      lastMessageId: latestId,
-      lastTriggeredAt: new Date(),
-      workflowId: node.workflowId,
-      updatedAt: new Date(),
-      },
-    });
-}
-
-async function ensureGmailWatch({
-  userId,
-  labelIds,
-  force = false,
-}: {
-  userId: string;
-  labelIds: string[];
+async function ensureGmailWatch(input: {
+  grant: Awaited<ReturnType<typeof resolveOAuthProviderGrant>>;
+  actorUserId?: string | null;
   force?: boolean;
-}) {
-  const topicName = getGmailTopicName();
-  const normalizedLabels = labelIds.length ? labelIds : ["INBOX"];
-
+  labelIds: string[];
+  providerAccountId: string;
+  scope: ProviderAccountScope;
+}): Promise<void> {
+  const labels = input.labelIds.length > 0 ? input.labelIds : ["INBOX"];
   const existing = await db.query.gmailSubscription.findFirst({
-    where: eq(gmailSubscription.userId, userId),
+    where: and(
+      eq(gmailSubscription.providerAccountId, input.providerAccountId),
+      eq(gmailSubscription.organizationId, input.scope.organizationId),
+      exactLocationWhere(gmailSubscription.locationId, input.scope.locationId),
+    ),
   });
-
   const needsRefresh =
-    force ||
-    !existing ||
-    !existing.expiresAt ||
+    input.force ||
+    !existing?.expiresAt ||
     existing.expiresAt.getTime() - Date.now() < WATCH_RENEWAL_WINDOW_MS ||
-    !sameSet(existing.labelIds ?? [], normalizedLabels);
+    !sameSet(existing.labelIds ?? [], labels);
+  if (!needsRefresh) return;
 
-  if (!needsRefresh) {
-    if (!sameSet(existing.labelIds ?? [], normalizedLabels)) {
-      await db
-        .update(gmailSubscription)
-        .set({
-          labelIds: normalizedLabels,
-        })
-        .where(eq(gmailSubscription.id, existing.id));
-    }
-    return;
-  }
-
-  const accessToken = await ensureGoogleAccessToken(userId);
-  const profile = await fetchGmailProfile(accessToken);
-  const emailAddress = profile.emailAddress;
-  const payload = await createWatch(accessToken, {
+  const topicName = getGmailTopicName();
+  const watch = await createGmailWatch({
+    grant: input.grant,
+    labelIds: labels,
     topicName,
-    labelIds: normalizedLabels,
   });
-
-  const expiresAt =
-    payload?.expiration !== undefined
-      ? new Date(Number(payload.expiration))
-      : null;
-
+  const now = new Date();
   await db
     .insert(gmailSubscription)
     .values({
       id: crypto.randomUUID(),
-      userId,
-      emailAddress,
-      labelIds: normalizedLabels,
+      organizationId: input.scope.organizationId,
+      locationId: input.scope.locationId,
+      providerAccountId: input.providerAccountId,
+      userId: input.actorUserId ?? existing?.userId ?? null,
+      emailAddress: watch.emailAddress,
+      labelIds: labels,
       topicName,
-      historyId: payload?.historyId,
-      expiresAt,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      historyId: watch.historyId,
+      expiresAt: watch.expiresAt,
+      createdAt: now,
+      updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: gmailSubscription.userId,
+      target: gmailSubscription.providerAccountId,
       set: {
-      emailAddress,
-      labelIds: normalizedLabels,
-      topicName,
-      historyId: payload?.historyId,
-      expiresAt,
-      lastSyncedAt: new Date(),
-      updatedAt: new Date(),
+        organizationId: input.scope.organizationId,
+        locationId: input.scope.locationId,
+        userId: input.actorUserId ?? existing?.userId ?? null,
+        emailAddress: watch.emailAddress,
+        labelIds: labels,
+        topicName,
+        historyId: watch.historyId,
+        expiresAt: watch.expiresAt,
+        lastSyncedAt: now,
+        updatedAt: now,
       },
     });
 }
 
-async function stopGmailWatchForUser(userId: string) {
-  const subscription = await db.query.gmailSubscription.findFirst({
-    where: eq(gmailSubscription.userId, userId),
-  });
+async function stopSubscriptionsForOrganization(
+  organizationId: string,
+): Promise<void> {
+  const subscriptions = await getGmailSubscriptionsForOrganization(
+    organizationId,
+  );
+  for (const subscription of subscriptions) await stopSubscription(subscription);
+}
 
-  if (!subscription) {
-    return;
-  }
-
+async function stopSubscription(
+  subscription: GmailSubscriptionRow,
+): Promise<void> {
   try {
-    const accessToken = await ensureGoogleAccessToken(userId);
-    await fetch(`${GMAIL_API_BASE}/users/me/stop`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
+    const grant = await resolveOAuthProviderGrant({
+      provider: "GOOGLE_WORKSPACE",
+      providerAccountId: subscription.providerAccountId,
+      scope: subscriptionScope(subscription),
+      requiredScopes: GMAIL_TRIGGER_SCOPES,
     });
-  } catch (error) {
-    console.warn(`[Gmail] Failed to stop watch for user ${userId}:`, error);
-  } finally {
-    await db
-      .delete(gmailSubscription)
-      .where(eq(gmailSubscription.id, subscription.id))
-      .catch(() => {});
+    await stopGmailWatch(grant);
+  } catch {
+    console.warn("[Gmail] Remote watch cleanup failed.", {
+      providerAccountId: subscription.providerAccountId,
+      subscriptionId: subscription.id,
+    });
   }
-}
-
-async function createWatch(
-  accessToken: string,
-  {
-    topicName,
-    labelIds,
-  }: {
-    topicName: string;
-    labelIds: string[];
-  }
-) {
-  const response = await fetch(`${GMAIL_API_BASE}/users/me/watch`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      topicName,
-      labelIds,
-    }),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message || "Failed to create Gmail watch channel."
-    );
-  }
-
-  return payload as { historyId?: string; expiration?: string | number };
-}
-
-async function ensureGoogleAccessToken(userId: string) {
-  const selectedAccount = await db.query.account.findFirst({
-    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "google")),
-  });
-
-  if (!selectedAccount) {
-    throw new Error(
-      "Gmail requires a connected Google account. Connect Google under Integrations."
-    );
-  }
-
-  if (
-    selectedAccount.accessToken &&
-    selectedAccount.accessTokenExpiresAt &&
-    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
-  ) {
-    return selectedAccount.accessToken;
-  }
-
-  if (!selectedAccount.refreshToken) {
-    throw new Error(
-      "Gmail access token expired and no refresh token is available. Reconnect Google."
-    );
-  }
-
-  return refreshGoogleAccessToken(selectedAccount);
-}
-
-async function refreshGoogleAccessToken(account: Account) {
-  const refreshToken = account.refreshToken;
-  if (!refreshToken) {
-    throw new Error("Google account is missing a refresh token.");
-  }
-
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error("Google OAuth credentials are not configured.");
-  }
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-  });
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.error_description ||
-        payload?.error ||
-        "Failed to refresh Google access token."
-    );
-  }
-
-  const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
-
   await db
-    .update(accountTable)
-    .set({
-      accessToken: payload.access_token,
-      accessTokenExpiresAt: expiresAt,
-      refreshToken: payload.refresh_token ?? refreshToken,
-      updatedAt: new Date(),
-    })
-    .where(eq(accountTable.id, account.id));
-
-  return payload.access_token as string;
-}
-
-function buildLabelSet(nodes: Array<{ data: unknown }>) {
-  const labels = new Set<string>();
-  for (const node of nodes) {
-    const config = ((node.data || {}) as GmailTriggerConfig) || {};
-    const labelId = config.labelId?.trim() || "INBOX";
-    labels.add(labelId);
-  }
-  return Array.from(labels);
-}
-
-function normalizeVariableName(value?: string | null) {
-  const fallback = "gmailTrigger";
-  if (!value) {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
-    return fallback;
-  }
-
-  return trimmed;
-}
-
-function sameSet(a: string[], b: string[]) {
-  if (a.length !== b.length) {
-    return false;
-  }
-  const lookup = new Set(a);
-  return b.every((item) => lookup.has(item));
-}
-
-function getGmailTopicName() {
-  const topic = process.env.GMAIL_PUBSUB_TOPIC;
-  if (!topic) {
-    throw new Error(
-      "Set GMAIL_PUBSUB_TOPIC to the Pub/Sub topic name for Gmail watchers."
+    .delete(gmailSubscription)
+    .where(
+      and(
+        eq(gmailSubscription.id, subscription.id),
+        eq(gmailSubscription.organizationId, subscription.organizationId),
+        exactLocationWhere(gmailSubscription.locationId, subscription.locationId),
+        eq(gmailSubscription.providerAccountId, subscription.providerAccountId),
+      ),
     );
-  }
+}
+
+function sameSet(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  const values = new Set(left);
+  return right.every((item) => values.has(item));
+}
+
+function subscriptionScope(
+  subscription: GmailSubscriptionRow,
+): ProviderAccountScope {
+  return {
+    organizationId: subscription.organizationId,
+    locationId: subscription.locationId,
+  };
+}
+
+function getGmailTopicName(): string {
+  const topic = process.env.GMAIL_PUBSUB_TOPIC?.trim();
+  if (!topic) throw new Error("Gmail Pub/Sub topic is not configured.");
   return topic;
 }

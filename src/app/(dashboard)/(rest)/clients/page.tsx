@@ -5,6 +5,7 @@ import { Suspense, useState } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 
 import { ClientsTable } from "@/features/crm/components/clients-table";
+import { SavedAudiencesPanel } from "@/features/audiences/components";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { PageTabs } from "@/components/ui/page-tabs";
@@ -23,26 +24,35 @@ export default function ClientsPage() {
   const { data: active } = useSuspenseQuery(
     trpc.organizations.getActive.queryOptions(),
   );
+  const { data: permissions } = useSuspenseQuery(
+    trpc.permissions.getCurrent.queryOptions(),
+  );
 
   const isStudioLevel = !active?.activeLocationId;
+  const canViewAudiences = permissions.capabilities.includes("audience.view");
+  const canManageAudiences = permissions.capabilities.includes("audience.manage");
+  const canManageClients = permissions.capabilities.includes("customer.manage");
+  const canExportClients = permissions.capabilities.includes("privacy.export");
 
   // Define tabs based on context
   const tabs = isStudioLevel
     ? [
         { id: "studio-data", label: "Studio data" },
-        { id: "leads", label: "Leads" },
         { id: "locations-data", label: "All locations data" },
+        ...(canViewAudiences ? [{ id: "audiences", label: "Audiences" }] : []),
         { id: "activity", label: "Activity timeline" },
       ]
     : [
         { id: "data", label: "Data table" },
-        { id: "leads", label: "Leads" },
+        ...(canViewAudiences ? [{ id: "audiences", label: "Audiences" }] : []),
         { id: "activity", label: "Activity timeline" },
       ];
 
   const requestedView = searchParams.get("view");
   const [activeTab, setActiveTab] = useState(
-    requestedView === "leads" ? "leads" : tabs[0].id,
+    requestedView === "audiences" && canViewAudiences
+      ? requestedView
+      : tabs[0].id,
   );
 
   return (
@@ -51,7 +61,7 @@ export default function ClientsPage() {
         <div>
           <h1 className="text-lg font-semibold text-primary">Clients</h1>
           <p className="text-xs text-primary/75">
-            Manage your studio clients and leads
+            Manage client profiles, memberships, and activity
           </p>
         </div>
 
@@ -72,7 +82,7 @@ export default function ClientsPage() {
         className="px-6"
       />
 
-      <Separator className="bg-black/5 dark:bg-white/5" />
+
 
       {activeTab === "data" || activeTab === "studio-data" ? (
         <Suspense
@@ -83,18 +93,12 @@ export default function ClientsPage() {
             </div>
           }
         >
-          <ClientsTable scope="agency" clientView="members" />
-        </Suspense>
-      ) : activeTab === "leads" ? (
-        <Suspense
-          fallback={
-            <div className="border-y border-black/5 dark:border-white/5 bg-primary-foreground p-6 text-sm text-primary flex items-center justify-center gap-3 h-full">
-              <LoaderCircle className="size-3.5 animate-spin" />
-              Loading leads...
-            </div>
-          }
-        >
-          <ClientsTable scope="agency" clientView="leads" />
+          <ClientsTable
+            scope="agency"
+            clientView="all"
+            canManage={canManageClients}
+            canExport={canExportClients}
+          />
         </Suspense>
       ) : activeTab === "locations-data" ? (
         <Suspense
@@ -105,7 +109,22 @@ export default function ClientsPage() {
             </div>
           }
         >
-          <ClientsTable scope="all-clients" />
+          <ClientsTable
+            scope="all-clients"
+            canManage={canManageClients}
+            canExport={canExportClients}
+          />
+        </Suspense>
+      ) : activeTab === "audiences" ? (
+        <Suspense
+          fallback={
+            <div className="flex min-h-[420px] items-center justify-center gap-3 border-y border-black/5 p-6 text-sm text-primary dark:border-white/5">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              Loading audiences...
+            </div>
+          }
+        >
+          <SavedAudiencesPanel canManage={canManageAudiences} />
         </Suspense>
       ) : (
         <ActivityTimeline limit={50} filterByEntityType="client" />

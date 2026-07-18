@@ -70,7 +70,10 @@ export function ReportCatalogTable({
     }),
     [],
   );
-  const filterOptions = useMemo(() => getCatalogFilterOptions(reports), [reports]);
+  const filterOptions = useMemo(
+    () => getCatalogFilterOptions(reports),
+    [reports],
+  );
   const filteredReports = useMemo(
     () =>
       sortReportCatalogItems(

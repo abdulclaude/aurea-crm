@@ -1,23 +1,46 @@
 "use server";
 
-import { createId } from "@paralleldrive/cuid2";
-import { and, eq, lte } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
+
 import type { InferSelectModel } from "drizzle-orm";
+import { and, eq, isNull, lte } from "drizzle-orm";
 
 import { db } from "@/db";
 import { NodeType } from "@/db/enums";
 import {
-  account as accountTable,
   googleCalendarSubscription,
   node as workflowNode,
+  workflows,
 } from "@/db/schema";
+import { GOOGLE_CALENDAR_REQUIRED_SCOPES } from "@/features/apps/constants";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
 import { inngest } from "@/inngest/client";
 import { sendWorkflowExecution } from "@/inngest/utils";
 
-const GOOGLE_API_BASE = "https://www.googleapis.com/calendar/v3";
-const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const WEBHOOK_URL = resolveWebhookUrl();
-const RENEWAL_WINDOW_MS = 1000 * 60 * 60 * 24; // 24 hours
+import {
+  createCalendarWatch,
+  requestCalendarEvents,
+  stopCalendarWatch,
+} from "./google-calendar-api";
+import {
+  hashWebhookSecret,
+  normalizeCalendarEvents,
+  resolveCalendarEventType,
+  sanitizeVariableName,
+  type GoogleCalendarEventType,
+} from "./subscription-contracts";
+
+const RENEWAL_WINDOW_MS = 24 * 60 * 60 * 1_000;
+const MAX_CHANGE_PAGES = 100;
+
+type Subscription = InferSelectModel<typeof googleCalendarSubscription>;
+type CalendarNode = InferSelectModel<typeof workflowNode>;
+
+export type ProviderSubscriptionScope = {
+  organizationId: string;
+  locationId: string | null;
+  actorUserId?: string | null;
+};
 
 type TriggerNodeData = {
   calendarId?: string;
@@ -27,638 +50,434 @@ type TriggerNodeData = {
   variableName?: string;
 };
 
-type EventType = "created" | "updated" | "deleted";
-type Account = InferSelectModel<typeof accountTable>;
-type GoogleCalendarSubscription = InferSelectModel<typeof googleCalendarSubscription>;
-type CalendarNode = InferSelectModel<typeof workflowNode>;
-
-export async function syncGoogleCalendarWorkflowSubscriptions({
-  workflowId,
-  userId,
-}: {
-  workflowId: string;
-  userId: string;
-}) {
-  const nodes = await db.query.node.findMany({
+export async function syncGoogleCalendarWorkflowSubscriptions(
+  input: ProviderSubscriptionScope & { workflowId: string },
+): Promise<void> {
+  const nodes = await getScopedCalendarNodes(input);
+  const existing = await db.query.googleCalendarSubscription.findMany({
     where: and(
-      eq(workflowNode.workflowId, workflowId),
-      eq(workflowNode.type, NodeType.GOOGLE_CALENDAR_TRIGGER),
+      eq(googleCalendarSubscription.workflowId, input.workflowId),
+      eq(googleCalendarSubscription.organizationId, input.organizationId),
+      locationCondition(input.locationId),
     ),
   });
-
-  const existingSubscriptions =
-    await db.query.googleCalendarSubscription.findMany({
-      where: eq(googleCalendarSubscription.workflowId, workflowId),
-    });
-
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-
-  // remove subscriptions whose node no longer exists
-  await Promise.all(
-    existingSubscriptions
-      .filter((sub) => !nodeMap.has(sub.nodeId))
-      .map((sub) => stopSubscription(sub))
-  );
-
-  if (nodes.length === 0) {
-    return;
+  const activeNodeIds = new Set(nodes.map((node) => node.id));
+  for (const subscription of existing) {
+    if (!activeNodeIds.has(subscription.nodeId)) await stopSubscription(subscription);
   }
+  if (nodes.length === 0) return;
 
-  const existingByNode = new Map(
-    existingSubscriptions.map((sub) => [sub.nodeId, sub])
+  const providerAccountIds = [
+    ...new Set(
+      nodes.map((node) => {
+        if (!node.providerAccountId) {
+          throw new Error(
+            "Google Calendar trigger provider account binding is missing.",
+          );
+        }
+        return node.providerAccountId;
+      }),
+    ),
+  ];
+  const grants = await Promise.all(
+    providerAccountIds.map((providerAccountId) =>
+      resolveOAuthProviderGrant({
+        provider: "GOOGLE_WORKSPACE",
+        providerAccountId,
+        scope: input,
+        requiredScopes: GOOGLE_CALENDAR_REQUIRED_SCOPES,
+      }),
+    ),
   );
-
+  const grantByAccountId = new Map(
+    grants.map((grant) => [grant.providerAccountId, grant]),
+  );
+  const byNode = new Map(existing.map((subscription) => [subscription.nodeId, subscription]));
   for (const node of nodes) {
-    const existing = existingByNode.get(node.id);
+    const grant = node.providerAccountId
+      ? grantByAccountId.get(node.providerAccountId)
+      : null;
+    if (!grant) {
+      throw new Error(
+        "Google Calendar trigger provider account is unavailable.",
+      );
+    }
     await ensureSubscriptionForNode({
       node,
-      workflowId,
-      userId,
-      existing,
+      scope: input,
+      grant,
+      providerAccountId: grant.providerAccountId,
+      existing: byNode.get(node.id),
     });
   }
 }
 
 export async function removeGoogleCalendarWorkflowSubscriptions(
-  workflowId: string
-) {
-  const subs = await db.query.googleCalendarSubscription.findMany({
-    where: eq(googleCalendarSubscription.workflowId, workflowId),
+  input: ProviderSubscriptionScope & { workflowId: string },
+): Promise<void> {
+  const subscriptions = await db.query.googleCalendarSubscription.findMany({
+    where: and(
+      eq(googleCalendarSubscription.workflowId, input.workflowId),
+      eq(googleCalendarSubscription.organizationId, input.organizationId),
+      locationCondition(input.locationId),
+    ),
   });
-  await Promise.all(subs.map((sub) => stopSubscription(sub)));
+  for (const subscription of subscriptions) await stopSubscription(subscription);
 }
 
-export async function removeGoogleCalendarSubscriptionsForUser(userId: string) {
-  const subs = await db.query.googleCalendarSubscription.findMany({
-    where: eq(googleCalendarSubscription.userId, userId),
-  });
-  await Promise.all(subs.map((sub) => stopSubscription(sub)));
-}
-
-export async function enqueueGoogleCalendarNotification(params: {
+export async function enqueueGoogleCalendarNotification(input: {
   subscriptionId: string;
   resourceState?: string | null;
-  messageNumber?: string | null;
-}) {
+  messageNumber: string;
+}): Promise<void> {
   await inngest.send({
+    id: `google-calendar:${input.subscriptionId}:${input.messageNumber}`,
     name: "google-calendar/subscription.notification",
-    data: params,
+    data: input,
   });
 }
 
 export async function processGoogleCalendarSubscription(
-  subscriptionId: string
-) {
+  subscriptionId: string,
+): Promise<void> {
   const subscription = await db.query.googleCalendarSubscription.findFirst({
     where: eq(googleCalendarSubscription.id, subscriptionId),
   });
-
-  if (!subscription) {
-    return;
-  }
-
+  if (!subscription) return;
   if (!subscription.syncToken) {
     await recreateSubscription(subscription);
     return;
   }
-
   await fetchAndProcessChanges(subscription);
 }
 
-export async function renewExpiringGoogleCalendarSubscriptions() {
+export async function renewExpiringGoogleCalendarSubscriptions(): Promise<number> {
   const threshold = new Date(Date.now() + RENEWAL_WINDOW_MS);
-  const subs = await db.query.googleCalendarSubscription.findMany({
+  const subscriptions = await db.query.googleCalendarSubscription.findMany({
     where: lte(googleCalendarSubscription.expiresAt, threshold),
   });
-
-  for (const sub of subs) {
-    await recreateSubscription(sub);
+  for (const subscription of subscriptions) {
+    try {
+      await recreateSubscription(subscription);
+    } catch {
+      console.error("[GoogleCalendar] Subscription renewal failed.", {
+        providerAccountId: subscription.providerAccountId,
+        subscriptionId: subscription.id,
+      });
+    }
   }
-
-  return subs.length;
+  return subscriptions.length;
 }
 
-async function ensureSubscriptionForNode({
-  node,
-  workflowId,
-  userId,
-  existing,
-  force = false,
-}: {
-  node: CalendarNode;
-  workflowId: string;
-  userId: string;
-  existing?: GoogleCalendarSubscription;
-  force?: boolean;
-}) {
-  const data = ((node.data || {}) as TriggerNodeData) || {};
-  const listenFor = normalizeListenFor(data.listenFor);
-  const variableName = sanitizeVariableName(data.variableName);
+async function getScopedCalendarNodes(
+  input: ProviderSubscriptionScope & { workflowId: string },
+): Promise<CalendarNode[]> {
+  return db
+    .select({ node: workflowNode })
+    .from(workflowNode)
+    .innerJoin(workflows, eq(workflowNode.workflowId, workflows.id))
+    .where(
+      and(
+        eq(workflowNode.workflowId, input.workflowId),
+        eq(workflowNode.type, NodeType.GOOGLE_CALENDAR_TRIGGER),
+        eq(workflows.organizationId, input.organizationId),
+        workflowLocationCondition(input.locationId),
+        eq(workflows.archived, false),
+        eq(workflows.isTemplate, false),
+      ),
+    )
+    .then((rows) => rows.map((row) => row.node));
+}
 
+async function ensureSubscriptionForNode(input: {
+  node: CalendarNode;
+  scope: ProviderSubscriptionScope;
+  providerAccountId: string;
+  grant: Awaited<ReturnType<typeof resolveOAuthProviderGrant>>;
+  existing?: Subscription;
+  force?: boolean;
+}): Promise<void> {
+  const data = (input.node.data ?? {}) as TriggerNodeData;
+  const listenFor = normalizeCalendarEvents(data.listenFor);
+  const variableName = sanitizeVariableName(data.variableName);
   if (!data.calendarId || listenFor.length === 0) {
-    if (existing) {
-      await stopSubscription(existing);
-    }
+    if (input.existing) await stopSubscription(input.existing);
     return;
   }
 
   const requiresRefresh =
-    force ||
-    !existing ||
-    existing.calendarId !== data.calendarId ||
-    !sameSet(existing.listenFor ?? [], listenFor) ||
-    existing.variableName !== variableName ||
-    !existing.syncToken ||
-    !existing.expiresAt ||
-    existing.expiresAt.getTime() - Date.now() < RENEWAL_WINDOW_MS / 2;
-
-  if (!requiresRefresh) {
-    if (existing && existing.variableName !== variableName) {
+    input.force ||
+    !input.existing ||
+    input.existing.providerAccountId !== input.providerAccountId ||
+    input.existing.calendarId !== data.calendarId ||
+    !sameSet(input.existing.listenFor ?? [], listenFor) ||
+    !input.existing.syncToken ||
+    !input.existing.expiresAt ||
+    input.existing.expiresAt.getTime() - Date.now() < RENEWAL_WINDOW_MS / 2;
+  if (!requiresRefresh && input.existing) {
+    if (input.existing.variableName !== variableName) {
       await db
         .update(googleCalendarSubscription)
         .set({ variableName, updatedAt: new Date() })
-        .where(eq(googleCalendarSubscription.id, existing.id));
+        .where(eq(googleCalendarSubscription.id, input.existing.id));
     }
     return;
   }
-
-  if (existing) {
-    await stopSubscription(existing);
+  if (
+    input.existing &&
+    input.existing.providerAccountId !== input.providerAccountId
+  ) {
+    await stopSubscription(input.existing);
   }
 
-  const accessToken = await ensureGoogleAccessToken(userId);
-  const syncToken = await fetchInitialSyncToken(accessToken, data.calendarId);
-  const webhookToken = createId();
-  const channelId = createId();
-
-  const watchResponse = await googleApiFetch(
-    `/calendars/${encodeURIComponent(data.calendarId)}/events/watch`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: channelId,
-        type: "web_hook",
-        address: WEBHOOK_URL,
-        token: webhookToken,
-        params: {
-          ttl: "604800",
-        },
-      }),
-    }
+  const syncToken = await fetchInitialSyncToken(
+    input.grant,
+    data.calendarId,
   );
+  const webhookSecret = randomBytes(32).toString("base64url");
+  const channelId = crypto.randomUUID();
+  const watch = await createCalendarWatch({
+    grant: input.grant,
+    calendarId: data.calendarId,
+    channelId,
+    webhookSecret,
+    webhookUrl: resolveWebhookUrl(),
+  });
+  const expiresAt = watch.expiration
+    ? new Date(Number(watch.expiration))
+    : null;
 
-  const payload = await watchResponse.json().catch(() => ({}));
-  if (!watchResponse.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        "Failed to create Google Calendar watch channel."
-    );
+  try {
+    const update = {
+      calendarId: data.calendarId,
+      calendarName: data.calendarName,
+      listenFor,
+      channelId,
+      resourceId: watch.resourceId,
+      webhookTokenHash: hashWebhookSecret(webhookSecret),
+      syncToken,
+      expiresAt,
+      lastSyncedAt: new Date(),
+      lastMessageNumber: null,
+      timezone: data.timezone,
+      variableName,
+      userId: input.scope.actorUserId ?? input.existing?.userId ?? null,
+      updatedAt: new Date(),
+    };
+    if (
+      input.existing &&
+      input.existing.providerAccountId === input.providerAccountId
+    ) {
+      await db
+        .update(googleCalendarSubscription)
+        .set(update)
+        .where(eq(googleCalendarSubscription.id, input.existing.id));
+    } else {
+      await db.insert(googleCalendarSubscription).values({
+        id: crypto.randomUUID(),
+        organizationId: input.scope.organizationId,
+        locationId: input.scope.locationId,
+        providerAccountId: input.providerAccountId,
+        workflowId: input.node.workflowId,
+        nodeId: input.node.id,
+        createdAt: new Date(),
+        ...update,
+      });
+    }
+  } catch (error) {
+    await stopCalendarWatch({
+      grant: input.grant,
+      channelId,
+      resourceId: watch.resourceId,
+    }).catch(() => undefined);
+    throw error;
   }
 
-  const expiresAt =
-    payload?.expiration !== undefined
-      ? new Date(Number(payload.expiration))
-      : null;
-
-  await db
-    .insert(googleCalendarSubscription)
-    .values({
-      id: crypto.randomUUID(),
-      nodeId: node.id,
-      calendarId: data.calendarId,
-      calendarName: data.calendarName,
-      listenFor,
-      channelId,
-      resourceId: payload.resourceId,
-      webhookToken,
-      syncToken,
-      expiresAt,
-      lastSyncedAt: new Date(),
-      timezone: data.timezone,
-      userId,
-      workflowId,
-      variableName,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: googleCalendarSubscription.nodeId,
-      set: {
-      calendarId: data.calendarId,
-      calendarName: data.calendarName,
-      listenFor,
-      channelId,
-      resourceId: payload.resourceId,
-      webhookToken,
-      syncToken,
-      expiresAt,
-      lastSyncedAt: new Date(),
-      timezone: data.timezone,
-      userId,
-      workflowId,
-      variableName,
-      updatedAt: new Date(),
-      },
-    });
+  if (
+    input.existing &&
+    input.existing.providerAccountId === input.providerAccountId &&
+    input.existing.channelId !== channelId
+  ) {
+    await stopCalendarWatch({
+      grant: input.grant,
+      channelId: input.existing.channelId,
+      resourceId: input.existing.resourceId,
+    }).catch(() => undefined);
+  }
 }
 
-async function fetchAndProcessChanges(
-  subscription: GoogleCalendarSubscription
-) {
-  const accessToken = await ensureGoogleAccessToken(subscription.userId);
-  const currentSyncToken = subscription.syncToken;
-
-  if (!currentSyncToken) {
-    await recreateSubscription(subscription);
-    return;
-  }
-
-  let nextSyncToken = currentSyncToken;
+async function fetchAndProcessChanges(subscription: Subscription): Promise<void> {
+  const grant = await resolveSubscriptionGrant(subscription);
   let pageToken: string | undefined;
-
-  while (true) {
-    const searchParams = new URLSearchParams({
+  let nextSyncToken = subscription.syncToken;
+  for (let pageCount = 0; pageCount < MAX_CHANGE_PAGES; pageCount += 1) {
+    const query = new URLSearchParams({
       singleEvents: "true",
       showDeleted: "true",
-      syncToken: nextSyncToken,
+      syncToken: subscription.syncToken ?? "",
     });
-
-    if (pageToken) {
-      searchParams.set("pageToken", pageToken);
-    }
-
-    const response = await googleApiFetch(
-      `/calendars/${encodeURIComponent(
-        subscription.calendarId
-      )}/events?${searchParams.toString()}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-
-    if (response.status === 410) {
+    if (pageToken) query.set("pageToken", pageToken);
+    const result = await requestCalendarEvents({
+      grant,
+      calendarId: subscription.calendarId,
+      query,
+    });
+    if (result.expiredSyncToken) {
       await recreateSubscription(subscription);
       return;
     }
-
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(
-        payload?.error?.message ||
-          "Failed to fetch Google Calendar changes for workflow trigger."
-      );
+    for (const event of result.page.items) {
+      const eventType = resolveCalendarEventType(event);
+      if (!(subscription.listenFor ?? []).includes(eventType)) continue;
+      await dispatchCalendarEvent(subscription, eventType, event);
     }
-
-    const items: GoogleCalendarEvent[] = Array.isArray(payload.items)
-      ? (payload.items as GoogleCalendarEvent[])
-      : [];
-
-    for (const event of items) {
-      const eventType = resolveEventType(event);
-      if (!(subscription.listenFor ?? []).includes(eventType)) {
-        continue;
-      }
-
-      const eventPayload = {
-        subscriptionId: subscription.id,
-        nodeId: subscription.nodeId,
-        calendarId: subscription.calendarId,
-        calendarName: subscription.calendarName,
-        eventType,
-        timezone: subscription.timezone,
-        event,
-      };
-
-      const variableKey = sanitizeVariableName(subscription.variableName);
-      const initialData: Record<string, unknown> = {
-        [variableKey]: eventPayload,
-      };
-
-      if (variableKey !== "googleCalendar") {
-        initialData.googleCalendar = eventPayload;
-      }
-
-      await sendWorkflowExecution({
-        workflowId: subscription.workflowId,
-        initialData,
-      });
-    }
-
-    pageToken = payload.nextPageToken ?? undefined;
-    if (payload.nextSyncToken) {
-      nextSyncToken = payload.nextSyncToken;
-    }
-
+    pageToken = result.page.nextPageToken;
+    nextSyncToken = result.page.nextSyncToken ?? nextSyncToken;
     if (!pageToken) {
-      break;
+      await db
+        .update(googleCalendarSubscription)
+        .set({ syncToken: nextSyncToken, lastSyncedAt: new Date(), updatedAt: new Date() })
+        .where(eq(googleCalendarSubscription.id, subscription.id));
+      return;
     }
   }
-
-  await db
-    .update(googleCalendarSubscription)
-    .set({
-      syncToken: nextSyncToken,
-      lastSyncedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(googleCalendarSubscription.id, subscription.id));
+  throw new Error("Google Calendar returned too many change pages.");
 }
 
-async function recreateSubscription(subscription: GoogleCalendarSubscription) {
-  const node = await db.query.node.findFirst({
-    where: eq(workflowNode.id, subscription.nodeId),
+async function dispatchCalendarEvent(
+  subscription: Subscription,
+  eventType: GoogleCalendarEventType,
+  event: Record<string, unknown> & { id: string; updated?: string; status?: string },
+): Promise<void> {
+  const eventPayload = {
+    subscriptionId: subscription.id,
+    nodeId: subscription.nodeId,
+    calendarId: subscription.calendarId,
+    calendarName: subscription.calendarName,
+    eventType,
+    timezone: subscription.timezone,
+    event,
+  };
+  const variableKey = sanitizeVariableName(subscription.variableName);
+  const initialData: Record<string, unknown> = { [variableKey]: eventPayload };
+  if (variableKey !== "googleCalendar") initialData.googleCalendar = eventPayload;
+  const eventKey = createHash("sha256")
+    .update(`${subscription.id}:${event.id}:${event.updated ?? event.status ?? eventType}`)
+    .digest("hex");
+  await sendWorkflowExecution({
+    workflowId: subscription.workflowId,
+    initialData,
+    idempotencyKey: `google-calendar-event:${eventKey}`,
+    expectedOrganizationId: subscription.organizationId,
+    expectedLocationId: subscription.locationId,
   });
+}
 
-  if (!node || node.type !== NodeType.GOOGLE_CALENDAR_TRIGGER) {
-    await db
-      .delete(googleCalendarSubscription)
-      .where(eq(googleCalendarSubscription.id, subscription.id))
-      .catch(() => {});
+async function recreateSubscription(subscription: Subscription): Promise<void> {
+  const [node] = await getScopedCalendarNodes({
+    workflowId: subscription.workflowId,
+    organizationId: subscription.organizationId,
+    locationId: subscription.locationId,
+  });
+  if (!node || node.id !== subscription.nodeId) {
+    await stopSubscription(subscription);
     return;
   }
-
+  if (!node.providerAccountId) {
+    await stopSubscription(subscription);
+    return;
+  }
+  const grant = await resolveOAuthProviderGrant({
+    providerAccountId: node.providerAccountId,
+    provider: "GOOGLE_WORKSPACE",
+    scope: subscription,
+    requiredScopes: GOOGLE_CALENDAR_REQUIRED_SCOPES,
+  });
   await ensureSubscriptionForNode({
     node,
-    workflowId: subscription.workflowId,
-    userId: subscription.userId,
+    scope: subscription,
+    providerAccountId: grant.providerAccountId,
+    grant,
     existing: subscription,
     force: true,
   });
 }
 
-async function stopSubscription(subscription: GoogleCalendarSubscription) {
+async function stopSubscription(subscription: Subscription): Promise<void> {
   try {
-    const accessToken = await ensureGoogleAccessToken(subscription.userId);
-    await googleApiFetch("/channels/stop", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: subscription.channelId,
-        resourceId: subscription.resourceId,
-      }),
+    const grant = await resolveSubscriptionGrant(subscription);
+    await stopCalendarWatch({
+      grant,
+      channelId: subscription.channelId,
+      resourceId: subscription.resourceId,
     });
-  } catch (error) {
-    console.warn(
-      `[GoogleCalendar] Failed to stop channel ${subscription.channelId}:`,
-      error
-    );
+  } catch {
+    console.warn("[GoogleCalendar] Remote channel cleanup failed.", {
+      providerAccountId: subscription.providerAccountId,
+      subscriptionId: subscription.id,
+    });
   } finally {
     await db
       .delete(googleCalendarSubscription)
-      .where(eq(googleCalendarSubscription.id, subscription.id))
-      .catch(() => {});
+      .where(eq(googleCalendarSubscription.id, subscription.id));
   }
 }
 
-async function ensureGoogleAccessToken(userId: string) {
-  const selectedAccount = await db.query.account.findFirst({
-    where: and(eq(accountTable.userId, userId), eq(accountTable.providerId, "google")),
+function resolveSubscriptionGrant(subscription: Subscription) {
+  return resolveOAuthProviderGrant({
+    providerAccountId: subscription.providerAccountId,
+    provider: "GOOGLE_WORKSPACE",
+    scope: subscription,
+    requiredScopes: GOOGLE_CALENDAR_REQUIRED_SCOPES,
   });
-
-  if (!selectedAccount) {
-    throw new Error(
-      "Google Calendar requires a connected Google account. Connect Google Calendar under Integrations."
-    );
-  }
-
-  if (
-    selectedAccount.accessToken &&
-    selectedAccount.accessTokenExpiresAt &&
-    selectedAccount.accessTokenExpiresAt.getTime() > Date.now() + 60_000
-  ) {
-    return selectedAccount.accessToken;
-  }
-
-  if (!selectedAccount.refreshToken) {
-    throw new Error(
-      "Google Calendar access token expired and no refresh token is available. Reconnect Google Calendar."
-    );
-  }
-
-  return refreshGoogleAccessToken(selectedAccount);
 }
 
-async function refreshGoogleAccessToken(account: Account) {
-  const refreshToken = account.refreshToken;
-  if (!refreshToken) {
-    throw new Error("Google account is missing a refresh token.");
-  }
-
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error("Google OAuth credentials are not configured.");
-  }
-
-  const params = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-  });
-
-  const response = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(
-      payload?.error_description ||
-        payload?.error ||
-        "Failed to refresh Google Calendar access token."
-    );
-  }
-
-  const expiresAt = new Date(Date.now() + (payload.expires_in ?? 3600) * 1000);
-
-  await db
-    .update(accountTable)
-    .set({
-      accessToken: payload.access_token,
-      accessTokenExpiresAt: expiresAt,
-      refreshToken: payload.refresh_token ?? refreshToken,
-      updatedAt: new Date(),
-    })
-    .where(eq(accountTable.id, account.id));
-
-  return payload.access_token as string;
-}
-
-async function fetchInitialSyncToken(accessToken: string, calendarId: string) {
-  const baseParams = new URLSearchParams({
-    singleEvents: "true",
-    showDeleted: "true",
-    orderBy: "updated",
-    timeMin: new Date().toISOString(),
-  });
-
-  let syncToken = await requestSyncToken(accessToken, calendarId, baseParams);
-
-  if (!syncToken) {
-    baseParams.delete("timeMin");
-    syncToken = await requestSyncToken(accessToken, calendarId, baseParams);
-  }
-
-  if (!syncToken) {
-    throw new Error(
-      "Unable to initialize Google Calendar sync token. Try selecting a different calendar."
-    );
-  }
-
-  return syncToken;
-}
-
-async function requestSyncToken(
-  accessToken: string,
+async function fetchInitialSyncToken(
+  grant: Awaited<ReturnType<typeof resolveOAuthProviderGrant>>,
   calendarId: string,
-  params: URLSearchParams
-) {
-  let pageToken: string | undefined;
-
-  while (true) {
-    const query = new URLSearchParams(params);
-    if (pageToken) {
-      query.set("pageToken", pageToken);
-    }
-
-    const response = await googleApiFetch(
-      `/calendars/${encodeURIComponent(calendarId)}/events?${query.toString()}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
-    );
-
-    const payload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      console.warn(
-        "[GoogleCalendar] Failed to request sync token:",
-        payload?.error?.message || response.statusText
-      );
-      return null;
-    }
-
-    if (payload.nextSyncToken) {
-      return payload.nextSyncToken;
-    }
-
-    pageToken = payload.nextPageToken ?? undefined;
-    if (!pageToken) {
-      break;
+): Promise<string> {
+  for (const includeTimeMin of [true, false]) {
+    let pageToken: string | undefined;
+    for (let pageCount = 0; pageCount < MAX_CHANGE_PAGES; pageCount += 1) {
+      const query = new URLSearchParams({
+        singleEvents: "true",
+        showDeleted: "true",
+        orderBy: "updated",
+      });
+      if (includeTimeMin) query.set("timeMin", new Date().toISOString());
+      if (pageToken) query.set("pageToken", pageToken);
+      const result = await requestCalendarEvents({ grant, calendarId, query });
+      if (result.expiredSyncToken) break;
+      if (result.page.nextSyncToken) return result.page.nextSyncToken;
+      pageToken = result.page.nextPageToken;
+      if (!pageToken) break;
     }
   }
-
-  return null;
+  throw new Error("Unable to initialize Google Calendar synchronization.");
 }
 
-type GoogleCalendarEvent = {
-  status?: string;
-  created?: string;
-  updated?: string;
-  [key: string]: unknown;
-};
-
-function resolveEventType(event: GoogleCalendarEvent): EventType {
-  if (event.status === "cancelled") {
-    return "deleted";
-  }
-
-  const created = event.created ? Date.parse(event.created) : NaN;
-  const updated = event.updated ? Date.parse(event.updated) : NaN;
-
-  if (
-    !Number.isNaN(created) &&
-    !Number.isNaN(updated) &&
-    updated - created > 0
-  ) {
-    return "updated";
-  }
-
-  return "created";
+function locationCondition(locationId: string | null) {
+  return locationId
+    ? eq(googleCalendarSubscription.locationId, locationId)
+    : isNull(googleCalendarSubscription.locationId);
 }
 
-function normalizeListenFor(values?: string[]) {
-  if (!Array.isArray(values)) {
-    return [] as EventType[];
-  }
-
-  const allowed: EventType[] = ["created", "updated", "deleted"];
-  const set = new Set<EventType>();
-  for (const value of values) {
-    const normalized = value?.toLowerCase() as EventType;
-    if (allowed.includes(normalized)) {
-      set.add(normalized);
-    }
-  }
-  return Array.from(set);
+function workflowLocationCondition(locationId: string | null) {
+  return locationId ? eq(workflows.locationId, locationId) : isNull(workflows.locationId);
 }
 
-function sameSet(a: string[], b: string[]) {
-  if (a.length !== b.length) {
-    return false;
-  }
-  const set = new Set(a);
-  return b.every((item) => set.has(item));
+function sameSet(left: string[], right: string[]): boolean {
+  const values = new Set(left);
+  return left.length === right.length && right.every((value) => values.has(value));
 }
 
-async function googleApiFetch(path: string, init: RequestInit) {
-  const url = path.startsWith("http")
-    ? path
-    : `${GOOGLE_API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
-  return fetch(url, init);
-}
-
-function sanitizeVariableName(value?: string | null) {
-  const fallback = "googleCalendar";
-  if (!value) {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
-    return fallback;
-  }
-
-  return trimmed;
-}
-
-function resolveWebhookUrl() {
+function resolveWebhookUrl(): string {
   const base =
     process.env.GOOGLE_CALENDAR_WEBHOOK_BASE_URL ??
     process.env.APP_URL ??
-    process.env.NEXT_PUBLIC_APP_URL ??
-    "";
-
-  if (!base) {
-    throw new Error(
-      "Set GOOGLE_CALENDAR_WEBHOOK_BASE_URL (must be HTTPS) so Google Calendar can reach your server."
-    );
+    process.env.NEXT_PUBLIC_APP_URL;
+  if (!base || !base.startsWith("https://")) {
+    throw new Error("Google Calendar subscriptions require an HTTPS webhook base URL.");
   }
-
-  if (!base.startsWith("https://")) {
-    throw new Error(
-      `Google Calendar webhook base must be HTTPS. Received: "${base}".`
-    );
-  }
-
   return `${base.replace(/\/$/, "")}/api/webhooks/google-calendar`;
 }

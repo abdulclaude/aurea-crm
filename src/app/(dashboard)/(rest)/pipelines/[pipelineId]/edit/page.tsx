@@ -533,7 +533,7 @@ export default function EditPipelinePage() {
                 disabled={updatePipeline.isPending}
                 className="text-xs rounded-sm bg-background text-primary hover:text-primary border border-black/10 dark:border-white/5"
               >
-                {updatePipeline.isPending ? "Saving..." : "Save Changes"}
+                {updatePipeline.isPending ? "Saving..." : "Save changes"}
               </Button>
             </div>
           </form>

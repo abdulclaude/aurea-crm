@@ -1,73 +1,103 @@
-import { db } from "@/db";
-import { googleCalendarSubscription } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { enqueueGoogleCalendarNotification } from "@/features/google-calendar/server/subscriptions";
-import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { googleCalendarSubscription, providerAccount } from "@/db/schema";
+import {
+  enqueueGoogleCalendarNotification,
+} from "@/features/google-calendar/server/subscriptions";
+import {
+  isNewGoogleMessageNumber,
+  webhookSecretMatches,
+} from "@/features/google-calendar/server/subscription-contracts";
+
+const HEADER_LIMITS = {
+  channelId: 200,
+  resourceId: 1_000,
+  resourceState: 100,
+  channelToken: 500,
+  messageNumber: 40,
+} as const;
 
 export async function POST(request: NextRequest) {
+  const channelId = boundedHeader(request, "x-goog-channel-id", HEADER_LIMITS.channelId);
+  const resourceId = boundedHeader(request, "x-goog-resource-id", HEADER_LIMITS.resourceId);
+  const resourceState = boundedHeader(
+    request,
+    "x-goog-resource-state",
+    HEADER_LIMITS.resourceState,
+  );
+  const channelToken = boundedHeader(
+    request,
+    "x-goog-channel-token",
+    HEADER_LIMITS.channelToken,
+  );
+  const messageNumber = boundedHeader(
+    request,
+    "x-goog-message-number",
+    HEADER_LIMITS.messageNumber,
+  );
+  if (!channelId || !resourceId || !channelToken || !messageNumber) {
+    return NextResponse.json({ error: "Invalid channel metadata." }, { status: 400 });
+  }
+
   try {
-    const channelId = request.headers.get("x-goog-channel-id");
-    const resourceId = request.headers.get("x-goog-resource-id");
-    const resourceState = request.headers.get("x-goog-resource-state");
-    const channelToken = request.headers.get("x-goog-channel-token");
-    const messageNumber = request.headers.get("x-goog-message-number");
-
-    if (!channelId || !resourceId) {
-      return NextResponse.json(
-        { success: false, error: "Missing channel metadata." },
-        { status: 400 }
-      );
-    }
-
-    const [subscription] = await db
-      .select()
+    const [row] = await db
+      .select({ subscription: googleCalendarSubscription })
       .from(googleCalendarSubscription)
+      .innerJoin(
+        providerAccount,
+        and(
+          eq(providerAccount.id, googleCalendarSubscription.providerAccountId),
+          eq(providerAccount.organizationId, googleCalendarSubscription.organizationId),
+        ),
+      )
       .where(
         and(
           eq(googleCalendarSubscription.channelId, channelId),
-          eq(googleCalendarSubscription.resourceId, resourceId)
-        )
+          eq(googleCalendarSubscription.resourceId, resourceId),
+          eq(providerAccount.status, "ACTIVE"),
+        ),
       )
       .limit(1);
+    if (!row) return NextResponse.json({ accepted: true }, { status: 202 });
 
-    if (!subscription) {
-      return NextResponse.json(
-        { success: true, ignored: true },
-        { status: 202 }
-      );
+    const subscription = row.subscription;
+    if (!webhookSecretMatches(channelToken, subscription.webhookTokenHash)) {
+      return NextResponse.json({ error: "Invalid channel token." }, { status: 401 });
+    }
+    if (!isNewGoogleMessageNumber(messageNumber, subscription.lastMessageNumber)) {
+      return NextResponse.json({ accepted: true }, { status: 202 });
     }
 
-    if (
-      subscription.webhookToken &&
-      channelToken !== subscription.webhookToken
-    ) {
-      return NextResponse.json(
-        { success: true, ignored: true },
-        { status: 202 }
-      );
+    if (resourceState !== "sync") {
+      await enqueueGoogleCalendarNotification({
+        subscriptionId: subscription.id,
+        resourceState,
+        messageNumber,
+      });
     }
-
-    if (resourceState === "sync") {
-      await db
-        .update(googleCalendarSubscription)
-        .set({ lastSyncedAt: new Date() })
-        .where(eq(googleCalendarSubscription.id, subscription.id));
-      return NextResponse.json({ success: true });
-    }
-
-    await enqueueGoogleCalendarNotification({
-      subscriptionId: subscription.id,
-      resourceState,
-      messageNumber,
-    });
-
-    return NextResponse.json({ success: true });
+    await db
+      .update(googleCalendarSubscription)
+      .set({
+        lastMessageNumber: messageNumber,
+        lastSyncedAt: resourceState === "sync" ? new Date() : subscription.lastSyncedAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(googleCalendarSubscription.id, subscription.id));
+    return NextResponse.json({ accepted: true }, { status: 202 });
   } catch (error) {
-    console.error("Google Calendar webhook error:", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to handle Google Calendar webhook." },
-      { status: 500 }
-    );
+    console.error("[GoogleCalendar] Webhook intake failed.", error);
+    return NextResponse.json({ error: "Webhook intake failed." }, { status: 500 });
   }
+}
+
+function boundedHeader(
+  request: NextRequest,
+  name: string,
+  maxLength: number,
+): string | null {
+  const value = request.headers.get(name);
+  return value && value.length <= maxLength ? value : null;
 }

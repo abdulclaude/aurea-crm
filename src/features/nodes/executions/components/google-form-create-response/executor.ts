@@ -36,7 +36,6 @@ export const googleFormCreateResponseExecutor: NodeExecutor<GoogleFormCreateResp
     const formId = data.formId ? decode(Handlebars.compile(data.formId)(context)) : undefined;
     const responses = data.responses ? decode(Handlebars.compile(data.responses)(context)) : undefined;
 
-    // TODO: Implement Google Forms: Create Response logic here
     const result = await step.run("google-form-create-response", async () => {
       // Add implementation here
       throw new NonRetriableError("Google Forms: Create Response: Not yet implemented");

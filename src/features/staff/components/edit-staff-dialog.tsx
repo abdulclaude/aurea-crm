@@ -258,7 +258,7 @@ export function EditStaffDialog({
                 disabled={isPending}
               >
                 {isPending && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
+                Save changes
               </Button>
             </div>
           </form>

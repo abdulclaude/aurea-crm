@@ -1,6 +1,6 @@
-import { Resend } from "resend";
+import "server-only";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { sendEmail, type EmailQueueResult } from "@/lib/email";
 
 export async function sendMagicLinkEmail({
   to,
@@ -8,19 +8,31 @@ export async function sendMagicLinkEmail({
   magicLink,
   expiresAt,
   organizationName,
+  organizationId,
+  locationId,
+  instructorId,
+  tokenDigest,
 }: {
+  organizationId: string;
+  locationId: string | null;
+  instructorId: string;
+  tokenDigest: string;
   to: string;
   instructorName: string;
   magicLink: string;
   expiresAt: Date;
   organizationName?: string;
-}) {
-  try {
-    const { data, error } = await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || "noreply@yourdomain.com",
-      to: [to],
-      subject: "Set up your instructor account",
-      html: `
+}): Promise<EmailQueueResult> {
+  return sendEmail({
+    organizationId,
+    locationId,
+    clientId: null,
+    sourceType: "INSTRUCTOR_MAGIC_LINK",
+    sourceId: instructorId,
+    idempotencyKey: `instructor:${instructorId}:magic-link:${tokenDigest}`,
+    to,
+    subject: "Set up your instructor account",
+    html: `
         <!DOCTYPE html>
         <html>
           <head>
@@ -77,17 +89,6 @@ export async function sendMagicLinkEmail({
             </div>
           </body>
         </html>
-      `,
-    });
-
-    if (error) {
-      console.error("Failed to send magic link email:", error);
-      return { success: false, error };
-    }
-
-    return { success: true, data };
-  } catch (error) {
-    console.error("Failed to send magic link email:", error);
-    return { success: false, error };
-  }
+    `,
+  });
 }

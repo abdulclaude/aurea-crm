@@ -1,6 +1,7 @@
 import AppHeader from "@/components/sidebar/app-header";
 import { db } from "@/db";
 import { member, locationMember } from "@/db/schema";
+import { UnauthenticatedRedirect } from "@/features/auth/components/unauthenticated-redirect";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -10,7 +11,7 @@ import { count, eq } from "drizzle-orm";
 const PreviewLayout = async ({ children }: { children: React.ReactNode }) => {
   // Ensure the user is authenticated
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) redirect("/login");
+  if (!session) return <UnauthenticatedRedirect />;
 
   // Check for organization membership
   const [{ count: organizationMembershipCount }] = await db

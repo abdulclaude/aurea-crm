@@ -9,18 +9,22 @@ type TelegramUpdatePayload = {
 
 export async function enqueueTelegramUpdate({
   credentialId,
-  userId,
+  organizationId,
+  locationId,
   update,
 }: {
   credentialId: string;
-  userId: string;
+  organizationId: string;
+  locationId: string | null;
   update: TelegramUpdatePayload;
 }) {
   await inngest.send({
     name: "telegram/update",
+    id: `telegram:${credentialId}:${update.update_id}`,
     data: {
       credentialId,
-      userId,
+      organizationId,
+      locationId,
       update,
     },
   });

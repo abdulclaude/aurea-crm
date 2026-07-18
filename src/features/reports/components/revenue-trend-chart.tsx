@@ -16,8 +16,21 @@ interface RevenueDataPoint {
   amount: number;
 }
 
-export function RevenueTrendChart({ data }: { data: RevenueDataPoint[] }) {
+export function RevenueTrendChart({
+  data,
+  currency,
+  locale,
+}: {
+  data: RevenueDataPoint[];
+  currency: string;
+  locale: string;
+}) {
   if (!data.length) return null;
+  const formatter = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  });
 
   return (
     <Card>
@@ -27,14 +40,21 @@ export function RevenueTrendChart({ data }: { data: RevenueDataPoint[] }) {
       <CardContent>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 4, right: 12, left: 12, bottom: 4 }}>
+            <AreaChart
+              data={data}
+              margin={{ top: 4, right: 12, left: 12, bottom: 4 }}
+            >
               <defs>
                 <linearGradient id="revTrendFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
+              <CartesianGrid
+                strokeDasharray="3 3"
+                vertical={false}
+                stroke="rgba(0,0,0,0.06)"
+              />
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 11, fill: "rgba(0,0,0,0.5)" }}
@@ -45,7 +65,7 @@ export function RevenueTrendChart({ data }: { data: RevenueDataPoint[] }) {
                 tick={{ fontSize: 11, fill: "rgba(0,0,0,0.5)" }}
                 axisLine={false}
                 tickLine={false}
-                tickFormatter={(v) => `£${v}`}
+                tickFormatter={(value) => formatter.format(Number(value))}
               />
               <Tooltip
                 contentStyle={{
@@ -55,7 +75,7 @@ export function RevenueTrendChart({ data }: { data: RevenueDataPoint[] }) {
                   fontSize: "12px",
                 }}
                 formatter={(v) => [
-                  `£${Number(v ?? 0).toLocaleString()}`,
+                  formatter.format(Number(v ?? 0)),
                   "Revenue",
                 ]}
               />

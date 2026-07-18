@@ -6,4 +6,5 @@ export { ReportDataTable } from "./report-data-table";
 export { ReportDetail } from "./report-detail";
 export { ReportGroupOverview } from "./report-group-overview";
 export { ReportTableToolbar } from "./report-table-toolbar";
+export { ReportDataHealthBar } from "./report-data-health-bar";
 export { ReportsGroupShell } from "./reports-group-shell";

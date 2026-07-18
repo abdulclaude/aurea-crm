@@ -64,7 +64,6 @@ type ModuleCardProps = {
   description: string;
   features: readonly string[];
   enabled: boolean;
-  requiresPremium: boolean;
   onToggle: (enabled: boolean) => void;
   isLoading?: boolean;
 };
@@ -75,7 +74,6 @@ const ModuleCard = ({
   description,
   features,
   enabled,
-  requiresPremium,
   onToggle,
   isLoading,
 }: ModuleCardProps) => {
@@ -96,12 +94,6 @@ const ModuleCard = ({
                   <CardTitle className="text-base text-primary">
                     {name}
                   </CardTitle>
-
-                  {/* {requiresPremium && (
-                    <Badge variant="secondary" className="text-xs w-max">
-                      Premium
-                    </Badge>
-                  )} */}
 
                   {/* {enabled && (
                     <Badge className="text-xs bg-emerald-400/10 text-emerald-500 border-emerald-500/20">
@@ -229,7 +221,6 @@ export const ModulesList = () => {
           description={module.description}
           features={module.features}
           enabled={module.enabled}
-          requiresPremium={module.requiresPremium}
           onToggle={(enabled) => handleToggle(module.type, module.enabled)}
           isLoading={loadingModule === module.type}
         />

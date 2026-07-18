@@ -1,7 +1,12 @@
 import { type NextRequest } from "next/server";
 import { db } from "@/db";
 import { membershipPlan } from "@/db/schema";
-import { validateApiKey, requireScope, apiError } from "@/lib/api-auth";
+import {
+  apiError,
+  requireApiKeyLocation,
+  requireScope,
+  validateApiKey,
+} from "@/lib/api-auth";
 import { and, asc, eq, type SQL } from "drizzle-orm";
 
 export const runtime = "nodejs";
@@ -12,12 +17,15 @@ export async function GET(req: NextRequest) {
 
   const scope = requireScope(auth.apiKey.scopes, "memberships:read");
   if (!scope.ok) return apiError(scope.error, 403);
+  const keyLocation = requireApiKeyLocation(auth.apiKey);
+  if (!keyLocation.ok) return apiError(keyLocation.error, 403);
 
   const { searchParams } = req.nextUrl;
   const includeInactive = searchParams.get("includeInactive") === "true";
 
   const conditions: SQL[] = [
     eq(membershipPlan.organizationId, auth.apiKey.organizationId),
+    eq(membershipPlan.locationId, keyLocation.locationId),
   ];
   if (!includeInactive) {
     conditions.push(eq(membershipPlan.isActive, true));
@@ -42,10 +50,5 @@ export async function GET(req: NextRequest) {
     .where(and(...conditions))
     .orderBy(asc(membershipPlan.sortOrder));
 
-  const result = plans.map((p) => ({
-    ...p,
-    price: p.price ? Number(p.price) : null,
-  }));
-
-  return Response.json({ data: result, count: result.length });
+  return Response.json({ data: plans, count: plans.length });
 }

@@ -25,6 +25,11 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   Select,
   SelectContent,
@@ -93,7 +98,7 @@ export function TaskEditSheet({
   const isEditing = !!task;
 
   const { data: assignees = [] } = useQuery(
-    trpc.tasks.getAssignees.queryOptions()
+    trpc.tasks.getAssignees.queryOptions(),
   );
   const { data: clientsData } = useQuery(trpc.clients.list.queryOptions());
   const { data: dealsData } = useQuery(trpc.deals.list.queryOptions({}));
@@ -138,7 +143,7 @@ export function TaskEditSheet({
         await queryClient.invalidateQueries();
         onOpenChange(false);
       },
-    })
+    }),
   );
 
   const updateTask = useMutation(
@@ -147,7 +152,7 @@ export function TaskEditSheet({
         await queryClient.invalidateQueries();
         onOpenChange(false);
       },
-    })
+    }),
   );
 
   const onSubmit = async (values: FormValues) => {
@@ -251,13 +256,13 @@ export function TaskEditSheet({
                                   <div
                                     className={cn(
                                       "size-2 rounded-full",
-                                      config.color
+                                      config.color,
                                     )}
                                   />
                                   {config.label}
                                 </div>
                               </SelectItem>
-                            )
+                            ),
                           )}
                         </SelectContent>
                       </Select>
@@ -291,13 +296,13 @@ export function TaskEditSheet({
                                   <div
                                     className={cn(
                                       "size-2 rounded-full",
-                                      config.color
+                                      config.color,
                                     )}
                                   />
                                   {config.label}
                                 </div>
                               </SelectItem>
-                            )
+                            ),
                           )}
                         </SelectContent>
                       </Select>
@@ -316,7 +321,14 @@ export function TaskEditSheet({
                       Due date
                     </FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} />
+                      <DatePicker
+                        date={parseDateValue(field.value)}
+                        onSelect={(date) =>
+                          field.onChange(formatDateValue(date))
+                        }
+                        placeholder="Pick a due date"
+                        ariaLabel="Due date"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -395,8 +407,7 @@ export function TaskEditSheet({
                           {clientsData?.items.map((client) => (
                             <SelectItem key={client.id} value={client.id}>
                               {client.name}
-                              {client.companyName &&
-                                ` - ${client.companyName}`}
+                              {client.companyName && ` - ${client.companyName}`}
                             </SelectItem>
                           ))}
                         </SelectContent>

@@ -15,6 +15,7 @@ import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
 import { useWorkflowContext } from "@/features/editor/store/workflow-context";
 
 export type GoogleCalendarActionNodeData = {
+  providerAccountId?: string;
   variableName?: string;
   calendarId?: string;
   summary?: string;
@@ -56,7 +57,7 @@ export const GoogleCalendarActionNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_CALENDAR_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleCalendarRealtimeToken as any,
+    refreshToken: fetchGoogleCalendarRealtimeToken,
   });
 
   const handleOpenSettings = () => setDialogOpen(true);

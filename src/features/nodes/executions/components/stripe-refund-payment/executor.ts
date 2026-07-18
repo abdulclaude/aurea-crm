@@ -29,7 +29,6 @@ export const stripeRefundPaymentExecutor: NodeExecutor<StripeRefundPaymentData> 
     // Compile fields with Handlebars
     const paymentIntentId = data.paymentIntentId ? decode(Handlebars.compile(data.paymentIntentId)(context)) : undefined;
 
-    // TODO: Implement Stripe: Refund Payment logic here
     const result = await step.run("stripe-refund-payment", async () => {
       // Add implementation here
       throw new NonRetriableError("Stripe: Refund Payment: Not yet implemented");

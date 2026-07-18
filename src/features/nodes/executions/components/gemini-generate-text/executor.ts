@@ -29,7 +29,6 @@ export const geminiGenerateTextExecutor: NodeExecutor<GeminiGenerateTextData> = 
     // Compile fields with Handlebars
     const prompt = data.prompt ? decode(Handlebars.compile(data.prompt)(context)) : undefined;
 
-    // TODO: Implement Gemini: Generate Text logic here
     const result = await step.run("gemini-generate-text", async () => {
       // Add implementation here
       throw new NonRetriableError("Gemini: Generate Text: Not yet implemented");

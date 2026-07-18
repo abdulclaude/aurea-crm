@@ -1,4 +1,5 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { parse, toClientConfig } from "pg-connection-string";
 import { Pool } from "pg";
 
 import * as relations from "./relations";
@@ -20,6 +21,12 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is missing");
 }
 
+const poolConfig = toClientConfig(
+  parse(connectionString, {
+    useLibpqCompat: !/[?&]uselibpqcompat=/i.test(connectionString),
+  }),
+);
+
 const globalForDrizzle = globalThis as unknown as {
   drizzleDb?: Database;
   drizzlePool?: Pool;
@@ -28,7 +35,7 @@ const globalForDrizzle = globalThis as unknown as {
 export const dbPool =
   globalForDrizzle.drizzlePool ??
   new Pool({
-    connectionString,
+    ...poolConfig,
     max: 10,
   });
 

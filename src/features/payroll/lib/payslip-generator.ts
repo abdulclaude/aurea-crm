@@ -1,6 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { payrollRunInstructor as payrollRunInstructorTable } from "@/db/schema";
+import {
+  payrollRun,
+  payrollRunInstructor as payrollRunInstructorTable,
+} from "@/db/schema";
 
 type Instructor = typeof import("@/db/schema").instructor.$inferSelect;
 type PayrollRun = typeof import("@/db/schema").payrollRun.$inferSelect;
@@ -16,6 +19,11 @@ interface PayslipData {
   organizationAddress?: string;
 }
 
+type PayslipScope = {
+  organizationId: string;
+  locationId: string | null;
+};
+
 /**
  * Generate payslip HTML for a instructor
  */
@@ -28,13 +36,29 @@ export function generatePayslipHTML(data: PayslipData): string {
     organizationAddress,
   } = data;
 
-  const periodStart = new Date(payrollRun.periodStart).toLocaleDateString("en-GB");
+  const periodStart = new Date(payrollRun.periodStart).toLocaleDateString(
+    "en-GB",
+  );
   const periodEnd = new Date(payrollRun.periodEnd).toLocaleDateString("en-GB");
-  const paymentDate = new Date(payrollRun.paymentDate).toLocaleDateString("en-GB");
+  const paymentDate = new Date(payrollRun.paymentDate).toLocaleDateString(
+    "en-GB",
+  );
 
-  const formatCurrency = (amount: number | string) => {
-    return `£${Number(amount).toFixed(2)}`;
-  };
+  const formatCurrency = (amount: number | string) =>
+    new Intl.NumberFormat("en-GB", {
+      style: "currency",
+      currency: payrollRun.currency,
+    }).format(Number(amount));
+  const regularRate =
+    Number(payrollInstructor.regularHours) > 0
+      ? Number(payrollInstructor.regularPay) /
+        Number(payrollInstructor.regularHours)
+      : 0;
+  const overtimeRate =
+    Number(payrollInstructor.overtimeHours) > 0
+      ? Number(payrollInstructor.overtimePay) /
+        Number(payrollInstructor.overtimeHours)
+      : 0;
 
   return `
 <!DOCTYPE html>
@@ -217,7 +241,7 @@ export function generatePayslipHTML(data: PayslipData): string {
               ? `<tr>
             <td>Regular Pay</td>
             <td class="amount">${Number(payrollInstructor.regularHours).toFixed(1)}</td>
-            <td class="amount">${formatCurrency(Number(instructor.hourlyRate) || 0)}</td>
+            <td class="amount">${formatCurrency(regularRate)}</td>
             <td class="amount">${formatCurrency(payrollInstructor.regularPay)}</td>
           </tr>`
               : ""
@@ -227,7 +251,7 @@ export function generatePayslipHTML(data: PayslipData): string {
               ? `<tr>
             <td>Overtime Pay</td>
             <td class="amount">${Number(payrollInstructor.overtimeHours).toFixed(1)}</td>
-            <td class="amount">${formatCurrency((Number(instructor.hourlyRate) || 0) * 1.5)}</td>
+            <td class="amount">${formatCurrency(overtimeRate)}</td>
             <td class="amount">${formatCurrency(payrollInstructor.overtimePay)}</td>
           </tr>`
               : ""
@@ -432,20 +456,28 @@ export function generatePayslipHTML(data: PayslipData): string {
  */
 export async function getPayslipData(
   payrollRunId: string,
-  instructorId: string
+  instructorId: string,
+  scope: PayslipScope,
 ): Promise<PayslipData | null> {
+  const selectedPayrollRun = await db.query.payrollRun.findFirst({
+    where: and(
+      eq(payrollRun.id, payrollRunId),
+      eq(payrollRun.organizationId, scope.organizationId),
+      scope.locationId === null
+        ? isNull(payrollRun.locationId)
+        : eq(payrollRun.locationId, scope.locationId),
+    ),
+    with: { organization: true },
+  });
+  if (!selectedPayrollRun) return null;
+
   const payrollInstructor = await db.query.payrollRunInstructor.findFirst({
     where: and(
       eq(payrollRunInstructorTable.payrollRunId, payrollRunId),
-      eq(payrollRunInstructorTable.instructorId, instructorId)
+      eq(payrollRunInstructorTable.instructorId, instructorId),
     ),
     with: {
       instructor: true,
-      payrollRun: {
-        with: {
-          organization: true,
-        },
-      },
     },
   });
 
@@ -455,9 +487,9 @@ export async function getPayslipData(
 
   return {
     instructor: payrollInstructor.instructor,
-    payrollRun: payrollInstructor.payrollRun,
+    payrollRun: selectedPayrollRun,
     payrollInstructor,
-    organizationName: payrollInstructor.payrollRun.organization.name,
+    organizationName: selectedPayrollRun.organization.name,
     organizationAddress: undefined,
   };
 }

@@ -29,7 +29,6 @@ export const geminiSummariseExecutor: NodeExecutor<GeminiSummariseData> = async 
     // Compile fields with Handlebars
     const text = data.text ? decode(Handlebars.compile(data.text)(context)) : undefined;
 
-    // TODO: Implement Gemini: Summarise logic here
     const result = await step.run("gemini-summarise", async () => {
       // Add implementation here
       throw new NonRetriableError("Gemini: Summarise: Not yet implemented");

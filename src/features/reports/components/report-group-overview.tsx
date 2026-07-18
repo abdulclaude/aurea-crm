@@ -43,9 +43,7 @@ export function ReportGroupOverview({
   return (
     <div className="space-y-0">
       <div className="p-6 pb-6">
-        <h1 className="text-lg font-semibold text-primary">
-          {group.label}
-        </h1>
+        <h1 className="text-lg font-semibold text-primary">{group.label}</h1>
         <p className="text-xs text-primary/75">{group.description}</p>
       </div>
 

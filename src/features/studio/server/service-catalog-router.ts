@@ -5,11 +5,24 @@ import { z } from "zod";
 
 import { db } from "@/db";
 import {
-  classType,
+  classType as classTypeTable,
+  classSeries,
+  pricingOptionAccessGrant,
   serviceCategory,
   serviceType,
   studioClass,
 } from "@/db/schema";
+import { ActivityAction, ActivityType } from "@/db/enums";
+import {
+  getChangedFields,
+  logActivity,
+} from "@/features/activity/lib/log-activity";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import {
+  regionalCurrencySchema,
+  resolveRegionalCurrency,
+} from "@/lib/regional-context/contracts";
+import { getRegionalContext } from "@/lib/regional-context/server";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const serviceExperienceTypeSchema = z.enum(["CLASS", "PRIVATE", "EVENT"]);
@@ -23,8 +36,18 @@ const servicePaymentTypeSchema = z.enum([
 const serviceVisibilitySchema = z.enum(["PUBLIC", "PRIVATE"]);
 
 const optionalMoneySchema = z.number().min(0).optional().nullable();
-const optionalPositiveIntSchema = z.number().int().positive().optional().nullable();
-const optionalNonNegativeIntSchema = z.number().int().min(0).optional().nullable();
+const optionalPositiveIntSchema = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .nullable();
+const optionalNonNegativeIntSchema = z
+  .number()
+  .int()
+  .min(0)
+  .optional()
+  .nullable();
 
 const categoryInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -52,9 +75,11 @@ const serviceTypeInputSchema = z
     price: optionalMoneySchema,
     slidingScaleMinPrice: optionalMoneySchema,
     slidingScaleMaxPrice: optionalMoneySchema,
-    currency: z.string().trim().length(3).default("GBP"),
+    currency: regionalCurrencySchema.optional(),
     revenueCategory: z.string().trim().max(120).optional().nullable(),
-    bookingRestrictionTags: z.array(z.string().trim().min(1).max(80)).default([]),
+    bookingRestrictionTags: z
+      .array(z.string().trim().min(1).max(80))
+      .default([]),
     workoutTypes: z.array(z.string().trim().min(1).max(80)).default([]),
     areasOfFocus: z.array(z.string().trim().min(1).max(80)).default([]),
     intensity: z.string().trim().max(80).optional().nullable(),
@@ -79,7 +104,10 @@ const serviceTypeInputSchema = z
     }
 
     if (value.paymentType === "SLIDING_SCALE") {
-      if (value.slidingScaleMinPrice == null || value.slidingScaleMaxPrice == null) {
+      if (
+        value.slidingScaleMinPrice == null ||
+        value.slidingScaleMaxPrice == null
+      ) {
         ctx.addIssue({
           code: "custom",
           path: ["slidingScaleMinPrice"],
@@ -99,6 +127,10 @@ const serviceTypeInputSchema = z
   });
 
 type ServiceTypeInput = z.infer<typeof serviceTypeInputSchema>;
+type ResolvedServiceTypeInput = ServiceTypeInput & { currency: string };
+const serviceTypeUpdateInputSchema = serviceTypeInputSchema.safeExtend({
+  id: z.string().min(1),
+});
 
 function requireOrg(ctx: { orgId: string | null }): string {
   if (!ctx.orgId) {
@@ -111,11 +143,72 @@ function requireOrg(ctx: { orgId: string | null }): string {
   return ctx.orgId;
 }
 
+async function requireServiceCatalogAccess(
+  ctx: {
+    auth: { user: { id: string } };
+    orgId: string | null;
+    locationId: string | null;
+  },
+  capability: "schedule.view" | "schedule.manage",
+): Promise<string> {
+  const organizationId = requireOrg(ctx);
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId,
+      locationId: ctx.locationId,
+    },
+    capability,
+    resource: { organizationId, locationId: ctx.locationId },
+  });
+  return organizationId;
+}
+
+function exactServiceScope(
+  organizationId: string,
+  locationId: string | null,
+): SQL[] {
+  return [
+    eq(serviceType.organizationId, organizationId),
+    locationScoped(serviceType.locationId, locationId),
+  ].filter((condition): condition is SQL => condition !== undefined);
+}
+
+async function recordServiceActivity(input: {
+  organizationId: string;
+  locationId: string | null;
+  userId: string;
+  action: (typeof ActivityAction)[keyof typeof ActivityAction];
+  service: { id: string; name: string };
+  changes?: Record<string, { old: unknown; new: unknown }>;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  await logActivity({
+    organizationId: input.organizationId,
+    locationId: input.locationId,
+    userId: input.userId,
+    type: ActivityType.BOOKING,
+    action: input.action,
+    entityType: "service_type",
+    entityId: input.service.id,
+    entityName: input.service.name,
+    changes: input.changes,
+    metadata: input.metadata,
+  });
+}
+
+function meaningfulServiceChanges<T extends Record<string, unknown>>(
+  before: T,
+  after: Partial<T>,
+): Record<string, { old: unknown; new: unknown }> | undefined {
+  const changes = getChangedFields(before, after);
+  if (!changes) return undefined;
+  delete changes.updatedAt;
+  return Object.keys(changes).length > 0 ? changes : undefined;
+}
+
 function locationScoped(
-  column:
-    | typeof serviceType.locationId
-    | typeof serviceCategory.locationId
-    | typeof classType.locationId,
+  column: typeof serviceType.locationId | typeof serviceCategory.locationId,
   locationId: string | null,
 ): SQL | undefined {
   if (!locationId) return isNull(column);
@@ -141,7 +234,10 @@ async function uniqueServiceSlug(
 
   while (true) {
     const existing = await db.query.serviceType.findFirst({
-      where: and(eq(serviceType.organizationId, organizationId), eq(serviceType.slug, slug)),
+      where: and(
+        eq(serviceType.organizationId, organizationId),
+        eq(serviceType.slug, slug),
+      ),
       columns: { id: true },
     });
 
@@ -162,7 +258,10 @@ async function uniqueCategorySlug(
 
   while (true) {
     const existing = await db.query.serviceCategory.findFirst({
-      where: and(eq(serviceCategory.organizationId, organizationId), eq(serviceCategory.slug, slug)),
+      where: and(
+        eq(serviceCategory.organizationId, organizationId),
+        eq(serviceCategory.slug, slug),
+      ),
       columns: { id: true },
     });
 
@@ -174,6 +273,7 @@ async function uniqueCategorySlug(
 
 async function assertServiceReferences(
   organizationId: string,
+  locationId: string | null,
   categoryId?: string | null,
   classTypeId?: string | null,
 ): Promise<void> {
@@ -182,6 +282,7 @@ async function assertServiceReferences(
       where: and(
         eq(serviceCategory.id, categoryId),
         eq(serviceCategory.organizationId, organizationId),
+        locationScoped(serviceCategory.locationId, locationId),
       ),
       columns: { id: true },
     });
@@ -195,7 +296,13 @@ async function assertServiceReferences(
 
   if (classTypeId) {
     const linkedClassType = await db.query.classType.findFirst({
-      where: and(eq(classType.id, classTypeId), eq(classType.organizationId, organizationId)),
+      where: and(
+        eq(classTypeTable.id, classTypeId),
+        eq(classTypeTable.organizationId, organizationId),
+        locationId
+          ? eq(classTypeTable.locationId, locationId)
+          : isNull(classTypeTable.locationId),
+      ),
       columns: { id: true },
     });
     if (!linkedClassType) {
@@ -212,7 +319,7 @@ function moneyValue(value: number | null | undefined): string | null {
 }
 
 function serviceValues(
-  input: ServiceTypeInput,
+  input: ResolvedServiceTypeInput,
   organizationId: string,
   locationId: string | null,
   slug: string,
@@ -260,7 +367,10 @@ function serviceValues(
 
 export const serviceCatalogRouter = createTRPCRouter({
   categories: protectedProcedure.query(async ({ ctx }) => {
-    const organizationId = requireOrg(ctx);
+    const organizationId = await requireServiceCatalogAccess(
+      ctx,
+      "schedule.view",
+    );
 
     return db
       .select({
@@ -293,13 +403,17 @@ export const serviceCatalogRouter = createTRPCRouter({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      const organizationId = requireOrg(ctx);
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.view",
+      );
       const conditions: SQL[] = [
         eq(serviceType.organizationId, organizationId),
         locationScoped(serviceType.locationId, ctx.locationId),
       ].filter((condition): condition is SQL => condition !== undefined);
 
-      if (!input?.includeInactive) conditions.push(eq(serviceType.isActive, true));
+      if (!input?.includeInactive)
+        conditions.push(eq(serviceType.isActive, true));
       if (input?.experienceType) {
         conditions.push(eq(serviceType.experienceType, input.experienceType));
       }
@@ -310,6 +424,7 @@ export const serviceCatalogRouter = createTRPCRouter({
           name: serviceType.name,
           slug: serviceType.slug,
           description: serviceType.description,
+          defaultLocation: serviceType.defaultLocation,
           experienceType: serviceType.experienceType,
           format: serviceType.format,
           paymentType: serviceType.paymentType,
@@ -317,6 +432,8 @@ export const serviceCatalogRouter = createTRPCRouter({
           durationMinutes: serviceType.durationMinutes,
           capacity: serviceType.capacity,
           bufferMinutes: serviceType.bufferMinutes,
+          roomIds: serviceType.roomIds,
+          instructorIds: serviceType.instructorIds,
           price: serviceType.price,
           slidingScaleMinPrice: serviceType.slidingScaleMinPrice,
           slidingScaleMaxPrice: serviceType.slidingScaleMaxPrice,
@@ -329,36 +446,69 @@ export const serviceCatalogRouter = createTRPCRouter({
           equipment: serviceType.equipment,
           checkoutConfirmation: serviceType.checkoutConfirmation,
           confirmationEmailBody: serviceType.confirmationEmailBody,
+          imageUrl: serviceType.imageUrl,
           allowUnpaidBookings: serviceType.allowUnpaidBookings,
           delaySchedulingHours: serviceType.delaySchedulingHours,
           allowRecurringBookings: serviceType.allowRecurringBookings,
           displayImageAtCheckout: serviceType.displayImageAtCheckout,
           calendarColor: serviceType.calendarColor,
+          sortOrder: serviceType.sortOrder,
           isActive: serviceType.isActive,
+          createdAt: serviceType.createdAt,
+          updatedAt: serviceType.updatedAt,
           categoryId: serviceType.categoryId,
           categoryName: serviceCategory.name,
           categoryColor: serviceCategory.color,
           classTypeId: serviceType.classTypeId,
-          classTypeName: classType.name,
+          classTypeName: classTypeTable.name,
+          bookingWindowPolicyId: serviceType.bookingWindowPolicyId,
+          waitlistPolicyId: serviceType.waitlistPolicyId,
           studioClassCount: count(studioClass.id),
         })
         .from(serviceType)
-        .leftJoin(serviceCategory, eq(serviceType.categoryId, serviceCategory.id))
-        .leftJoin(classType, eq(serviceType.classTypeId, classType.id))
+        .leftJoin(
+          serviceCategory,
+          eq(serviceType.categoryId, serviceCategory.id),
+        )
+        .leftJoin(
+          classTypeTable,
+          eq(serviceType.classTypeId, classTypeTable.id),
+        )
         .leftJoin(studioClass, eq(studioClass.serviceTypeId, serviceType.id))
         .where(and(...conditions))
-        .groupBy(
-          serviceType.id,
-          serviceCategory.id,
-          classType.id,
-        )
+        .groupBy(serviceType.id, serviceCategory.id, classTypeTable.id)
         .orderBy(asc(serviceType.sortOrder), asc(serviceType.name));
+    }),
+
+  getById: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.view",
+      );
+      const service = await db.query.serviceType.findFirst({
+        where: and(
+          eq(serviceType.id, input.id),
+          ...exactServiceScope(organizationId, ctx.locationId),
+        ),
+      });
+      if (!service) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
+      }
+      return service;
     }),
 
   createCategory: protectedProcedure
     .input(categoryInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const organizationId = requireOrg(ctx);
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
       const now = new Date();
       const slug = await uniqueCategorySlug(organizationId, input.name);
 
@@ -384,53 +534,129 @@ export const serviceCatalogRouter = createTRPCRouter({
   create: protectedProcedure
     .input(serviceTypeInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const organizationId = requireOrg(ctx);
-      await assertServiceReferences(organizationId, input.categoryId, input.classTypeId);
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
+      await assertServiceReferences(
+        organizationId,
+        ctx.locationId,
+        input.categoryId,
+        input.classTypeId,
+      );
 
       const now = new Date();
       const slug = await uniqueServiceSlug(organizationId, input.name);
+      const regionalContext = await getRegionalContext({
+        organizationId,
+        locationId: ctx.locationId,
+      });
+      const resolvedInput: ResolvedServiceTypeInput = {
+        ...input,
+        currency: resolveRegionalCurrency(
+          input.currency,
+          regionalContext.currency,
+        ),
+      };
       const [createdService] = await db
         .insert(serviceType)
         .values({
           id: createId(),
-          ...serviceValues(input, organizationId, ctx.locationId ?? null, slug),
+          ...serviceValues(
+            resolvedInput,
+            organizationId,
+            ctx.locationId ?? null,
+            slug,
+          ),
           createdAt: now,
           updatedAt: now,
         })
         .returning();
 
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        service: createdService,
+      });
+
       return createdService;
     }),
 
   update: protectedProcedure
-    .input(serviceTypeInputSchema.partial().extend({ id: z.string().min(1) }))
+    .input(serviceTypeUpdateInputSchema)
     .mutation(async ({ ctx, input }) => {
-      const organizationId = requireOrg(ctx);
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
       const existing = await db.query.serviceType.findFirst({
-        where: and(eq(serviceType.id, input.id), eq(serviceType.organizationId, organizationId)),
-        columns: { id: true, name: true, slug: true },
+        where: and(
+          eq(serviceType.id, input.id),
+          ...exactServiceScope(organizationId, ctx.locationId),
+        ),
       });
 
       if (!existing) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Service type not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
       }
 
-      await assertServiceReferences(organizationId, input.categoryId, input.classTypeId);
+      await assertServiceReferences(
+        organizationId,
+        ctx.locationId,
+        input.categoryId,
+        input.classTypeId,
+      );
 
-      const mergedInput = serviceTypeInputSchema.parse({
-        ...input,
-        name: input.name ?? existing.name,
-      });
+      const parsedInput = serviceTypeUpdateInputSchema.parse(input);
+      const resolvedInput: ResolvedServiceTypeInput = {
+        ...parsedInput,
+        currency: resolveRegionalCurrency(
+          parsedInput.currency,
+          existing.currency,
+        ),
+      };
       const slug =
-        input.name && input.name !== existing.name
+        input.name !== existing.name
           ? await uniqueServiceSlug(organizationId, input.name, existing.id)
           : existing.slug;
 
       const [updatedService] = await db
         .update(serviceType)
-        .set(serviceValues(mergedInput, organizationId, ctx.locationId ?? null, slug))
-        .where(eq(serviceType.id, input.id))
+        .set(
+          serviceValues(
+            resolvedInput,
+            organizationId,
+            ctx.locationId ?? null,
+            slug,
+          ),
+        )
+        .where(
+          and(
+            eq(serviceType.id, input.id),
+            ...exactServiceScope(organizationId, ctx.locationId),
+          ),
+        )
         .returning();
+
+      if (!updatedService) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
+      }
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        service: updatedService,
+        changes: meaningfulServiceChanges(existing, updatedService),
+      });
 
       return updatedService;
     }),
@@ -438,78 +664,186 @@ export const serviceCatalogRouter = createTRPCRouter({
   archive: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const organizationId = requireOrg(ctx);
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
+      const existing = await db.query.serviceType.findFirst({
+        where: and(
+          eq(serviceType.id, input.id),
+          ...exactServiceScope(organizationId, ctx.locationId),
+        ),
+      });
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
+      }
       const [updatedService] = await db
         .update(serviceType)
         .set({ isActive: false, updatedAt: new Date() })
-        .where(and(eq(serviceType.id, input.id), eq(serviceType.organizationId, organizationId)))
+        .where(
+          and(
+            eq(serviceType.id, input.id),
+            ...exactServiceScope(organizationId, ctx.locationId),
+          ),
+        )
         .returning();
 
       if (!updatedService) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Service type not found" });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
       }
+
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.ARCHIVED,
+        service: updatedService,
+        changes: meaningfulServiceChanges(existing, updatedService),
+      });
 
       return updatedService;
     }),
 
-  backfillFromClassTypes: protectedProcedure.mutation(async ({ ctx }) => {
-    const organizationId = requireOrg(ctx);
-
-    const existingServices = await db
-      .select({ classTypeId: serviceType.classTypeId })
-      .from(serviceType)
-      .where(eq(serviceType.organizationId, organizationId));
-    const linkedClassTypeIds = new Set(
-      existingServices
-        .map((service) => service.classTypeId)
-        .filter((id): id is string => Boolean(id)),
-    );
-
-    const classTypes = await db
-      .select({
-        id: classType.id,
-        name: classType.name,
-        description: classType.description,
-        color: classType.color,
-      })
-      .from(classType)
-      .where(
-        and(
-          eq(classType.organizationId, organizationId),
-          locationScoped(classType.locationId, ctx.locationId),
-          eq(classType.isActive, true),
+  duplicate: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
+      const source = await db.query.serviceType.findFirst({
+        where: and(
+          eq(serviceType.id, input.id),
+          ...exactServiceScope(organizationId, ctx.locationId),
         ),
-      )
-      .orderBy(asc(classType.name));
-
-    const missingClassTypes = classTypes.filter((item) => !linkedClassTypeIds.has(item.id));
-    if (missingClassTypes.length === 0) return { created: 0 };
-
-    await db.transaction(async (tx) => {
-      for (const item of missingClassTypes) {
-        const slug = await uniqueServiceSlug(organizationId, item.name);
-        await tx.insert(serviceType).values({
-          id: createId(),
-          organizationId,
-          locationId: ctx.locationId ?? null,
-          classTypeId: item.id,
-          name: item.name,
-          slug,
-          description: item.description,
-          experienceType: "CLASS",
-          format: "IN_PERSON",
-          durationMinutes: 60,
-          bufferMinutes: 0,
-          paymentType: "PACKAGE_ONLY",
-          visibility: "PUBLIC",
-          currency: "GBP",
-          calendarColor: item.color,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+      });
+      if (!source) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
         });
       }
-    });
 
-    return { created: missingClassTypes.length };
-  }),
+      const name = `${source.name} copy`;
+      const slug = await uniqueServiceSlug(organizationId, name);
+      const now = new Date();
+      const [created] = await db
+        .insert(serviceType)
+        .values({
+          ...source,
+          id: createId(),
+          name,
+          slug,
+          isActive: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.CREATED,
+        service: created,
+        metadata: {
+          duplicatedFromId: source.id,
+          duplicatedFromName: source.name,
+        },
+      });
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.UPDATED,
+        service: source,
+        metadata: {
+          action: "duplicated",
+          duplicatedToId: created.id,
+          duplicatedToName: created.name,
+        },
+      });
+      return created;
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await requireServiceCatalogAccess(
+        ctx,
+        "schedule.manage",
+      );
+      const existing = await db.query.serviceType.findFirst({
+        where: and(
+          eq(serviceType.id, input.id),
+          ...exactServiceScope(organizationId, ctx.locationId),
+        ),
+        columns: { id: true, name: true, isActive: true },
+      });
+      if (!existing) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Service type not found",
+        });
+      }
+      if (existing.isActive) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Archive this service type before deleting it.",
+        });
+      }
+
+      const [classes, series, grants] = await Promise.all([
+        db
+          .select({ total: count() })
+          .from(studioClass)
+          .where(eq(studioClass.serviceTypeId, input.id)),
+        db
+          .select({ total: count() })
+          .from(classSeries)
+          .where(eq(classSeries.serviceTypeId, input.id)),
+        db
+          .select({ total: count() })
+          .from(pricingOptionAccessGrant)
+          .where(eq(pricingOptionAccessGrant.serviceTypeId, input.id)),
+      ]);
+      const dependencyCount =
+        (classes[0]?.total ?? 0) +
+        (series[0]?.total ?? 0) +
+        (grants[0]?.total ?? 0);
+      if (dependencyCount > 0) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message:
+            "This service type is still used by classes, series, or pricing access rules. Keep it archived instead.",
+        });
+      }
+
+      await db
+        .delete(serviceType)
+        .where(
+          and(
+            eq(serviceType.id, input.id),
+            ...exactServiceScope(organizationId, ctx.locationId),
+          ),
+        );
+      await recordServiceActivity({
+        organizationId,
+        locationId: ctx.locationId,
+        userId: ctx.auth.user.id,
+        action: ActivityAction.DELETED,
+        service: existing,
+        metadata: {
+          deletedName: existing.name,
+          wasActive: existing.isActive,
+        },
+      });
+      return { id: existing.id };
+    }),
 });

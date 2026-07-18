@@ -27,6 +27,9 @@ import { ClientDeletedTriggerNode } from "@/features/nodes/triggers/components/c
 import { ClientTypeChangedTriggerNode } from "@/features/nodes/triggers/components/client-type-changed-trigger/node";
 import { ClientLifecycleStageChangedTriggerNode } from "@/features/nodes/triggers/components/client-lifecycle-stage-changed-trigger/node";
 import { BirthdayTriggerNode } from "@/features/nodes/triggers/components/birthday-trigger/node";
+import { FormSubmittedTriggerNode } from "@/features/nodes/triggers/components/form-submitted-trigger/node";
+import { PricingOptionPurchasedTriggerNode } from "@/features/nodes/triggers/components/pricing-option-purchased-trigger/node";
+import { ClientInactivityTriggerNode } from "@/features/nodes/triggers/components/client-inactivity-trigger/node";
 import { IfElseNode } from "@/features/nodes/executions/components/if-else/node";
 import { SetVariableNode } from "@/features/nodes/executions/components/set-variable/node";
 import { StopWorkflowNode } from "@/features/nodes/executions/components/stop-workflow/node";
@@ -126,6 +129,9 @@ import { GeminiSummariseNode } from "@/features/nodes/executions/components/gemi
 import { GeminiTransformNode } from "@/features/nodes/executions/components/gemini-transform/node";
 import { GeminiClassifyNode } from "@/features/nodes/executions/components/gemini-classify/node";
 import { ExecuteWorkflowNode } from "@/features/nodes/executions/components/execute-workflow/node";
+import { SendEmailNode } from "@/features/nodes/executions/components/send-email/node";
+import { CreateTaskNode } from "@/features/nodes/executions/components/create-task/node";
+import { StudioBookingActionNode } from "@/features/nodes/executions/components/studio-booking-action/node";
 import {
   AwardLoyaltyPointsNode,
   CalculateChurnScoreNode,
@@ -135,6 +141,7 @@ import {
   ClientTagRemovedTriggerNode,
   IntroOfferRedeemedTriggerNode,
   IntroOfferCompletedTriggerNode,
+  ReferralConvertedTriggerNode,
   MemberClassCountTriggerNode,
   MemberCheckedInTriggerNode,
   MemberNoShowTriggerNode,
@@ -182,6 +189,10 @@ export const nodeComponents = {
   [NodeType.CLIENT_LIFECYCLE_STAGE_CHANGED_TRIGGER]:
     ClientLifecycleStageChangedTriggerNode,
   [NodeType.BIRTHDAY_TRIGGER]: BirthdayTriggerNode,
+  [NodeType.FORM_SUBMITTED_TRIGGER]: FormSubmittedTriggerNode,
+  [NodeType.PRICING_OPTION_PURCHASED_TRIGGER]:
+    PricingOptionPurchasedTriggerNode,
+  [NodeType.CLIENT_INACTIVITY_TRIGGER]: ClientInactivityTriggerNode,
   [NodeType.IF_ELSE]: IfElseNode,
   [NodeType.SET_VARIABLE]: SetVariableNode,
   [NodeType.STOP_WORKFLOW]: StopWorkflowNode,
@@ -294,6 +305,7 @@ export const nodeComponents = {
   [NodeType.WAITLIST_SPOT_OPENED_TRIGGER]: WaitlistSpotOpenedTriggerNode,
   [NodeType.INTRO_OFFER_REDEEMED_TRIGGER]: IntroOfferRedeemedTriggerNode,
   [NodeType.INTRO_OFFER_COMPLETED_TRIGGER]: IntroOfferCompletedTriggerNode,
+  [NodeType.REFERRAL_CONVERTED_TRIGGER]: ReferralConvertedTriggerNode,
   [NodeType.MEMBER_CLASS_COUNT_TRIGGER]: MemberClassCountTriggerNode,
   [NodeType.CLIENT_TAG_ADDED_TRIGGER]: ClientTagAddedTriggerNode,
   [NodeType.CLIENT_TAG_REMOVED_TRIGGER]: ClientTagRemovedTriggerNode,
@@ -304,6 +316,9 @@ export const nodeComponents = {
   [NodeType.AWARD_LOYALTY_POINTS]: AwardLoyaltyPointsNode,
   [NodeType.CALCULATE_CHURN_SCORE]: CalculateChurnScoreNode,
   [NodeType.SEND_SMS]: SendSmsNode,
+  [NodeType.SEND_EMAIL]: SendEmailNode,
+  [NodeType.CREATE_TASK]: CreateTaskNode,
+  [NodeType.STUDIO_CLASS_ACTION]: StudioBookingActionNode,
 } as const satisfies NodeTypes;
 
 export type RegisteredNodeType = keyof typeof nodeComponents;

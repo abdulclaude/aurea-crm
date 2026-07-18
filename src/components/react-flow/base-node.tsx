@@ -12,12 +12,12 @@ export const BaseNode = forwardRef<HTMLDivElement, BaseNodeProps>(
     <div
       ref={ref}
       className={cn(
-        "relative rounded-sm border border-black/10 bg-background text-primary",
-        "hover:border-primary transition duration-150",
+        "relative rounded-lg border border-black/10 bg-background text-primary shadow-sm dark:border-white/10",
+        "transition duration-150 hover:border-primary/35 hover:shadow-md",
         status === "loading" && "border-none",
         status === "success" && "border-none",
         status === "error" && "border-none",
-        className
+        className,
       )}
       // tabIndex={0}
       {...props}
@@ -36,7 +36,7 @@ export const BaseNode = forwardRef<HTMLDivElement, BaseNodeProps>(
         <Loader2Icon className="size-2.5 absolute -right-2 -top-3 text-blue-700 animate-spin " />
       )}
     </div>
-  )
+  ),
 );
 BaseNode.displayName = "BaseNode";
 
@@ -55,7 +55,7 @@ export const BaseNodeHeader = forwardRef<
       "mx-0 my-0 -mb-1 flex flex-row items-center justify-between gap-2 px-3 py-2",
       // Remove or modify these classes if you modify the padding in the
       // `<BaseNode />` component.
-      className
+      className,
     )}
   />
 ));
@@ -100,7 +100,7 @@ export const BaseNodeFooter = forwardRef<
     data-slot="base-node-footer"
     className={cn(
       "flex flex-col items-center gap-y-2 border-t px-3 pb-3 pt-2",
-      className
+      className,
     )}
     {...props}
   />

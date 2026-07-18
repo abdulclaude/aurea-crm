@@ -15,7 +15,7 @@ const supportedWidgetTypes = new Set([
 
 interface PageProps {
   params: Promise<{ orgSlug: string; type: string }>;
-  searchParams: Promise<{ widget?: string }>;
+  searchParams: Promise<{ publication?: string }>;
 }
 
 export default async function TypedEmbedPage({
@@ -23,16 +23,15 @@ export default async function TypedEmbedPage({
   searchParams,
 }: PageProps) {
   const { orgSlug, type } = await params;
-  const { widget } = await searchParams;
+  const { publication } = await searchParams;
   const normalizedType = type.toLowerCase();
 
   if (!supportedWidgetTypes.has(normalizedType)) {
     return <WidgetUnavailable label="Widget type is not supported." />;
   }
 
-  if (normalizedType === "schedule") {
-    const widgetParam = widget ? `&widget=${encodeURIComponent(widget)}` : "";
-    redirect(`/embed/schedule?org=${encodeURIComponent(orgSlug)}${widgetParam}`);
+  if (normalizedType === "schedule" && publication) {
+    redirect(`/p/${encodeURIComponent(orgSlug)}/${encodeURIComponent(publication)}`);
   }
 
   return (

@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { PageTabs } from "@/components/ui/page-tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { StudioTableToolbar } from "@/features/studio/components/studio-table-toolbar";
 import { useTRPC } from "@/trpc/client";
@@ -140,6 +141,7 @@ export default function StudioAddOnsPage() {
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [videoTitle, setVideoTitle] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
+  const [publishAsPublicFree, setPublishAsPublicFree] = useState(false);
 
   const [accessDialogOpen, setAccessDialogOpen] = useState(false);
   const [accessProvider, setAccessProvider] = useState<AccessProvider>("KISI");
@@ -455,7 +457,11 @@ export default function StudioAddOnsPage() {
             <p className="text-[11px] font-medium text-primary/40">Video</p>
             <Field label="Title"><Input value={videoTitle} onChange={(e) => setVideoTitle(e.target.value)} /></Field>
             <Field label="Video URL"><Input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="https://..." /></Field>
-            <Button variant="outline" size="sm" className="w-full" disabled={!videoTitle || !videoUrl} onClick={() => { createVideo.mutate({ title: videoTitle, videoUrl }); setVideoDialogOpen(false); }}>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="publish-public-free-video" className="text-xs">Public free video</Label>
+              <Switch id="publish-public-free-video" checked={publishAsPublicFree} onCheckedChange={setPublishAsPublicFree} />
+            </div>
+            <Button variant="outline" size="sm" className="w-full" disabled={!videoTitle || !videoUrl} onClick={() => { createVideo.mutate({ title: videoTitle, videoUrl, publishAsPublicFree }); setVideoDialogOpen(false); setVideoTitle(""); setVideoUrl(""); setPublishAsPublicFree(false); }}>
               Add video
             </Button>
           </div>

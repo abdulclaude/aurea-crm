@@ -43,7 +43,6 @@ export const outlookCalendarCreateEventExecutor: NodeExecutor<OutlookCalendarCre
     const start = data.start ? decode(Handlebars.compile(data.start)(context)) : undefined;
     const end = data.end ? decode(Handlebars.compile(data.end)(context)) : undefined;
 
-    // TODO: Implement Outlook Calendar: Create Event logic here
     const result = await step.run("outlook-calendar-create-event", async () => {
       // Add implementation here
       throw new NonRetriableError("Outlook Calendar: Create Event: Not yet implemented");

@@ -23,18 +23,12 @@ import {
   protectedProcedure,
 } from "@/trpc/init";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import {
+  generateInstructorMagicLinkToken,
+  hashInstructorMagicLinkToken,
+} from "@/features/instructors/lib/magic-link-token";
 
 const MAGIC_LINK_EXPIRY_HOURS = 24;
-
-// Helper function to hash magic link tokens
-function hashToken(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex");
-}
-
-// Helper function to generate magic link token
-function generateMagicLinkToken(): string {
-  return crypto.randomBytes(32).toString("hex");
-}
 
 async function getCurrentInstructor(userId: string) {
   return db.query.instructor.findFirst({
@@ -476,8 +470,8 @@ export const instructorsRouter = createTRPCRouter({
       }
 
       // Generate token and hash it
-      const token = generateMagicLinkToken();
-      const hashedToken = hashToken(token);
+      const { token, tokenDigest: hashedToken } =
+        generateInstructorMagicLinkToken();
 
       // Store hashed token and expiry
       await db
@@ -552,8 +546,8 @@ export const instructorsRouter = createTRPCRouter({
       }
 
       // Generate magic link
-      const token = generateMagicLinkToken();
-      const hashedToken = hashToken(token);
+      const { token, tokenDigest: hashedToken } =
+        generateInstructorMagicLinkToken();
 
       await db
         .update(instructorTable)
@@ -572,6 +566,10 @@ export const instructorsRouter = createTRPCRouter({
       try {
         const { sendMagicLinkEmail } = await import("../lib/send-magic-link");
         const result = await sendMagicLinkEmail({
+          organizationId: instructor.organizationId,
+          locationId: instructor.locationId,
+          instructorId: instructor.id,
+          tokenDigest: hashedToken,
           to: instructor.email,
           instructorName: instructor.name,
           magicLink,
@@ -581,20 +579,29 @@ export const instructorsRouter = createTRPCRouter({
 
         if (!result.success) {
           throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to send email. Please copy the link manually.",
+            code:
+              result.status === "SUPPRESSED"
+                ? "PRECONDITION_FAILED"
+                : "INTERNAL_SERVER_ERROR",
+            message: result.error,
           });
         }
 
         return {
           success: true,
-          message: "Magic link sent successfully",
+          queued: true,
+          deliveryId: result.deliveryId,
+          message: "Magic link queued for delivery",
         };
-      } catch (error: any) {
-        console.error("Failed to send magic link email:", error);
+      } catch (error: unknown) {
+        if (error instanceof TRPCError) {
+          throw error;
+        }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: error.message || "Failed to send email",
+          message:
+            error instanceof Error ? error.message : "Failed to queue email",
+          cause: error,
         });
       }
     }),
@@ -608,7 +615,7 @@ export const instructorsRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
-      const hashedToken = hashToken(input.token);
+      const hashedToken = hashInstructorMagicLinkToken(input.token);
 
       const instructor = await db.query.instructor.findFirst({
         where: eq(instructorTable.id, input.instructorId),
@@ -1619,7 +1626,7 @@ export const instructorsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      const hashedToken = hashToken(input.token);
+      const hashedToken = hashInstructorMagicLinkToken(input.token);
 
       const instructor = await db.query.instructor.findFirst({
         where: and(

@@ -55,28 +55,42 @@ export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
     };
 
     return (
-      <WorkflowNode
-        name={name}
-        description={description}
-        onDelete={handleDelete}
-        onSettings={onSettings}
-      >
+      <WorkflowNode onDelete={handleDelete} onSettings={onSettings}>
         <NodeStatusIndicator
           status={status}
           variant="border"
-          className="rounded-l-2xl"
+          className="rounded-lg"
         >
           <BaseNode
             onDoubleClick={onDoubleClick}
             status={status}
-            className="rounded-l-2xl relative group"
+            className="group relative w-[240px]"
           >
-            <BaseNodeContent>
-              {typeof Icon === "string" ? (
-                <Image src={Icon} alt={name} width={10} height={10} />
-              ) : (
-                <Icon className="size-3 text-gray-400" />
-              )}
+            <BaseNodeContent className="gap-0 p-0">
+              <div className="flex items-center gap-2.5 border-b border-black/5 px-3.5 py-3 dark:border-white/5">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-primary-foreground/25 dark:border-white/10">
+                  {typeof Icon === "string" ? (
+                    <Image
+                      src={Icon}
+                      alt={name}
+                      width={16}
+                      height={16}
+                      className="max-h-4 max-w-4 object-contain"
+                    />
+                  ) : (
+                    <Icon className="size-4 text-primary/60" />
+                  )}
+                </span>
+                <span className="truncate text-xs font-medium text-primary">
+                  {name}
+                </span>
+              </div>
+
+              {description ? (
+                <p className="line-clamp-3 px-3.5 py-3 text-[10px] leading-4 text-primary/55">
+                  {description}
+                </p>
+              ) : null}
 
               {children}
 

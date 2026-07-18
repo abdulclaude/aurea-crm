@@ -1,10 +1,6 @@
-import { Resend } from "resend";
+import "server-only";
 
-if (!process.env.RESEND_API_KEY) {
-  throw new Error("RESEND_API_KEY environment variable is not set");
-}
-
-export const resend = new Resend(process.env.RESEND_API_KEY);
+import { sendEmail, type EmailQueueResult } from "@/lib/email";
 
 export const sendInvitationEmail = async ({
   to,
@@ -13,16 +9,20 @@ export const sendInvitationEmail = async ({
   invitationUrl,
   role,
   isLocation = false,
+  organizationId,
+  locationId,
+  invitationId,
 }: {
+  organizationId: string;
+  locationId: string | null;
+  invitationId: string;
   to: string;
   inviterName: string;
   organizationName: string;
   invitationUrl: string;
   role?: string;
   isLocation?: boolean;
-}) => {
-  const fromEnv = process.env.RESEND_FROM_EMAIL || "noreply@aureacrm.com";
-  const normalizedFrom = fromEnv.split("#")[0].trim();
+}): Promise<EmailQueueResult> => {
   const subject = `You've been invited to join ${organizationName}`;
   const entityType = isLocation ? "client workspace" : "organization";
   const roleText = role ? ` as ${role}` : "";
@@ -92,18 +92,16 @@ ${invitationUrl}
 If you didn't expect this invitation, you can safely ignore this email.
 `;
 
-  try {
-    const result = await resend.emails.send({
-      from: normalizedFrom || "noreply@aureamedia.co.uk",
-      to,
-      subject,
-      html,
-      text,
-    });
-
-    return result;
-  } catch (error) {
-    console.error("Failed to send invitation email:", error);
-    throw new Error("Failed to send invitation email");
-  }
+  return sendEmail({
+    organizationId,
+    locationId,
+    clientId: null,
+    sourceType: "INVITATION",
+    sourceId: invitationId,
+    idempotencyKey: `invitation:${invitationId}:email`,
+    to,
+    subject,
+    html,
+    text,
+  });
 };

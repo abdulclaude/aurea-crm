@@ -2,11 +2,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
-import { format } from "date-fns";
+import { endOfDay, format, startOfDay } from "date-fns";
 import { Gauge, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import * as React from "react";
 import { useQueryState, parseAsString, parseAsArrayOf } from "nuqs";
 import { DataTable } from "@/components/data-table/data-table";
+import { Button } from "@/components/ui/button";
 import { useTRPC } from "@/trpc/client";
 import { WebVitalsToolbar } from "./web-vitals-toolbar";
 import { cn } from "@/lib/utils";
@@ -125,7 +126,9 @@ const createWebVitalsColumns = (): ColumnDef<WebVitalRow>[] => [
     enableSorting: true,
     cell: ({ row }) => (
       <div className="flex flex-col gap-1">
-        <span className="text-xs font-semibold text-primary">{row.original.metric}</span>
+        <span className="text-xs font-semibold text-primary">
+          {row.original.metric}
+        </span>
         <span className="text-[11px] text-primary/75">
           {getMetricDescription(row.original.metric)}
         </span>
@@ -139,7 +142,12 @@ const createWebVitalsColumns = (): ColumnDef<WebVitalRow>[] => [
     meta: { label: "Value" },
     enableSorting: true,
     cell: ({ row }) => (
-      <span className={cn("text-xs font-semibold", getRatingColor(row.original.rating))}>
+      <span
+        className={cn(
+          "text-xs font-semibold",
+          getRatingColor(row.original.rating),
+        )}
+      >
         {formatValue(row.original.metric, row.original.value)}
       </span>
     ),
@@ -155,11 +163,13 @@ const createWebVitalsColumns = (): ColumnDef<WebVitalRow>[] => [
         <span
           className={cn(
             "text-[11px] font-semibold px-2 py-1 rounded border flex items-center gap-1",
-            getRatingBadgeColor(row.original.rating)
+            getRatingBadgeColor(row.original.rating),
           )}
         >
           {getRatingIcon(row.original.rating)}
-          {row.original.rating === "NEEDS_IMPROVEMENT" ? "Needs Improvement" : row.original.rating.toLowerCase()}
+          {row.original.rating === "NEEDS_IMPROVEMENT"
+            ? "Needs Improvement"
+            : row.original.rating.toLowerCase()}
         </span>
       </div>
     ),
@@ -191,7 +201,9 @@ const createWebVitalsColumns = (): ColumnDef<WebVitalRow>[] => [
           {row.original.deviceType || "Unknown"}
         </span>
         {row.original.browserName && (
-          <span className="text-[11px] text-primary/75">{row.original.browserName}</span>
+          <span className="text-[11px] text-primary/75">
+            {row.original.browserName}
+          </span>
         )}
       </div>
     ),
@@ -233,20 +245,28 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
   const trpc = useTRPC();
 
   // Query states
-  const [search, setSearch] = useQueryState("search", parseAsString.withDefault(""));
+  const [search, setSearch] = useQueryState(
+    "search",
+    parseAsString.withDefault(""),
+  );
   const [selectedMetrics, setSelectedMetrics] = useQueryState(
     "metrics",
-    parseAsArrayOf(parseAsString).withDefault([])
+    parseAsArrayOf(parseAsString).withDefault([]),
   );
   const [selectedRatings, setSelectedRatings] = useQueryState(
     "ratings",
-    parseAsArrayOf(parseAsString).withDefault([])
+    parseAsArrayOf(parseAsString).withDefault([]),
   );
   const [selectedDeviceTypes, setSelectedDeviceTypes] = useQueryState(
     "deviceTypes",
-    parseAsArrayOf(parseAsString).withDefault([])
+    parseAsArrayOf(parseAsString).withDefault([]),
   );
-  const [sortValue, setSortValue] = useQueryState("sort", parseAsString.withDefault("timestamp.desc"));
+  const [sortValue, setSortValue] = useQueryState(
+    "sort",
+    parseAsString.withDefault("timestamp.desc"),
+  );
+  const [timestampStart, setTimestampStart] = React.useState<Date>();
+  const [timestampEnd, setTimestampEnd] = React.useState<Date>();
 
   // Filters data
   const { data: filtersData } = useQuery({
@@ -266,10 +286,15 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
   const { data: webVitalsData, isFetching } = useQuery({
     ...trpc.webVitals.getWebVitals.queryOptions({
       funnelId,
-      metric: selectedMetrics.length > 0 ? (selectedMetrics[0] as any) : undefined,
-      rating: selectedRatings.length > 0 ? (selectedRatings[0] as any) : undefined,
+      metric:
+        selectedMetrics.length > 0 ? (selectedMetrics[0] as any) : undefined,
+      rating:
+        selectedRatings.length > 0 ? (selectedRatings[0] as any) : undefined,
       pageUrl: search || undefined,
-      deviceType: selectedDeviceTypes.length > 0 ? selectedDeviceTypes[0] : undefined,
+      deviceType:
+        selectedDeviceTypes.length > 0 ? selectedDeviceTypes[0] : undefined,
+      timestampStart,
+      timestampEnd,
       cursor,
       limit: 50,
     }),
@@ -295,7 +320,16 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
   React.useEffect(() => {
     setCursor(undefined);
     setAllWebVitals([]);
-  }, [funnelId, selectedMetrics, selectedRatings, search, selectedDeviceTypes, sortValue]);
+  }, [
+    funnelId,
+    selectedMetrics,
+    selectedRatings,
+    search,
+    selectedDeviceTypes,
+    sortValue,
+    timestampStart,
+    timestampEnd,
+  ]);
 
   const loadMore = () => {
     if (webVitalsData?.nextCursor && !isFetching) {
@@ -305,19 +339,25 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
 
   const handleToggleMetric = (metric: string) => {
     setSelectedMetrics((prev) =>
-      prev.includes(metric) ? prev.filter((m) => m !== metric) : [...prev, metric]
+      prev.includes(metric)
+        ? prev.filter((m) => m !== metric)
+        : [...prev, metric],
     );
   };
 
   const handleToggleRating = (rating: string) => {
     setSelectedRatings((prev) =>
-      prev.includes(rating) ? prev.filter((r) => r !== rating) : [...prev, rating]
+      prev.includes(rating)
+        ? prev.filter((r) => r !== rating)
+        : [...prev, rating],
     );
   };
 
   const handleToggleDeviceType = (deviceType: string) => {
     setSelectedDeviceTypes((prev) =>
-      prev.includes(deviceType) ? prev.filter((d) => d !== deviceType) : [...prev, deviceType]
+      prev.includes(deviceType)
+        ? prev.filter((d) => d !== deviceType)
+        : [...prev, deviceType],
     );
   };
 
@@ -327,6 +367,8 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
     void setSelectedRatings([]);
     void setSelectedDeviceTypes([]);
     void setSortValue("timestamp.desc");
+    setTimestampStart(undefined);
+    setTimestampEnd(undefined);
   };
 
   const handleSortChange = (value: string) => {
@@ -340,7 +382,7 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
         void setSortValue(newValue);
       }
     },
-    [setSortValue]
+    [setSortValue],
   );
 
   const columns = React.useMemo(() => createWebVitalsColumns(), []);
@@ -363,6 +405,12 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
         onToggleDeviceType={handleToggleDeviceType}
         sortValue={sortValue}
         onSortChange={handleSortChange}
+        timestampStart={timestampStart}
+        timestampEnd={timestampEnd}
+        onTimestampChange={(start, end) => {
+          setTimestampStart(start ? startOfDay(start) : undefined);
+          setTimestampEnd(end ? endOfDay(end) : undefined);
+        }}
         onClearFilters={handleClearFilters}
       />
 
@@ -375,13 +423,9 @@ export function WebVitalsTable({ funnelId }: WebVitalsTableProps) {
 
       {hasMore && !isFetching && (
         <div className="flex justify-center py-4">
-          <button
-            type="button"
-            onClick={loadMore}
-            className="text-xs text-primary hover:text-black dark:hover:text-white transition px-4 py-2 rounded-lg border border-black/10 dark:border-white/5 hover:bg-primary-foreground/50"
-          >
+          <Button variant="outline" size="sm" onClick={loadMore}>
             Load more
-          </button>
+          </Button>
         </div>
       )}
 

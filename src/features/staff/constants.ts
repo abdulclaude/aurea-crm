@@ -38,6 +38,16 @@ export const STAFF_TYPE_VALUES = STAFF_ROLE_VALUES;
 
 export type StaffTypeValue = (typeof STAFF_TYPE_VALUES)[number];
 
+export const STAFF_EMPLOYMENT_TYPE_VALUES = ["EMPLOYEE", "CONTRACTOR"] as const;
+
+export type StaffEmploymentType = (typeof STAFF_EMPLOYMENT_TYPE_VALUES)[number];
+
+export const STAFF_EMPLOYMENT_TYPE_LABELS: Record<StaffEmploymentType, string> =
+  {
+    EMPLOYEE: "Employee",
+    CONTRACTOR: "Contractor",
+  };
+
 export const STAFF_TYPE_LABELS: Record<string, string> = {
   ADMIN: "Admin",
   MANAGER: "Manager",

@@ -6,7 +6,10 @@ import {
 } from "@/features/reports/helpers";
 import type { ReportCatalogItem } from "@/features/reports/types";
 
-import type { ReportFilterOption, ReportFilterState } from "./report-table-types";
+import type {
+  ReportFilterOption,
+  ReportFilterState,
+} from "./report-table-types";
 
 export function matchesReportCatalogSearch(
   report: ReportCatalogItem,
@@ -73,7 +76,10 @@ export function sortReportCatalogItems(
   });
 }
 
-function getCatalogSortValue(report: ReportCatalogItem, columnId: string): string {
+function getCatalogSortValue(
+  report: ReportCatalogItem,
+  columnId: string,
+): string {
   if (columnId === "category") return report.category;
   if (columnId === "groupId") return report.groupId;
   return report.name;

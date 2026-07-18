@@ -1,9 +1,17 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveGoogleMailProviderGrant } from "@/features/nodes/lib/resolve-google-mail-provider-grant";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
 import { gmailSendEmailChannel } from "@/inngest/channels/gmail-send-email";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
+import {
+  formatGmailAddressList,
+  safeGmailHeaderValue,
+} from "../gmail-message-headers";
+import { z } from "zod";
 
 Handlebars.registerHelper("json", (context) => {
   const jsonString = JSON.stringify(context, null, 2);
@@ -11,6 +19,7 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GmailSendEmailData = {
+  providerAccountId?: string;
   variableName?: string;
   to: string;
   subject: string;
@@ -19,8 +28,14 @@ type GmailSendEmailData = {
   bcc?: string;
 };
 
+const gmailSendResponseSchema = z.object({
+  id: z.string().optional(),
+  threadId: z.string().optional(),
+  labelIds: z.array(z.string()).optional(),
+});
+
 export const gmailSendEmailExecutor: NodeExecutor<GmailSendEmailData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
       gmailSendEmailChannel().status({ nodeId, status: "loading" })
     );
@@ -35,26 +50,14 @@ export const gmailSendEmailExecutor: NodeExecutor<GmailSendEmailData> =
         );
       }
 
-      // Get Gmail OAuth token
-      const tokenResponse = await step.run("get-gmail-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          gmailSendEmailChannel().status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Gmail is not connected. Please connect Gmail in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-gmail-token", async () =>
+        resolveGoogleMailProviderGrant({
+          nodeType: NodeType.GMAIL_SEND_EMAIL,
+          providerAccountId: data.providerAccountId,
+          scope,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const to = decode(Handlebars.compile(data.to)(context));
@@ -62,15 +65,18 @@ export const gmailSendEmailExecutor: NodeExecutor<GmailSendEmailData> =
       const body = decode(Handlebars.compile(data.body)(context));
       const cc = data.cc ? decode(Handlebars.compile(data.cc)(context)) : undefined;
       const bcc = data.bcc ? decode(Handlebars.compile(data.bcc)(context)) : undefined;
+      const toHeader = formatGmailAddressList("Recipients", to);
+      const ccHeader = formatGmailAddressList("Cc", cc);
+      const bccHeader = formatGmailAddressList("Bcc", bcc);
 
       // Create RFC 2822 formatted email
       const emailLines = [
-        `To: ${to}`,
-        `Subject: ${subject}`,
+        `To: ${toHeader}`,
+        `Subject: ${safeGmailHeaderValue("Subject", subject)}`,
       ];
 
-      if (cc) emailLines.push(`Cc: ${cc}`);
-      if (bcc) emailLines.push(`Bcc: ${bcc}`);
+      if (ccHeader) emailLines.push(`Cc: ${ccHeader}`);
+      if (bccHeader) emailLines.push(`Bcc: ${bccHeader}`);
 
       emailLines.push(`Content-Type: text/html; charset=utf-8`);
       emailLines.push("");
@@ -87,7 +93,8 @@ export const gmailSendEmailExecutor: NodeExecutor<GmailSendEmailData> =
 
       // Send email via Gmail API
       const response = await step.run("send-gmail-email", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
           {
             method: "POST",
@@ -102,11 +109,13 @@ export const gmailSendEmailExecutor: NodeExecutor<GmailSendEmailData> =
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Gmail API error: ${error}`);
+          throw new NonRetriableError(
+            `Gmail API rejected the message with status ${res.status}.`,
+          );
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return gmailSendResponseSchema.parse(payload);
       });
 
       await publish(

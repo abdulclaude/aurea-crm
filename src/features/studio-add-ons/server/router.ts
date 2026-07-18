@@ -6,8 +6,10 @@ import { z } from "zod";
 import { db } from "@/db";
 import {
   accessControlIntegration,
+  classType,
   dynamicPricingRule,
   externalChannelIntegration,
+  instructor,
   marketplaceListing,
   performanceMetric,
   soapNote,
@@ -15,6 +17,8 @@ import {
   videoOnDemandAsset,
   workoutProgram,
 } from "@/db/schema";
+import { parsePublicMediaUrl } from "@/features/studio/widgets/public-media-url";
+import { requireCapability } from "@/features/permissions/server/authorization";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const externalChannelProviders = [
@@ -291,22 +295,91 @@ export const studioAddOnsRouter = createTRPCRouter({
         instructorId: z.string().optional(),
         accessLevel: z.enum(contentAccessLevels).default("MEMBERS_ONLY"),
         price: z.number().nonnegative().optional(),
+        publishAsPublicFree: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
       const { orgId } = scopedConditions(ctx);
+      if (input.publishAsPublicFree) {
+        await requireCapability({
+          actor: {
+            userId: ctx.auth.user.id,
+            organizationId: ctx.orgId,
+            locationId: ctx.locationId,
+          },
+          capability: "publication.manage",
+          resource: {
+            organizationId: orgId,
+            locationId: ctx.locationId,
+          },
+        });
+      }
+      const publicVideoUrl = input.publishAsPublicFree
+        ? parsePublicMediaUrl(input.videoUrl)
+        : null;
+      if (input.publishAsPublicFree && !publicVideoUrl) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Public free videos require a credential-free HTTPS media URL without query parameters.",
+        });
+      }
+      const [classTypes, instructors] = await Promise.all([
+        input.classTypeId
+          ? db
+              .select({ id: classType.id })
+              .from(classType)
+              .where(
+                and(
+                  eq(classType.id, input.classTypeId),
+                  tableScope(classType, orgId, ctx.locationId),
+                  eq(classType.isActive, true),
+                ),
+              )
+              .limit(1)
+          : Promise.resolve([]),
+        input.instructorId
+          ? db
+              .select({ id: instructor.id })
+              .from(instructor)
+              .where(
+                and(
+                  eq(instructor.id, input.instructorId),
+                  tableScope(instructor, orgId, ctx.locationId),
+                  eq(instructor.isActive, true),
+                  eq(instructor.isSystem, false),
+                ),
+              )
+              .limit(1)
+          : Promise.resolve([]),
+      ]);
+      if (input.classTypeId && classTypes.length !== 1) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The selected class type is unavailable in this location.",
+        });
+      }
+      if (input.instructorId && instructors.length !== 1) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "The selected instructor is unavailable in this location.",
+        });
+      }
+      const now = new Date();
       const [created] = await db.insert(videoOnDemandAsset).values({
         id: crypto.randomUUID(),
         organizationId: orgId,
         locationId: ctx.locationId ?? null,
-        updatedAt: new Date(),
+        updatedAt: now,
         title: input.title.trim(),
-        videoUrl: input.videoUrl,
+        videoUrl: publicVideoUrl ?? input.videoUrl,
         description: input.description?.trim() || null,
         classTypeId: input.classTypeId || null,
         instructorId: input.instructorId || null,
-        accessLevel: input.accessLevel,
-        price: input.price?.toString() ?? null,
+        accessLevel: input.publishAsPublicFree ? "PUBLIC" : input.accessLevel,
+        price: input.publishAsPublicFree ? null : input.price?.toString() ?? null,
+        isPublished: input.publishAsPublicFree,
+        publishedAt: input.publishAsPublicFree ? now : null,
       }).returning();
       return created;
     }),

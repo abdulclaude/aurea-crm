@@ -1,13 +1,11 @@
 import { z } from "zod";
 import {
   createTRPCRouter,
-  premiumProcedure,
   protectedProcedure,
 } from "@/trpc/init";
 import { db } from "@/db";
-import { AILogStatus } from "@/db/enums";
 import { aiLog } from "@/db/schema";
-import { TRPCError } from "@trpc/server";
+import { requireCapability } from "@/features/permissions/server/authorization";
 import {
   and,
   desc,
@@ -75,20 +73,35 @@ export const aiRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const conditions: SQL[] = [eq(aiLog.userId, ctx.auth.user.id)];
-      const contextCondition = or(
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "customer.view",
+        resource: ctx.orgId
+          ? { organizationId: ctx.orgId, locationId: ctx.locationId }
+          : undefined,
+      });
+      const conditions: SQL[] = [
+        eq(aiLog.userId, ctx.auth.user.id),
         nullableEq(aiLog.organizationId, ctx.orgId),
-        nullableEq(aiLog.locationId, ctx.locationId)
-      );
-      if (contextCondition) {
-        conditions.push(contextCondition);
-      }
+        nullableEq(aiLog.locationId, ctx.locationId),
+      ];
 
       if (input.cursor) {
         const [cursorLog] = await db
           .select({ id: aiLog.id, createdAt: aiLog.createdAt })
           .from(aiLog)
-          .where(and(eq(aiLog.id, input.cursor), eq(aiLog.userId, ctx.auth.user.id)))
+          .where(
+            and(
+              eq(aiLog.id, input.cursor),
+              eq(aiLog.userId, ctx.auth.user.id),
+              nullableEq(aiLog.organizationId, ctx.orgId),
+              nullableEq(aiLog.locationId, ctx.locationId),
+            ),
+          )
           .limit(1);
 
         if (cursorLog) {
@@ -120,86 +133,5 @@ export const aiRouter = createTRPCRouter({
         items: logs.map(serializeLog),
         nextCursor,
       };
-    }),
-
-  createLog: protectedProcedure
-    .input(
-      z.object({
-        title: z.string(),
-        description: z.string().optional(),
-        intent: z.string().optional(),
-        userMessage: z.string(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [log] = await db
-        .insert(aiLog)
-        .values({
-          id: crypto.randomUUID(),
-          title: input.title,
-          description: input.description,
-          intent: input.intent,
-          userMessage: input.userMessage,
-          status: AILogStatus.RUNNING,
-          userId: ctx.auth.user.id,
-          organizationId: ctx.orgId,
-          locationId: ctx.locationId,
-          createdAt: new Date(),
-        })
-        .returning();
-
-      return serializeLog(log);
-    }),
-
-  updateLog: protectedProcedure
-    .input(
-      z.object({
-        id: z.string(),
-        status: z.enum(AILogStatus),
-        error: z.string().optional(),
-        result: z.unknown().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) => {
-      const [log] = await db
-        .update(aiLog)
-        .set({
-          status: input.status,
-          error: input.error,
-          result: input.result,
-          completedAt:
-            input.status === "COMPLETED" || input.status === "FAILED"
-            ? new Date()
-            : undefined,
-        })
-        .where(and(eq(aiLog.id, input.id), eq(aiLog.userId, ctx.auth.user.id)))
-        .returning();
-
-      if (!log) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "AI log not found",
-        });
-      }
-
-      return serializeLog(log);
-    }),
-
-  deleteLog: protectedProcedure
-    .input(z.object({ id: z.string() }))
-    .mutation(async ({ ctx, input }) => {
-      const [log] = await db
-        .delete(aiLog)
-        .where(and(eq(aiLog.id, input.id), eq(aiLog.userId, ctx.auth.user.id)))
-        .returning();
-
-      if (!log) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "AI log not found",
-        });
-      }
-
-      return serializeLog(log);
     }),
 });

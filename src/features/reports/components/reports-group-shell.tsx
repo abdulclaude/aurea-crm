@@ -26,8 +26,8 @@ export function ReportsGroupShell({
   const reportGroups = getReportCategoryGroups(group.id, reports);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <aside className="w-72 shrink-0 overflow-y-auto border-r border-black/5 bg-background dark:border-white/5">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden md:flex-row">
+      <aside className="max-h-56 w-full shrink-0 overflow-y-auto border-b border-black/5 bg-background dark:border-white/5 md:max-h-none md:w-72 md:border-r md:border-b-0">
         <nav className="space-y-6 p-4">
           <div className="space-y-1">
             <Link href={`/reports/${group.id}`}>
@@ -74,7 +74,7 @@ export function ReportsGroupShell({
         </nav>
       </aside>
 
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   );
 }

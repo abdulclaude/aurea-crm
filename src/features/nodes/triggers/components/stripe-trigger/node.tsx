@@ -27,11 +27,11 @@ export const StripeTriggerNode: React.FC<NodeProps> = memo((props) => {
 
   return (
     <>
-      <StripeTriggerDialog open={dialogOpen} onOpenChange={setDialogOpen} variables={[]} />
+      <StripeTriggerDialog open={dialogOpen} onOpenChange={setDialogOpen} />
       <BaseTriggerNode
         {...props}
         icon="/logos/stripe.svg"
-        name="When a Stripe payment event is captured"
+        name="Legacy Stripe event (disabled)"
         status={nodeStatus}
         onSettings={handleOpenSettings}
         onDoubleClick={handleOpenSettings}

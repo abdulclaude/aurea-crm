@@ -2,9 +2,12 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { pipeline as pipelineTable, pipelineStage } from "@/db/schema";
-import type { JsonObject } from "@/db/json";
+import {
+  parseGeneratedWorkflow,
+  type GeneratedWorkflow,
+} from "./workflow-contract";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+export type { GeneratedWorkflow } from "./workflow-contract";
 
 // Node definitions with descriptions for AI
 const nodeDefinitions = {
@@ -35,9 +38,29 @@ const nodeDefinitions = {
       description: "Triggered by Telegram bot messages",
     },
     {
-      type: "STRIPE_TRIGGER",
-      name: "Stripe Trigger",
-      description: "Triggered by Stripe payment events",
+      type: "STRIPE_PAYMENT_SUCCEEDED",
+      name: "Stripe Payment Succeeded",
+      description: "Triggered when a verified Stripe payment succeeds",
+    },
+    {
+      type: "STRIPE_PAYMENT_FAILED",
+      name: "Stripe Payment Failed",
+      description: "Triggered when a verified Stripe payment fails",
+    },
+    {
+      type: "STRIPE_SUBSCRIPTION_CREATED",
+      name: "Stripe Subscription Created",
+      description: "Triggered when Stripe creates a subscription",
+    },
+    {
+      type: "STRIPE_SUBSCRIPTION_UPDATED",
+      name: "Stripe Subscription Updated",
+      description: "Triggered when Stripe updates a subscription",
+    },
+    {
+      type: "STRIPE_SUBSCRIPTION_CANCELLED",
+      name: "Stripe Subscription Cancelled",
+      description: "Triggered when Stripe cancels a subscription",
     },
     {
       type: "CLIENT_CREATED_TRIGGER",
@@ -71,11 +94,6 @@ const nodeDefinitions = {
     },
   ],
   executions: [
-    {
-      type: "HTTP_REQUEST",
-      name: "HTTP Request",
-      description: "Make HTTP API calls to external services",
-    },
     {
       type: "GEMINI",
       name: "Gemini AI",
@@ -118,11 +136,6 @@ const nodeDefinitions = {
       description: "Update an existing client",
     },
     {
-      type: "DELETE_CLIENT",
-      name: "Delete Client",
-      description: "Delete a client",
-    },
-    {
       type: "CREATE_DEAL",
       name: "Create deal",
       description: "Create a new deal in pipeline",
@@ -132,7 +145,6 @@ const nodeDefinitions = {
       name: "Update Deal",
       description: "Update an existing deal",
     },
-    { type: "DELETE_DEAL", name: "Delete Deal", description: "Delete a deal" },
     {
       type: "UPDATE_PIPELINE",
       name: "Update Pipeline",
@@ -167,30 +179,17 @@ const nodeDefinitions = {
   ],
 };
 
-export interface GeneratedWorkflow {
-  name: string;
-  description: string;
-  nodes: Array<{
-    id: string;
-    name: string;
-    type: string;
-    position: { x: number; y: number };
-    data: JsonObject;
-  }>;
-  connections: Array<{
-    sourceId: string;
-    targetId: string;
-  }>;
-}
-
 export async function generateWorkflow(
   description: string,
   context: {
     organizationId: string;
     locationId: string | null;
+    geminiApiKey: string;
   },
 ): Promise<GeneratedWorkflow | null> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(context.geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   // Fetch existing pipelines for context
   const pipelines = await getPipelinePromptContext(context);
@@ -264,27 +263,12 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-    if (jsonMatch) {
-      const workflow = JSON.parse(jsonMatch[0]) as GeneratedWorkflow;
-
-      // Validate the workflow structure
-      if (!workflow.name || !workflow.nodes || !workflow.connections) {
-        return null;
-      }
-
-      // Ensure at least one trigger node
-      const hasTrigger = workflow.nodes.some((n) =>
-        nodeDefinitions.triggers.some((t) => t.type === n.type),
-      );
-
-      if (!hasTrigger) {
-        return null;
-      }
-
-      return workflow;
-    }
+    return parseGeneratedWorkflow({
+      text,
+      mode: "workflow",
+      triggerDefinitions: nodeDefinitions.triggers,
+      executionDefinitions: nodeDefinitions.executions,
+    });
   } catch (error) {
     console.error("Failed to generate workflow:", error);
   }
@@ -297,9 +281,12 @@ export async function generateBundleWorkflow(
   context: {
     organizationId: string;
     locationId: string | null;
+    geminiApiKey: string;
   },
 ): Promise<GeneratedWorkflow | null> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(context.geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const pipelines = await getPipelinePromptContext(context);
 
@@ -367,33 +354,12 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-    if (jsonMatch) {
-      const workflow = JSON.parse(jsonMatch[0]) as GeneratedWorkflow;
-
-      // Validate the workflow structure
-      if (!workflow.name || !workflow.nodes || !workflow.connections) {
-        return null;
-      }
-
-      // Ensure NO trigger nodes (bundles shouldn't have triggers)
-      const hasTrigger = workflow.nodes.some((n) =>
-        nodeDefinitions.triggers.some((t) => t.type === n.type),
-      );
-
-      if (hasTrigger) {
-        console.error("Bundle workflow should not contain triggers");
-        return null;
-      }
-
-      // Ensure at least one execution node
-      if (workflow.nodes.length === 0) {
-        return null;
-      }
-
-      return workflow;
-    }
+    return parseGeneratedWorkflow({
+      text,
+      mode: "bundle",
+      triggerDefinitions: nodeDefinitions.triggers,
+      executionDefinitions: nodeDefinitions.executions,
+    });
   } catch (error) {
     console.error("Failed to generate bundle workflow:", error);
   }

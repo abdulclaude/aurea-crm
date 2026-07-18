@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
+import { TABLE_BADGE_COLORS, TableBadge } from "@/components/ui/table-badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -64,7 +64,6 @@ import {
 } from "@/features/organizations/members/constants";
 import { useMembersParams } from "@/features/organizations/members/hooks/use-members-params";
 import { UserStatus, type UserStatus as UserStatusValue } from "@/db/enums";
-import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import type { AppRouter } from "@/trpc/routers/_app";
 import { MembersToolbar } from "./members-toolbar";
@@ -134,25 +133,19 @@ const sortingStateToValue = (state: SortingState): string | null => {
 };
 
 const getRoleBadgeColor = (role: string | null | undefined): string => {
-  if (!role)
-    return "text-gray-500 ring-gray-200 bg-gray-100 dark:border-gray-700";
+  if (!role) return TABLE_BADGE_COLORS.slate;
   const colors: Record<string, string> = {
-    owner:
-      "text-indigo-600 ring-indigo-300 bg-indigo-100 dark:border-indigo-800",
-    admin: "text-blue-600 ring-blue-300 bg-blue-100 dark:border-blue-800",
-    manager: "text-cyan-600 ring-cyan-300 bg-cyan-100 dark:border-cyan-800",
-    staff:
-      "text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800",
-    viewer: "text-gray-500 ring-gray-200 bg-gray-100 dark:border-gray-700",
-    AGENCY:
-      "text-indigo-600 ring-indigo-300 bg-indigo-100 dark:border-indigo-800",
-    ADMIN:
-      "text-orange-600 ring-orange-300 bg-orange-100 dark:border-orange-800",
-    MANAGER: "text-teal-600 ring-teal-300 bg-teal-100 dark:border-teal-800",
-    STANDARD:
-      "text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800",
-    LIMITED: "text-amber-600 ring-amber-200 bg-amber-100 dark:border-amber-800",
-    VIEWER: "text-gray-500 ring-gray-200 bg-gray-100 dark:border-gray-700",
+    owner: TABLE_BADGE_COLORS.indigo,
+    admin: TABLE_BADGE_COLORS.blue,
+    manager: TABLE_BADGE_COLORS.cyan,
+    staff: TABLE_BADGE_COLORS.emerald,
+    viewer: TABLE_BADGE_COLORS.slate,
+    AGENCY: TABLE_BADGE_COLORS.indigo,
+    ADMIN: TABLE_BADGE_COLORS.orange,
+    MANAGER: TABLE_BADGE_COLORS.teal,
+    STANDARD: TABLE_BADGE_COLORS.emerald,
+    LIMITED: TABLE_BADGE_COLORS.amber,
+    VIEWER: TABLE_BADGE_COLORS.slate,
   };
   return colors[role] || colors.viewer;
 };
@@ -180,7 +173,7 @@ const getRoleLabel = (role: string | null | undefined) => {
 const PRIMARY_COLUMN_ID = "name";
 const COLUMN_ORDER_STORAGE_KEY = "members-table.column-order";
 
-export function MembersTable() {
+export function MembersTable({ canManage = true }: { canManage?: boolean }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [params, setParams] = useMembersParams();
@@ -378,12 +371,9 @@ export function MembersTable() {
         cell: ({ row }) => {
           const role = row.original.role;
           return (
-            <Badge
-              variant="outline"
-              className={cn("text-[11px] w-fit", getRoleBadgeColor(role))}
-            >
+            <TableBadge color={getRoleBadgeColor(role)}>
               {getRoleLabel(role)}
-            </Badge>
+            </TableBadge>
           );
         },
       },
@@ -395,45 +385,33 @@ export function MembersTable() {
         cell: ({ row }) => {
           const member = row.original;
           const status = member.status?.toString() ?? "OFFLINE";
-          const statusConfig: Record<
-            string,
-            { label: string; className: string }
-          > = {
-            ONLINE: {
-              label: "Online",
-              className:
-                "text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800",
-            },
-            WORKING: {
-              label: "Working",
-              className:
-                "text-blue-600 ring-blue-300 bg-blue-100 dark:border-blue-800",
-            },
-            DO_NOT_DISTURB: {
-              label: "Do Not Disturb",
-              className:
-                "text-rose-600 ring-rose-300 bg-rose-100 dark:border-rose-800",
-            },
-            AWAY: {
-              label: "Away",
-              className:
-                "text-amber-600 ring-amber-200 bg-amber-100 dark:border-amber-800",
-            },
-            OFFLINE: {
-              label: "Offline",
-              className:
-                "text-gray-500 ring-gray-200 bg-gray-100 dark:border-gray-700",
-            },
-          };
+          const statusConfig: Record<string, { label: string; color: string }> =
+            {
+              ONLINE: {
+                label: "Online",
+                color: TABLE_BADGE_COLORS.emerald,
+              },
+              WORKING: {
+                label: "Working",
+                color: TABLE_BADGE_COLORS.blue,
+              },
+              DO_NOT_DISTURB: {
+                label: "Do Not Disturb",
+                color: TABLE_BADGE_COLORS.rose,
+              },
+              AWAY: {
+                label: "Away",
+                color: TABLE_BADGE_COLORS.amber,
+              },
+              OFFLINE: {
+                label: "Offline",
+                color: TABLE_BADGE_COLORS.slate,
+              },
+            };
           const config = statusConfig[status] ?? statusConfig.OFFLINE;
           return (
             <div className="flex flex-col gap-1">
-              <Badge
-                variant="outline"
-                className={cn("text-[11px] w-fit", config.className)}
-              >
-                {config.label}
-              </Badge>
+              <TableBadge color={config.color}>{config.label}</TableBadge>
               {member.statusMessage && (
                 <span className="text-[10px] text-primary/60 dark:text-white/50 line-clamp-1">
                   {member.statusMessage}
@@ -506,26 +484,30 @@ export function MembersTable() {
                   <Mail className="mr-1 size-3.5" />
                   Send email
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleChangeRoleClick(row.original);
-                  }}
-                >
-                  <Shield className="mr-1 size-3.5" />
-                  Change role
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="text-xs text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 cursor-pointer"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemoveMemberClick(row.original);
-                  }}
-                >
-                  <UserX className="mr-1 size-3.5" />
-                  Remove member
-                </DropdownMenuItem>
+                {canManage ? (
+                  <>
+                    <DropdownMenuItem
+                      className="text-xs dark:text-white text-primary hover:text-black hover:bg-primary-foreground cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleChangeRoleClick(row.original);
+                      }}
+                    >
+                      <Shield className="mr-1 size-3.5" />
+                      Change role
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-xs text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveMemberClick(row.original);
+                      }}
+                    >
+                      <UserX className="mr-1 size-3.5" />
+                      Remove member
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           );
@@ -534,7 +516,7 @@ export function MembersTable() {
         enableHiding: false,
       },
     ],
-    [handleChangeRoleClick, handleRemoveMemberClick],
+    [canManage, handleChangeRoleClick, handleRemoveMemberClick],
   );
 
   const memberColumnIds = React.useMemo(
@@ -665,9 +647,7 @@ export function MembersTable() {
   );
 
   const roleOptions =
-    activeMember?.memberType === "organization"
-      ? AGENCY_ROLES
-      : LOCATION_ROLES;
+    activeMember?.memberType === "organization" ? AGENCY_ROLES : LOCATION_ROLES;
 
   const handleUpdateRole = async () => {
     if (!activeMember) return;

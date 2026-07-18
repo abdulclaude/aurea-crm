@@ -44,8 +44,14 @@ export const RemoveTagFromClientNode: React.FC<NodeProps<RemoveTagFromClientNode
       });
     }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
-    const description = nodeData?.tag
-      ? `Remove tag: ${nodeData.tag}`
+    const configuredTags =
+      nodeData.tags?.length > 0
+        ? nodeData.tags
+        : nodeData.tag
+          ? [nodeData.tag]
+          : [];
+    const description = configuredTags.length > 0
+      ? `Remove ${configuredTags.join(", ")}`
       : "Not configured";
 
     const nodeStatus = useNodeStatus({
@@ -91,7 +97,7 @@ export const RemoveTagFromClientNode: React.FC<NodeProps<RemoveTagFromClientNode
           {...props}
           id={props.id}
           icon={RemoveTagIcon}
-          name="Remove Tag from Client"
+          name="Remove tag"
           description={description}
           status={nodeStatus}
           onSettings={handleOpenSettings}

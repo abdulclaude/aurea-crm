@@ -6,8 +6,8 @@ import { useReactFlow, type Node, type NodeProps } from "@xyflow/react";
 import { BaseTriggerNode } from "@/features/nodes/triggers/base-trigger-node";
 import {
   AppointmentCreatedTriggerDialog,
-  type AppointmentCreatedTriggerFormValues,
 } from "./dialog";
+import type { AppointmentCreatedTriggerFormValues } from "./config";
 
 import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
 import { IconCalendarAdd4 as CalendarIcon } from "central-icons/IconCalendarAdd4";
@@ -56,7 +56,9 @@ export const AppointmentCreatedTriggerNode: React.FC<
     refreshToken: fetchAppointmentCreatedTriggerRealtimeToken,
   });
 
-  const description = "Triggers when an appointment is created";
+  const description = nodeData.firstAppointmentOnly
+    ? "When a client books their first appointment"
+    : "When an appointment is booked";
 
   const handleOpenSettings = () => {
     setDialogOpen(true);
@@ -94,7 +96,11 @@ export const AppointmentCreatedTriggerNode: React.FC<
         {...props}
         id={props.id}
         icon={CalendarIcon}
-        name="Appointment Created"
+        name={
+          nodeData.firstAppointmentOnly
+            ? "First appointment booked"
+            : "Appointment booked"
+        }
         description={description}
         status={nodeStatus}
         onSettings={handleOpenSettings}

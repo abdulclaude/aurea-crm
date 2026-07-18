@@ -1,6 +1,6 @@
 "use server";
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { db } from "@/db";
 import { credential as credentialTable } from "@/db/schema";
@@ -10,7 +10,7 @@ const TELEGRAM_API_BASE = "https://api.telegram.org";
 
 export type TelegramCredentialMetadata = {
   botUsername?: string;
-  webhookSecret?: string;
+  webhookSecretHash?: string;
 };
 
 const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post"];
@@ -116,7 +116,7 @@ export async function configureTelegramWebhook({
 
   const metadata: TelegramCredentialMetadata = {
     ...getMetadataRecord(credential.metadata),
-    webhookSecret,
+    webhookSecretHash: createHash("sha256").update(webhookSecret).digest("hex"),
     botUsername: getMe?.result?.username,
   };
 

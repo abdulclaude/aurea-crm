@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTRPC } from "@/trpc/client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -32,6 +32,12 @@ export function EditorTopBar({ funnel }: EditorTopBarProps) {
 
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const { data: publicationTargets } = useQuery(
+    trpc.publications.list.queryOptions({ kind: "FUNNEL" }),
+  );
+  const publicationTarget = publicationTargets?.find(
+    (target) => target.sourceKey === `funnel:${funnel.id}`,
+  );
 
   const { mutateAsync: updateFunnel } = useMutation(
     trpc.funnels.update.mutationOptions({
@@ -52,16 +58,27 @@ export function EditorTopBar({ funnel }: EditorTopBarProps) {
     })
   );
 
+  const { mutateAsync: publishTarget } = useMutation(
+    trpc.publications.publish.mutationOptions(),
+  );
+  const { mutateAsync: pauseTarget } = useMutation(
+    trpc.publications.pause.mutationOptions(),
+  );
+
   const handlePublish = async () => {
     setIsPublishing(true);
     try {
-      await updateFunnel({
-        id: funnel.id,
-        status: FunnelStatus.PUBLISHED,
-      });
+      if (!publicationTarget) {
+        router.push(
+          `/settings/publication?sourceKey=${encodeURIComponent(`funnel:${funnel.id}`)}`,
+        );
+        return;
+      }
+      await publishTarget({ id: publicationTarget.id, changeNote: null });
+      await queryClient.invalidateQueries();
 
       toast.success("Funnel published!", {
-        description: "Your funnel is now live and accessible to visitors.",
+        description: "A new immutable version is now live.",
       });
     } catch (error) {
       toast.error("Failed to publish", {
@@ -74,10 +91,15 @@ export function EditorTopBar({ funnel }: EditorTopBarProps) {
 
   const handleUnpublish = async () => {
     try {
-      await updateFunnel({
-        id: funnel.id,
-        status: FunnelStatus.DRAFT,
-      });
+      if (publicationTarget) {
+        await pauseTarget({ id: publicationTarget.id });
+        await queryClient.invalidateQueries();
+      } else {
+        await updateFunnel({
+          id: funnel.id,
+          status: FunnelStatus.DRAFT,
+        });
+      }
 
       toast.success("Funnel unpublished", {
         description: "Your funnel is now in draft mode.",
@@ -118,14 +140,23 @@ export function EditorTopBar({ funnel }: EditorTopBarProps) {
     deleteFunnel({ id: funnel.id });
   };
 
-  const isPublished = funnel.status === FunnelStatus.PUBLISHED;
+  const isPublished = publicationTarget
+    ? publicationTarget.status === "PUBLISHED"
+    : funnel.status === FunnelStatus.PUBLISHED;
+  const displayedStatus = publicationTarget?.status ?? funnel.status;
 
   return (
     <>
       <Button
         variant="outline"
         size="sm"
-        onClick={() => setDomainSettingsOpen(true)}
+        onClick={() => {
+          if (publicationTarget) {
+            router.push(`/settings/publication?target=${publicationTarget.id}`);
+          } else {
+            setDomainSettingsOpen(true);
+          }
+        }}
       >
         <Globe className="mr-2 h-4 w-4" />
         Domain
@@ -163,7 +194,7 @@ export function EditorTopBar({ funnel }: EditorTopBarProps) {
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">Status</span>
               <Badge variant={isPublished ? "default" : "secondary"}>
-                {funnel.status}
+                {displayedStatus}
               </Badge>
             </div>
           </div>

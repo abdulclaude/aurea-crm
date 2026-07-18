@@ -1,5 +1,6 @@
 export const generateGoogleFormScript = (
-  webhookUrl: string
+  webhookUrl: string,
+  webhookSecret: string,
 ) => `function onFormSubmit(e) {
   var formResponse = e.response;
   var itemResponses = formResponse.getItemResponses();
@@ -25,10 +26,13 @@ export const generateGoogleFormScript = (
   var options = {
     'method': 'post',
     'contentType': 'application/json',
+    'headers': {
+      'X-Aurea-Webhook-Token': ${JSON.stringify(webhookSecret)}
+    },
     'payload': JSON.stringify(payload)
   };
 
-  var WEBHOOK_URL = '${webhookUrl}';
+  var WEBHOOK_URL = ${JSON.stringify(webhookUrl)};
 
   try {
     UrlFetchApp.fetch(WEBHOOK_URL, options);

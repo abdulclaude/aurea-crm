@@ -26,8 +26,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
 
 const formSchema = z.object({
+  providerAccountId: z.string().trim().min(1, "Select a Slack account."),
   variableName: z
     .string()
     .min(1, { message: "Variable name is required." })
@@ -58,6 +61,7 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues.providerAccountId || "",
       variableName: defaultValues.variableName || "slackMessage",
       channelId: defaultValues.channelId || "",
       message: defaultValues.message || "",
@@ -67,6 +71,7 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues.providerAccountId || "",
         variableName: defaultValues.variableName || "slackMessage",
         channelId: defaultValues.channelId || "",
         message: defaultValues.message || "",
@@ -81,7 +86,7 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Slack send message configuration</SheetTitle>
           <SheetDescription>
@@ -96,6 +101,21 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 px-6"
           >
+            <FormField
+              control={form.control}
+              name="providerAccountId"
+              render={({ field }) => (
+                <FormItem>
+                  <WorkflowProviderAccountSelect
+                    nodeType={NodeType.SLACK_SEND_MESSAGE}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="variableName"
@@ -132,8 +152,9 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
                     />
                   </FormControl>
                   <FormDescription className="text-xs mt-2">
-                    The Slack channel ID (e.g., C1234567890). Find it by right-clicking
-                    the channel → View channel details → Copy channel ID
+                    The Slack channel ID (e.g., C1234567890). Find it by
+                    right-clicking the channel → View channel details → Copy
+                    channel ID
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -165,13 +186,18 @@ export const SlackSendMessageDialog: React.FC<Props> = ({
 
             <div className="bg-blue-500/10 border border-blue-500/20 rounded p-4">
               <p className="text-xs text-blue-400">
-                <strong>Note:</strong> Make sure you've connected your Slack account
-                in Settings → Apps and the bot has been added to the target channel.
+                <strong>Note:</strong> Make sure you've connected your Slack
+                account in Settings → Apps and the bot has been added to the
+                target channel.
               </p>
             </div>
 
             <SheetFooter className="px-0 pb-4">
-              <Button type="submit" className="w-max ml-auto" variant="gradient">
+              <Button
+                type="submit"
+                className="w-max ml-auto"
+                variant="gradient"
+              >
                 Save changes
               </Button>
             </SheetFooter>

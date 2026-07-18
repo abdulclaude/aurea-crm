@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { NodeType } from "@/db/enums";
+import { ClientType, LifecycleStage, NodeType } from "@/db/enums";
 import {
   client,
   clientAssignee,
@@ -24,14 +24,76 @@ import {
 } from "./argument-parser";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateWorkflow, generateBundleWorkflow, type GeneratedWorkflow } from "./workflow-generator";
-import { polarClient } from "@/lib/polar";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import { GENERATED_WORKFLOW_DRAFT_STATE } from "./workflow-contract";
+import { z } from "zod";
 
 const textParam = (value: unknown): string => (typeof value === "string" ? value : "");
 
 const stringArrayParam = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const ClientExtractionSchema = z.object({
+  name: z.string().trim().min(1).max(500).optional(),
+  email: z.string().email().max(500).optional(),
+  phone: z.string().trim().min(1).max(100).optional(),
+  companyName: z.string().trim().min(1).max(500).optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  assigneeName: z.string().trim().min(1).max(500).optional(),
+});
+const DealExtractionSchema = z.object({
+  name: z.string().trim().min(1).max(500).optional(),
+  value: z.number().finite().nonnegative().optional(),
+  currency: z.string().trim().min(3).max(3).optional(),
+  deadline: IsoDateSchema.optional(),
+  clientName: z.string().trim().min(1).max(500).optional(),
+  assigneeName: z.string().trim().min(1).max(500).optional(),
+  pipelineName: z.string().trim().min(1).max(500).optional(),
+});
+const PipelineExtractionSchema = z.object({
+  name: z.string().trim().min(1).max(500).optional(),
+  description: z.string().trim().max(5_000).optional(),
+});
+const ClientFilterSchema = z.object({
+  companyName: z.string().trim().min(1).max(500).optional(),
+  name: z.string().trim().min(1).max(500).optional(),
+  email: z.string().trim().min(1).max(500).optional(),
+  createdAfter: IsoDateSchema.optional(),
+  createdBefore: IsoDateSchema.optional(),
+  createdOn: IsoDateSchema.optional(),
+  type: z.enum(ClientType).optional(),
+  lifecycleStage: z.enum(LifecycleStage).optional(),
+});
+const DealFilterSchema = z.object({
+  minValue: z.number().finite().nonnegative().optional(),
+  maxValue: z.number().finite().nonnegative().optional(),
+  currency: z.string().trim().min(3).max(3).optional(),
+  pipelineName: z.string().trim().min(1).max(500).optional(),
+  stageName: z.string().trim().min(1).max(500).optional(),
+  createdAfter: IsoDateSchema.optional(),
+  createdBefore: IsoDateSchema.optional(),
+  createdOn: IsoDateSchema.optional(),
+  name: z.string().trim().min(1).max(500).optional(),
+  deadlineBefore: IsoDateSchema.optional(),
+  deadlineAfter: IsoDateSchema.optional(),
+  deadlineOn: IsoDateSchema.optional(),
+  hasPassedDeadline: z.boolean().optional(),
+});
+const SearchTargetSchema = z.object({
+  type: z.enum(["clients", "deals", "pipelines", "workflows"]),
+});
+
+function parseModelJson<T>(text: string, schema: z.ZodType<T>): T | null {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+
+  try {
+    const parsed = schema.safeParse(JSON.parse(jsonMatch[0]) as unknown);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 const optionalLocationCondition = (
   column: typeof client.locationId | typeof deal.locationId | typeof pipeline.locationId | typeof workflows.locationId,
@@ -80,39 +142,34 @@ async function persistGeneratedWorkflow({
         name: workflow.name,
         description: workflow.description,
         isBundle,
+        ...GENERATED_WORKFLOW_DRAFT_STATE,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
       .returning();
 
-    const createdNodes =
-      workflow.nodes.length > 0
-        ? await tx
-            .insert(workflowNode)
-            .values(
-              workflow.nodes.map((node) => ({
-                id: crypto.randomUUID(),
-                workflowId: createdWorkflow.id,
-                name: node.name,
-                type: node.type as NodeType,
-                position: node.position,
-                data: node.data,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              }))
-            )
-            .returning()
-        : [];
-
     const nodeIdMap = new Map<string, string>();
-    for (const generatedNode of workflow.nodes) {
-      const createdNode = createdNodes.find(
-        (node) => node.name === generatedNode.name && node.type === generatedNode.type
-      );
-      if (createdNode) {
-        nodeIdMap.set(generatedNode.id, createdNode.id);
-      }
-    }
+    const nodesToInsert = workflow.nodes.map((node) => {
+      const id = crypto.randomUUID();
+      nodeIdMap.set(node.id, id);
+      return {
+        id,
+        workflowId: createdWorkflow.id,
+        name: node.name,
+        type: node.type as NodeType,
+        position: node.position,
+        data: node.data,
+        credentialId:
+          typeof node.data.credentialId === "string"
+            ? node.data.credentialId
+            : null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    });
+    const createdNodes = nodesToInsert.length
+      ? await tx.insert(workflowNode).values(nodesToInsert).returning()
+      : [];
 
     const connectionsToInsert = workflow.connections
       .map((workflowConnection) => {
@@ -139,24 +196,8 @@ async function persistGeneratedWorkflow({
   });
 }
 
-// Helper to check if user has active subscription
-async function hasActiveSubscription(userId: string): Promise<boolean> {
-  try {
-    const customer = await polarClient.customers.getStateExternal({
-      externalId: userId,
-    });
-    return (
-      customer.activeSubscriptions !== undefined &&
-      customer.activeSubscriptions.length > 0
-    );
-  } catch (error) {
-    console.error("Failed to check subscription:", error);
-    return false;
-  }
-}
-
 // Extract structured data from natural language using AI
-async function extractClientFromNL(message: string): Promise<{
+async function extractClientFromNL(message: string, geminiApiKey: string): Promise<{
   name?: string;
   email?: string;
   phone?: string;
@@ -164,7 +205,9 @@ async function extractClientFromNL(message: string): Promise<{
   tags?: string[];
   assigneeName?: string;
 }> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const prompt = `Extract client information from this message. Return ONLY valid JSON with these fields (omit fields if not mentioned):
 - name: string (person's full name)
@@ -181,18 +224,14 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    return parseModelJson(text, ClientExtractionSchema) ?? {};
   } catch (error) {
     console.error("Failed to extract client from NL:", error);
   }
   return {};
 }
 
-async function extractDealFromNL(message: string): Promise<{
+async function extractDealFromNL(message: string, geminiApiKey: string): Promise<{
   name?: string;
   value?: number;
   currency?: string;
@@ -201,7 +240,9 @@ async function extractDealFromNL(message: string): Promise<{
   assigneeName?: string;
   pipelineName?: string;
 }> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -223,21 +264,20 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    return parseModelJson(text, DealExtractionSchema) ?? {};
   } catch (error) {
     console.error("Failed to extract deal from NL:", error);
   }
   return {};
 }
 
-async function extractPipelineFromNL(message: string): Promise<{
+async function extractPipelineFromNL(message: string, geminiApiKey: string): Promise<{
   name?: string;
   description?: string;
 }> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const prompt = `Extract pipeline information from this message. Return ONLY valid JSON with these fields (omit fields if not mentioned):
 - name: string (pipeline name)
@@ -250,10 +290,7 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    return parseModelJson(text, PipelineExtractionSchema) ?? {};
   } catch (error) {
     console.error("Failed to extract pipeline from NL:", error);
   }
@@ -261,7 +298,7 @@ JSON:`;
 }
 
 // Extract client query filters from natural language
-async function extractClientFiltersFromNL(message: string): Promise<{
+async function extractClientFiltersFromNL(message: string, geminiApiKey: string): Promise<{
   companyName?: string;
   name?: string;
   email?: string;
@@ -271,7 +308,9 @@ async function extractClientFiltersFromNL(message: string): Promise<{
   type?: string;
   lifecycleStage?: string;
 }> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -294,10 +333,7 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    return parseModelJson(text, ClientFilterSchema) ?? {};
   } catch (error) {
     console.error("Failed to extract client filters from NL:", error);
   }
@@ -305,7 +341,7 @@ JSON:`;
 }
 
 // Extract deal query filters from natural language
-async function extractDealFiltersFromNL(message: string): Promise<{
+async function extractDealFiltersFromNL(message: string, geminiApiKey: string): Promise<{
   minValue?: number;
   maxValue?: number;
   currency?: string;
@@ -320,7 +356,9 @@ async function extractDealFiltersFromNL(message: string): Promise<{
   deadlineOn?: string;
   hasPassedDeadline?: boolean;
 }> {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const model = new GoogleGenerativeAI(geminiApiKey).getGenerativeModel({
+    model: "gemini-2.0-flash",
+  });
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -350,10 +388,7 @@ JSON:`;
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    return parseModelJson(text, DealFilterSchema) ?? {};
   } catch (error) {
     console.error("Failed to extract deal filters from NL:", error);
   }
@@ -364,6 +399,7 @@ export interface ActionContext {
   userId: string;
   organizationId: string | null;
   locationId: string | null;
+  geminiApiKey: string;
 }
 
 export interface ActionResult {
@@ -397,7 +433,7 @@ const handlers: Record<string, ActionHandler> = {
     // Use regex parser for slash commands, AI for natural language
     const parsed = isSlashCommand
       ? parseClientArgs(rawMessage)
-      : await extractClientFromNL(rawMessage);
+      : await extractClientFromNL(rawMessage, context.geminiApiKey);
 
     const missing = getMissingFields(parsed, ["name"]);
 
@@ -485,7 +521,7 @@ const handlers: Record<string, ActionHandler> = {
 
     const parsed = isSlashCommand
       ? parseDealArgs(rawMessage)
-      : await extractDealFromNL(rawMessage);
+      : await extractDealFromNL(rawMessage, context.geminiApiKey);
 
     const missing = getMissingFields(parsed, ["name"]);
 
@@ -618,7 +654,7 @@ const handlers: Record<string, ActionHandler> = {
 
     const parsed = isSlashCommand
       ? parsePipelineArgs(rawMessage)
-      : await extractPipelineFromNL(rawMessage);
+      : await extractPipelineFromNL(rawMessage, context.geminiApiKey);
 
     const missing = getMissingFields(parsed, ["name"]);
 
@@ -734,13 +770,10 @@ const handlers: Record<string, ActionHandler> = {
 
   // Workflow Actions
   runWorkflow: async (params, context) => {
-    // Check subscription
-    const hasSubscription = await hasActiveSubscription(context.userId);
-    if (!hasSubscription) {
+    if (!context.organizationId) {
       return {
         success: false,
-        message:
-          "⚠️ Workflow features require an active subscription. Please upgrade your plan to access workflow automation.",
+        message: "Please select an organization to view workflows.",
       };
     }
 
@@ -750,7 +783,11 @@ const handlers: Record<string, ActionHandler> = {
 
       // Check if workflow exists and user has access
       const workflow = await db.query.workflows.findFirst({
-        where: and(eq(workflows.id, workflowId), eq(workflows.userId, context.userId)),
+        where: and(
+          eq(workflows.id, workflowId),
+          eq(workflows.organizationId, context.organizationId),
+          strictLocationCondition(workflows.locationId, context.locationId),
+        ),
       });
 
       if (!workflow) {
@@ -777,18 +814,19 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   listWorkflows: async (params, context) => {
-    // Check subscription
-    const hasSubscription = await hasActiveSubscription(context.userId);
-    if (!hasSubscription) {
+    if (!context.organizationId) {
       return {
         success: false,
-        message:
-          "⚠️ Workflow features require an active subscription. Please upgrade your plan to access workflow automation.",
+        message: "Please select an organization to view workflows.",
       };
     }
 
     const workflowRows = await db.query.workflows.findMany({
-      where: and(eq(workflows.userId, context.userId), eq(workflows.archived, false)),
+      where: and(
+        eq(workflows.organizationId, context.organizationId),
+        strictLocationCondition(workflows.locationId, context.locationId),
+        eq(workflows.archived, false),
+      ),
       columns: {
         id: true,
         name: true,
@@ -818,16 +856,6 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   generateWorkflow: async (params, context) => {
-    // Check subscription
-    const hasSubscription = await hasActiveSubscription(context.userId);
-    if (!hasSubscription) {
-      return {
-        success: false,
-        message:
-          "⚠️ Workflow features require an active subscription. Please upgrade your plan to access workflow automation.",
-      };
-    }
-
     if (!context.organizationId) {
       return {
         success: false,
@@ -853,6 +881,7 @@ const handlers: Record<string, ActionHandler> = {
       const workflow = await generateWorkflow(rawMessage, {
         organizationId: context.organizationId,
         locationId: context.locationId,
+        geminiApiKey: context.geminiApiKey,
       });
 
       if (!workflow) {
@@ -871,7 +900,7 @@ const handlers: Record<string, ActionHandler> = {
 
       return {
         success: true,
-        message: `Created workflow **${workflow.name}**\n\n${workflow.description}\n\n**Nodes:**\n${nodeList}\n\n[Open workflow editor](/workflows/${createdWorkflow.id})`,
+        message: `Created draft workflow **${workflow.name}**\n\n${workflow.description}\n\n**Nodes:**\n${nodeList}\n\nReview and enable it in the [workflow editor](/workflows/${createdWorkflow.id}).`,
         data: { workflow: createdWorkflow },
       };
     } catch (error) {
@@ -884,16 +913,6 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   generateBundle: async (params, context) => {
-    // Check subscription
-    const hasSubscription = await hasActiveSubscription(context.userId);
-    if (!hasSubscription) {
-      return {
-        success: false,
-        message:
-          "⚠️ Workflow features require an active subscription. Please upgrade your plan to access workflow automation.",
-      };
-    }
-
     if (!context.organizationId) {
       return {
         success: false,
@@ -919,6 +938,7 @@ const handlers: Record<string, ActionHandler> = {
       const workflow = await generateBundleWorkflow(rawMessage, {
         organizationId: context.organizationId,
         locationId: context.locationId,
+        geminiApiKey: context.geminiApiKey,
       });
 
       if (!workflow) {
@@ -938,7 +958,7 @@ const handlers: Record<string, ActionHandler> = {
 
       return {
         success: true,
-        message: `Created bundle **${workflow.name}**\n\n${workflow.description}\n\n**Nodes:**\n${nodeList}\n\n[Open bundle editor](/bundles/${createdWorkflow.id})`,
+        message: `Created draft bundle **${workflow.name}**\n\n${workflow.description}\n\n**Nodes:**\n${nodeList}\n\nReview and enable it in the [bundle editor](/bundles/${createdWorkflow.id}).`,
         data: { workflow: createdWorkflow },
       };
     } catch (error) {
@@ -1156,8 +1176,19 @@ const handlers: Record<string, ActionHandler> = {
   },
 
   showWorkflows: async (params, context) => {
+    if (!context.organizationId) {
+      return {
+        success: false,
+        message: "Please select an organization to view workflows.",
+      };
+    }
+
     const workflowRows = await db.query.workflows.findMany({
-      where: and(eq(workflows.userId, context.userId), eq(workflows.archived, false)),
+      where: and(
+        eq(workflows.organizationId, context.organizationId),
+        strictLocationCondition(workflows.locationId, context.locationId),
+        eq(workflows.archived, false),
+      ),
       columns: {
         id: true,
         name: true,
@@ -1199,7 +1230,9 @@ const handlers: Record<string, ActionHandler> = {
     }
 
     // Use AI to determine what type of search this is
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = new GoogleGenerativeAI(context.geminiApiKey).getGenerativeModel({
+      model: "gemini-2.0-flash",
+    });
 
     const prompt = `Analyze this search query and determine what the user is looking for. Return ONLY valid JSON with these fields:
 - type: string ("clients", "deals", "pipelines", or "workflows")
@@ -1211,11 +1244,9 @@ JSON:`;
     try {
       const result = await model.generateContent(prompt);
       const text = result.response.text().trim();
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsed = parseModelJson(text, SearchTargetSchema);
 
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-
+      if (parsed) {
         // Route to the appropriate handler
         if (parsed.type === "clients") {
           return handlers.queryClients(params, context);
@@ -1259,7 +1290,10 @@ JSON:`;
     }
 
     const rawMessage = textParam(params.rawMessage);
-    const filters = await extractClientFiltersFromNL(rawMessage);
+    const filters = await extractClientFiltersFromNL(
+      rawMessage,
+      context.geminiApiKey,
+    );
 
     const conditions: SQL[] = [eq(client.organizationId, context.organizationId)];
     const locationFilter = optionalLocationCondition(client.locationId, context.locationId);
@@ -1380,7 +1414,10 @@ JSON:`;
     }
 
     const rawMessage = textParam(params.rawMessage);
-    const filters = await extractDealFiltersFromNL(rawMessage);
+    const filters = await extractDealFiltersFromNL(
+      rawMessage,
+      context.geminiApiKey,
+    );
 
     const conditions: SQL[] = [eq(deal.organizationId, context.organizationId)];
     const locationFilter = optionalLocationCondition(deal.locationId, context.locationId);

@@ -50,7 +50,7 @@ export const OutlookMoveEmailNode: React.FC<NodeProps<OutlookMoveEmailNodeType>>
       nodeId: props.id,
       channel: OUTLOOK_MOVE_EMAIL_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOutlookMoveEmailRealtimeToken as any,
+      refreshToken: fetchOutlookMoveEmailRealtimeToken,
     });
 
     const handleOpenSettings = () => {

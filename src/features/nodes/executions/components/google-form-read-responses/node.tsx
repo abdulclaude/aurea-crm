@@ -45,7 +45,7 @@ export const GoogleFormReadResponsesNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_FORM_READ_RESPONSES_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleFormReadResponsesRealtimeToken as any,
+    refreshToken: fetchGoogleFormReadResponsesRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleFormReadResponsesFormValues) => {

@@ -4,12 +4,12 @@ import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResizableSheetContent,
+  Sheet,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Form,
   FormControl,
@@ -148,16 +148,16 @@ export function BundleWorkflowDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto p-0">
-        <DialogHeader className="p-6 pb-0">
-          <DialogTitle>Configure Bundle Workflow</DialogTitle>
-          <DialogDescription>
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <ResizableSheetContent className="overflow-y-auto border-border bg-background">
+        <SheetHeader className="gap-1 px-6 pb-5 pt-8">
+          <SheetTitle>Run reusable workflow</SheetTitle>
+          <SheetDescription>
             Execute a reusable bundle workflow with input parameters.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
-        <Separator className="bg-black/5 dark:bg-white/5" />
+        <Separator className="bg-border" />
 
         <Form {...form}>
           <form
@@ -324,7 +324,7 @@ export function BundleWorkflowDialog({
             </div>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResizableSheetContent>
+    </Sheet>
   );
 }

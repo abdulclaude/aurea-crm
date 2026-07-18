@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 import {
   AreaChart,
   Area,
@@ -33,6 +34,7 @@ export function ChartVisits({
   isEditing?: boolean;
   isLoading?: boolean;
 }) {
+  const isMobile = useIsMobile();
   const merged = useMemo(() => {
     if (!comparisonData?.length) return data;
     const len = Math.max(data.length, comparisonData.length);
@@ -54,7 +56,10 @@ export function ChartVisits({
     merged.length,
     !!comparisonData?.length,
   );
-  const xTicks = useMemo(() => getVisibleXAxisTicks(merged), [merged]);
+  const xTicks = useMemo(
+    () => getVisibleXAxisTicks(merged, isMobile ? 5 : undefined),
+    [isMobile, merged],
+  );
 
   return (
     <ChartShell

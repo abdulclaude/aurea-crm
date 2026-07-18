@@ -31,6 +31,8 @@ import { useTRPC } from "@/trpc/client";
 import { InvoiceStatus } from "@/db/enums";
 import { RecordPaymentDialog } from "./record-payment-dialog";
 import { SendReminderDialog } from "./send-reminder-dialog";
+import { InvoicePublicLinkControls } from "./invoice-public-link-controls";
+import { InvoiceStatusBadge } from "./invoice-status-badge";
 
 interface InvoiceDetailDialogProps {
   open: boolean;
@@ -38,48 +40,6 @@ interface InvoiceDetailDialogProps {
   invoiceId: string;
   onEdit?: (invoiceId: string) => void;
 }
-
-const getStatusBadge = (status: InvoiceStatus) => {
-  const variants: Record<InvoiceStatus, { label: string; className: string }> =
-    {
-      DRAFT: {
-        label: "Draft",
-        className: "bg-gray-500/10 text-gray-500 ring-gray-500/20",
-      },
-      SENT: {
-        label: "Sent",
-        className: "bg-blue-500/10 text-blue-500 ring-blue-500/20",
-      },
-      VIEWED: {
-        label: "Viewed",
-        className: "bg-purple-500/10 text-purple-500 ring-purple-500/20",
-      },
-      PAID: {
-        label: "Paid",
-        className: "bg-green-500/10 text-green-500 ring-green-500/20",
-      },
-      PARTIALLY_PAID: {
-        label: "Partial",
-        className: "bg-yellow-500/10 text-yellow-500 ring-yellow-500/20",
-      },
-      OVERDUE: {
-        label: "Overdue",
-        className: "bg-red-500/10 text-red-500 ring-red-500/20",
-      },
-      CANCELLED: {
-        label: "Cancelled",
-        className: "bg-gray-500/10 text-gray-500 ring-gray-500/20",
-      },
-    };
-
-  const variant = variants[status];
-
-  return (
-    <Badge variant="outline" className={cn("text-xs", variant.className)}>
-      {variant.label}
-    </Badge>
-  );
-};
 
 const formatCurrency = (amount: string, currency: string = "USD") => {
   const numAmount = parseFloat(amount);
@@ -135,7 +95,7 @@ export function InvoiceDetailDialog({
                 </DialogDescription>
               </div>
               <div className="flex items-center gap-2">
-                {getStatusBadge(invoice.status)}
+                <InvoiceStatusBadge status={invoice.status} />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -189,6 +149,10 @@ export function InvoiceDetailDialog({
           <Separator />
 
           <div className="space-y-6">
+            <InvoicePublicLinkControls invoiceId={invoice.id} />
+
+            <Separator />
+
             {/* Client & Dates Section */}
             <div className="grid grid-cols-2 gap-6 px-6">
               {/* Client Info */}
@@ -392,11 +356,11 @@ export function InvoiceDetailDialog({
                         <Send className="size-3 text-blue-500" />
                         <div className="flex-1">
                           <p className="text-xs text-muted-foreground">
-                            Sent to {reminder.sentTo} on{" "}
-                            {format(
-                              new Date(reminder.sentAt),
-                              "MMM dd, yyyy 'at' h:mm a"
-                            )}
+                            {reminder.sentAt ? "Sent" : "Queued"} to{" "}
+                            {reminder.sentTo}
+                            {reminder.sentAt
+                              ? ` on ${format(new Date(reminder.sentAt), "MMM dd, yyyy 'at' h:mm a")}`
+                              : ""}
                           </p>
                         </div>
                         {reminder.opened && (

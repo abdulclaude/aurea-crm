@@ -33,6 +33,7 @@ interface DayViewProps {
   onEventSelect: (event: CalendarEvent) => void;
   onEventCreate?: (startTime: Date, endTime?: Date) => void;
   timeBounds?: { startHour: number; endHour: number };
+  slotMinutes?: number;
 }
 
 interface PositionedEvent {
@@ -50,6 +51,7 @@ export function DayView({
   onEventSelect,
   onEventCreate,
   timeBounds = { startHour: StartHour, endHour: EndHour },
+  slotMinutes = 15,
 }: DayViewProps) {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState<Date | null>(null);
@@ -209,7 +211,7 @@ export function DayView({
     });
 
     return result;
-  }, [currentDate, timeEvents]);
+  }, [currentDate, timeBounds, timeEvents]);
 
   const handleEventClick = (event: CalendarEvent, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -220,6 +222,7 @@ export function DayView({
   const { currentTimePosition, currentTimeVisible } = useCurrentTimeIndicator(
     currentDate,
     "day",
+    { timeBounds },
   );
 
   useEffect(() => {
@@ -238,7 +241,7 @@ export function DayView({
           ? [selectionStart, selectionEnd]
           : [selectionEnd, selectionStart];
       const isSingleSlot = selectionStart.getTime() === selectionEnd.getTime();
-      const endWithBuffer = addMinutes(end, isSingleSlot ? 60 : 15);
+      const endWithBuffer = addMinutes(end, isSingleSlot ? 60 : slotMinutes);
 
       onEventCreate?.(start, endWithBuffer);
       setIsSelecting(false);
@@ -248,7 +251,7 @@ export function DayView({
 
     window.addEventListener("mouseup", handleMouseUp);
     return () => window.removeEventListener("mouseup", handleMouseUp);
-  }, [isSelecting, selectionStart, selectionEnd, onEventCreate]);
+  }, [isSelecting, selectionStart, selectionEnd, onEventCreate, slotMinutes]);
 
   const columnRef = useRef<HTMLDivElement>(null);
   const { activeEvent } = useCalendarDnd();
@@ -262,10 +265,11 @@ export function DayView({
       const totalHeight = rect.height;
       const totalHours = timeBounds.endHour - timeBounds.startHour;
       const hourFraction = (y / totalHeight) * totalHours;
-      const quarter = Math.floor(hourFraction * 4) / 4;
-      return Math.max(0, Math.min(totalHours - 0.25, quarter)) + timeBounds.startHour;
+      const slotFraction = slotMinutes / 60;
+      const snapped = Math.floor(hourFraction / slotFraction) * slotFraction;
+      return Math.max(0, Math.min(totalHours - slotFraction, snapped)) + timeBounds.startHour;
     },
-    [timeBounds],
+    [slotMinutes, timeBounds],
   );
 
   const getCellDate = useCallback(
@@ -284,6 +288,9 @@ export function DayView({
     (e: React.MouseEvent) => {
       if (!onEventCreate) return;
       if (e.button !== 0) return;
+      if (e.target instanceof Element && e.target.closest("[data-calendar-event]")) {
+        return;
+      }
       const time = getTimeFromMouseY(e.clientY);
       if (time === null) return;
       const cellStart = getCellDate(time);
@@ -313,14 +320,14 @@ export function DayView({
         : [selectionEnd, selectionStart];
 
     const startHour = getHours(start) + getMinutes(start) / 60;
-    const endHour = getHours(end) + getMinutes(end) / 60 + 0.25;
+    const endHour = getHours(end) + getMinutes(end) / 60 + slotMinutes / 60;
     const totalHours = timeBounds.endHour - timeBounds.startHour;
 
     const top = ((startHour - timeBounds.startHour) / totalHours) * 100;
     const height = ((endHour - startHour) / totalHours) * 100;
 
     return { top: `${top}%`, height: `${height}%` };
-  }, [isSelecting, selectionStart, selectionEnd, timeBounds]);
+  }, [isSelecting, selectionStart, selectionEnd, slotMinutes, timeBounds]);
 
   return (
     <div data-slot="day-view" className="contents">
@@ -439,17 +446,19 @@ export function DayView({
           {isDragging &&
             hours.map((hour) => {
               const hourValue = getHours(hour);
-              return [0, 1, 2, 3].map((quarter) => {
-                const quarterHourTime = hourValue + quarter * 0.25;
+              const slotsPerHour = 60 / slotMinutes;
+              return Array.from({ length: slotsPerHour }, (_, slot) => slot).map((slot) => {
+                const slotTime = hourValue + slot * (slotMinutes / 60);
                 return (
                   <DroppableCell
-                    key={`${hour.toString()}-${quarter}`}
-                    id={`day-cell-${currentDate.toISOString()}-${quarterHourTime}`}
+                    key={`${hour.toString()}-${slot}`}
+                    id={`day-cell-${currentDate.toISOString()}-${slotTime}`}
                     date={currentDate}
-                    time={quarterHourTime}
-                    className="absolute w-full h-[calc(var(--week-cells-height)/4)] pointer-events-auto"
+                    time={slotTime}
+                    className="absolute w-full pointer-events-auto"
                     style={{
-                      top: `${((hourValue - timeBounds.startHour) * 4 + quarter) * (100 / ((timeBounds.endHour - timeBounds.startHour) * 4))}%`,
+                      height: `${100 / ((timeBounds.endHour - timeBounds.startHour) * slotsPerHour)}%`,
+                      top: `${((hourValue - timeBounds.startHour) * slotsPerHour + slot) * (100 / ((timeBounds.endHour - timeBounds.startHour) * slotsPerHour))}%`,
                     }}
                   />
                 );

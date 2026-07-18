@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
 	anonymousUserProfiles,
@@ -9,41 +9,32 @@ import {
 	funnelSession,
 	funnelWebVital,
 } from "@/db/schema";
+import { buildAnonymousProfileId } from "@/features/external-funnels/lib/anonymous-profile-identity";
+import {
+	externalTelemetryTimesAreCurrent,
+	externalWebVitalSchema,
+	MAX_EXTERNAL_TELEMETRY_BODY_BYTES,
+} from "@/features/external-funnels/lib/external-telemetry-contract";
+import {
+	enforceFunnelTelemetryQuota,
+	FunnelTelemetryQuotaExceededError,
+	FunnelTelemetryQuotaUnavailableError,
+} from "@/features/external-funnels/server/telemetry-quota";
+import {
+	readBoundedRawBody,
+	WebhookPayloadTooLargeError,
+} from "@/features/webhooks/server/bounded-raw-body";
+import { parseIPAddress } from "@/lib/device-parser";
 import { getPrivacyCompliantIp } from "@/lib/gdpr-utils";
 
-type GeoData = {
-	status?: string;
-	country?: string;
-	countryCode?: string;
-	regionName?: string;
-	city?: string;
-};
-
-// Web Vital validation schema
-const WebVitalSchema = z.object({
-	funnelId: z.string(),
-	sessionId: z.string(),
-	anonymousId: z.string().optional(),
-	pageUrl: z.string(),
-	pagePath: z.string(),
-	pageTitle: z.string().optional(),
-	metric: z.enum(["LCP", "INP", "CLS", "FCP", "TTFB", "FID"]),
-	value: z.number(),
-	rating: z.enum(["GOOD", "NEEDS_IMPROVEMENT", "POOR"]),
-	delta: z.number().optional(),
-	id_metric: z.string().optional(),
-	deviceType: z.string().optional(),
-	browserName: z.string().optional(),
-	browserVersion: z.string().optional(),
-	osName: z.string().optional(),
-	osVersion: z.string().optional(),
-	screenWidth: z.number().optional(),
-	screenHeight: z.number().optional(),
-	timestamp: z.string(),
-});
-
 export async function POST(req: NextRequest) {
-	try {
+		try {
+			if (
+				req.headers.get("sec-gpc") === "1" ||
+				req.headers.get("dnt") === "1"
+			) {
+				return response("Performance tracking is not permitted.", 403);
+			}
 		// Get headers from request
 		const apiKey = req.headers.get("X-Aurea-API-Key");
 		const funnelId = req.headers.get("X-Aurea-Funnel-ID");
@@ -87,9 +78,40 @@ export async function POST(req: NextRequest) {
 			);
 		}
 
-		// Parse request body
-		const body = await req.json();
-		const data = WebVitalSchema.parse(body);
+			const data = externalWebVitalSchema.parse(
+				JSON.parse(
+					await readBoundedRawBody(req, MAX_EXTERNAL_TELEMETRY_BODY_BYTES),
+				),
+			);
+			if (data.funnelId !== funnel.id) {
+			return NextResponse.json(
+				{ error: "Funnel ID does not match the authenticated funnel" },
+				{ status: 400 },
+				);
+			}
+			if (!externalTelemetryTimesAreCurrent([Date.parse(data.timestamp)])) {
+				return response("Performance event time is outside the accepted window.", 400);
+			}
+			await enforceFunnelTelemetryQuota({
+				request: req,
+				organizationId: funnel.organizationId,
+				funnelId: funnel.id,
+			});
+			if (data.anonymousId) {
+				const erasedProfile = await db.query.anonymousUserProfiles.findFirst({
+					where: and(
+						eq(anonymousUserProfiles.organizationId, funnel.organizationId),
+						funnel.locationId
+							? eq(anonymousUserProfiles.locationId, funnel.locationId)
+							: isNull(anonymousUserProfiles.locationId),
+						eq(anonymousUserProfiles.anonymousId, data.anonymousId),
+					),
+					columns: { deletionRequestedAt: true },
+				});
+				if (erasedProfile?.deletionRequestedAt) {
+					return response("Performance event accepted without retention.", 202);
+				}
+			}
 
 		// Get client IP for geo lookup
 		let ip =
@@ -119,39 +141,58 @@ export async function POST(req: NextRequest) {
 			hashIp,
 		});
 
-		// Fetch geo data for this IP (if enabled and not already cached)
-		let geoData: GeoData | null = null;
-		if (!anonymizeIp && !hashIp) {
-			try {
-				const geoResponse = await fetch(
-					`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,timezone`,
-				);
-				if (geoResponse.ok) {
-					geoData = (await geoResponse.json()) as GeoData;
-					if (geoData.status === "fail") {
-						geoData = null;
-					}
-				}
-			} catch (error) {
-				console.error("[Web Vitals API] Geo lookup failed:", error);
-			}
-		}
+		const geoData = await parseIPAddress(ip);
 
 		// Check if session exists, create if not
 		let session = await db.query.funnelSession.findFirst({
-			where: eq(funnelSession.sessionId, data.sessionId),
+			where: and(
+				eq(funnelSession.sessionId, data.sessionId),
+				eq(funnelSession.funnelId, funnel.id),
+			),
 			columns: { id: true, sessionId: true },
 		});
 
 		if (!session) {
-			console.log(`[Web Vitals API] Creating session ${data.sessionId} for web vital tracking`);
-			
 			session = await db.transaction(async (tx) => {
-				if (data.anonymousId) {
+				const [existingProfile] = data.anonymousId
+					? await tx
+							.select({ id: anonymousUserProfiles.id })
+							.from(anonymousUserProfiles)
+							.where(
+								and(
+									eq(
+										anonymousUserProfiles.organizationId,
+										funnel.organizationId,
+									),
+									funnel.locationId
+										? eq(
+												anonymousUserProfiles.locationId,
+												funnel.locationId,
+											)
+										: isNull(anonymousUserProfiles.locationId),
+									eq(anonymousUserProfiles.anonymousId, data.anonymousId),
+								),
+							)
+							.limit(1)
+					: [];
+				const profileId = data.anonymousId
+					? (existingProfile?.id ??
+						buildAnonymousProfileId(
+							{
+								organizationId: funnel.organizationId,
+								locationId: funnel.locationId,
+							},
+							data.anonymousId,
+						))
+					: null;
+				if (data.anonymousId && profileId) {
 					await tx
 						.insert(anonymousUserProfiles)
 						.values({
-							id: data.anonymousId,
+							id: profileId,
+							organizationId: funnel.organizationId,
+							locationId: funnel.locationId,
+							anonymousId: data.anonymousId,
 							displayName: `Visitor #${data.anonymousId.slice(-6)}`,
 							firstSeen: new Date(data.timestamp),
 							lastSeen: new Date(data.timestamp),
@@ -174,7 +215,7 @@ export async function POST(req: NextRequest) {
 					funnelId: funnel.id,
 					locationId: funnel.locationId,
 					anonymousId: data.anonymousId,
-					profileId: data.anonymousId,
+					profileId,
 					startedAt: new Date(data.timestamp),
 					endedAt: new Date(data.timestamp),
 					durationSeconds: 0,
@@ -188,16 +229,30 @@ export async function POST(req: NextRequest) {
 					browserVersion: data.browserVersion,
 					osName: data.osName,
 					osVersion: data.osVersion,
-					countryCode: geoData?.countryCode,
-					countryName: geoData?.country,
-					region: geoData?.regionName,
-					city: geoData?.city,
+					countryCode: geoData.countryCode,
+					countryName: geoData.countryName,
+					region: geoData.region,
+					city: geoData.city,
 					ipAddress: ip,
 					updatedAt: new Date(),
-				})
+					})
+					.onConflictDoNothing({
+						target: [funnelSession.funnelId, funnelSession.sessionId],
+					})
 					.returning({ id: funnelSession.id, sessionId: funnelSession.sessionId });
 
-				return createdSession ?? null;
+				if (createdSession) return createdSession;
+				const [concurrentSession] = await tx
+					.select({ id: funnelSession.id, sessionId: funnelSession.sessionId })
+					.from(funnelSession)
+					.where(
+						and(
+							eq(funnelSession.funnelId, funnel.id),
+							eq(funnelSession.sessionId, data.sessionId),
+						),
+					)
+					.limit(1);
+				return concurrentSession ?? null;
 			});
 		}
 
@@ -223,10 +278,10 @@ export async function POST(req: NextRequest) {
 				osVersion: data.osVersion,
 				screenWidth: data.screenWidth,
 				screenHeight: data.screenHeight,
-				countryCode: geoData?.countryCode,
-				countryName: geoData?.country,
-				region: geoData?.regionName,
-				city: geoData?.city,
+					countryCode: geoData.countryCode,
+					countryName: geoData.countryName,
+					region: geoData.region,
+					city: geoData.city,
 				timestamp: new Date(data.timestamp),
 		});
 
@@ -234,7 +289,10 @@ export async function POST(req: NextRequest) {
 		if (session) {
 			// Calculate new averages
 			const webVitals = await db.query.funnelWebVital.findMany({
-				where: eq(funnelWebVital.sessionId, data.sessionId),
+				where: and(
+					eq(funnelWebVital.sessionId, data.sessionId),
+					eq(funnelWebVital.funnelId, funnel.id),
+				),
 				columns: {
 					metric: true,
 					value: true,
@@ -313,7 +371,12 @@ export async function POST(req: NextRequest) {
 					experienceScore: calculateExperienceScore(),
 					updatedAt: new Date(),
 				})
-				.where(eq(funnelSession.sessionId, data.sessionId));
+				.where(
+					and(
+						eq(funnelSession.sessionId, data.sessionId),
+						eq(funnelSession.funnelId, funnel.id),
+					),
+				);
 		}
 
 		return NextResponse.json(
@@ -329,31 +392,37 @@ export async function POST(req: NextRequest) {
 				},
 			},
 		);
-	} catch (error) {
-		console.error("[Web Vitals API] Error processing web vital:", error);
-
-		if (error instanceof z.ZodError) {
-			return NextResponse.json(
-				{ error: "Invalid request format", details: error.issues },
-				{
-					status: 400,
-					headers: {
-						"Access-Control-Allow-Origin": "*",
+		} catch (error) {
+			if (error instanceof FunnelTelemetryQuotaExceededError) {
+				return NextResponse.json(
+					{ error: "Performance tracking request limit reached." },
+					{
+						status: 429,
+						headers: {
+							"Access-Control-Allow-Origin": "*",
+							"Retry-After": String(error.retryAfterSeconds),
+						},
 					},
-				},
-			);
+				);
+			}
+			if (error instanceof FunnelTelemetryQuotaUnavailableError) {
+				return response("Performance tracking is temporarily unavailable.", 503);
+			}
+			if (error instanceof WebhookPayloadTooLargeError) {
+				return response("Performance tracking payload is too large.", 413);
+			}
+			if (error instanceof z.ZodError || error instanceof SyntaxError) {
+				return response("Performance tracking payload is invalid.", 400);
+			}
+			return response("Performance tracking is temporarily unavailable.", 503);
 		}
+}
 
-		return NextResponse.json(
-			{ error: "Internal server error" },
-			{
-				status: 500,
-				headers: {
-					"Access-Control-Allow-Origin": "*",
-				},
-			},
-		);
-	}
+function response(message: string, status: number) {
+	return NextResponse.json(
+		{ error: message },
+		{ status, headers: { "Access-Control-Allow-Origin": "*" } },
+	);
 }
 
 // Handle OPTIONS for CORS

@@ -1,8 +1,13 @@
 import Handlebars from "handlebars";
 import { NonRetriableError } from "inngest";
+import { z } from "zod";
+
+import { NodeType } from "@/db/enums";
 import type { NodeExecutor } from "@/features/executions/types";
+import { resolveOAuthProviderGrant } from "@/features/provider-accounts/server/oauth-resolver";
+import { oauthAuthenticatedFetch } from "@/features/provider-accounts/server/oauth-authenticated-fetch";
+import { getWorkflowProviderBindingSpec } from "@/features/workflows/lib/workflow-provider-binding";
 import { googleFormReadResponsesChannel } from "@/inngest/channels/google-form-read-responses";
-import { auth } from "@/lib/auth";
 import { decode } from "html-entities";
 
 Handlebars.registerHelper("json", (context) => {
@@ -11,47 +16,77 @@ Handlebars.registerHelper("json", (context) => {
 });
 
 type GoogleFormReadResponsesData = {
+  providerAccountId: string;
   variableName?: string;
   formId: string;
   limit?: string;
 };
 
+const googleFormResponseSchema = z.object({
+  responseId: z.string().optional(),
+  createTime: z.string().optional(),
+  lastSubmittedTime: z.string().optional(),
+  respondentEmail: z.string().optional(),
+  answers: z.record(z.string(), z.unknown()).optional(),
+});
+
+const googleFormResponsesSchema = z.object({
+  responses: z.array(googleFormResponseSchema).optional(),
+});
+
+const googleFormMetadataSchema = z.object({
+  info: z
+    .object({
+      title: z.string().optional(),
+    })
+    .optional(),
+  items: z
+    .array(
+      z.object({
+        title: z.string().optional(),
+        questionItem: z
+          .object({
+            question: z
+              .object({
+                questionId: z.string().optional(),
+              })
+              .optional(),
+          })
+          .optional(),
+      })
+    )
+    .optional(),
+});
+
+const providerBinding = getWorkflowProviderBindingSpec(
+  NodeType.GOOGLE_FORM_READ_RESPONSES,
+);
+
 export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadResponsesData> =
-  async ({ data, nodeId, userId, context, step, publish }) => {
+  async ({ data, nodeId, scope, context, step, publish }) => {
     await publish(
-      (googleFormReadResponsesChannel as any).status({ nodeId, status: "loading" })
+      googleFormReadResponsesChannel().status({ nodeId, status: "loading" })
     );
 
     try {
-      if (!data.formId) {
+      if (!data.providerAccountId || !data.formId) {
         await publish(
-          (googleFormReadResponsesChannel as any).status({ nodeId, status: "error" })
+          googleFormReadResponsesChannel().status({ nodeId, status: "error" })
         );
         throw new NonRetriableError(
-          "Google Forms: Form ID is required"
+          "Google Forms: Account and form ID are required"
         );
       }
 
-      // Get Google OAuth token
-      const tokenResponse = await step.run("get-google-token", async () => {
-        return await auth.api.getAccessToken({
-          body: {
-            providerId: "google",
-            userId,
-          },
-        });
-      });
-
-      const accessToken = tokenResponse?.accessToken;
-
-      if (!accessToken) {
-        await publish(
-          (googleFormReadResponsesChannel as any).status({ nodeId, status: "error" })
-        );
-        throw new NonRetriableError(
-          "Google Forms is not connected. Please connect Google in Settings → Apps."
-        );
-      }
+      const grant = await step.run("get-google-token", async () =>
+        resolveOAuthProviderGrant({
+          providerAccountId: data.providerAccountId,
+          provider: providerBinding.provider,
+          scope,
+          requiredScopes: providerBinding.requiredScopes,
+        })
+      );
+      const { accessToken } = grant;
 
       // Compile templates
       const formId = decode(Handlebars.compile(data.formId)(context));
@@ -61,7 +96,8 @@ export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadRespons
 
       // Get form responses
       const response = await step.run("get-form-responses", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://forms.googleapis.com/v1/forms/${formId}/responses`,
           {
             headers: {
@@ -71,16 +107,17 @@ export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadRespons
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Forms API error: ${error}`);
+          throw new Error(`Google Forms API rejected the form request with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return googleFormResponsesSchema.parse(payload);
       });
 
       // Get form metadata to include question info
       const formMetadata = await step.run("get-form-metadata", async () => {
-        const res = await fetch(
+        const res = await oauthAuthenticatedFetch(
+          grant,
           `https://forms.googleapis.com/v1/forms/${formId}`,
           {
             headers: {
@@ -90,22 +127,23 @@ export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadRespons
         );
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Google Forms API error: ${error}`);
+          throw new Error(`Google Forms API rejected the response request with status ${res.status}.`);
         }
 
-        return await res.json();
+        const payload: unknown = await res.json();
+        return googleFormMetadataSchema.parse(payload);
       });
 
       // Process and limit responses
-      const responses = (response.responses || []).slice(0, limit).map((resp: any) => {
-        const answers: Record<string, any> = {};
+      const responses = (response.responses || []).slice(0, limit).map((resp) => {
+        const answers: Record<string, unknown> = {};
 
         // Map question IDs to their answers
         if (resp.answers) {
           for (const [questionId, answer] of Object.entries(resp.answers)) {
             const question = formMetadata.items?.find(
-              (item: any) => item.questionItem?.question?.questionId === questionId
+              (item) =>
+                item.questionItem?.question?.questionId === questionId
             );
 
             const questionTitle = question?.title || questionId;
@@ -123,7 +161,7 @@ export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadRespons
       });
 
       await publish(
-        (googleFormReadResponsesChannel as any).status({ nodeId, status: "success" })
+        googleFormReadResponsesChannel().status({ nodeId, status: "success" })
       );
 
       return {
@@ -141,7 +179,7 @@ export const googleFormReadResponsesExecutor: NodeExecutor<GoogleFormReadRespons
       };
     } catch (error) {
       await publish(
-        (googleFormReadResponsesChannel as any).status({ nodeId, status: "error" })
+        googleFormReadResponsesChannel().status({ nodeId, status: "error" })
       );
       throw error;
     }

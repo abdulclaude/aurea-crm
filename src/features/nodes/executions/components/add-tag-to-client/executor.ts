@@ -5,18 +5,19 @@ import { addTagToClientChannel } from "@/inngest/channels/add-tag-to-client";
 import { decode } from "html-entities";
 import { db } from "@/db";
 import { client as clientTable } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 type AddTagToClientData = {
   clientId: string;
-  tag: string;
+  tag?: string;
+  tags?: string[];
   variableName?: string;
 };
 
 export const addTagToClientExecutor: NodeExecutor<AddTagToClientData> = async ({
   data,
   nodeId,
-  userId,
+  scope,
   context,
   step,
   publish,
@@ -31,7 +32,7 @@ export const addTagToClientExecutor: NodeExecutor<AddTagToClientData> = async ({
       );
     }
 
-    if (!data.tag) {
+    if (!data.tag && !data.tags?.length) {
       await publish(addTagToClientChannel().status({ nodeId, status: "error" }));
       throw new NonRetriableError(
         "Add Tag to Client Node error: Tag is required."
@@ -40,12 +41,24 @@ export const addTagToClientExecutor: NodeExecutor<AddTagToClientData> = async ({
 
     // Compile fields with Handlebars
     const clientId = decode(Handlebars.compile(data.clientId)(context));
-    const tag = decode(Handlebars.compile(data.tag)(context)).trim();
+    const tags = Array.from(
+      new Set(
+        (data.tags?.length ? data.tags : [data.tag || ""])
+          .map((tag) => decode(Handlebars.compile(tag)(context)).trim())
+          .filter(Boolean),
+      ),
+    );
 
     const client = await step.run("add-tag-to-client", async () => {
       // Fetch the current client
       const existingClient = await db.query.client.findFirst({
-        where: eq(clientTable.id, clientId),
+        where: and(
+          eq(clientTable.id, clientId),
+          eq(clientTable.organizationId, scope.organizationId),
+          scope.locationId
+            ? eq(clientTable.locationId, scope.locationId)
+            : isNull(clientTable.locationId),
+        ),
       });
 
       if (!existingClient) {
@@ -56,9 +69,7 @@ export const addTagToClientExecutor: NodeExecutor<AddTagToClientData> = async ({
 
       // Add tag if it doesn't already exist
       const currentTags = existingClient.tags || [];
-      const updatedTags = currentTags.includes(tag)
-        ? currentTags
-        : [...currentTags, tag];
+      const updatedTags = Array.from(new Set([...currentTags, ...tags]));
 
       const [updatedClient] = await db
         .update(clientTable)
@@ -66,7 +77,15 @@ export const addTagToClientExecutor: NodeExecutor<AddTagToClientData> = async ({
           tags: updatedTags,
           updatedAt: new Date(),
         })
-        .where(eq(clientTable.id, clientId))
+        .where(
+          and(
+            eq(clientTable.id, clientId),
+            eq(clientTable.organizationId, scope.organizationId),
+            scope.locationId
+              ? eq(clientTable.locationId, scope.locationId)
+              : isNull(clientTable.locationId),
+          ),
+        )
         .returning();
 
       return updatedClient;

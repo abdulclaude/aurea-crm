@@ -50,7 +50,7 @@ export const OnedriveDeleteFileNode: React.FC<NodeProps<OnedriveDeleteFileNodeTy
       nodeId: props.id,
       channel: ONEDRIVE_DELETE_FILE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOnedriveDeleteFileRealtimeToken as any,
+      refreshToken: fetchOnedriveDeleteFileRealtimeToken,
     });
 
     const handleOpenSettings = () => {

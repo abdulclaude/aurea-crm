@@ -80,7 +80,7 @@ export const SetVariableDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Set Variable Configuration</SheetTitle>
           <SheetDescription>
@@ -88,7 +88,7 @@ export const SetVariableDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
@@ -107,7 +107,7 @@ export const SetVariableDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     Use this name to reference the variable in other nodes:{" "}
                     <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "fullName"}}}`}
                     </span>
                   </FormDescription>
@@ -133,17 +133,17 @@ export const SetVariableDialog: React.FC<Props> = ({
                   <FormDescription className="text-xs mt-2 leading-5">
                     Set a static value or combine variables. Examples:
                     <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{firstName}} {{lastName}}"}
                     </span>
                     {" - Combine text"}
                     <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"{{deal.value}}"}
                     </span>
                     {" - Copy a value"}
                     <br />
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {"500"}
                     </span>
                     {" - Set a static value"}

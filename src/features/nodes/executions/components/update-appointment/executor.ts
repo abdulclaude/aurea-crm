@@ -29,7 +29,6 @@ export const updateAppointmentExecutor: NodeExecutor<UpdateAppointmentData> = as
     // Compile fields with Handlebars
     const appointmentId = data.appointmentId ? decode(Handlebars.compile(data.appointmentId)(context)) : undefined;
 
-    // TODO: Implement Update Appointment logic here
     const result = await step.run("update-appointment", async () => {
       // Add implementation here
       throw new NonRetriableError("Update Appointment: Not yet implemented");

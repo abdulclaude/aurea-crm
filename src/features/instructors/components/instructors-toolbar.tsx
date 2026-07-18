@@ -526,8 +526,8 @@ export function InstructorsToolbar({
                 {selectedLocationId
                   ? clients.find(
                       (c: any) => c.locationId === selectedLocationId,
-                    )?.name || "Select client"
-                  : "All clients"}
+                    )?.name || "Select location"
+                  : "All locations"}
                 <ChevronDown className="size-3 text-primary/80 dark:text-white/60" />
               </Button>
             </DropdownMenuTrigger>
@@ -541,7 +541,7 @@ export function InstructorsToolbar({
                 onSelect={() => onLocationIdChange("")}
                 className="px-10 py-2.5 text-xs bg-background text-primary/80 hover:bg-primary-foreground/50 hover:text-black cursor-pointer"
               >
-                All clients
+                All locations
               </DropdownMenuCheckboxItem>
 
               <DropdownMenuSeparator className="bg-black/5 dark:bg-white/5 my-1" />

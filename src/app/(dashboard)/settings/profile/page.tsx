@@ -174,7 +174,7 @@ export default function ProfileSettingsPage() {
                 Saving...
               </>
             ) : (
-              "Save Changes"
+              "Save changes"
             )}
           </Button>
         </div>

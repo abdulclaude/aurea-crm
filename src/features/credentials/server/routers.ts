@@ -5,7 +5,6 @@ import { credential as credentialTable } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import {
   createTRPCRouter,
-  premiumProcedure,
   protectedProcedure,
 } from "@/trpc/init";
 import z from "zod";
@@ -15,9 +14,11 @@ import {
 } from "@/features/telegram/server/webhook-manager";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, ilike, isNull, type SQL } from "drizzle-orm";
+import { requireCapability } from "@/features/permissions/server/authorization";
 
 type CredentialScopeContext = {
   auth: { user: { id: string } };
+  orgId: string | null;
   locationId?: string | null;
 };
 
@@ -29,8 +30,10 @@ type JsonValue =
   | null
   | JsonValue[]
   | { [key: string]: JsonValue };
-type SerializedCredential = Omit<CredentialRow, "metadata"> & {
+type SerializedCredential = Omit<CredentialRow, "metadata" | "value"> & {
   metadata: JsonValue;
+  value: "";
+  hasSecret: boolean;
 };
 
 const toJsonValue = (value: unknown): JsonValue => {
@@ -63,15 +66,48 @@ const serializeCredential = (
   credential: CredentialRow
 ): SerializedCredential => ({
   ...credential,
+  value: "",
+  hasSecret: Boolean(credential.value),
   metadata: toJsonValue(credential.metadata),
 });
 
+const requireOrganization = (ctx: CredentialScopeContext): string => {
+  if (!ctx.orgId) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Select an organization before managing credentials.",
+    });
+  }
+  return ctx.orgId;
+};
+
+const requireCredentialManagement = async (
+  ctx: CredentialScopeContext,
+): Promise<string> => {
+  const organizationId = requireOrganization(ctx);
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId,
+      locationId: ctx.locationId ?? null,
+    },
+    capability: "provider.manage",
+  });
+  return organizationId;
+};
+
 const credentialScopeConditions = (ctx: CredentialScopeContext): SQL[] => [
-  eq(credentialTable.userId, ctx.auth.user.id),
+  eq(credentialTable.organizationId, requireOrganization(ctx)),
   ctx.locationId
     ? eq(credentialTable.locationId, ctx.locationId)
     : isNull(credentialTable.locationId),
+  eq(credentialTable.isActive, true),
 ];
+
+const isAiCredentialType = (type: CredentialType): boolean =>
+  type === CredentialType.GEMINI ||
+  type === CredentialType.OPENAI ||
+  type === CredentialType.ANTHROPIC;
 
 const getScopedCredentialOrThrow = async (
   ctx: CredentialScopeContext,
@@ -90,34 +126,74 @@ const getScopedCredentialOrThrow = async (
     });
   }
 
-  return serializeCredential(credential);
+  return credential;
 };
 
 export const credentialsRouter = createTRPCRouter({
-  create: premiumProcedure
+  create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1, "Name is required"),
         type: z.enum(CredentialType),
         value: z.string().min(1, "Value is required"),
+        isDefault: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const organizationId = await requireCredentialManagement(ctx);
       const { name, value, type } = input;
 
-      const [credential] = await db
-        .insert(credentialTable)
-        .values({
+      const credential = await db.transaction(async (tx) => {
+        const [existingCount] = await tx
+          .select({ total: count() })
+          .from(credentialTable)
+          .where(
+            and(
+              eq(credentialTable.organizationId, organizationId),
+              ctx.locationId
+                ? eq(credentialTable.locationId, ctx.locationId)
+                : isNull(credentialTable.locationId),
+              eq(credentialTable.type, type),
+              eq(credentialTable.isActive, true),
+            ),
+          );
+        const shouldDefault =
+          isAiCredentialType(type) &&
+          (input.isDefault || (existingCount?.total ?? 0) === 0);
+        if (shouldDefault) {
+          await tx
+            .update(credentialTable)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(credentialTable.organizationId, organizationId),
+                ctx.locationId
+                  ? eq(credentialTable.locationId, ctx.locationId)
+                  : isNull(credentialTable.locationId),
+                eq(credentialTable.type, type),
+                eq(credentialTable.isActive, true),
+                eq(credentialTable.isDefault, true),
+              ),
+            );
+        }
+
+        const [created] = await tx
+          .insert(credentialTable)
+          .values({
             id: crypto.randomUUID(),
+            organizationId,
             name,
             type,
             userId: ctx.auth.user.id,
             locationId: ctx.locationId ?? null,
             value: encrypt(value),
+            isDefault: shouldDefault,
             createdAt: new Date(),
             updatedAt: new Date(),
-        })
-        .returning();
+          })
+          .returning();
+        return created;
+      });
 
       if (type === CredentialType.TELEGRAM_BOT) {
         try {
@@ -143,6 +219,7 @@ export const credentialsRouter = createTRPCRouter({
   remove: protectedProcedure
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
+      await requireCredentialManagement(ctx);
       const credential = await getScopedCredentialOrThrow(ctx, input.id);
 
       if (credential.type === CredentialType.TELEGRAM_BOT) {
@@ -151,7 +228,8 @@ export const credentialsRouter = createTRPCRouter({
       }
 
       const [deletedCredential] = await db
-        .delete(credentialTable)
+        .update(credentialTable)
+        .set({ isActive: false, isDefault: false, updatedAt: new Date() })
         .where(eq(credentialTable.id, credential.id))
         .returning();
 
@@ -163,24 +241,48 @@ export const credentialsRouter = createTRPCRouter({
         id: z.string(),
         name: z.string().min(1, "Name is required"),
         type: z.enum(CredentialType),
-        value: z.string().min(1, "Value is required"),
+        value: z.string(),
+        isDefault: z.boolean().default(false),
       })
     )
     .mutation(async ({ ctx, input }) => {
+      await requireCredentialManagement(ctx);
       const { id, name, type, value } = input;
 
       const existing = await getScopedCredentialOrThrow(ctx, id);
 
-      const [updated] = await db
-        .update(credentialTable)
-        .set({
+      const updated = await db.transaction(async (tx) => {
+        const shouldDefault = isAiCredentialType(type) && input.isDefault;
+        if (shouldDefault) {
+          await tx
+            .update(credentialTable)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(
+              and(
+                eq(credentialTable.organizationId, existing.organizationId),
+                existing.locationId
+                  ? eq(credentialTable.locationId, existing.locationId)
+                  : isNull(credentialTable.locationId),
+                eq(credentialTable.type, type),
+                eq(credentialTable.isActive, true),
+                eq(credentialTable.isDefault, true),
+              ),
+            );
+        }
+
+        const [saved] = await tx
+          .update(credentialTable)
+          .set({
             name,
             type,
-            value: encrypt(value),
+            value: value ? encrypt(value) : existing.value,
+            isDefault: shouldDefault,
             updatedAt: new Date(),
-        })
-        .where(eq(credentialTable.id, id))
-        .returning();
+          })
+          .where(eq(credentialTable.id, id))
+          .returning();
+        return saved;
+      });
 
       if (!updated) {
         throw new TRPCError({
@@ -191,9 +293,10 @@ export const credentialsRouter = createTRPCRouter({
 
       if (type === CredentialType.TELEGRAM_BOT) {
         try {
+          const token = value || decrypt(existing.value);
           await configureTelegramWebhook({
             credential: updated,
-            token: value,
+            token,
           });
         } catch (error) {
           throw new TRPCError({
@@ -213,7 +316,10 @@ export const credentialsRouter = createTRPCRouter({
   getOne: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      return getScopedCredentialOrThrow(ctx, input.id);
+      await requireCredentialManagement(ctx);
+      return serializeCredential(
+        await getScopedCredentialOrThrow(ctx, input.id),
+      );
     }),
   getMany: protectedProcedure
     .input(
@@ -228,6 +334,7 @@ export const credentialsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
+      await requireCredentialManagement(ctx);
       const { page, pageSize, search } = input;
       const conditions = credentialScopeConditions(ctx);
       if (search) {
@@ -267,6 +374,7 @@ export const credentialsRouter = createTRPCRouter({
   getByType: protectedProcedure
     .input(z.object({ type: z.enum(CredentialType) }))
     .query(async ({ input, ctx }) => {
+      await requireCredentialManagement(ctx);
       const { type } = input;
 
       const credentials = await db

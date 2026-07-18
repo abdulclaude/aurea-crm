@@ -45,7 +45,7 @@ export const GoogleDriveCreateFolderNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_DRIVE_CREATE_FOLDER_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleDriveCreateFolderRealtimeToken as any,
+    refreshToken: fetchGoogleDriveCreateFolderRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleDriveCreateFolderFormValues) => {

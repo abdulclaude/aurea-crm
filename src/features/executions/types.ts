@@ -11,10 +11,20 @@ export interface WorkflowMetadata {
   isBundle?: boolean;
 }
 
+export type WorkflowExecutionScope = {
+  executionId: string;
+  rootWorkflowId: string;
+  workflowId: string;
+  organizationId: string;
+  locationId: string | null;
+  workflowPath: readonly string[];
+};
+
 export interface NodeExecutorParams<TData = Record<string, unknown>> {
   data: TData;
   nodeId: string;
   userId: string;
+  scope: WorkflowExecutionScope;
   context: WorkflowContext;
   step: StepTools;
   publish: Realtime.PublishFn;

@@ -9,20 +9,32 @@ import crypto from "node:crypto";
  * Hash an IP address with a daily-rotating salt
  * This makes IPs non-reversible while allowing same-day deduplication
  */
-export function hashIpAddress(ip: string): string {
+export class IpHashSaltUnavailableError extends Error {
+  constructor() {
+    super("IP hashing is unavailable because its deployment secret is missing");
+    this.name = "IpHashSaltUnavailableError";
+  }
+}
+
+export function hashIpAddress(
+	ip: string,
+	options: { now?: Date; salt?: string } = {},
+): string {
 	if (!ip) return "unknown";
 
 	// Use daily salt (resets every day at midnight UTC)
-	const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-	const salt = process.env.IP_HASH_SALT || "aurea-default-salt";
+	const today = (options.now ?? new Date()).toISOString().split("T")[0];
+	const salt = options.salt ?? process.env.IP_HASH_SALT?.trim();
+	if (!salt || salt.length < 32) {
+		throw new IpHashSaltUnavailableError();
+	}
 
 	const hash = crypto
-		.createHash("sha256")
-		.update(`${ip}${today}${salt}`)
+		.createHmac("sha256", salt)
+		.update(`${today}:${ip}`)
 		.digest("hex");
 
-	// Return first 16 characters for storage efficiency
-	return hash.substring(0, 16);
+	return hash.substring(0, 32);
 }
 
 /**
@@ -126,7 +138,9 @@ export function shouldDeleteData(
  * Sanitize user properties for GDPR compliance
  * Removes PII fields that shouldn't be stored
  */
-export function sanitizeUserProperties(properties: Record<string, any>): Record<string, any> {
+export function sanitizeUserProperties(
+	properties: Record<string, unknown>,
+): Record<string, unknown> {
 	const sanitized = { ...properties };
 
 	// Remove common PII fields

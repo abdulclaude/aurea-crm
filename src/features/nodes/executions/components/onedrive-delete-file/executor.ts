@@ -29,7 +29,6 @@ export const onedriveDeleteFileExecutor: NodeExecutor<OnedriveDeleteFileData> = 
     // Compile fields with Handlebars
     const fileId = data.fileId ? decode(Handlebars.compile(data.fileId)(context)) : undefined;
 
-    // TODO: Implement OneDrive: Delete File logic here
     const result = await step.run("onedrive-delete-file", async () => {
       // Add implementation here
       throw new NonRetriableError("OneDrive: Delete File: Not yet implemented");

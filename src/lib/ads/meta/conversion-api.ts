@@ -1,24 +1,14 @@
-/**
- * Meta (Facebook) Conversion API Implementation
- * 
- * Sends server-side conversion events to Facebook for:
- * - iOS 14.5+ attribution (bypasses ATT opt-out)
- * - Ad blocker bypass
- * - 30% higher match rates than pixel-only
- * 
- * Docs: https://developers.facebook.com/docs/marketing-api/conversions-api
- */
+import crypto from "node:crypto";
+import { z } from "zod";
 
-import crypto from 'crypto';
+const META_GRAPH_API_VERSION = "v25.0";
+const PROVIDER_TIMEOUT_MS = 10_000;
 
-export interface MetaConversionEvent {
-  // Event details
-  eventName: string;  // 'Purchase', 'Lead', 'AddToCart', 'ViewContent', etc.
-  eventTime: number;  // Unix timestamp (seconds)
-  eventId: string;    // Unique event ID (for deduplication with pixel)
-  eventSourceUrl?: string;  // URL where event occurred
-  
-  // User data (for matching)
+export type MetaConversionEvent = {
+  eventName: string;
+  eventTime: number;
+  eventId: string;
+  eventSourceUrl?: string;
   email?: string;
   phone?: string;
   firstName?: string;
@@ -27,15 +17,11 @@ export interface MetaConversionEvent {
   state?: string;
   zipCode?: string;
   country?: string;
-  
-  // Browser data
   userAgent?: string;
   ipAddress?: string;
-  fbp?: string;  // _fbp cookie (Facebook Browser ID)
-  fbc?: string;  // _fbc cookie (Facebook Click Cookie)
-  fbclid?: string;  // Facebook Click ID from URL
-  
-  // Conversion data
+  fbp?: string;
+  fbc?: string;
+  fbclid?: string;
   value?: number;
   currency?: string;
   contentType?: string;
@@ -43,196 +29,143 @@ export interface MetaConversionEvent {
   contentName?: string;
   numItems?: number;
   orderId?: string;
-  
-  // Custom data
-  customData?: Record<string, any>;
-}
+  customData?: Record<string, unknown>;
+};
 
-export interface MetaConversionAPIConfig {
+export type MetaConversionAPIConfig = {
   pixelId: string;
   accessToken: string;
-  testEventCode?: string;  // For testing events
-}
+  testEventCode?: string;
+};
 
-/**
- * Hash a string value with SHA-256
- * Required by Meta for PII (email, phone, name, address)
- */
+export type MetaConversionResult = {
+  success: boolean;
+  providerEventId: string;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+const metaResponseSchema = z.object({
+  events_received: z.number().int().nonnegative().optional(),
+  error: z
+    .object({
+      code: z.number().int().optional(),
+    })
+    .optional(),
+});
+
 function hashValue(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  
-  // Normalize: lowercase and trim
-  const normalized = value.toLowerCase().trim();
-  if (!normalized) return undefined;
-  
-  return crypto.createHash('sha256').update(normalized).digest('hex');
+  const normalized = value?.toLowerCase().trim();
+  return normalized
+    ? crypto.createHash("sha256").update(normalized).digest("hex")
+    : undefined;
 }
 
-/**
- * Format phone number to E.164 format (required by Meta)
- * Example: +14155551234
- */
 function formatPhone(phone: string): string {
-  // Remove all non-digit characters
-  const digits = phone.replace(/\D/g, '');
-  
-  // Add + prefix if not present
-  return digits.startsWith('+') ? digits : `+${digits}`;
+  return `+${phone.replace(/\D/g, "")}`;
 }
 
-/**
- * Send conversion event to Meta Conversion API
- */
 export async function sendMetaConversion(
   config: MetaConversionAPIConfig,
-  event: MetaConversionEvent
-): Promise<{ success: boolean; eventId: string; error?: string }> {
+  event: MetaConversionEvent,
+): Promise<MetaConversionResult> {
+  const userData: Record<string, string | string[] | undefined> = {
+    client_ip_address: event.ipAddress,
+    client_user_agent: event.userAgent,
+  };
+  const hashedEmail = hashValue(event.email);
+  const hashedPhone = event.phone ? hashValue(formatPhone(event.phone)) : undefined;
+  const hashedFirstName = hashValue(event.firstName);
+  const hashedLastName = hashValue(event.lastName);
+  const hashedCity = hashValue(event.city);
+  const hashedState = hashValue(event.state);
+  const hashedZipCode = hashValue(event.zipCode);
+  if (hashedEmail) userData.em = [hashedEmail];
+  if (hashedPhone) userData.ph = [hashedPhone];
+  if (hashedFirstName) userData.fn = [hashedFirstName];
+  if (hashedLastName) userData.ln = [hashedLastName];
+  if (hashedCity) userData.ct = [hashedCity];
+  if (hashedState) userData.st = [hashedState];
+  if (hashedZipCode) userData.zp = [hashedZipCode];
+  if (event.country) userData.country = [event.country.toLowerCase()];
+  if (event.fbp) userData.fbp = event.fbp;
+  if (event.fbc) {
+    userData.fbc = event.fbc;
+  } else if (event.fbclid) {
+    userData.fbc = `fb.1.${event.eventTime}.${event.fbclid}`;
+  }
+
+  const customData: Record<string, unknown> = { ...event.customData };
+  if (event.value !== undefined) customData.value = event.value;
+  if (event.currency) customData.currency = event.currency;
+  if (event.contentType) customData.content_type = event.contentType;
+  if (event.contentIds) customData.content_ids = event.contentIds;
+  if (event.contentName) customData.content_name = event.contentName;
+  if (event.numItems !== undefined) customData.num_items = event.numItems;
+  if (event.orderId) customData.order_id = event.orderId;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   try {
-    // Build user_data object (all PII must be hashed)
-    const userData: Record<string, any> = {
-      client_ip_address: event.ipAddress,
-      client_user_agent: event.userAgent,
-    };
-    
-    // Add hashed PII
-    if (event.email) {
-      userData.em = [hashValue(event.email)];
-    }
-    if (event.phone) {
-      const formatted = formatPhone(event.phone);
-      userData.ph = [hashValue(formatted)];
-    }
-    if (event.firstName) {
-      userData.fn = [hashValue(event.firstName)];
-    }
-    if (event.lastName) {
-      userData.ln = [hashValue(event.lastName)];
-    }
-    if (event.city) {
-      userData.ct = [hashValue(event.city)];
-    }
-    if (event.state) {
-      userData.st = [hashValue(event.state)];
-    }
-    if (event.zipCode) {
-      userData.zp = [hashValue(event.zipCode)];
-    }
-    if (event.country) {
-      userData.country = [event.country.toLowerCase()];  // Not hashed, 2-letter code
-    }
-    
-    // Add first-party cookies
-    if (event.fbp) {
-      userData.fbp = event.fbp;
-    }
-    
-    // Add fbc cookie or construct from fbclid
-    if (event.fbc) {
-      userData.fbc = event.fbc;
-    } else if (event.fbclid) {
-      // Format: fb.1.{timestamp}.{fbclid}
-      userData.fbc = `fb.1.${Date.now()}.${event.fbclid}`;
-    }
-    
-    // Build custom_data object
-    const customData: Record<string, any> = {
-      ...(event.customData || {}),
-    };
-    
-    if (event.value !== undefined) {
-      customData.value = event.value;
-    }
-    if (event.currency) {
-      customData.currency = event.currency;
-    }
-    if (event.contentType) {
-      customData.content_type = event.contentType;
-    }
-    if (event.contentIds) {
-      customData.content_ids = event.contentIds;
-    }
-    if (event.contentName) {
-      customData.content_name = event.contentName;
-    }
-    if (event.numItems !== undefined) {
-      customData.num_items = event.numItems;
-    }
-    if (event.orderId) {
-      customData.order_id = event.orderId;
-    }
-    
-    // Build API payload
-    const payload = {
-      data: [
-        {
-          event_name: event.eventName,
-          event_time: event.eventTime,
-          event_id: event.eventId,
-          event_source_url: event.eventSourceUrl,
-          action_source: 'website',
-          user_data: userData,
-          custom_data: Object.keys(customData).length > 0 ? customData : undefined,
+    const response = await fetch(
+      `https://graph.facebook.com/${META_GRAPH_API_VERSION}/${encodeURIComponent(config.pixelId)}/events`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.accessToken}`,
+          "Content-Type": "application/json",
         },
-      ],
-      ...(config.testEventCode && { test_event_code: config.testEventCode }),
-    };
-    
-    // Send to Meta
-    const url = `https://graph.facebook.com/v18.0/${config.pixelId}/events?access_token=${config.accessToken}`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+        body: JSON.stringify({
+          data: [
+            {
+              event_name: event.eventName,
+              event_time: event.eventTime,
+              event_id: event.eventId,
+              event_source_url: event.eventSourceUrl,
+              action_source: "website",
+              user_data: userData,
+              custom_data:
+                Object.keys(customData).length > 0 ? customData : undefined,
+            },
+          ],
+          test_event_code: config.testEventCode,
+        }),
+        signal: controller.signal,
       },
-      body: JSON.stringify(payload),
-    });
-    
-    const result = await response.json();
-    
-    if (!response.ok) {
-      console.error('[Meta CAPI] Error:', result);
+    );
+    const parsed = metaResponseSchema.safeParse(await response.json());
+    if (
+      !response.ok ||
+      !parsed.success ||
+      !parsed.data.events_received
+    ) {
+      const providerCode = parsed.success ? parsed.data.error?.code : undefined;
       return {
         success: false,
-        eventId: event.eventId,
-        error: result.error?.message || 'Unknown error',
+        providerEventId: event.eventId,
+        errorCode: providerCode
+          ? `META_${providerCode}`
+          : response.ok
+            ? "META_RESPONSE_INVALID"
+            : `META_HTTP_${response.status}`,
+        errorMessage: "Meta did not accept the conversion event.",
       };
     }
-    
-    // Check for events_received
-    if (result.events_received === 0) {
-      console.error('[Meta CAPI] No events received:', result);
-      return {
-        success: false,
-        eventId: event.eventId,
-        error: 'Events not received by Meta',
-      };
-    }
-    
-    console.log('[Meta CAPI] Event sent successfully:', {
-      eventId: event.eventId,
-      eventName: event.eventName,
-      eventsReceived: result.events_received,
-    });
-    
-    return {
-      success: true,
-      eventId: event.eventId,
-    };
+    return { success: true, providerEventId: event.eventId };
   } catch (error) {
-    console.error('[Meta CAPI] Exception:', error);
     return {
       success: false,
-      eventId: event.eventId,
-      error: error instanceof Error ? error.message : 'Unknown exception',
+      providerEventId: event.eventId,
+      errorCode: error instanceof Error && error.name === "AbortError"
+        ? "META_TIMEOUT"
+        : "META_REQUEST_FAILED",
+      errorMessage: "Meta conversion delivery failed.",
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-/**
- * Send purchase conversion to Meta
- * Helper function for common purchase event
- */
 export async function sendMetaPurchase(
   config: MetaConversionAPIConfig,
   data: {
@@ -249,12 +182,14 @@ export async function sendMetaPurchase(
     ipAddress?: string;
     userAgent?: string;
     eventTime?: number;
-  }
-) {
+    eventSourceUrl?: string;
+  },
+): Promise<MetaConversionResult> {
   return sendMetaConversion(config, {
-    eventName: 'Purchase',
-    eventTime: data.eventTime || Math.floor(Date.now() / 1000),
+    eventName: "Purchase",
+    eventTime: data.eventTime ?? Math.floor(Date.now() / 1000),
     eventId: data.eventId,
+    eventSourceUrl: data.eventSourceUrl,
     email: data.email,
     phone: data.phone,
     value: data.value,
@@ -269,9 +204,6 @@ export async function sendMetaPurchase(
   });
 }
 
-/**
- * Send lead conversion to Meta
- */
 export async function sendMetaLead(
   config: MetaConversionAPIConfig,
   data: {
@@ -286,12 +218,14 @@ export async function sendMetaLead(
     ipAddress?: string;
     userAgent?: string;
     eventTime?: number;
-  }
-) {
+    eventSourceUrl?: string;
+  },
+): Promise<MetaConversionResult> {
   return sendMetaConversion(config, {
-    eventName: 'Lead',
-    eventTime: data.eventTime || Math.floor(Date.now() / 1000),
+    eventName: "Lead",
+    eventTime: data.eventTime ?? Math.floor(Date.now() / 1000),
     eventId: data.eventId,
+    eventSourceUrl: data.eventSourceUrl,
     email: data.email,
     phone: data.phone,
     value: data.value,

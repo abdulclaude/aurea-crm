@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  useMutation,
-  useQueryClient,
-  useSuspenseQuery,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ColumnDef,
   ColumnOrderState,
@@ -153,6 +149,7 @@ function buildColumns(
 export function RoomsTable() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const [hydrated, setHydrated] = React.useState(false);
 
   const [search, setSearch] = React.useState("");
   const [sortValue, setSortValue] = React.useState(DEFAULT_SORT);
@@ -168,9 +165,13 @@ export function RoomsTable() {
     null,
   );
 
-  const { data: rooms, isFetching } = useSuspenseQuery(
-    trpc.rooms.list.queryOptions(),
-  );
+  React.useEffect(() => setHydrated(true), []);
+
+  const roomsQuery = useQuery({
+    ...trpc.rooms.list.queryOptions(),
+    enabled: hydrated,
+  });
+  const rooms = roomsQuery.data ?? [];
 
   const updateMutation = useMutation(trpc.rooms.update.mutationOptions());
   const deleteMutation = useMutation(trpc.rooms.delete.mutationOptions());
@@ -277,12 +278,44 @@ export function RoomsTable() {
   const columnOrderOrDefault =
     columnOrder.length > 0 ? columnOrder : COLUMN_IDS;
 
+  if (!hydrated || roomsQuery.isPending) {
+    return (
+      <div
+        role="status"
+        aria-label="Loading rooms"
+        className="h-64 animate-pulse bg-muted/40"
+      />
+    );
+  }
+
+  if (roomsQuery.isError) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-3 p-6 text-center">
+        <p role="alert" className="text-sm font-medium">
+          Rooms could not be loaded.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {roomsQuery.error instanceof Error
+            ? roomsQuery.error.message
+            : "Try the request again."}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void roomsQuery.refetch()}
+        >
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <>
       <DataTable
         columns={columns}
         data={filtered}
-        isLoading={isFetching}
+        isLoading={roomsQuery.isFetching}
         getRowId={(row) => row.id}
         columnVisibility={columnVisibility}
         onColumnVisibilityChange={(updater) =>
@@ -407,7 +440,8 @@ export function RoomsTable() {
             </Button>
 
             <Button
-              variant="outline"
+              variant="gradient"
+              className="w-max"
               onClick={handleSaveEdit}
               disabled={!editName || updateMutation.isPending}
             >

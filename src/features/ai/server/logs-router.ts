@@ -2,7 +2,9 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { db } from "@/db";
 import { AILogStatus } from "@/db/enums";
-import { aiLog, user as userTable } from "@/db/schema";
+import { aiLog, location, user as userTable } from "@/db/schema";
+import { requireCapability } from "@/features/permissions/server/authorization";
+import { TRPCError } from "@trpc/server";
 import {
   and,
   count,
@@ -27,6 +29,27 @@ const nullableEq = (
 const organizationCondition = (organizationId: string | null): SQL =>
   nullableEq(aiLog.organizationId, organizationId);
 
+async function requireLogCapability(
+  ctx: {
+    auth: { user: { id: string } };
+    orgId: string | null;
+    locationId: string | null;
+  },
+  capability: "settings.view" | "settings.manage",
+): Promise<void> {
+  await requireCapability({
+    actor: {
+      userId: ctx.auth.user.id,
+      organizationId: ctx.orgId,
+      locationId: ctx.locationId,
+    },
+    capability,
+    resource: ctx.orgId
+      ? { organizationId: ctx.orgId, locationId: ctx.locationId }
+      : undefined,
+  });
+}
+
 export const logsRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
@@ -46,16 +69,46 @@ export const logsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
+      await requireLogCapability(ctx, "settings.view");
       const { page, pageSize } = input;
 
-      const locationId =
-        input?.locationId !== undefined
-          ? input.locationId || null
-          : ctx.locationId;
+      let locationId = ctx.locationId;
+      let includeAllClients = false;
+      if (input.locationId !== undefined || input.includeAllClients) {
+        if (ctx.locationId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Switch to the organization context to view other locations.",
+          });
+        }
+        await requireLogCapability(ctx, "settings.manage");
+        includeAllClients = input.includeAllClients === true;
+
+        if (input.locationId) {
+          const [targetLocation] = await db
+            .select({ id: location.id })
+            .from(location)
+            .where(
+              and(
+                eq(location.id, input.locationId),
+                ctx.orgId ? eq(location.organizationId, ctx.orgId) : undefined,
+              ),
+            )
+            .limit(1);
+          if (!targetLocation) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Location not found.",
+            });
+          }
+          locationId = targetLocation.id;
+          includeAllClients = false;
+        }
+      }
 
       const conditions: SQL[] = [organizationCondition(ctx.orgId)];
 
-      if (!input?.includeAllClients) {
+      if (!includeAllClients) {
         conditions.push(nullableEq(aiLog.locationId, locationId));
       }
 
@@ -142,13 +195,19 @@ export const logsRouter = createTRPCRouter({
     }),
 
   stats: protectedProcedure.query(async ({ ctx }) => {
+    await requireLogCapability(ctx, "settings.view");
     const rows = await db
       .select({
         status: aiLog.status,
         total: count(),
       })
       .from(aiLog)
-      .where(organizationCondition(ctx.orgId))
+      .where(
+        and(
+          organizationCondition(ctx.orgId),
+          nullableEq(aiLog.locationId, ctx.locationId),
+        ),
+      )
       .groupBy(aiLog.status);
 
     const statusCounts: Record<AILogStatus, number> = {
@@ -170,6 +229,7 @@ export const logsRouter = createTRPCRouter({
   }),
 
   dateRange: protectedProcedure.query(async ({ ctx }) => {
+    await requireLogCapability(ctx, "settings.view");
     const [result] = await db
       .select({
         createdAtMin: min(aiLog.createdAt),
@@ -178,7 +238,12 @@ export const logsRouter = createTRPCRouter({
         completedAtMax: max(aiLog.completedAt),
       })
       .from(aiLog)
-      .where(organizationCondition(ctx.orgId));
+      .where(
+        and(
+          organizationCondition(ctx.orgId),
+          nullableEq(aiLog.locationId, ctx.locationId),
+        ),
+      );
 
     return {
       createdAtMin: result?.createdAtMin ?? null,
@@ -189,6 +254,7 @@ export const logsRouter = createTRPCRouter({
   }),
 
   filterOptions: protectedProcedure.query(async ({ ctx }) => {
+    await requireLogCapability(ctx, "settings.view");
     const logs = await db
       .select({
         intent: aiLog.intent,
@@ -201,7 +267,12 @@ export const logsRouter = createTRPCRouter({
       })
       .from(aiLog)
       .innerJoin(userTable, eq(aiLog.userId, userTable.id))
-      .where(organizationCondition(ctx.orgId));
+      .where(
+        and(
+          organizationCondition(ctx.orgId),
+          nullableEq(aiLog.locationId, ctx.locationId),
+        ),
+      );
 
     // Get unique intents (filter out null/empty)
     const intents = Array.from(

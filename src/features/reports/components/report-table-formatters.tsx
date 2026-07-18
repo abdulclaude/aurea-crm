@@ -1,6 +1,6 @@
 "use client";
 
-import { format, isValid } from "date-fns";
+import { isValid } from "date-fns";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,9 @@ export function parseReportDate(value: ReportDataValue): Date | null {
 export function renderReportValue(
   field: ReportField,
   value: ReportDataValue,
+  currency = "GBP",
+  locale = "en-GB",
+  dateFormat: "LOCALE" | "MONTH_DAY_YEAR" | "DAY_MONTH_YEAR" | "YEAR_MONTH_DAY" = "LOCALE",
 ): ReactNode {
   if (value === null || value === undefined || String(value).trim() === "") {
     return <span className="text-xs text-primary/45">-</span>;
@@ -33,56 +36,88 @@ export function renderReportValue(
   if (field.type === "Status") return renderStatusBadge(value);
   if (field.type === "Date") {
     return (
-      <span className="text-xs text-primary/80">{formatReportDate(value)}</span>
+      <span className="text-xs text-primary/80">
+        {formatReportDate(value, locale, dateFormat)}
+      </span>
     );
   }
-  if (field.type === "Currency") return renderFinancialValue(Number(value), value);
-  if (field.type === "Percent") return renderPercentValue(Number(value), value);
-  if (field.type === "Number") return renderNumberValue(Number(value), value);
+  if (field.type === "Currency") {
+    return renderFinancialValue(Number(value), value, currency, locale);
+  }
+  if (field.type === "Percent") return renderPercentValue(Number(value), value, locale);
+  if (field.type === "Number") return renderNumberValue(Number(value), value, locale);
 
   return <span className="text-xs text-primary/80">{String(value)}</span>;
 }
 
-function renderFinancialValue(amount: number, fallback: ReportDataValue): ReactNode {
+function renderFinancialValue(
+  amount: number,
+  fallback: ReportDataValue,
+  currency: string,
+  locale: string,
+): ReactNode {
   return (
     <span className={cn("text-xs font-medium", getFinancialClass(amount))}>
-      {Number.isFinite(amount) ? formatCurrency(amount) : String(fallback)}
+      {Number.isFinite(amount)
+        ? formatCurrency(amount, currency, locale)
+        : String(fallback)}
     </span>
   );
 }
 
-function renderPercentValue(percent: number, fallback: ReportDataValue): ReactNode {
+function renderPercentValue(
+  percent: number,
+  fallback: ReportDataValue,
+  locale: string,
+): ReactNode {
   return (
     <span className={cn("text-xs font-medium", getFinancialClass(percent))}>
-      {Number.isFinite(percent) ? `${formatNumber(percent)}%` : String(fallback)}
+      {Number.isFinite(percent)
+        ? `${formatNumber(percent, locale)}%`
+        : String(fallback)}
     </span>
   );
 }
 
-function renderNumberValue(number: number, fallback: ReportDataValue): ReactNode {
+function renderNumberValue(
+  number: number,
+  fallback: ReportDataValue,
+  locale: string,
+): ReactNode {
   return (
     <span className="text-xs text-primary/80">
-      {Number.isFinite(number) ? formatNumber(number) : String(fallback)}
+      {Number.isFinite(number) ? formatNumber(number, locale) : String(fallback)}
     </span>
   );
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-GB", {
-    currency: "GBP",
+function formatCurrency(value: number, currency: string, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    currency,
     maximumFractionDigits: Number.isInteger(value) ? 0 : 2,
     minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
     style: "currency",
   }).format(value);
 }
 
-function formatReportDate(value: ReportDataValue): string {
+function formatReportDate(
+  value: ReportDataValue,
+  locale: string,
+  dateFormat: "LOCALE" | "MONTH_DAY_YEAR" | "DAY_MONTH_YEAR" | "YEAR_MONTH_DAY",
+): string {
   const date = parseReportDate(value);
-  return date ? format(date, "MMM do, yyyy") : "-";
+  if (!date) return "-";
+  const year = String(date.getFullYear());
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  if (dateFormat === "MONTH_DAY_YEAR") return `${month}/${day}/${year}`;
+  if (dateFormat === "DAY_MONTH_YEAR") return `${day}/${month}/${year}`;
+  if (dateFormat === "YEAR_MONTH_DAY") return `${year}-${month}-${day}`;
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(date);
 }
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-GB", {
+function formatNumber(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, {
     maximumFractionDigits: 1,
   }).format(value);
 }
@@ -98,7 +133,10 @@ function renderStatusBadge(value: ReportDataValue): ReactNode {
   return (
     <Badge
       variant="outline"
-      className={cn("w-fit text-[11px] capitalize", getStatusBadgeClass(status))}
+      className={cn(
+        "w-fit text-[11px] capitalize",
+        getStatusBadgeClass(status),
+      )}
     >
       {label}
     </Badge>
@@ -117,25 +155,44 @@ function getStatusBadgeClass(status: string): string {
   const normalized = status.toUpperCase().replaceAll(" ", "_");
 
   if (
-    ["ACTIVE", "APPROVED", "COMPLETED", "CUSTOMER", "OPEN", "SETTLED", "SUCCEEDED"].includes(
-      normalized,
-    )
+    [
+      "ACTIVE",
+      "APPROVED",
+      "COMPLETED",
+      "CUSTOMER",
+      "OPEN",
+      "SETTLED",
+      "SUCCEEDED",
+    ].includes(normalized)
   ) {
     return "ring-teal-500/25 bg-teal-500/10 text-teal-700 dark:text-teal-300";
   }
 
   if (
-    ["BOOKED", "IN_PROGRESS", "LEAD", "PENDING", "PROCESSING", "PROSPECT", "SCHEDULED"].includes(
-      normalized,
-    )
+    [
+      "BOOKED",
+      "IN_PROGRESS",
+      "LEAD",
+      "PENDING",
+      "PROCESSING",
+      "PROSPECT",
+      "SCHEDULED",
+    ].includes(normalized)
   ) {
     return "ring-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
   }
 
   if (
-    ["CANCELLED", "CHURN", "EXPIRED", "FAILED", "NO_SHOW", "REFUNDED", "REJECTED", "VOIDED"].includes(
-      normalized,
-    )
+    [
+      "CANCELLED",
+      "CHURN",
+      "EXPIRED",
+      "FAILED",
+      "NO_SHOW",
+      "REFUNDED",
+      "REJECTED",
+      "VOIDED",
+    ].includes(normalized)
   ) {
     return "ring-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300";
   }

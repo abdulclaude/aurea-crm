@@ -47,8 +47,14 @@ export const AddTagToClientNode: React.FC<NodeProps<AddTagToClientNodeType>> =
       });
     }, [props.id, getNodes, getEdges, dialogOpen, workflowContext]);
 
-    const description = nodeData?.tag
-      ? `Add tag: ${nodeData.tag}`
+    const configuredTags =
+      nodeData.tags?.length > 0
+        ? nodeData.tags
+        : nodeData.tag
+          ? [nodeData.tag]
+          : [];
+    const description = configuredTags.length > 0
+      ? `Add ${configuredTags.join(", ")}`
       : "Not configured";
 
     const nodeStatus = useNodeStatus({
@@ -94,7 +100,7 @@ export const AddTagToClientNode: React.FC<NodeProps<AddTagToClientNodeType>> =
           {...props}
           id={props.id}
           icon={AddTagIcon}
-          name="Add Tag to Client"
+          name="Add tag"
           description={description}
           status={nodeStatus}
           onSettings={handleOpenSettings}

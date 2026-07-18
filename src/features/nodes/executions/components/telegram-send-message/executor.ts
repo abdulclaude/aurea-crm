@@ -36,7 +36,6 @@ export const telegramSendMessageExecutor: NodeExecutor<TelegramSendMessageData> 
     const chatId = data.chatId ? decode(Handlebars.compile(data.chatId)(context)) : undefined;
     const message = data.message ? decode(Handlebars.compile(data.message)(context)) : undefined;
 
-    // TODO: Implement Telegram: Send Message logic here
     const result = await step.run("telegram-send-message", async () => {
       // Add implementation here
       throw new NonRetriableError("Telegram: Send Message: Not yet implemented");

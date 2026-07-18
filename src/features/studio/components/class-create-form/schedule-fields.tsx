@@ -1,6 +1,11 @@
 "use client";
 
 import type { UseFormReturn } from "react-hook-form";
+import { DatePicker } from "@/components/ui/date-picker";
+import {
+  formatDateValue,
+  parseDateValue,
+} from "@/components/ui/date-picker-utils";
 import {
   FormControl,
   FormField,
@@ -36,7 +41,13 @@ export function ScheduleFields({ form }: ScheduleFieldsProps) {
             <FormItem>
               <FormLabel className="text-xs text-primary/75">Date</FormLabel>
               <FormControl>
-                <Input type="date" {...field} />
+                <DatePicker
+                  date={parseDateValue(field.value)}
+                  onSelect={(date) => field.onChange(formatDateValue(date))}
+                  placeholder="Pick a date"
+                  ariaLabel="Class date"
+                  required
+                />
               </FormControl>
               <FormMessage className="text-xs" />
             </FormItem>
@@ -104,7 +115,9 @@ export function ScheduleFields({ form }: ScheduleFieldsProps) {
             name="repeatCount"
             render={({ field }) => (
               <FormItem>
-                <FormLabel className="text-xs text-primary/75">Occurrences</FormLabel>
+                <FormLabel className="text-xs text-primary/75">
+                  Occurrences
+                </FormLabel>
                 <FormControl>
                   <Input inputMode="numeric" placeholder="8" {...field} />
                 </FormControl>
@@ -117,4 +130,3 @@ export function ScheduleFields({ form }: ScheduleFieldsProps) {
     </div>
   );
 }
-

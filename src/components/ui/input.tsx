@@ -4,15 +4,19 @@ import { cn } from "@/lib/utils";
 
 function Input({
   className,
+  containerClassName,
   type,
   ...props
-}: React.ComponentProps<"input">): React.ReactElement {
+}: React.ComponentProps<"input"> & {
+  containerClassName?: string;
+}): React.ReactElement {
   return (
     <div
       className={cn(
         "relative",
         "before:pointer-events-none focus-within:before:opacity-100 before:opacity-0 before:absolute before:-inset-0.5 before:rounded-[12px] before:border before:border-sky-500 before:ring-2 before:ring-blue-500/20 before:transition",
         "after:pointer-events-none after:absolute after:inset-px after:rounded-lg after:shadow-highlight after:shadow-white/5 focus-within:after:shadow-sky-500 dark:focus-within:after:shadow-blue-500/20 after:transition w-full",
+        containerClassName,
       )}
     >
       <input

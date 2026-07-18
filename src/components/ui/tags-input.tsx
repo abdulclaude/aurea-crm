@@ -3,6 +3,7 @@
 import * as React from "react";
 import { X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { TABLE_BADGE_COLORS, TableBadge } from "@/components/ui/table-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -58,15 +59,15 @@ export function TagsInput({
   return (
     <div
       className={cn(
-        "flex min-h-10 w-full flex-wrap gap-2 rounded-sm border border-black/10 bg-background px-2 py-2 text-sm",
-        className
+        "flex min-h-10 w-full flex-wrap gap-1 rounded-xl border border-black/10 bg-background p-1 text-sm",
+        className,
       )}
       onClick={() => inputRef.current?.focus()}
     >
       {value.map((tag) => (
         <Badge
           key={tag}
-          className="gap-1 pr-1 text-[11px] bg-background border border-black/10 rounded-sm text-primary"
+          className="gap-1 pr-1 text-[11px] bg-background border border-black/10 rounded-lg text-primary"
         >
           {tag}
           {!readOnly && (
@@ -94,7 +95,8 @@ export function TagsInput({
           onKeyDown={handleKeyDown}
           onBlur={addTag}
           placeholder={value.length === 0 ? placeholder : ""}
-          className="h-7 flex-1 border-0 bg-transparent p-0 placeholder:text-primary/75 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-transparent focus:bg-transparent"
+          containerClassName="contents"
+          className="h-7 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none ring-0 placeholder:text-primary/75 focus-visible:ring-0 focus-visible:ring-offset-0 hover:bg-transparent focus:bg-transparent"
           disabled={maxTags !== undefined && value.length >= maxTags}
         />
       )}
@@ -102,30 +104,34 @@ export function TagsInput({
   );
 }
 
-export function TagsDisplay({ tags }: { tags: string[] }) {
-  if (!tags || tags.length === 0) {
+export function TagsDisplay({
+  maxVisible = 3,
+  tags,
+}: {
+  maxVisible?: number;
+  tags: string[];
+}) {
+  const uniqueTags = Array.from(new Set(tags.filter(Boolean)));
+  if (uniqueTags.length === 0) {
     return <span className="text-xs text-primary/75">No tags</span>;
   }
 
   return (
-    <div className="flex w-max relative gap-1">
-      {tags.slice(0, 1).map((tag) => (
-        <Badge
+    <div className="flex max-w-full flex-wrap gap-1">
+      {uniqueTags.slice(0, maxVisible).map((tag) => (
+        <TableBadge
           key={tag}
-          variant="outline"
-          className="text-[11px] w-fit text-violet-600 ring-violet-300 bg-violet-100 dark:border-violet-800"
+          color={TABLE_BADGE_COLORS.violet}
+          className="max-w-36"
         >
           {tag}
-        </Badge>
+        </TableBadge>
       ))}
 
-      {tags.length > 1 && (
-        <Badge
-          variant="outline"
-          className="text-[11px] px-1.5 text-slate-600 ring-slate-300 bg-slate-100 dark:border-slate-700"
-        >
-          +{tags.length - 1}
-        </Badge>
+      {uniqueTags.length > maxVisible && (
+        <TableBadge color={TABLE_BADGE_COLORS.slate} className="px-1.5">
+          +{uniqueTags.length - maxVisible} more
+        </TableBadge>
       )}
     </div>
   );

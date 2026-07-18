@@ -50,7 +50,7 @@ export const OnedriveDownloadFileNode: React.FC<NodeProps<OnedriveDownloadFileNo
       nodeId: props.id,
       channel: ONEDRIVE_DOWNLOAD_FILE_CHANNEL_NAME,
       topic: "status",
-      refreshToken: fetchOnedriveDownloadFileRealtimeToken as any,
+      refreshToken: fetchOnedriveDownloadFileRealtimeToken,
     });
 
     const handleOpenSettings = () => {

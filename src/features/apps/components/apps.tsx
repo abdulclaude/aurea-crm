@@ -5,10 +5,9 @@ import {
   EntityHeader,
 } from "@/components/react-flow/entity-components";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   useSuspenseApps,
-  useSyncGoogleCalendarApp,
-  useSyncGmailApp,
   useSyncGoogleApp,
   useSyncMicrosoftApp,
   useSyncSlackApp,
@@ -24,7 +23,7 @@ import {
 } from "@/components/ui/card";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { AppProvider } from "@/db/enums";
@@ -41,6 +40,7 @@ import { IconPlusSmall as PlusIcon } from "central-icons/IconPlusSmall";
 import { IconSettingsGear3 as SettingsIcon } from "central-icons/IconSettingsGear3";
 import { cn } from "@/lib/utils";
 import { AppChannelSetupDialog } from "./app-channel-setup-dialog";
+import { OAuthAccountManagerDialog } from "./oauth-account-manager-dialog";
 
 export const AppsContainer = ({ children }: { children: React.ReactNode }) => {
   return (
@@ -59,7 +59,11 @@ export const AppsContainer = ({ children }: { children: React.ReactNode }) => {
 
 type AppCatalogItem = {
   id: string;
-  provider: AppProvider;
+  provider:
+    | typeof AppProvider.GOOGLE
+    | typeof AppProvider.MICROSOFT
+    | typeof AppProvider.SLACK
+    | typeof AppProvider.DISCORD;
   title: string;
   description: string;
   icon: string;
@@ -114,12 +118,6 @@ export const AppsList = () => {
   const apps = useSuspenseApps();
   const queryClient = useQueryClient();
   const trpc = useTRPC();
-  const {
-    mutate: syncGoogleCalendarMutate,
-    isPending: isSyncingGoogleCalendar,
-  } = useSyncGoogleCalendarApp();
-  const { mutate: syncGmailMutate, isPending: isSyncingGmail } =
-    useSyncGmailApp();
   const { mutate: syncGoogleWorkspaceMutate, isPending: isSyncingGoogle } =
     useSyncGoogleApp();
   const { mutate: syncMicrosoftMutate, isPending: isSyncingMicrosoft } =
@@ -135,6 +133,16 @@ export const AppsList = () => {
   const [configureProvider, setConfigureProvider] = useState<
     typeof AppProvider.DISCORD | typeof AppProvider.SLACK | null
   >(null);
+  const [configureProviderAccountId, setConfigureProviderAccountId] =
+    useState<string>("");
+  const [manageProvider, setManageProvider] = useState<
+    | typeof AppProvider.GOOGLE
+    | typeof AppProvider.MICROSOFT
+    | typeof AppProvider.SLACK
+    | typeof AppProvider.DISCORD
+    | null
+  >(null);
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
   // Refetch both apps list and connected providers
   const refetchApps = () => {
@@ -144,34 +152,76 @@ export const AppsList = () => {
     });
   };
 
-  // Run sync on mount (handles OAuth callback returns)
+  // Bind only the provider explicitly selected before the OAuth redirect.
   useEffect(() => {
     if (hasInitialSync) return;
     setHasInitialSync(true);
-
-    // Run all syncs silently on mount to detect any new connections
-    syncGoogleCalendarMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
-    syncGmailMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
-    syncGoogleWorkspaceMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
-    syncMicrosoftMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
-    syncSlackMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
-    syncDiscordMutate(undefined, {
-      onSettled: () => refetchApps(),
-    });
+    const params = new URLSearchParams(window.location.search);
+    const provider = params.get("connectProvider");
+    const manager = params.get("manageProvider");
+    if (
+      manager === AppProvider.GOOGLE ||
+      manager === AppProvider.MICROSOFT ||
+      manager === AppProvider.SLACK ||
+      manager === AppProvider.DISCORD
+    ) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("manageProvider");
+      window.history.replaceState({}, "", url);
+      setManageProvider(manager);
+      setManageDialogOpen(true);
+      refetchApps();
+      return;
+    }
+    const onSettled = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("connectProvider");
+      window.history.replaceState({}, "", url);
+      setConnectingProvider(null);
+      refetchApps();
+    };
+    switch (provider) {
+      case AppProvider.GOOGLE:
+        syncGoogleWorkspaceMutate(undefined, {
+          onSettled,
+          onError: () => {
+            setManageProvider(AppProvider.GOOGLE);
+            setManageDialogOpen(true);
+          },
+        });
+        break;
+      case AppProvider.MICROSOFT:
+        syncMicrosoftMutate(undefined, {
+          onSettled,
+          onError: () => {
+            setManageProvider(AppProvider.MICROSOFT);
+            setManageDialogOpen(true);
+          },
+        });
+        break;
+      case AppProvider.SLACK:
+        syncSlackMutate(undefined, {
+          onSettled,
+          onError: () => {
+            setManageProvider(AppProvider.SLACK);
+            setManageDialogOpen(true);
+          },
+        });
+        break;
+      case AppProvider.DISCORD:
+        syncDiscordMutate(undefined, {
+          onSettled,
+          onError: () => {
+            setManageProvider(AppProvider.DISCORD);
+            setManageDialogOpen(true);
+          },
+        });
+        break;
+      default:
+        break;
+    }
   }, [
     hasInitialSync,
-    syncGoogleCalendarMutate,
-    syncGmailMutate,
     syncGoogleWorkspaceMutate,
     syncMicrosoftMutate,
     syncSlackMutate,
@@ -179,32 +229,11 @@ export const AppsList = () => {
     refetchApps,
   ]);
 
-  type SyncHandler = ReturnType<typeof useSyncGoogleCalendarApp>["mutate"];
-
-  const syncByProvider = useMemo<Partial<Record<AppProvider, SyncHandler>>>(
-    () => ({
-      [AppProvider.GOOGLE_CALENDAR]: syncGoogleCalendarMutate,
-      [AppProvider.GMAIL]: syncGmailMutate,
-      [AppProvider.GOOGLE]: syncGoogleWorkspaceMutate,
-      [AppProvider.MICROSOFT]: syncMicrosoftMutate,
-      [AppProvider.SLACK]: syncSlackMutate,
-      [AppProvider.DISCORD]: syncDiscordMutate,
-    }),
-    [
-      syncGoogleCalendarMutate,
-      syncGmailMutate,
-      syncGoogleWorkspaceMutate,
-      syncMicrosoftMutate,
-      syncSlackMutate,
-      syncDiscordMutate,
-    ]
-  );
-
   const syncLoadingByProvider: Partial<
     Record<AppProvider, boolean | undefined>
   > = {
-    [AppProvider.GOOGLE_CALENDAR]: isSyncingGoogleCalendar,
-    [AppProvider.GMAIL]: isSyncingGmail,
+    [AppProvider.GOOGLE_CALENDAR]: undefined,
+    [AppProvider.GMAIL]: undefined,
     [AppProvider.GOOGLE]: isSyncingGoogle,
     [AppProvider.TELEGRAM]: undefined,
     [AppProvider.MICROSOFT]: isSyncingMicrosoft,
@@ -219,7 +248,8 @@ export const AppsList = () => {
     provider: AppProvider,
     authProvider: "google" | "facebook" | "microsoft" | "slack" | "discord",
     scopes: string[],
-    label: string
+    label: string,
+    openManager = false,
   ) => {
     try {
       setConnectingProvider(provider);
@@ -228,7 +258,14 @@ export const AppsList = () => {
       await authClient.linkSocial({
         provider: authProvider,
         scopes,
-        callbackURL: window.location.href,
+        callbackURL: (() => {
+          const url = new URL(window.location.href);
+          url.searchParams.set(
+            openManager ? "manageProvider" : "connectProvider",
+            provider,
+          );
+          return url.toString();
+        })(),
       });
     } catch (_error) {
       toast.error(`Failed to connect ${label}. Please try again.`);
@@ -236,14 +273,18 @@ export const AppsList = () => {
     }
   };
 
-  const connected = new Set(apps.data?.map((item) => item.provider) ?? []);
+  const managedApp = appsCatalog.find((app) => app.provider === manageProvider);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       {appsCatalog.map((app) => {
-        const isConnected = connected.has(app.provider);
         const isSyncing = syncLoadingByProvider[app.provider] ?? false;
         const isConnecting = connectingProvider === app.provider;
+        const connectedAccount = apps.data?.find(
+          (item) => item.provider === app.provider,
+        );
+        const hasConfiguredAccount = Boolean(connectedAccount);
+        const isConnected = connectedAccount?.status === "ACTIVE";
         return (
           <Card
             key={app.id}
@@ -261,7 +302,14 @@ export const AppsList = () => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <CardTitle className="text-sm">{app.title}</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm">{app.title}</CardTitle>
+                    {hasConfiguredAccount && (
+                      <Badge variant={isConnected ? "outline" : "destructive"}>
+                        {isConnected ? "Connected" : "Needs attention"}
+                      </Badge>
+                    )}
+                  </div>
                   <CardDescription className="text-[13px] text-primary/50 font-medium tracking-tight">
                     {app.description}
                   </CardDescription>
@@ -279,9 +327,12 @@ export const AppsList = () => {
                         setConfigureProvider(
                           app.provider as
                             | typeof AppProvider.DISCORD
-                            | typeof AppProvider.SLACK
+                            | typeof AppProvider.SLACK,
                         );
                         setConfigureDialogOpen(true);
+                        setConfigureProviderAccountId(
+                          connectedAccount?.metadata.providerAccountId ?? "",
+                        );
                       }}
                       className="h-max! p-1.5!"
                     >
@@ -289,26 +340,33 @@ export const AppsList = () => {
                     </Button>
                   )}
                 <Button
-                  variant={isConnected ? "outline" : "gradient"}
-                  disabled={isSyncing || isConnecting || isConnected}
+                  variant={hasConfiguredAccount ? "outline" : "gradient"}
+                  disabled={isSyncing || isConnecting}
                   onClick={() => {
-                    if (isConnected) {
-                      toast.info(`${app.title} is already connected.`);
+                    if (hasConfiguredAccount) {
+                      setManageProvider(app.provider);
+                      setManageDialogOpen(true);
                       return;
                     }
                     handleConnect(
                       app.provider,
                       app.authProvider,
                       app.scopes,
-                      app.title
+                      app.title,
                     );
                   }}
                   className={cn(
                     "w-max",
-                    isConnected ? "h-max! p-1.5! px-3!" : "p-1.5! h-max"
+                    hasConfiguredAccount
+                      ? "h-max! p-1.5! px-3!"
+                      : "p-1.5! h-max",
                   )}
                 >
-                  {isConnected ? "Connected" : <PlusIcon className="size-4" />}
+                  {hasConfiguredAccount ? (
+                    "Manage"
+                  ) : (
+                    <PlusIcon className="size-4" />
+                  )}
                 </Button>
               </div>
             </CardContent>
@@ -320,9 +378,28 @@ export const AppsList = () => {
           open={configureDialogOpen}
           onOpenChange={setConfigureDialogOpen}
           provider={configureProvider}
+          providerAccountId={configureProviderAccountId}
           onSuccess={() => {
             refetchApps();
           }}
+        />
+      )}
+      {managedApp && (
+        <OAuthAccountManagerDialog
+          open={manageDialogOpen}
+          onOpenChange={setManageDialogOpen}
+          provider={managedApp.provider}
+          title={managedApp.title}
+          onLinkAccount={() =>
+            handleConnect(
+              managedApp.provider,
+              managedApp.authProvider,
+              managedApp.scopes,
+              managedApp.title,
+              true,
+            )
+          }
+          onSuccess={refetchApps}
         />
       )}
     </div>

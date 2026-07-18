@@ -34,6 +34,11 @@ import {
 } from "@/components/ui/select";
 import { VariableInput } from "@/components/tiptap/variable-input";
 import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { NodeType } from "@/db/enums";
+import { WorkflowProviderAccountSelect } from "@/features/workflows/components/workflow-provider-account-select";
+import {
+  requiredWorkflowProviderBindingSchema,
+} from "@/features/workflows/lib/workflow-provider-binding";
 
 const emailListSchema = z
   .string()
@@ -48,7 +53,7 @@ const emailListSchema = z
     "Enter comma-separated email addresses."
   );
 
-const formSchema = z.object({
+const formSchema = requiredWorkflowProviderBindingSchema.extend({
   variableName: z
     .string()
     .min(1, "Variable name is required.")
@@ -86,9 +91,14 @@ export const GmailExecutionDialog: React.FC<Props> = ({
   defaultValues,
   variables,
 }) => {
-  const form = useForm<GmailExecutionFormValues>({
-    resolver: zodResolver(formSchema) as any,
+  const form = useForm<
+    z.input<typeof formSchema>,
+    unknown,
+    GmailExecutionFormValues
+  >({
+    resolver: zodResolver(formSchema),
     defaultValues: {
+      providerAccountId: defaultValues?.providerAccountId || "",
       variableName: defaultValues?.variableName || "gmailMessage",
       to: defaultValues?.to || "",
       cc: defaultValues?.cc || "",
@@ -104,6 +114,7 @@ export const GmailExecutionDialog: React.FC<Props> = ({
   useEffect(() => {
     if (open) {
       form.reset({
+        providerAccountId: defaultValues?.providerAccountId || "",
         variableName: defaultValues?.variableName || "gmailMessage",
         to: defaultValues?.to || "",
         cc: defaultValues?.cc || "",
@@ -115,7 +126,20 @@ export const GmailExecutionDialog: React.FC<Props> = ({
         replyTo: defaultValues?.replyTo || "",
       });
     }
-  }, [open, defaultValues?.variableName, defaultValues?.to, defaultValues?.cc, defaultValues?.bcc, defaultValues?.subject, defaultValues?.body, defaultValues?.bodyFormat, defaultValues?.fromName, defaultValues?.replyTo, form]);
+  }, [
+    open,
+    defaultValues?.providerAccountId,
+    defaultValues?.variableName,
+    defaultValues?.to,
+    defaultValues?.cc,
+    defaultValues?.bcc,
+    defaultValues?.subject,
+    defaultValues?.body,
+    defaultValues?.bodyFormat,
+    defaultValues?.fromName,
+    defaultValues?.replyTo,
+    form,
+  ]);
 
   const handleSubmit = (values: GmailExecutionFormValues) => {
     onSubmit(values);
@@ -124,7 +148,7 @@ export const GmailExecutionDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-[#202e32] border-white/5">
+      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-border">
         <SheetHeader className="px-6 pt-8 pb-1 gap-1">
           <SheetTitle>Send Gmail</SheetTitle>
           <SheetDescription>
@@ -132,13 +156,28 @@ export const GmailExecutionDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-5 bg-white/5" />
+        <Separator className="my-5 bg-border" />
 
         <Form {...form}>
           <form
             onSubmit={form.handleSubmit(handleSubmit)}
             className="space-y-6 px-6"
           >
+            <FormField
+              control={form.control}
+              name="providerAccountId"
+              render={({ field }) => (
+                <FormItem>
+                  <WorkflowProviderAccountSelect
+                    nodeType={NodeType.GMAIL_EXECUTION}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
             <FormField
               control={form.control}
               name="variableName"
@@ -150,7 +189,7 @@ export const GmailExecutionDialog: React.FC<Props> = ({
                   </FormControl>
                   <FormDescription className="text-xs mt-2 leading-5">
                     Access the Gmail API response using{" "}
-                    <span className="text-white font-medium tracking-wide">
+                    <span className="text-primary font-medium tracking-wide">
                       {`{{${field.value || "gmailMessage"}.id}}`}
                     </span>
                     .

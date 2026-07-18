@@ -16,6 +16,7 @@ interface VariableInputProps {
   className?: string;
   onExtractHandlebars?: (text: string) => string;
   disabled?: boolean;
+  ariaLabel?: string;
 }
 
 export const VariableInput = ({
@@ -25,6 +26,7 @@ export const VariableInput = ({
   variables,
   className,
   disabled,
+  ariaLabel,
 }: VariableInputProps) => {
   // Use a ref to maintain the latest onChange callback
   const onChangeRef = useRef(onChange);
@@ -122,9 +124,12 @@ export const VariableInput = ({
       content: "",
       editorProps: {
         attributes: {
+          role: "textbox",
+          "aria-label": ariaLabel ?? placeholder ?? "Variable input",
+          "aria-multiline": "true",
           class: cn(
             "prose prose-sm focus:outline-none min-h-[80px] max-w-none p-3",
-            className
+            className,
           ),
         },
       },
@@ -141,7 +146,7 @@ export const VariableInput = ({
         onChangeRef.current?.(handlebarsText);
       },
     },
-    [] // Empty deps - editor should be created once and persisted
+    [], // Empty deps - editor should be created once and persisted
   );
 
   // Update editor editable state when disabled prop changes
@@ -156,10 +161,10 @@ export const VariableInput = ({
 
     // Update the mention extensions with new variables
     const variableMention = editor.extensionManager.extensions.find(
-      (ext) => ext.name === "variableMention"
+      (ext) => ext.name === "variableMention",
     );
     const slashMention = editor.extensionManager.extensions.find(
-      (ext) => ext.name === "slashMention"
+      (ext) => ext.name === "slashMention",
     );
 
     if (variableMention) {
@@ -183,19 +188,25 @@ export const VariableInput = ({
 
     const currentHandlebars = convertToHandlebars(editor.getJSON());
 
-    // Always update if value is different (including on initial mount)
-    if (value !== currentHandlebars) {
-      // Convert Handlebars back to editor content using ref
-      const content = convertFromHandlebars(value, variablesRef.current);
-
-      // Use setContent without emitting onChange
-      editor.commands.setContent(content, { emitUpdate: false });
-    }
-
-    // Mark as initialized after the first sync (even if value is empty)
-    if (!isInitializedRef.current) {
+    if (value === currentHandlebars) {
       isInitializedRef.current = true;
+      return;
     }
+
+    const content = convertFromHandlebars(value, variablesRef.current);
+    let cancelled = false;
+
+    // TipTap synchronously flushes its React renderer during setContent. Defer
+    // external-value synchronization until React has finished this lifecycle.
+    queueMicrotask(() => {
+      if (cancelled || editor.isDestroyed) return;
+      editor.commands.setContent(content, { emitUpdate: false });
+      isInitializedRef.current = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [value, editor]); // Removed variables from deps to prevent reset on variable changes
 
   if (!editor) {
@@ -207,13 +218,13 @@ export const VariableInput = ({
       className={cn(
         "relative",
         "before:pointer-events-none focus-within:before:opacity-100 before:opacity-0 before:absolute before:-inset-0.5 before:rounded-[12px] before:border before:border-sky-500 before:ring-2 before:ring-blue-500/20 before:transition",
-        "after:pointer-events-none after:absolute after:inset-px after:rounded-lg after:shadow-highlight after:shadow-white/5 focus-within:after:shadow-sky-500 dark:focus-within:after:shadow-blue-500/20 after:transition w-full"
+        "after:pointer-events-none after:absolute after:inset-px after:rounded-lg after:shadow-highlight after:shadow-white/5 focus-within:after:shadow-sky-500 dark:focus-within:after:shadow-blue-500/20 after:transition w-full",
       )}
     >
       <div
         className={cn(
           "relative text-xs text-primary dark:text-neutral-200 bg-white dark:bg-neutral-750 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 rounded-lg outline-none transition duration-150 hover:bg-primary-foreground/15 w-full ring ring-black/10 shadow-sm",
-          className
+          className,
         )}
       >
         <EditorContent editor={editor} placeholder={placeholder} />
@@ -336,7 +347,7 @@ function convertFromHandlebars(text: string, variables: VariableItem[]): any {
 // Helper to recursively find a variable by path
 function findVariableByPath(
   path: string,
-  variables: VariableItem[]
+  variables: VariableItem[],
 ): VariableItem | null {
   for (const variable of variables) {
     if (variable.path === path) {

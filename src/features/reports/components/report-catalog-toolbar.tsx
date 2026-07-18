@@ -22,7 +22,10 @@ import { ReportColumnControls } from "@/features/reports/components/report-colum
 import type { ReportCatalogItem } from "@/features/reports/types";
 
 import { ReportFiltersMenu } from "./report-filters-menu";
-import type { ReportFilterOption, ReportFilterState } from "./report-table-types";
+import type {
+  ReportFilterOption,
+  ReportFilterState,
+} from "./report-table-types";
 
 type ReportCatalogToolbarProps = {
   columnLabels: Readonly<Record<string, string>>;
@@ -108,10 +111,13 @@ export function ReportCatalogToolbar({
               setFiltersOpen(false);
             }}
             onToggle={(fieldId, value) => {
-              setStagedFilters((previous) => toggleFilter(previous, fieldId, value));
+              setStagedFilters((previous) =>
+                toggleFilter(previous, fieldId, value),
+              );
             }}
             open={filtersOpen}
             previewCount={previewCount}
+            previewIsPartial={false}
             selectedFilters={stagedFilters}
             setOpen={setFiltersOpen}
           />

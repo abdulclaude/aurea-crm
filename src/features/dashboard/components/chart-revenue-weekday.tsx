@@ -14,6 +14,7 @@ import { CompareSwitch } from "./compare-switch";
 import { DashboardCategoricalTooltip } from "./dashboard-chart-tooltip";
 import { ChartLoadingState } from "./chart-loading-state";
 import { DASHBOARD_COMPARE_COLOUR } from "../constants";
+import { formatDashboardMoney } from "../helpers";
 
 export function ChartRevenueWeekday({
   data,
@@ -21,12 +22,14 @@ export function ChartRevenueWeekday({
   range,
   isEditing,
   isLoading,
+  currency,
 }: {
   data: { day: string; revenue: number }[];
   comparisonData?: { day: string; revenue: number }[] | null;
   range: { start: Date; end: Date };
   isEditing?: boolean;
   isLoading?: boolean;
+  currency?: string;
 }) {
   const merged = useMemo(() => {
     const withTitles = data.map((item) => ({
@@ -86,7 +89,7 @@ export function ChartRevenueWeekday({
                 compareKey="compareRevenue"
                 range={range}
                 color="#3b82f6"
-                valueFormatter={(value) => `£${value.toLocaleString()}`}
+                valueFormatter={(value) => formatDashboardMoney(value, currency)}
               />
             }
             animationDuration={200}

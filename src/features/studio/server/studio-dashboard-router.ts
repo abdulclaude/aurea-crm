@@ -30,12 +30,19 @@ import {
   client,
   instructor,
   membershipPlan,
+  organization,
   referral,
   studioClass,
   studioBooking,
   studioMembership,
   studioPayment,
 } from "@/db/schema";
+import { normalizeCurrency } from "@/features/commerce/lib/money";
+import {
+  formatDashboardXAxisLabel,
+  getDashboardBucketKeys,
+  type DashboardTimeGranularity,
+} from "@/features/dashboard/time-buckets";
 import { readThroughRedisCache } from "@/lib/redis/read-through-cache";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
@@ -210,7 +217,7 @@ function amount(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-type Granularity = "day" | "week" | "month";
+type Granularity = DashboardTimeGranularity;
 
 function pickGranularity(days: number): Granularity {
   if (days <= 60) return "day";
@@ -235,44 +242,6 @@ function bucketSqlParts(gran: Granularity): {
   };
 }
 
-function dayKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-function weekKey(date: Date): string {
-  const d = new Date(date);
-  const day = (d.getDay() + 6) % 7;
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - day);
-  return d.toISOString().slice(0, 10);
-}
-
-function monthKey(date: Date): string {
-  return date.toISOString().slice(0, 7);
-}
-
-function bucketKey(date: Date, granularity: Granularity): string {
-  if (granularity === "week") return weekKey(date);
-  if (granularity === "month") return monthKey(date);
-  return dayKey(date);
-}
-
-function dayLabel(key: string): string {
-  const date = new Date(`${key}T00:00:00`);
-  return date.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
-}
-
-function weekLabel(key: string): string {
-  const date = new Date(`${key}T00:00:00`);
-  return `w/c ${date.toLocaleDateString("en-GB", { month: "short", day: "numeric" })}`;
-}
-
-function monthLabel(key: string): string {
-  const [y, m] = key.split("-");
-  const date = new Date(Number(y), Number(m) - 1, 1);
-  return date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-}
-
 function ordinal(day: number): string {
   const mod10 = day % 10;
   const mod100 = day % 100;
@@ -291,9 +260,7 @@ function fullDateLabel(date: Date): string {
 }
 
 function bucketLabel(key: string, granularity: Granularity): string {
-  if (granularity === "week") return weekLabel(key);
-  if (granularity === "month") return monthLabel(key);
-  return dayLabel(key);
+  return formatDashboardXAxisLabel(key, granularity);
 }
 
 function bucketFullLabel(key: string, granularity: Granularity): string {
@@ -315,34 +282,8 @@ function bucketFullLabel(key: string, granularity: Granularity): string {
   return fullDateLabel(start);
 }
 
-function dailyKeys(start: Date, end: Date): string[] {
-  const keys: string[] = [];
-  const cursor = new Date(start);
-  cursor.setHours(0, 0, 0, 0);
-  while (cursor < end) {
-    keys.push(dayKey(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return keys;
-}
-
 function bucketKeys(start: Date, end: Date, granularity: Granularity): string[] {
-  if (granularity === "day") return dailyKeys(start, end);
-  const keys: string[] = [];
-  const seen = new Set<string>();
-  const cursor = new Date(start);
-  cursor.setHours(0, 0, 0, 0);
-  while (cursor < end) {
-    const k = bucketKey(cursor, granularity);
-    if (!seen.has(k)) {
-      seen.add(k);
-      keys.push(k);
-    }
-    cursor.setDate(cursor.getDate() + (granularity === "week" ? 7 : 28));
-  }
-  const lastKey = bucketKey(new Date(end.getTime() - 1), granularity);
-  if (!seen.has(lastKey)) keys.push(lastKey);
-  return keys;
+  return getDashboardBucketKeys(start, end, granularity);
 }
 
 function bookingScope(
@@ -369,6 +310,14 @@ function activityLabel(row: {
 }
 
 export const studioDashboardRouter = createTRPCRouter({
+  locale: protectedProcedure.query(async ({ ctx }) => {
+    const orgId = requireOrg(ctx);
+    const selectedOrganization = await db.query.organization.findFirst({
+      where: eq(organization.id, orgId),
+      columns: { currency: true },
+    });
+    return { currency: normalizeCurrency(selectedOrganization?.currency ?? "GBP") };
+  }),
   summaryStats: protectedProcedure
     .input(rangeInputSchema)
     .query(({ ctx, input }) =>

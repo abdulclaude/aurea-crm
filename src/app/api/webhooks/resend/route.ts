@@ -1,213 +1,96 @@
+import { createHash } from "node:crypto";
+
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
-import { db } from "@/db";
-import { campaign, campaignRecipient, client } from "@/db/schema";
 import { Webhook } from "svix";
 
-// Resend webhook event types
-type ResendEventType =
-  | "email.sent"
-  | "email.delivered"
-  | "email.delivery_delayed"
-  | "email.complained"
-  | "email.bounced"
-  | "email.opened"
-  | "email.clicked";
+import { resendWebhookEventSchema } from "@/features/delivery/server/resend-events";
+import {
+  recordManagedResendWebhook,
+  requestManagedResendReceiptProcessing,
+} from "@/features/communications/server/resend-webhook-receipts";
+import { getPlatformResendCredentials } from "@/features/communications/server/platform-credentials";
+import {
+  readBoundedRawBody,
+  WebhookPayloadTooLargeError,
+} from "@/features/webhooks/server/bounded-raw-body";
 
-interface ResendWebhookPayload {
-  type: ResendEventType;
-  created_at: string;
-  data: {
-    email_id: string;
-    from: string;
-    to: string[];
-    subject: string;
-    created_at: string;
-    // For click events
-    click?: {
-      link: string;
-      timestamp: string;
-    };
-    // For bounce events
-    bounce?: {
-      message: string;
-    };
-  };
+function verifies(body: string, headers: Record<string, string>): boolean {
+  const credentials = getPlatformResendCredentials();
+  return [credentials.webhookSecret, credentials.previousWebhookSecret]
+    .filter((secret): secret is string => Boolean(secret))
+    .some((secret) => {
+      try {
+        new Webhook(secret).verify(body, headers);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const body = await request.text();
-    const headers = Object.fromEntries(request.headers.entries());
-
-    // Verify webhook signature if secret is configured
-    const webhookSecret = process.env.RESEND_WEBHOOK_SECRET;
-    
-    if (webhookSecret) {
-      const svixId = headers["svix-id"];
-      const svixTimestamp = headers["svix-timestamp"];
-      const svixSignature = headers["svix-signature"];
-
-      if (!svixId || !svixTimestamp || !svixSignature) {
-        console.error("Missing Svix headers");
-        return NextResponse.json(
-          { error: "Missing webhook signature headers" },
-          { status: 400 }
-        );
-      }
-
-      try {
-        const wh = new Webhook(webhookSecret);
-        wh.verify(body, {
-          "svix-id": svixId,
-          "svix-timestamp": svixTimestamp,
-          "svix-signature": svixSignature,
-        });
-      } catch (err) {
-        console.error("Webhook signature verification failed:", err);
-        return NextResponse.json(
-          { error: "Invalid webhook signature" },
-          { status: 401 }
-        );
-      }
-    }
-
-    const payload = JSON.parse(body) as ResendWebhookPayload;
-    const { type, data } = payload;
-    const emailId = data.email_id;
-
-    console.log(`Resend webhook received: ${type} for email ${emailId}`);
-
-    // Find the campaign recipient by resendEmailId
-    const recipient = await db.query.campaignRecipient.findFirst({
-      where: eq(campaignRecipient.resendEmailId, emailId),
-    });
-
-    if (!recipient) {
-      // This might be an email not from a campaign (e.g., transactional)
-      console.log(`No campaign recipient found for email ${emailId}`);
-      return NextResponse.json({ received: true, processed: false });
-    }
-
-    const campaignId = recipient.campaignId;
-    const now = new Date();
-
-    // Process based on event type
-    switch (type) {
-      case "email.delivered":
-        await db.transaction(async (tx) => {
-          await tx
-            .update(campaignRecipient)
-            .set({
-              status: "DELIVERED",
-              deliveredAt: now,
-              updatedAt: now,
-            })
-            .where(eq(campaignRecipient.id, recipient.id));
-          await tx
-            .update(campaign)
-            .set({ delivered: sql`${campaign.delivered} + 1`, updatedAt: now })
-            .where(eq(campaign.id, campaignId));
-        });
-        break;
-
-      case "email.opened":
-        // Only count first open
-        if (!recipient.openedAt) {
-          await db.transaction(async (tx) => {
-            await tx
-              .update(campaignRecipient)
-              .set({
-                status: "OPENED",
-                openedAt: now,
-                updatedAt: now,
-              })
-              .where(eq(campaignRecipient.id, recipient.id));
-            await tx
-              .update(campaign)
-              .set({ opened: sql`${campaign.opened} + 1`, updatedAt: now })
-              .where(eq(campaign.id, campaignId));
-          });
-        }
-        break;
-
-      case "email.clicked":
-        // Only count first click
-        if (!recipient.clickedAt) {
-          await db.transaction(async (tx) => {
-            await tx
-              .update(campaignRecipient)
-              .set({
-                status: "CLICKED",
-                clickedAt: now,
-                updatedAt: now,
-              })
-              .where(eq(campaignRecipient.id, recipient.id));
-            await tx
-              .update(campaign)
-              .set({ clicked: sql`${campaign.clicked} + 1`, updatedAt: now })
-              .where(eq(campaign.id, campaignId));
-          });
-        }
-        break;
-
-      case "email.bounced":
-        await db.transaction(async (tx) => {
-          await tx
-            .update(campaignRecipient)
-            .set({
-              status: "BOUNCED",
-              bouncedAt: now,
-              updatedAt: now,
-            })
-            .where(eq(campaignRecipient.id, recipient.id));
-          await tx
-            .update(campaign)
-            .set({ bounced: sql`${campaign.bounced} + 1`, updatedAt: now })
-            .where(eq(campaign.id, campaignId));
-        });
-        break;
-
-      case "email.complained":
-        await db.transaction(async (tx) => {
-          await tx
-            .update(campaignRecipient)
-            .set({
-              status: "COMPLAINED",
-              updatedAt: now,
-            })
-            .where(eq(campaignRecipient.id, recipient.id));
-          await tx
-            .update(campaign)
-            .set({ complained: sql`${campaign.complained} + 1`, updatedAt: now })
-            .where(eq(campaign.id, campaignId));
-          await tx
-            .update(client)
-            .set({
-              emailUnsubscribed: true,
-              emailUnsubscribedAt: now,
-              updatedAt: now,
-            })
-            .where(eq(client.id, recipient.clientId));
-        });
-        break;
-
-      case "email.delivery_delayed":
-        // Just log, don't update status yet
-        console.log(`Email ${emailId} delivery delayed`);
-        break;
-
-      case "email.sent":
-        // Already tracked when we sent
-        break;
-    }
-
-    return NextResponse.json({ received: true, processed: true });
-  } catch (error) {
-    console.error("Error processing Resend webhook:", error);
+  const providerEventId = request.headers.get("svix-id");
+  const timestamp = request.headers.get("svix-timestamp");
+  const signature = request.headers.get("svix-signature");
+  if (!providerEventId || !timestamp || !signature) {
     return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
+      { error: "Missing webhook signature headers" },
+      { status: 400 },
     );
+  }
+  let body: string;
+  try {
+    body = await readBoundedRawBody(request);
+  } catch (error) {
+    if (error instanceof WebhookPayloadTooLargeError) {
+      return NextResponse.json(
+        { error: "Webhook payload is too large" },
+        { status: 413 },
+      );
+    }
+    throw error;
+  }
+  if (
+    !verifies(body, {
+      "svix-id": providerEventId,
+      "svix-timestamp": timestamp,
+      "svix-signature": signature,
+    })
+  ) {
+    return NextResponse.json(
+      { error: "Invalid webhook signature" },
+      { status: 400 },
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body) as unknown;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+  const event = resendWebhookEventSchema.safeParse(raw);
+  if (!event.success) {
+    return NextResponse.json(
+      { error: "Unsupported webhook payload" },
+      { status: 400 },
+    );
+  }
+  try {
+    const receipt = await recordManagedResendWebhook({
+      providerEventId,
+      payloadHash: createHash("sha256").update(body).digest("hex"),
+      rawBody: body,
+      eventType: event.data.type,
+      providerResourceId: event.data.data.email_id,
+      occurredAt: event.data.created_at,
+    });
+    await requestManagedResendReceiptProcessing(receipt.receiptId);
+    return NextResponse.json({ received: true, ...receipt });
+  } catch (error) {
+    console.error("Failed to persist managed Resend webhook", {
+      providerEventId,
+      error: error instanceof Error ? error.message : "Unknown webhook error",
+    });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

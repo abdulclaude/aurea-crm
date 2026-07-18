@@ -1,13 +1,10 @@
 import type { SortingState } from "@tanstack/react-table";
 
-import type {
-  ReportDataRow,
-  ReportDataValue,
-  ReportField,
-} from "@/features/reports/types";
+import type { ReportDataRow, ReportField } from "@/features/reports/types";
 
 import { parseReportDate } from "./report-table-formatters";
 import type { ReportFilterState } from "./report-table-types";
+import { compareReportValues } from "@/features/reports/lib/report-view-projection";
 
 export type ReportDateBounds = {
   field: ReportField;
@@ -39,7 +36,9 @@ export function matchesReportSearch(
   if (!query) return true;
 
   return Object.values(row).some((value) =>
-    String(value ?? "").toLocaleLowerCase("en-GB").includes(query),
+    String(value ?? "")
+      .toLocaleLowerCase("en-GB")
+      .includes(query),
   );
 }
 
@@ -56,7 +55,9 @@ export function sortReportRows(
 
   return [...rows].sort((first, second) => {
     const direction = activeSort.desc ? -1 : 1;
-    return compareReportValues(first[field.id], second[field.id], field) * direction;
+    return (
+      compareReportValues(first[field.id], second[field.id], field) * direction
+    );
   });
 }
 
@@ -110,33 +111,9 @@ export function matchesSelectedFilters(
 }
 
 export function isSameReportDay(first: Date, second: Date): boolean {
-  return startOfReportDay(first).getTime() === startOfReportDay(second).getTime();
-}
-
-function compareReportValues(
-  first: ReportDataValue,
-  second: ReportDataValue,
-  field: ReportField,
-): number {
-  if (first === second) return 0;
-  if (first === null || first === undefined) return 1;
-  if (second === null || second === undefined) return -1;
-
-  if (["Currency", "Number", "Percent"].includes(field.type)) {
-    return Number(first) - Number(second);
-  }
-
-  if (field.type === "Date") {
-    return (
-      (parseReportDate(first)?.getTime() ?? 0) -
-      (parseReportDate(second)?.getTime() ?? 0)
-    );
-  }
-
-  return String(first).localeCompare(String(second), "en-GB", {
-    numeric: true,
-    sensitivity: "base",
-  });
+  return (
+    startOfReportDay(first).getTime() === startOfReportDay(second).getTime()
+  );
 }
 
 function startOfReportDay(date: Date): Date {
@@ -144,5 +121,13 @@ function startOfReportDay(date: Date): Date {
 }
 
 function endOfReportDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999,
+  );
 }

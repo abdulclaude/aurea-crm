@@ -45,7 +45,7 @@ export const GoogleCalendarDeleteEventNode: React.FC<
     nodeId: props.id,
     channel: GOOGLE_CALENDAR_DELETE_EVENT_CHANNEL_NAME,
     topic: "status",
-    refreshToken: fetchGoogleCalendarDeleteEventRealtimeToken as any,
+    refreshToken: fetchGoogleCalendarDeleteEventRealtimeToken,
   });
 
   const handleSubmit = (values: GoogleCalendarDeleteEventFormValues) => {

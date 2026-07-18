@@ -287,8 +287,8 @@ function InstructorActionsCell({ row }: { row: { original: InstructorRow } }) {
       { instructorId },
       {
         onSuccess: () => {
-          toast.success(`Magic link sent to ${email}`, {
-            description: `${name} can now access the instructor dashboard`,
+          toast.success(`Magic link queued for ${email}`, {
+            description: `${name} will receive access instructions shortly`,
           });
         },
         onError: (error) => {

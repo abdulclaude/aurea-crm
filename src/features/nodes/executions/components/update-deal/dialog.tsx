@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import {
   Sheet,
-  SheetContent,
+  ResizableSheetContent,
   SheetDescription,
   SheetFooter,
   SheetHeader,
@@ -122,7 +122,7 @@ export const UpdateDealDialog: React.FC<Props> = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto sm:max-w-xl bg-background border-black/10">
+      <ResizableSheetContent className="overflow-y-auto border-border bg-background">
         <SheetHeader className="px-6 p-6 pb-2 gap-1">
           <SheetTitle>Update Deal Configuration</SheetTitle>
           <SheetDescription>
@@ -131,7 +131,7 @@ export const UpdateDealDialog: React.FC<Props> = ({
           </SheetDescription>
         </SheetHeader>
 
-        <Separator className="my-4 bg-black/10" />
+        <Separator className="my-4 bg-border" />
 
         <Form {...form}>
           <form
@@ -371,7 +371,7 @@ export const UpdateDealDialog: React.FC<Props> = ({
             </SheetFooter>
           </form>
         </Form>
-      </SheetContent>
+      </ResizableSheetContent>
     </Sheet>
   );
 };

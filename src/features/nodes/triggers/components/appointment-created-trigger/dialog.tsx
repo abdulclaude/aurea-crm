@@ -1,20 +1,10 @@
 "use client";
 
-import { useForm } from "react-hook-form";
-import { useEffect } from "react";
-
-import {
-  Sheet,
-  ResizableSheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Separator } from "@/components/ui/separator";
-
-import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useEffect } from "react";
+import { useForm } from "react-hook-form";
+
+import type { VariableItem } from "@/components/tiptap/variable-suggestion";
 import {
   Form,
   FormControl,
@@ -24,106 +14,110 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { VariableInput } from "@/components/tiptap/variable-input";
-import type { VariableItem } from "@/components/tiptap/variable-suggestion";
+import { Switch } from "@/components/ui/switch";
+import {
+  StudioNodeDialogFooter,
+  StudioNodeDialogLayout,
+} from "@/features/nodes/studio/components/studio-node-dialog-layout";
 
-const formSchema = z.object({
-  variableName: z
-    .string()
-    .min(1, { message: "Variable name is required." })
-    .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/, {
-      message: "Variable name must start with a letter or underscore and contain only letters, numbers and underscores.",
-    }),
-});
+import {
+  appointmentCreatedTriggerConfigSchema,
+  type AppointmentCreatedTriggerFormValues,
+} from "./config";
 
-export type AppointmentCreatedTriggerFormValues = z.infer<typeof formSchema>;
-
-interface Props {
+type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (values: AppointmentCreatedTriggerFormValues) => void;
   defaultValues?: Partial<AppointmentCreatedTriggerFormValues>;
   variables: VariableItem[];
-}
+};
 
-export const AppointmentCreatedTriggerDialog: React.FC<Props> = ({
+export function AppointmentCreatedTriggerDialog({
   open,
   onOpenChange,
   onSubmit,
   defaultValues = {},
-  variables,
-}) => {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+}: Props): React.ReactElement {
+  const form = useForm<AppointmentCreatedTriggerFormValues>({
+    resolver: zodResolver(appointmentCreatedTriggerConfigSchema),
     defaultValues: {
       variableName: defaultValues.variableName || "newAppointment",
-
+      firstAppointmentOnly: defaultValues.firstAppointmentOnly ?? false,
     },
   });
 
   useEffect(() => {
-    if (open) {
-      form.reset({
-        variableName: defaultValues.variableName || "newAppointment",
-
-      });
-    }
-  }, [open, defaultValues, form]);
-
-  const handleSubmit = (values: z.infer<typeof formSchema>) => {
-    onSubmit(values);
-    onOpenChange(false);
-  };
+    if (!open) return;
+    form.reset({
+      variableName: defaultValues.variableName || "newAppointment",
+      firstAppointmentOnly: defaultValues.firstAppointmentOnly ?? false,
+    });
+  }, [
+    defaultValues.firstAppointmentOnly,
+    defaultValues.variableName,
+    form,
+    open,
+  ]);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <ResizableSheetContent className="overflow-y-auto sm:max-w-xl bg-background border-white/5">
-        <SheetHeader className="px-6 pt-8 pb-1 gap-1">
-          <SheetTitle>Appointment Created Configuration</SheetTitle>
-          <SheetDescription>
-            Triggers when an appointment is created
-          </SheetDescription>
-        </SheetHeader>
-
-        <Separator className="my-5" />
-
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-6 px-6"
-          >
-            <FormField
-              control={form.control}
-              name="variableName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Variable Name</FormLabel>
-                  <FormControl>
-                    <Input placeholder="newAppointment" {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    Reference the result in other nodes using this variable name.
+    <StudioNodeDialogLayout
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Appointment booked trigger"
+      description="Start when an appointment is booked, optionally only for the client's first appointment."
+    >
+      <Form {...form}>
+        <form
+          className="space-y-6 px-6"
+          onSubmit={form.handleSubmit((values) => {
+            onSubmit(values);
+            onOpenChange(false);
+          })}
+        >
+          <FormField
+            control={form.control}
+            name="firstAppointmentOnly"
+            render={({ field }) => (
+              <FormItem className="flex items-center justify-between gap-4 rounded border border-border p-4">
+                <div>
+                  <FormLabel>First appointment only</FormLabel>
+                  <FormDescription className="mt-1">
+                    Ignore later appointment bookings for the same client.
                   </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <SheetFooter className="px-0 pb-4">
-              <Button
-                type="submit"
-                className="w-max ml-auto"
-                variant="gradient"
-              >
-                Save changes
-              </Button>
-            </SheetFooter>
-          </form>
-        </Form>
-      </ResizableSheetContent>
-    </Sheet>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="variableName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Variable name</FormLabel>
+                <FormControl>
+                  <Input placeholder="newAppointment" {...field} />
+                </FormControl>
+                <FormDescription>
+                  Later steps can reference the booking and client from this
+                  variable.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <StudioNodeDialogFooter />
+        </form>
+      </Form>
+    </StudioNodeDialogLayout>
   );
-};
+}
+
+export type { AppointmentCreatedTriggerFormValues } from "./config";

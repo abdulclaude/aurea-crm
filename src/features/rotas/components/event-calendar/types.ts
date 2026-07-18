@@ -12,6 +12,14 @@ export interface CalendarEvent {
   location?: string;
   parentRotaId?: string; // For recurring events - points to the master rota
   isRecurring?: boolean; // Whether this is a recurring event
+  person?: {
+    name: string;
+    imageUrl?: string | null;
+  };
+  attendance?: {
+    booked: number;
+    capacity: number | null;
+  };
 }
 
 export type EventColor = "blue" | "orange" | "violet" | "rose" | "emerald";

@@ -2,7 +2,7 @@
 
 import { Suspense } from "react";
 import { LoaderCircle } from "lucide-react";
-import { PayrollDashboard } from "@/features/payroll/components/payroll-dashboard";
+import { PayrollReportingShell } from "@/features/payroll/components/payroll-reporting-shell";
 
 export default function PayrollPage() {
   return (
@@ -14,7 +14,7 @@ export default function PayrollPage() {
         </div>
       }
     >
-      <PayrollDashboard />
+      <PayrollReportingShell />
     </Suspense>
   );
 }

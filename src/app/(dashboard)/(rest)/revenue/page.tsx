@@ -45,6 +45,8 @@ const TYPE_BADGE_STYLES: Record<string, string> = {
     "text-emerald-600 bg-emerald-50 ring-emerald-400 dark:ring-emerald-800",
   GIFT_CARD: "text-pink-600 bg-pink-50 ring-pink-400 dark:ring-pink-800",
   POS: "text-violet-600 bg-violet-50 ring-violet-400 dark:ring-violet-800",
+  ACCOUNT_CREDIT:
+    "text-cyan-600 bg-cyan-50 ring-cyan-400 dark:ring-cyan-800",
 };
 
 const STATUS_BADGE_STYLES: Record<string, string> = {
@@ -523,6 +525,7 @@ export default function RevenuePage() {
           <div className="grid auto-rows-[288px] grid-cols-1 gap-3 md:grid-cols-2">
             <div className="col-span-1 md:col-span-2 h-72">
               <ChartRevenue
+                currency={currency}
                 data={revenueData}
                 comparisonData={revenueCompareRange ? revenueCompare : null}
                 range={dashboardRange}
@@ -531,6 +534,7 @@ export default function RevenuePage() {
             </div>
             <div className="h-72">
               <ChartRevenueCategory
+                currency={currency}
                 data={categoryData}
                 comparisonData={revCatCompareRange ? revCatCompare : null}
                 range={dashboardRange}
@@ -539,6 +543,7 @@ export default function RevenuePage() {
             </div>
             <div className="h-72">
               <ChartRevenueWeekday
+                currency={currency}
                 data={revenueByWeekday ?? []}
                 comparisonData={
                   revWeekdayCompareRange ? revWeekdayCompare : null
@@ -593,6 +598,7 @@ export default function RevenuePage() {
                       { value: "CLASS_PACK", label: "Class pack" },
                       { value: "DROP_IN", label: "Drop-in" },
                       { value: "GIFT_CARD", label: "Gift card" },
+                      { value: "ACCOUNT_CREDIT", label: "Account credit" },
                       { value: "POS", label: "POS" },
                     ],
                     selectedValues: txTypeFilter,

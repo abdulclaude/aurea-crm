@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -24,14 +25,17 @@ import {
 } from "@/components/ui/select";
 import {
   Clock,
+  ChevronLeft,
+  ChevronRight,
   SearchIcon,
   QrCode,
   Flame,
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { addDays, format, isToday, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
+import { CheckInPassDialog } from "@/features/studio/components/check-in-pass-dialog";
 
 function CompletionRing({ pct, size = 28 }: { pct: number; size?: number }) {
   const strokeWidth = 3;
@@ -88,18 +92,25 @@ export default function CheckInPage() {
   const queryClient = useQueryClient();
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() =>
+    startOfDay(new Date()),
+  );
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+  const dayStart = startOfDay(selectedDate);
+  const dayEnd = addDays(dayStart, 1);
 
-  const { data: todayClasses, isLoading: classesLoading } = useQuery(
+  const { data: dayClasses, isLoading: classesLoading } = useQuery(
     trpc.studioClassesEnhanced.list.queryOptions({
-      startDate: today.toISOString(),
-      endDate: tomorrow.toISOString(),
+      startDate: dayStart.toISOString(),
+      endDate: dayEnd.toISOString(),
       pageSize: 50,
     }),
   );
+
+  useEffect(() => {
+    setSelectedClassId("");
+    setSearchQuery("");
+  }, [selectedDate]);
 
   const { data: roster, isLoading: rosterLoading } = useQuery({
     ...trpc.checkin.getClassRoster.queryOptions({ classId: selectedClassId }),
@@ -133,6 +144,21 @@ export default function CheckInPage() {
     }),
   );
 
+  const passCheckInMutation = useMutation(
+    trpc.checkin.qrCheckIn.mutationOptions({
+      onSuccess: (result) => {
+        queryClient.invalidateQueries({
+          queryKey: trpc.checkin.getClassRoster.queryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.checkin.todayStats.queryKey(),
+        });
+        toast.success(`${result.client.name} checked in`);
+      },
+      onError: (err: { message: string }) => toast.error(err.message),
+    }),
+  );
+
   const filteredRoster = roster?.roster.filter((r) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -143,9 +169,10 @@ export default function CheckInPage() {
   });
 
   const totalBooked = roster?.totalBooked ?? 0;
-  const selectedClassEnded = roster?.class.endTime
-    ? new Date(roster.class.endTime) <= new Date()
-    : false;
+  const selectedClassEnded = roster?.hasClassEnded ?? false;
+  const checkInOpen = roster?.checkInOpen ?? false;
+  const selectableClasses =
+    dayClasses?.classes.filter((cls) => cls.status !== "CANCELLED") ?? [];
   const capacityPct = roster?.maxCapacity
     ? Math.round((totalBooked / roster.maxCapacity) * 100)
     : null;
@@ -156,7 +183,7 @@ export default function CheckInPage() {
         <div>
           <h1 className="text-lg font-semibold text-primary">Check-in</h1>
           <p className="text-xs text-primary/75">
-            Check in members to today&apos;s classes
+            Review rosters and check in members to active classes
           </p>
         </div>
         {capacityPct !== null && (
@@ -170,16 +197,44 @@ export default function CheckInPage() {
       <Separator className="bg-black/5 dark:bg-white/5" />
 
       {/* Toolbar — matches StudioTableToolbar layout */}
-      <div className="flex items-center px-6 py-4 gap-2">
+      <div className="flex flex-wrap items-center px-6 py-4 gap-2">
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Previous day"
+            onClick={() => setSelectedDate((date) => addDays(date, -1))}
+          >
+            <ChevronLeft />
+          </Button>
+          <DatePicker
+            date={selectedDate}
+            onSelect={(date) => date && setSelectedDate(startOfDay(date))}
+            maxDate={startOfDay(new Date())}
+            ariaLabel="Check-in date"
+            className="w-48"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Next day"
+            disabled={isToday(selectedDate)}
+            onClick={() => setSelectedDate((date) => addDays(date, 1))}
+          >
+            <ChevronRight />
+          </Button>
+        </div>
         {classesLoading ? (
           <div className="h-8.5 w-72 animate-pulse rounded-lg bg-primary/5" />
-        ) : todayClasses?.classes && todayClasses.classes.length > 0 ? (
+        ) : selectableClasses.length > 0 ? (
           <Select value={selectedClassId} onValueChange={setSelectedClassId}>
             <SelectTrigger className="h-8.5 w-72 rounded-lg">
               <SelectValue placeholder="Select a class..." />
             </SelectTrigger>
             <SelectContent>
-              {todayClasses.classes.map((cls) => (
+              {selectableClasses.map((cls) => (
                 <SelectItem key={cls.id} value={cls.id}>
                   <span className="flex items-center gap-2">
                     <span className="text-xs font-medium">{cls.name}</span>
@@ -196,7 +251,7 @@ export default function CheckInPage() {
           </Select>
         ) : (
           <p className="text-xs text-primary/50">
-            No classes scheduled for today.
+            No classes scheduled for {format(selectedDate, "MMM d, yyyy")}.
           </p>
         )}
 
@@ -211,6 +266,14 @@ export default function CheckInPage() {
             />
           </div>
         )}
+
+        <CheckInPassDialog
+          disabled={!selectedClassId || !checkInOpen}
+          isPending={passCheckInMutation.isPending}
+          onSubmit={(qrToken) =>
+            passCheckInMutation.mutate({ classId: selectedClassId, qrToken })
+          }
+        />
       </div>
 
       {/* Table / Empty states */}
@@ -241,14 +304,9 @@ export default function CheckInPage() {
                   <TableHead className={TH} style={{ minWidth: 130 }}>
                     Status
                   </TableHead>
-                  {!selectedClassEnded && (
-                    <TableHead
-                      className={TH}
-                      style={{ minWidth: 160 }}
-                    >
-                      Action
-                    </TableHead>
-                  )}
+                  <TableHead className={TH} style={{ minWidth: 160 }}>
+                    Action
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -301,16 +359,16 @@ export default function CheckInPage() {
                         {entry.isCheckedIn ? (
                           <Badge
                             variant="outline"
-                            className="text-[11px] w-fit capitalize text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800"
+                            className="text-[11px] w-fit text-emerald-600 ring-emerald-300 bg-emerald-100 dark:border-emerald-800"
                           >
                             Checked in
                           </Badge>
                         ) : entry.status === "NO_SHOW" ? (
                           <Badge
                             variant="outline"
-                            className="text-[11px] w-fit capitalize text-rose-600 ring-rose-300 bg-rose-100 dark:border-rose-800"
+                            className="text-[11px] w-fit text-rose-600 ring-rose-300 bg-rose-100 dark:border-rose-800"
                           >
-                            No-show
+                            No show
                           </Badge>
                         ) : (
                           <Badge
@@ -330,42 +388,47 @@ export default function CheckInPage() {
                         )}
                       </div>
                     </TableCell>
-                    {!selectedClassEnded && (
-                      <TableCell className={TD}>
-                        {!entry.isCheckedIn && entry.status !== "NO_SHOW" && (
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              className="h-7 w-max text-xs"
-                              onClick={() =>
-                                noShowMutation.mutate({
-                                  bookingId: entry.bookingId,
-                                })
-                              }
-                              disabled={noShowMutation.isPending}
-                            >
-                              No show
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="success"
-                              className="h-7 w-max text-xs"
-                              onClick={() =>
-                                checkInMutation.mutate({
-                                  classId: selectedClassId,
-                                  clientId: entry.client.id,
-                                  method: "MANUAL",
-                                })
-                              }
-                              disabled={checkInMutation.isPending}
-                            >
-                              Check in
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                    )}
+                    <TableCell className={TD}>
+                      {!entry.isCheckedIn && entry.status !== "NO_SHOW" ? (
+                        selectedClassEnded ? (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-7 w-max text-xs"
+                            onClick={() =>
+                              noShowMutation.mutate({
+                                bookingId: entry.bookingId,
+                              })
+                            }
+                            disabled={noShowMutation.isPending}
+                          >
+                            No show
+                          </Button>
+                        ) : checkInOpen ? (
+                          <Button
+                            size="sm"
+                            variant="success"
+                            className="h-7 w-max text-xs"
+                            onClick={() =>
+                              checkInMutation.mutate({
+                                classId: selectedClassId,
+                                clientId: entry.client.id,
+                                method: "MANUAL",
+                              })
+                            }
+                            disabled={checkInMutation.isPending}
+                          >
+                            Check in
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            -
+                          </span>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -383,7 +446,7 @@ export default function CheckInPage() {
             title="No members match your search"
           />
         ) : null
-      ) : todayClasses?.classes && todayClasses.classes.length > 0 ? (
+      ) : selectableClasses.length > 0 ? (
         <EmptyPanel
           icon={<QrCode className="size-8 text-primary/20" />}
           title="Select a class to view its roster"
@@ -392,8 +455,8 @@ export default function CheckInPage() {
       ) : !classesLoading ? (
         <EmptyPanel
           icon={<Clock className="size-8 text-primary/20" />}
-          title="No classes today"
-          subtitle="There are no classes scheduled for today."
+          title={`No classes on ${format(selectedDate, "MMM d")}`}
+          subtitle="Choose another date to review an earlier roster."
         />
       ) : null}
     </div>

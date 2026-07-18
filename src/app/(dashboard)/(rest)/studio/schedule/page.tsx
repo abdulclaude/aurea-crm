@@ -3,11 +3,7 @@
 import { useMemo, useState } from "react";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { IconLoader as LoaderIcon } from "central-icons/IconLoader";
-import { CalendarPlus } from "lucide-react";
-import Link from "next/link";
 import {
   addDays,
   endOfDay,
@@ -18,7 +14,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import { CreateClassDialog } from "@/features/studio/components/create-class-dialog";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   CalendarEvent,
   CalendarView,
@@ -27,10 +23,25 @@ import type {
 import { EventCalendar } from "@/features/rotas/components/event-calendar";
 import { CalendarContext } from "@/features/rotas/components/event-calendar/calendar-context";
 import { ClassViewSwitcher } from "@/features/studio/components/class-view-switcher";
+import {
+  calendarTimeBounds,
+  workspaceWeekStartIndex,
+} from "@/features/workspace-settings/lib/schedule-display";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+const ALL_SERVICES = "__all_services__";
 
 export default function StudioSchedulePage() {
   const trpc = useTRPC();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedServiceTypeId = searchParams.get("serviceTypeId") ?? "";
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<CalendarView>("week");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -47,6 +58,10 @@ export default function StudioSchedulePage() {
     violet: true,
     orange: true,
   });
+  const { data: displaySettings } = useQuery(
+    trpc.workspaceSettings.getScheduleDisplaySettings.queryOptions(),
+  );
+  const weekStartsOn = workspaceWeekStartIndex(displaySettings?.weekStart);
 
   const range = useMemo(() => {
     if (view === "month") {
@@ -68,10 +83,10 @@ export default function StudioSchedulePage() {
       };
     }
     return {
-      start: startOfWeek(currentDate, { weekStartsOn: 1 }),
-      end: endOfWeek(currentDate, { weekStartsOn: 1 }),
+      start: startOfWeek(currentDate, { weekStartsOn }),
+      end: endOfWeek(currentDate, { weekStartsOn }),
     };
-  }, [currentDate, view]);
+  }, [currentDate, view, weekStartsOn]);
 
   const { data: schedule, isLoading } = useQuery({
     ...trpc.studioClassesEnhanced.getSchedule.queryOptions({
@@ -80,9 +95,8 @@ export default function StudioSchedulePage() {
     }),
     placeholderData: (prev) => prev,
   });
-
-  const { data: stats } = useQuery(
-    trpc.studioClassesEnhanced.stats.queryOptions(),
+  const { data: services = [] } = useQuery(
+    trpc.serviceCatalog.list.queryOptions({ includeInactive: true }),
   );
 
   const events = useMemo<CalendarEvent[]>(() => {
@@ -90,64 +104,78 @@ export default function StudioSchedulePage() {
 
     return Object.values(schedule)
       .flat()
-      .map((cls) => ({
-        id: cls.id,
-        title: cls.name,
-        description: [
-          cls.instructor?.name,
-          `${cls._count.studioBooking}/${cls.maxCapacity ?? "∞"} booked`,
-        ]
-          .filter(Boolean)
-          .join(" • "),
-        start: new Date(cls.startTime),
-        end: cls.endTime
-          ? new Date(cls.endTime)
-          : new Date(new Date(cls.startTime).getTime() + 60 * 60 * 1000),
-        color: (cls.classType?.color
-          ? colorToEventColor(cls.classType.color)
-          : "blue") as EventColor,
-        label: cls.classType?.name,
-      }));
-  }, [schedule]);
+      .filter(
+        (cls) =>
+          !selectedServiceTypeId ||
+          cls.serviceType?.id === selectedServiceTypeId,
+      )
+      .map((cls) => {
+        const booked = cls.studioBookings.filter(
+          (booking) =>
+            booking.status !== "CANCELLED" && booking.status !== "LATE_CANCEL",
+        ).length;
+        return {
+          id: cls.id,
+          title: cls.name,
+          start: new Date(cls.startTime),
+          end: cls.endTime
+            ? new Date(cls.endTime)
+            : new Date(new Date(cls.startTime).getTime() + 60 * 60 * 1000),
+          color: ((cls.serviceType?.calendarColor ?? cls.classType?.color)
+            ? colorToEventColor(
+                cls.serviceType?.calendarColor ?? cls.classType?.color ?? "",
+              )
+            : "blue") as EventColor,
+          label: cls.serviceType?.name ?? cls.classType?.name,
+          person: cls.instructor
+            ? {
+                name: cls.instructor.name,
+                imageUrl: cls.instructor.profilePhoto,
+              }
+            : undefined,
+          attendance: {
+            booked,
+            capacity: cls.maxCapacity,
+          },
+        };
+      });
+  }, [schedule, selectedServiceTypeId]);
 
   const timeBounds = useMemo(() => {
-    if (events.length === 0) {
-      return { startHour: 7, endHour: 22 };
-    }
-
-    let earliestHour = 23;
-    for (const event of events) {
-      earliestHour = Math.min(earliestHour, event.start.getHours());
-    }
-
-    return {
-      startHour: Math.max(0, earliestHour - 1),
-      endHour: 24,
-    };
-  }, [events]);
+    return calendarTimeBounds({
+      startMinutes: displaySettings?.startMinutes,
+      endMinutes: displaySettings?.endMinutes,
+      events,
+    });
+  }, [displaySettings, events]);
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex flex-col gap-4 p-6 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-primary">Schedule</h1>
-          <p className="text-xs text-primary/75">
-            View and manage your class schedule
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ClassViewSwitcher activeView="schedule" />
-          <Button asChild>
-            <Link href="/studio/classes/new">
-              <CalendarPlus className="size-4" />
-              Add class
-            </Link>
-          </Button>
-        </div>
+    <div className="flex h-full flex-col">
+      <div className="flex flex-col justify-end gap-3 border-b border-black/5 px-8 py-3 sm:flex-row sm:items-center dark:border-white/5">
+        <Select
+          value={selectedServiceTypeId || ALL_SERVICES}
+          onValueChange={(value) => {
+            router.replace(
+              value === ALL_SERVICES
+                ? "/studio/schedule"
+                : `/studio/schedule?serviceTypeId=${encodeURIComponent(value)}`,
+              { scroll: false },
+            );
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-max">
+            <SelectValue placeholder="All services" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_SERVICES}>All services</SelectItem>
+            {services.map((service) => (
+              <SelectItem key={service.id} value={service.id}>
+                {service.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
-
-      <Separator className="bg-black/5 dark:bg-white/5" />
-
       <CalendarContext.Provider
         value={{
           currentDate,
@@ -174,6 +202,8 @@ export default function StudioSchedulePage() {
             events={events}
             initialView="week"
             timeBounds={timeBounds}
+            weekStartsOn={weekStartsOn}
+            slotMinutes={displaySettings?.slotMinutes ?? 15}
             enableCellEventCreate
             onViewChange={setView}
             onEventSelect={(event) => {

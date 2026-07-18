@@ -1,17 +1,26 @@
 import { type NextRequest } from "next/server";
-import { createId } from "@paralleldrive/cuid2";
+import { TRPCError } from "@trpc/server";
 import { db } from "@/db";
-import { ClassInstanceStatus, StudioBookingStatus } from "@/db/enums";
+import { NodeType, StudioBookingStatus } from "@/db/enums";
 import { client, studioBooking, studioClass } from "@/db/schema";
+import {
+  cancelClassBooking,
+  createClassBooking,
+} from "@/features/studio/server/class-booking-service";
+import { createClassBookingCheckout } from "@/features/studio/server/class-booking-checkout";
 import { validateApiKey, requireScope, apiError } from "@/lib/api-auth";
-import { and, count, desc, eq, type SQL } from "drizzle-orm";
+import { and, desc, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { triggerWorkflowsForNodeType } from "@/lib/workflow-triggers";
+import { dispatchClassBookingWorkflow } from "@/features/studio/server/paid-class-booking-workflow-dispatch";
+import { dispatchWaitlistSpotOpened } from "@/features/studio/server/waitlist-workflow-dispatch";
 
 export const runtime = "nodejs";
 
 const CreateBookingSchema = z.object({
   classId: z.string().min(1),
   clientId: z.string().min(1),
+  slidingScaleAmount: z.string().optional(),
 });
 
 export async function GET(req: NextRequest) {
@@ -20,6 +29,9 @@ export async function GET(req: NextRequest) {
 
   const scope = requireScope(auth.apiKey.scopes, "bookings:read");
   if (!scope.ok) return apiError(scope.error, 403);
+  if (!auth.apiKey.locationId) {
+    return apiError("API key must be bound to a location", 403);
+  }
 
   const { searchParams } = req.nextUrl;
   const clientId = searchParams.get("clientId") ?? undefined;
@@ -29,6 +41,9 @@ export async function GET(req: NextRequest) {
 
   const conditions: SQL[] = [
     eq(studioClass.organizationId, auth.apiKey.organizationId),
+    eq(studioClass.locationId, auth.apiKey.locationId),
+    eq(client.organizationId, auth.apiKey.organizationId),
+    eq(client.locationId, auth.apiKey.locationId),
   ];
   if (clientId) {
     conditions.push(eq(studioBooking.clientId, clientId));
@@ -80,6 +95,9 @@ export async function POST(req: NextRequest) {
 
   const writeScope = requireScope(auth.apiKey.scopes, "bookings:write");
   if (!writeScope.ok) return apiError(writeScope.error, 403);
+  if (!auth.apiKey.locationId) {
+    return apiError("API key must be bound to a location", 403);
+  }
 
   let body: unknown;
   try {
@@ -91,7 +109,7 @@ export async function POST(req: NextRequest) {
   const parsedBody = CreateBookingSchema.safeParse(body);
   if (!parsedBody.success) {
     const missingClientId = parsedBody.error.issues.some((issue) =>
-      issue.path.includes("clientId")
+      issue.path.includes("clientId"),
     );
     if (missingClientId) {
       return apiError("clientId is required", 400);
@@ -100,71 +118,107 @@ export async function POST(req: NextRequest) {
   }
   const data = parsedBody.data;
 
-  const [classRecord] = await db
-    .select({
-      id: studioClass.id,
-      maxCapacity: studioClass.maxCapacity,
-      bookedCount: count(studioBooking.id),
-    })
-    .from(studioClass)
-    .leftJoin(studioBooking, eq(studioBooking.classId, studioClass.id))
-    .where(
-      and(
-        eq(studioClass.id, data.classId),
-        eq(studioClass.organizationId, auth.apiKey.organizationId),
-        eq(studioClass.status, ClassInstanceStatus.SCHEDULED)
-      )
-    )
-    .groupBy(studioClass.id, studioClass.maxCapacity)
-    .limit(1);
-
-  if (!classRecord) return apiError("Class not found or not available", 404);
-
-  if (classRecord.maxCapacity && classRecord.bookedCount >= classRecord.maxCapacity) {
-    return apiError("Class is at capacity", 409);
-  }
-
-  const [clientRecord] = await db
-    .select({ id: client.id })
-    .from(client)
-    .where(
-      and(
-        eq(client.id, data.clientId),
-        eq(client.organizationId, auth.apiKey.organizationId)
-      )
-    )
-    .limit(1);
-  if (!clientRecord) return apiError("Member not found", 404);
-
-  const [existing] = await db
-    .select()
-    .from(studioBooking)
-    .where(
-      and(
-        eq(studioBooking.classId, data.classId),
-        eq(studioBooking.clientId, data.clientId),
-        eq(studioBooking.status, StudioBookingStatus.BOOKED)
-      )
-    )
-    .limit(1);
-  if (existing) return Response.json({ data: existing }, { status: 200 });
-
-  const [booking] = await db
-    .insert(studioBooking)
-    .values({
-      id: createId(),
+  try {
+    const booking = await createClassBooking({
+      organizationId: auth.apiKey.organizationId,
+      locationId: auth.apiKey.locationId,
       classId: data.classId,
       clientId: data.clientId,
-      status: StudioBookingStatus.BOOKED,
-      updatedAt: new Date(),
-    })
-    .returning({
-      id: studioBooking.id,
-      status: studioBooking.status,
-      bookedAt: studioBooking.bookedAt,
-      classId: studioBooking.classId,
-      clientId: studioBooking.clientId,
+      slidingScaleAmount: data.slidingScaleAmount,
+      channel: "API",
     });
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ??
+      process.env.APP_URL ??
+      "http://localhost:3000";
+    const checkout = booking.requiresPayment
+      ? await createClassBookingCheckout({
+          organizationId: auth.apiKey.organizationId,
+          locationId: auth.apiKey.locationId,
+          bookingId: booking.bookingId,
+          successUrl: `${appUrl}/studio/classes?payment=success`,
+          cancelUrl: `${appUrl}/studio/classes?payment=cancelled`,
+        })
+      : null;
+    if (booking.created && !booking.requiresPayment) {
+      await dispatchClassBookingWorkflow(booking.bookingId).catch(
+        (error: unknown) => {
+          console.error("Failed to trigger API class-booked workflow", error);
+        },
+      );
+    }
+    return Response.json(
+      { data: { ...booking, checkout } },
+      { status: booking.created ? 201 : 200 },
+    );
+  } catch (error: unknown) {
+    if (!(error instanceof TRPCError)) throw error;
+    const status =
+      error.code === "NOT_FOUND"
+        ? 404
+        : error.code === "FORBIDDEN"
+          ? 403
+          : error.code === "CONFLICT" || error.code === "PRECONDITION_FAILED"
+            ? 409
+            : 400;
+    return apiError(error.message, status);
+  }
+}
 
-  return Response.json({ data: booking }, { status: 201 });
+export async function DELETE(req: NextRequest) {
+  const auth = await validateApiKey(req);
+  if (!auth.valid) return apiError(auth.error, 401);
+  const writeScope = requireScope(auth.apiKey.scopes, "bookings:write");
+  if (!writeScope.ok) return apiError(writeScope.error, 403);
+  if (!auth.apiKey.locationId) {
+    return apiError("API key must be bound to a location", 403);
+  }
+  const bookingId = req.nextUrl.searchParams.get("bookingId");
+  if (!bookingId) return apiError("bookingId is required", 400);
+
+  try {
+    const cancelled = await cancelClassBooking({
+      organizationId: auth.apiKey.organizationId,
+      locationId: auth.apiKey.locationId,
+      bookingId,
+      channel: "API",
+    });
+    await triggerWorkflowsForNodeType({
+      nodeType: NodeType.CLASS_CANCELLED_TRIGGER,
+      organizationId: auth.apiKey.organizationId,
+      locationId: auth.apiKey.locationId,
+      idempotencyKey: `class-cancelled:${cancelled.bookingId}:${cancelled.status}`,
+      triggerData: {
+        bookingId: cancelled.bookingId,
+        clientId: cancelled.clientId,
+        classId: cancelled.classId,
+        status: cancelled.status,
+        isLateCancellation: cancelled.isLateCancellation,
+      },
+    }).catch((error: unknown) => {
+      console.error("Failed to trigger API class cancellation workflow", error);
+    });
+    if (cancelled.waitlistOffer) {
+      await dispatchWaitlistSpotOpened({
+        organizationId: auth.apiKey.organizationId,
+        locationId: auth.apiKey.locationId,
+        waitlistId: cancelled.waitlistOffer.id,
+        clientId: cancelled.waitlistOffer.clientId,
+        classId: cancelled.waitlistOffer.classId,
+        notifiedAt: cancelled.waitlistOffer.notifiedAt,
+      });
+    }
+    return Response.json({ data: cancelled });
+  } catch (error: unknown) {
+    if (!(error instanceof TRPCError)) throw error;
+    const status =
+      error.code === "NOT_FOUND"
+        ? 404
+        : error.code === "FORBIDDEN"
+          ? 403
+          : error.code === "CONFLICT" || error.code === "PRECONDITION_FAILED"
+            ? 409
+            : 400;
+    return apiError(error.message, status);
+  }
 }

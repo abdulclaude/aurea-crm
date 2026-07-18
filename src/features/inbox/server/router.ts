@@ -7,21 +7,39 @@ import {
   desc,
   eq,
   exists,
+  gte,
   ilike,
+  inArray,
+  isNotNull,
   isNull,
   lt,
+  not,
   or,
+  sql,
   type SQL,
 } from "drizzle-orm";
 import { z } from "zod";
 
-import { ConversationChannel, ConversationStatus, MessageDirection } from "@/db/enums";
+import { ConversationChannel, ConversationStatus } from "@/db/enums";
 import { db } from "@/db";
 import {
   client,
   inboxConversation,
   inboxMessage,
+  inboxReadState,
+  staffIdentity,
 } from "@/db/schema";
+import { requestDeliveryDispatch } from "@/features/delivery/server/request-dispatch";
+import {
+  enqueueInboxMessageInTransaction,
+  prepareInboxDelivery,
+} from "@/features/inbox/server/outbound-message";
+import { inboxManagementProcedures } from "@/features/inbox/server/management-procedures";
+import {
+  inboxConversationViewColumns,
+  inboxMessageViewColumns,
+} from "@/features/inbox/server/conversation-view";
+import { requireCapability } from "@/features/permissions/server/authorization";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
 const INBOX_PAGE_SIZE = 30;
@@ -30,6 +48,18 @@ function locationCondition(locationId: string | null | undefined): SQL {
   return locationId
     ? eq(inboxConversation.locationId, locationId)
     : isNull(inboxConversation.locationId);
+}
+
+function capabilityActor(ctx: {
+  auth: { user: { id: string } };
+  orgId: string | null;
+  locationId: string | null;
+}) {
+  return {
+    userId: ctx.auth.user.id,
+    organizationId: ctx.orgId,
+    locationId: ctx.locationId,
+  };
 }
 
 function mapConversation<T extends { inboxMessages?: unknown }>(
@@ -43,29 +73,85 @@ function mapConversation<T extends { inboxMessages?: unknown }>(
 }
 
 export const inboxRouter = createTRPCRouter({
+  ...inboxManagementProcedures,
   listConversations: protectedProcedure
     .input(
       z.object({
         status: z.nativeEnum(ConversationStatus).optional(),
         unreadOnly: z.boolean().optional(),
         search: z.string().optional(),
+        clientId: z.string().optional(),
+        assignment: z.enum(["ALL", "MINE", "UNASSIGNED"]).default("ALL"),
         cursor: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
       const { orgId, locationId } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.view",
+      });
 
       const filters: Array<SQL | undefined> = [
         eq(inboxConversation.organizationId, orgId),
         locationCondition(locationId),
+        input.clientId
+          ? eq(inboxConversation.clientId, input.clientId)
+          : undefined,
         input.status ? eq(inboxConversation.status, input.status) : undefined,
-        input.unreadOnly ? eq(inboxConversation.isRead, false) : undefined,
+        input.unreadOnly
+          ? and(
+              isNotNull(inboxConversation.lastMessageAt),
+              not(
+                exists(
+                  db
+                    .select({ id: inboxReadState.id })
+                    .from(inboxReadState)
+                    .where(
+                      and(
+                        eq(
+                          inboxReadState.conversationId,
+                          inboxConversation.id,
+                        ),
+                        eq(inboxReadState.userId, ctx.auth.user.id),
+                        gte(
+                          inboxReadState.lastReadAt,
+                          inboxConversation.lastMessageAt,
+                        ),
+                      ),
+                    ),
+                ),
+              ),
+            )
+          : undefined,
       ];
+
+      if (input.assignment === "UNASSIGNED") {
+        filters.push(isNull(inboxConversation.assigneeStaffIdentityId));
+      } else if (input.assignment === "MINE") {
+        const actorIdentity = await db.query.staffIdentity.findFirst({
+          where: and(
+            eq(staffIdentity.organizationId, orgId),
+            eq(staffIdentity.userId, ctx.auth.user.id),
+            eq(staffIdentity.status, "ACTIVE"),
+          ),
+          columns: { id: true },
+        });
+        filters.push(
+          actorIdentity
+            ? eq(inboxConversation.assigneeStaffIdentityId, actorIdentity.id)
+            : sql`false`,
+        );
+      }
 
       const cursorConversation = input.cursor
         ? await db.query.inboxConversation.findFirst({
-            where: eq(inboxConversation.id, input.cursor),
+            where: and(
+              eq(inboxConversation.id, input.cursor),
+              eq(inboxConversation.organizationId, orgId),
+              locationCondition(locationId),
+            ),
             columns: { id: true, lastMessageAt: true },
           })
         : null;
@@ -126,6 +212,7 @@ export const inboxRouter = createTRPCRouter({
         where: and(...filters),
         orderBy: [desc(inboxConversation.lastMessageAt), desc(inboxConversation.id)],
         limit: INBOX_PAGE_SIZE + 1,
+        columns: inboxConversationViewColumns,
         with: {
           client: {
             columns: { id: true, name: true, logo: true, email: true, phone: true },
@@ -144,8 +231,56 @@ export const inboxRouter = createTRPCRouter({
         nextCursor = next?.id;
       }
 
+      const conversationIds = conversations.map((conversation) => conversation.id);
+      const assigneeIds = conversations.flatMap((conversation) =>
+        conversation.assigneeStaffIdentityId
+          ? [conversation.assigneeStaffIdentityId]
+          : [],
+      );
+      const [readStates, assignees] = await Promise.all([
+        conversationIds.length
+          ? db
+              .select({
+                conversationId: inboxReadState.conversationId,
+                lastReadAt: inboxReadState.lastReadAt,
+              })
+              .from(inboxReadState)
+              .where(
+                and(
+                  eq(inboxReadState.userId, ctx.auth.user.id),
+                  inArray(inboxReadState.conversationId, conversationIds),
+                ),
+              )
+          : Promise.resolve([]),
+        assigneeIds.length
+          ? db
+              .select({
+                id: staffIdentity.id,
+                displayName: staffIdentity.displayName,
+                email: staffIdentity.email,
+              })
+              .from(staffIdentity)
+              .where(inArray(staffIdentity.id, assigneeIds))
+          : Promise.resolve([]),
+      ]);
+      const readStateByConversation = new Map(
+        readStates.map((state) => [state.conversationId, state.lastReadAt]),
+      );
+      const assigneeById = new Map(
+        assignees.map((assignee) => [assignee.id, assignee]),
+      );
+
       return {
-        conversations: conversations.map(mapConversation),
+        conversations: conversations.map((conversation) => ({
+          ...mapConversation(conversation),
+          isRead:
+            conversation.lastMessageAt === null ||
+            (readStateByConversation.get(conversation.id)?.getTime() ?? 0) >=
+              conversation.lastMessageAt.getTime(),
+          assignee: conversation.assigneeStaffIdentityId
+            ? (assigneeById.get(conversation.assigneeStaffIdentityId) ?? null)
+            : null,
+        })),
         nextCursor,
       };
     }),
@@ -153,43 +288,60 @@ export const inboxRouter = createTRPCRouter({
   getConversation: protectedProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
-      const { orgId } = ctx;
+      const { orgId, locationId } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.view",
+      });
 
       const conversation = await db.query.inboxConversation.findFirst({
         where: and(
           eq(inboxConversation.id, input.id),
-          eq(inboxConversation.organizationId, orgId)
+          eq(inboxConversation.organizationId, orgId),
+          locationCondition(locationId),
         ),
+        columns: inboxConversationViewColumns,
         with: {
           client: {
             columns: { id: true, name: true, logo: true, email: true, phone: true },
           },
           inboxMessages: {
             orderBy: [asc(inboxMessage.createdAt)],
+            columns: inboxMessageViewColumns,
           },
         },
       });
 
       if (!conversation) throw new TRPCError({ code: "NOT_FOUND" });
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(inboxMessage)
-          .set({ isRead: true })
-          .where(
-            and(
-              eq(inboxMessage.conversationId, input.id),
-              eq(inboxMessage.isRead, false)
-            )
-          );
-        await tx
-          .update(inboxConversation)
-          .set({ isRead: true, updatedAt: new Date() })
-          .where(eq(inboxConversation.id, input.id));
-      });
+      const [readState, assignee] = await Promise.all([
+        db.query.inboxReadState.findFirst({
+          where: and(
+            eq(inboxReadState.conversationId, input.id),
+            eq(inboxReadState.userId, ctx.auth.user.id),
+          ),
+          columns: { lastReadAt: true },
+        }),
+        conversation.assigneeStaffIdentityId
+          ? db.query.staffIdentity.findFirst({
+              where: and(
+                eq(staffIdentity.id, conversation.assigneeStaffIdentityId),
+                eq(staffIdentity.organizationId, orgId),
+              ),
+              columns: { id: true, displayName: true, email: true },
+            })
+          : Promise.resolve(undefined),
+      ]);
 
-      return mapConversation(conversation);
+      return {
+        ...mapConversation(conversation),
+        isRead:
+          conversation.lastMessageAt === null ||
+          (readState?.lastReadAt.getTime() ?? 0) >=
+            conversation.lastMessageAt.getTime(),
+        assignee: assignee ?? null,
+      };
     }),
 
   sendMessage: protectedProcedure
@@ -200,50 +352,71 @@ export const inboxRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { orgId, auth } = ctx;
+      const { orgId, locationId, auth } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.send",
+      });
 
       const conversation = await db.query.inboxConversation.findFirst({
         where: and(
           eq(inboxConversation.id, input.conversationId),
-          eq(inboxConversation.organizationId, orgId)
+          eq(inboxConversation.organizationId, orgId),
+          locationCondition(locationId),
         ),
-        columns: { id: true },
+        columns: {
+          id: true,
+          clientId: true,
+          channel: true,
+          subject: true,
+          routeId: true,
+        },
       });
       if (!conversation) throw new TRPCError({ code: "NOT_FOUND" });
 
-      return db.transaction(async (tx) => {
-        const [message] = await tx
-          .insert(inboxMessage)
-          .values({
-            id: createId(),
-            conversationId: input.conversationId,
-            direction: MessageDirection.OUTBOUND,
-            content: input.content,
-            isRead: true,
-            senderUserId: auth.user.id,
-          })
-          .returning();
-
-        if (!message) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to create inbox message",
-          });
-        }
+      const prepared = await prepareInboxDelivery({
+        organizationId: orgId,
+        locationId: locationId ?? null,
+        clientId: conversation.clientId,
+        channel: conversation.channel,
+        subject: conversation.subject,
+        content: input.content,
+        conversationId: conversation.id,
+        routeId: conversation.routeId,
+      });
+      const result = await db.transaction(async (tx) => {
+        const queuedMessage = await enqueueInboxMessageInTransaction(tx, {
+          conversationId: conversation.id,
+          senderUserId: auth.user.id,
+          content: input.content,
+          prepared,
+        });
 
         await tx
           .update(inboxConversation)
           .set({
-            lastMessageAt: message.createdAt,
+            lastMessageAt: queuedMessage.message.createdAt,
             status: ConversationStatus.OPEN,
             isRead: true,
             updatedAt: new Date(),
+            routeId: prepared.routeId ?? conversation.routeId,
+            replyRoutingTokenHash: prepared.replyRoutingTokenHash,
           })
-          .where(eq(inboxConversation.id, input.conversationId));
+          .where(
+            and(
+              eq(inboxConversation.id, input.conversationId),
+              eq(inboxConversation.organizationId, orgId),
+              locationCondition(locationId),
+            ),
+          );
 
-        return message;
+        return queuedMessage;
       });
+      if (!result.suppressed) {
+        await requestDeliveryDispatch(orgId);
+      }
+      return result.message;
     }),
 
   createConversation: protectedProcedure
@@ -258,18 +431,35 @@ export const inboxRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { orgId, locationId, auth } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.send",
+      });
 
-      return db.transaction(async (tx) => {
+      const conversationId = createId();
+      const prepared = await prepareInboxDelivery({
+        organizationId: orgId,
+        locationId: locationId ?? null,
+        clientId: input.clientId ?? null,
+        channel: input.channel,
+        subject: input.subject ?? null,
+        content: input.initialMessage,
+        conversationId,
+      });
+
+      const result = await db.transaction(async (tx) => {
         const now = new Date();
         const [conversation] = await tx
           .insert(inboxConversation)
           .values({
-            id: createId(),
+            id: conversationId,
             organizationId: orgId,
             locationId: locationId ?? null,
             clientId: input.clientId ?? null,
             channel: input.channel,
             subject: input.subject ?? null,
+            routeId: prepared.routeId,
+            replyRoutingTokenHash: prepared.replyRoutingTokenHash,
             lastMessageAt: now,
             updatedAt: now,
           })
@@ -282,17 +472,27 @@ export const inboxRouter = createTRPCRouter({
           });
         }
 
-        await tx.insert(inboxMessage).values({
-          id: createId(),
+        const queuedMessage = await enqueueInboxMessageInTransaction(tx, {
           conversationId: conversation.id,
-          direction: MessageDirection.OUTBOUND,
-          content: input.initialMessage,
-          isRead: true,
           senderUserId: auth.user.id,
+          content: input.initialMessage,
+          prepared,
         });
 
-        return conversation;
+        await tx
+          .update(inboxConversation)
+          .set({
+            lastMessageAt: queuedMessage.message.createdAt,
+            updatedAt: queuedMessage.message.createdAt,
+          })
+          .where(eq(inboxConversation.id, conversation.id));
+
+        return { conversation, suppressed: queuedMessage.suppressed };
       });
+      if (!result.suppressed) {
+        await requestDeliveryDispatch(orgId);
+      }
+      return result.conversation;
     }),
 
   setStatus: protectedProcedure
@@ -303,8 +503,12 @@ export const inboxRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const { orgId } = ctx;
+      const { orgId, locationId } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.send",
+      });
 
       const [conversation] = await db
         .update(inboxConversation)
@@ -312,7 +516,8 @@ export const inboxRouter = createTRPCRouter({
         .where(
           and(
             eq(inboxConversation.id, input.id),
-            eq(inboxConversation.organizationId, orgId)
+            eq(inboxConversation.organizationId, orgId),
+            locationCondition(locationId),
           )
         )
         .returning();
@@ -327,6 +532,10 @@ export const inboxRouter = createTRPCRouter({
     .query(async ({ ctx, input }) => {
       const { orgId, locationId } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await requireCapability({
+        actor: capabilityActor(ctx),
+        capability: "messaging.view",
+      });
 
       return db.query.client.findMany({
         where: and(
@@ -346,6 +555,10 @@ export const inboxRouter = createTRPCRouter({
   unreadCount: protectedProcedure.query(async ({ ctx }) => {
     const { orgId, locationId } = ctx;
     if (!orgId) return 0;
+    await requireCapability({
+      actor: capabilityActor(ctx),
+      capability: "messaging.view",
+    });
 
     const [result] = await db
       .select({ count: count(inboxConversation.id) })
@@ -354,7 +567,27 @@ export const inboxRouter = createTRPCRouter({
         and(
           eq(inboxConversation.organizationId, orgId),
           locationCondition(locationId),
-          eq(inboxConversation.isRead, false),
+          isNotNull(inboxConversation.lastMessageAt),
+          not(
+            exists(
+              db
+                .select({ id: inboxReadState.id })
+                .from(inboxReadState)
+                .where(
+                  and(
+                    eq(
+                      inboxReadState.conversationId,
+                      inboxConversation.id,
+                    ),
+                    eq(inboxReadState.userId, ctx.auth.user.id),
+                    gte(
+                      inboxReadState.lastReadAt,
+                      inboxConversation.lastMessageAt,
+                    ),
+                  ),
+                ),
+            ),
+          ),
           eq(inboxConversation.status, ConversationStatus.OPEN)
         )
       );

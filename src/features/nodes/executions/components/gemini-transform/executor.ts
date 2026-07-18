@@ -36,7 +36,6 @@ export const geminiTransformExecutor: NodeExecutor<GeminiTransformData> = async 
     const text = data.text ? decode(Handlebars.compile(data.text)(context)) : undefined;
     const instructions = data.instructions ? decode(Handlebars.compile(data.instructions)(context)) : undefined;
 
-    // TODO: Implement Gemini: Transform logic here
     const result = await step.run("gemini-transform", async () => {
       // Add implementation here
       throw new NonRetriableError("Gemini: Transform: Not yet implemented");

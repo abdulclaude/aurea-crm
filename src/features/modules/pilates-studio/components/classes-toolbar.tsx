@@ -69,6 +69,9 @@ export interface ClassesToolbarProps {
   instructor?: string;
   onInstructorChange?: (value: string) => void;
   instructors?: Array<{ id: string; name: string }>;
+  serviceTypeId?: string;
+  onServiceTypeChange?: (value: string) => void;
+  serviceTypes?: Array<{ id: string; name: string }>;
   roomId?: string;
   onRoomChange?: (value: string) => void;
   rooms?: Array<{ id: string; name: string }>;
@@ -108,6 +111,9 @@ export function ClassesToolbar({
   instructor,
   onInstructorChange,
   instructors = [],
+  serviceTypeId,
+  onServiceTypeChange,
+  serviceTypes = [],
   roomId,
   onRoomChange,
   rooms = [],
@@ -123,7 +129,14 @@ export function ClassesToolbar({
     setLocalSearch(search);
   }, [search]);
 
-  const hasFilters = !!(search || instructor || roomId || startDate || endDate);
+  const hasFilters = !!(
+    search ||
+    instructor ||
+    serviceTypeId ||
+    roomId ||
+    startDate ||
+    endDate
+  );
 
   return (
     <div className="flex justify-between w-full items-center py-4">
@@ -215,6 +228,50 @@ export function ClassesToolbar({
                       onClick={(e) => {
                         e.stopPropagation();
                         onInstructorChange?.("");
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Service</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent
+                  className="rounded-lg bg-background border border-black/10 dark:border-white/5 p-3 w-[220px] ml-2.5"
+                  alignOffset={-5}
+                >
+                  <div className="space-y-2">
+                    <Select
+                      value={serviceTypeId || ""}
+                      onValueChange={(val) =>
+                        onServiceTypeChange?.(val === "__all__" ? "" : val)
+                      }
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="All services" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__" className="text-xs">
+                          All services
+                        </SelectItem>
+                        {serviceTypes.map((service) => (
+                          <SelectItem
+                            key={service.id}
+                            value={service.id}
+                            className="text-xs"
+                          >
+                            {service.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      className="w-full border border-black/10 dark:border-white/5 bg-background hover:bg-primary-foreground/50 hover:text-black text-xs text-black dark:text-white py-3 rounded-lg"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onServiceTypeChange?.("");
                       }}
                     >
                       Clear

@@ -19,9 +19,9 @@ export default function StudioClassesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ClassViewSwitcher activeView="classes" />
-          <Button asChild>
+          <Button asChild variant="outline">
             <Link href="/studio/classes/new">
-              <CalendarPlus className="size-4" />
+              <CalendarPlus className="size-3" />
               Add class
             </Link>
           </Button>
