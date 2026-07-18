@@ -32,6 +32,16 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { logAnalytics, getChangedFields } from "@/lib/analytics-logger";
+import { resolveStaffRuntimeSnapshot } from "@/features/staff-settings/server/runtime-resolver";
+import {
+  breakComplianceMessage,
+  calculateAmount,
+  preserveStaffRuntimeSnapshot,
+  readStaffRuntimeSnapshot,
+  roundDurationMinutes,
+  stripStaffRuntimeSnapshot,
+  withStaffRuntimeSnapshot,
+} from "@/features/staff-settings/server/runtime-snapshot";
 
 const CRM_PAGE_SIZE = 20;
 
@@ -57,7 +67,7 @@ const createTimeLogSchema = z.object({
   hourlyRate: z.number().optional(),
   currency: z.string().default("USD"),
   breakDuration: z.number().optional(),
-  customFields: z.record(z.string(), z.any()).optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 const clockInSchema = z.object({
@@ -74,7 +84,7 @@ const clockInSchema = z.object({
     })
     .optional(),
   qrCodeId: z.string().optional(),
-  customFields: z.record(z.string(), z.any()).optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 const clockOutSchema = z.object({
@@ -115,7 +125,7 @@ const updateTimeLogSchema = z.object({
   status: z.nativeEnum(TimeLogStatus).optional(),
   billable: z.boolean().optional(),
   hourlyRate: z.number().optional(),
-  customFields: z.record(z.string(), z.any()).optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
 const approveTimeLogSchema = z.object({
@@ -242,6 +252,14 @@ export const timeTrackingRouter = createTRPCRouter({
     const title = input.title || `${foundInstructor.name} - Shift`;
 
     const now = new Date();
+    const runtimeSnapshot = await resolveStaffRuntimeSnapshot({
+      organizationId: foundInstructor.organizationId,
+      locationId: foundInstructor.locationId ?? null,
+      instructorId: foundInstructor.id,
+      effectiveAt: now,
+      legacyHourlyRate: foundInstructor.hourlyRate,
+      legacyCurrency: foundInstructor.currency,
+    });
     const [created] = await db
       .insert(timeLog)
       .values({
@@ -255,10 +273,13 @@ export const timeTrackingRouter = createTRPCRouter({
         checkInMethod: input.checkInMethod,
         checkInLocation: input.checkInLocation ?? null,
         qrCodeId: input.qrCodeId ?? null,
-        customFields: input.customFields ?? null,
+        customFields: withStaffRuntimeSnapshot(
+          input.customFields,
+          runtimeSnapshot,
+        ),
         status: TimeLogStatus.DRAFT,
-        hourlyRate: foundInstructor.hourlyRate,
-        currency: foundInstructor.currency,
+        hourlyRate: runtimeSnapshot.compensation.hourlyRate,
+        currency: runtimeSnapshot.compensation.currency,
         billable: true,
         createdAt: now,
         updatedAt: now,
@@ -279,6 +300,12 @@ export const timeTrackingRouter = createTRPCRouter({
   }),
 
   clockOut: baseProcedure.input(clockOutSchema).mutation(async ({ input }) => {
+    if (input.hourlyRate !== undefined) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Pay-rate overrides are not allowed from the public time clock.",
+      });
+    }
     // Verify instructor exists and is active
     const foundInstructor = await db.query.instructor.findFirst({
       where: (t, { eq }) => eq(t.id, input.instructorId),
@@ -329,25 +356,31 @@ export const timeTrackingRouter = createTRPCRouter({
     }
 
     const endTime = new Date();
-    const duration = calculateDuration(existingTimeLog.startTime, endTime);
+    const runtimeSnapshot =
+      readStaffRuntimeSnapshot(existingTimeLog.customFields) ??
+      (await resolveStaffRuntimeSnapshot({
+        organizationId: existingTimeLog.organizationId,
+        locationId: existingTimeLog.locationId,
+        instructorId: input.instructorId,
+        effectiveAt: existingTimeLog.startTime,
+        legacyHourlyRate: existingTimeLog.hourlyRate,
+        legacyCurrency: existingTimeLog.currency,
+      }));
+    const rawDuration = calculateDuration(existingTimeLog.startTime, endTime);
+    const duration = roundDurationMinutes(
+      rawDuration,
+      runtimeSnapshot.operationsPolicy.values.timeClockRoundingMinutes,
+    );
+    const breakDuration = input.breakDuration ?? 0;
+    const hourlyRate = runtimeSnapshot.compensation.hourlyRate;
+    const billable = input.billable ?? existingTimeLog.billable;
+    const totalAmount = billable
+      ? calculateAmount(duration, breakDuration, hourlyRate)
+      : null;
+    const shouldAutoApprove =
+      runtimeSnapshot.operationsPolicy.values.timeEntryApprovalMode ===
+      "AUTO_APPROVE";
 
-    // Use input hourlyRate if provided, otherwise use time log's rate, or fall back to instructor's rate
-    const hourlyRate = input.hourlyRate ?? (existingTimeLog.hourlyRate ? Number(existingTimeLog.hourlyRate) : null) ?? (existingTimeLog.instructor?.hourlyRate ? Number(existingTimeLog.instructor.hourlyRate) : null);
-    const totalAmount =
-      hourlyRate && input.billable !== false
-        ? calculateTotalAmount(
-            duration,
-            Number(hourlyRate),
-            input.breakDuration
-          )
-        : undefined;
-
-    // Auto-approve logic: Check if time log matches a scheduled rota within tolerance
-    // Default tolerance: 10% of scheduled duration or 15 minutes, whichever is greater
-    const AUTO_APPROVE_TOLERANCE_PERCENT = 0.10; // 10%
-    const AUTO_APPROVE_MIN_TOLERANCE_MINUTES = 15;
-
-    let shouldAutoApprove = false;
     let matchingRota = null;
 
     // Find a matching rota for this instructor on the same day
@@ -372,28 +405,10 @@ export const timeTrackingRouter = createTRPCRouter({
         },
       });
 
-      if (matchingRota) {
-        const scheduledDuration = calculateDuration(matchingRota.startTime, matchingRota.endTime);
-        const toleranceMinutes = Math.max(
-          scheduledDuration * AUTO_APPROVE_TOLERANCE_PERCENT,
-          AUTO_APPROVE_MIN_TOLERANCE_MINUTES
-        );
-
-        // Check if actual time is within tolerance of scheduled time
-        const startDiff = Math.abs(existingTimeLog.startTime.getTime() - matchingRota.startTime.getTime()) / 60000; // minutes
-        const endDiff = Math.abs(endTime.getTime() - matchingRota.endTime.getTime()) / 60000; // minutes
-        const durationDiff = Math.abs(duration - scheduledDuration);
-
-        // Auto-approve if start time, end time, and duration are all within tolerance
-        if (startDiff <= toleranceMinutes && endDiff <= toleranceMinutes && durationDiff <= toleranceMinutes) {
-          shouldAutoApprove = true;
-        }
-      }
     }
 
     // ==================== OVERTIME & COMPLIANCE TRACKING ====================
     const STANDARD_WEEKLY_HOURS = 40;
-    const MINIMUM_BREAK_MINUTES_6H = 30; // 30 min break for 6+ hours
     const complianceFlags: string[] = [];
     let isOvertime = false;
     let overtimeHours = 0;
@@ -429,7 +444,7 @@ export const timeTrackingRouter = createTRPCRouter({
       }, 0);
 
       // Add current log's billable minutes
-      const currentBillableMinutes = duration - (input.breakDuration || 0);
+      const currentBillableMinutes = duration - breakDuration;
       const totalWeeklyMinutes = weeklyMinutes + currentBillableMinutes;
       const totalWeeklyHours = totalWeeklyMinutes / 60;
 
@@ -444,29 +459,33 @@ export const timeTrackingRouter = createTRPCRouter({
     }
 
     // Check break compliance
-    const shiftHours = duration / 60;
-    const breakMinutes = input.breakDuration || 0;
-
-    if (shiftHours >= 6 && breakMinutes < MINIMUM_BREAK_MINUTES_6H) {
-      complianceFlags.push(
-        `Break violation: ${MINIMUM_BREAK_MINUTES_6H}min break required for ${shiftHours.toFixed(1)}h shift`
-      );
+    const breakViolation = breakComplianceMessage({
+      durationMinutes: duration,
+      breakMinutes: breakDuration,
+      policy: runtimeSnapshot.operationsPolicy,
+    });
+    if (breakViolation) {
+      complianceFlags.push(breakViolation);
     }
 
     // Build update data
     const updateData: Record<string, unknown> = {
       endTime,
       duration,
-      breakDuration: input.breakDuration ?? null,
+      breakDuration,
       description: input.description ?? null,
       checkOutLocation: input.checkOutLocation ?? null,
-      hourlyRate: hourlyRate != null ? String(hourlyRate) : null,
-      totalAmount: totalAmount != null ? String(totalAmount) : null,
-      billable: input.billable ?? existingTimeLog.billable,
+      hourlyRate,
+      totalAmount,
+      billable,
       status: shouldAutoApprove ? TimeLogStatus.APPROVED : TimeLogStatus.SUBMITTED,
       submittedAt: new Date(),
       isOvertime,
       overtimeHours: overtimeHours > 0 ? String(overtimeHours) : null,
+      customFields: withStaffRuntimeSnapshot(
+        existingTimeLog.customFields,
+        runtimeSnapshot,
+      ),
       updatedAt: new Date(),
     };
 
@@ -499,12 +518,26 @@ export const timeTrackingRouter = createTRPCRouter({
       }
     }
 
-    await db
-      .update(timeLog)
-      .set(updateData)
-      .where(eq(timeLog.id, input.timeLogId));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(timeLog)
+        .set(updateData)
+        .where(eq(timeLog.id, input.timeLogId));
 
-    // Fetch updated time log with relations
+      if (shouldAutoApprove && matchingRota) {
+        await tx
+          .update(rota)
+          .set({
+            status: "COMPLETED",
+            actualStartTime: existingTimeLog.startTime,
+            actualEndTime: endTime,
+            actualHours: String(duration / 60),
+            actualValue: totalAmount,
+          })
+          .where(eq(rota.id, matchingRota.id));
+      }
+    });
+
     const updatedTimeLog = await db.query.timeLog.findFirst({
       where: (t, { eq }) => eq(t.id, input.timeLogId),
       with: {
@@ -513,20 +546,6 @@ export const timeTrackingRouter = createTRPCRouter({
         instructor: true,
       },
     });
-
-    // If auto-approved, update the matching rota with actual times
-    if (shouldAutoApprove && matchingRota) {
-      await db
-        .update(rota)
-        .set({
-          status: "COMPLETED",
-          actualStartTime: existingTimeLog.startTime,
-          actualEndTime: endTime,
-          actualHours: String(duration / 60), // Convert minutes to hours
-          actualValue: totalAmount != null ? String(totalAmount) : null,
-        })
-        .where(eq(rota.id, matchingRota.id));
-    }
 
     return {
       ...updatedTimeLog!,
@@ -606,7 +625,10 @@ export const timeTrackingRouter = createTRPCRouter({
           hourlyRate: input.hourlyRate != null ? String(input.hourlyRate) : null,
           currency: input.currency,
           breakDuration: input.breakDuration ?? null,
-          customFields: input.customFields ?? null,
+          customFields:
+            input.customFields === undefined
+              ? null
+              : stripStaffRuntimeSnapshot(input.customFields),
           status: TimeLogStatus.DRAFT,
           createdAt: now,
           updatedAt: now,
@@ -693,7 +715,12 @@ export const timeTrackingRouter = createTRPCRouter({
       if (data.endTime !== undefined) updates.endTime = data.endTime;
       if (data.breakDuration !== undefined) updates.breakDuration = data.breakDuration;
       if (data.hourlyRate !== undefined) updates.hourlyRate = data.hourlyRate != null ? String(data.hourlyRate) : null;
-      if (data.customFields !== undefined) updates.customFields = data.customFields ?? null;
+      if (data.customFields !== undefined) {
+        updates.customFields = preserveStaffRuntimeSnapshot(
+          existingLog.customFields,
+          data.customFields,
+        );
+      }
       if (data.descriptionMode !== undefined) updates.descriptionMode = data.descriptionMode;
 
       // Handle description - set to null if explicitly null

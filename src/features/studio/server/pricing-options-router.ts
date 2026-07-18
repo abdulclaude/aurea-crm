@@ -16,10 +16,13 @@ import {
   serviceCategory,
   serviceType,
   studioMembership,
-  studioPaymentLineItem,
-  studioProduct,
   workflows,
 } from "@/db/schema";
+import {
+  listCanonicalRevenueCategories,
+  resolveRevenueCategorySelection,
+  type RevenueCategorySnapshot,
+} from "@/features/commerce-settings/server/revenue-runtime-resolver";
 import { requireCapability } from "@/features/permissions/server/authorization";
 import {
   pricingOptionPurchasedTriggerConfigSchema,
@@ -284,6 +287,7 @@ function pricingOptionValues(
   organizationSlug: string,
   locationId: string | null,
   slug: string,
+  revenueCategory: RevenueCategorySnapshot | null,
 ) {
   const buyPagePath = input.directPurchaseEnabled
     ? `/pricing/${organizationSlug}/${slug}`
@@ -301,7 +305,7 @@ function pricingOptionValues(
     billingInterval: input.billingInterval,
     classCredits: input.classCredits ?? null,
     durationDays: input.durationDays ?? null,
-    revenueCategory: input.revenueCategory || null,
+    revenueCategory: revenueCategory?.id ?? null,
     isIntroOffer: input.isIntroOffer,
     isBundle: input.isBundle,
     isPublic: input.isPublic,
@@ -317,6 +321,9 @@ function pricingOptionValues(
     maxPurchases: input.maxPurchases ?? null,
     maxPurchasesPerClient: input.maxPurchasesPerClient ?? null,
     accessSummary: input.accessSummary || null,
+    metadata: revenueCategory
+      ? { revenueCategorySnapshot: revenueCategory }
+      : {},
     updatedAt: new Date(),
   };
 }
@@ -341,85 +348,21 @@ export const pricingOptionsRouter = createTRPCRouter({
 
   revenueCategories: protectedProcedure.query(async ({ ctx }) => {
     const organizationId = requireOrg(ctx);
-    const locationId = ctx.locationId;
-
-    const [
-      pricingRows,
-      serviceRows,
-      serviceCategoryRows,
-      productRows,
-      paymentLineRows,
-    ] = await Promise.all([
-      db
-        .select({ value: pricingOption.revenueCategory })
-        .from(pricingOption)
-        .where(
-          and(
-            eq(pricingOption.organizationId, organizationId),
-            locationCondition(pricingOption.locationId, locationId),
-          ),
-        ),
-      db
-        .select({ value: serviceType.revenueCategory })
-        .from(serviceType)
-        .where(
-          and(
-            eq(serviceType.organizationId, organizationId),
-            locationId
-              ? eq(serviceType.locationId, locationId)
-              : isNull(serviceType.locationId),
-          ),
-        ),
-      db
-        .select({ value: serviceCategory.name })
-        .from(serviceCategory)
-        .where(
-          and(
-            eq(serviceCategory.organizationId, organizationId),
-            locationId
-              ? eq(serviceCategory.locationId, locationId)
-              : isNull(serviceCategory.locationId),
-            eq(serviceCategory.isActive, true),
-          ),
-        ),
-      db
-        .select({ value: studioProduct.category })
-        .from(studioProduct)
-        .where(
-          and(
-            eq(studioProduct.organizationId, organizationId),
-            locationId
-              ? eq(studioProduct.locationId, locationId)
-              : isNull(studioProduct.locationId),
-            eq(studioProduct.isActive, true),
-          ),
-        ),
-      db
-        .select({ value: studioPaymentLineItem.category })
-        .from(studioPaymentLineItem)
-        .where(
-          and(
-            eq(studioPaymentLineItem.organizationId, organizationId),
-            locationId
-              ? eq(studioPaymentLineItem.locationId, locationId)
-              : isNull(studioPaymentLineItem.locationId),
-          ),
-        ),
-    ]);
-
-    const categories = new Set<string>();
-    for (const row of [
-      ...pricingRows,
-      ...serviceRows,
-      ...serviceCategoryRows,
-      ...productRows,
-      ...paymentLineRows,
-    ]) {
-      const value = row.value?.trim();
-      if (value) categories.add(value);
-    }
-
-    return Array.from(categories).sort((a, b) => a.localeCompare(b));
+    await requireCapability({
+      actor: {
+        userId: ctx.auth.user.id,
+        organizationId,
+        locationId: ctx.locationId,
+      },
+      capability: "commerce.view",
+    });
+    const categories = await listCanonicalRevenueCategories({
+      organizationId,
+      locationId: ctx.locationId,
+    });
+    return categories
+      .map((category) => category.name)
+      .sort((a, b) => a.localeCompare(b));
   }),
 
   getBuyPage: baseProcedure
@@ -801,6 +744,18 @@ export const pricingOptionsRouter = createTRPCRouter({
     .input(pricingOptionInputSchema)
     .mutation(async ({ ctx, input }) => {
       const organizationId = requireOrg(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId,
+          locationId: ctx.locationId,
+        },
+        capability: "commerce.manage",
+      });
+      const revenueCategory = await resolveRevenueCategorySelection({
+        scope: { organizationId, locationId: ctx.locationId },
+        selection: input.revenueCategory,
+      });
       const org = await db.query.organization.findFirst({
         where: eq(organization.id, organizationId),
         columns: { slug: true },
@@ -863,6 +818,7 @@ export const pricingOptionsRouter = createTRPCRouter({
               org.slug,
               ctx.locationId ?? null,
               slug,
+              revenueCategory,
             ),
             membershipPlanId: checkoutPlan?.id ?? null,
             createdAt: now,

@@ -19,6 +19,10 @@ import {
 } from "@/features/activity/lib/log-activity";
 import { requireCapability } from "@/features/permissions/server/authorization";
 import {
+  resolveRevenueCategorySelection,
+  type RevenueCategorySnapshot,
+} from "@/features/commerce-settings/server/revenue-runtime-resolver";
+import {
   regionalCurrencySchema,
   resolveRegionalCurrency,
 } from "@/lib/regional-context/contracts";
@@ -323,7 +327,15 @@ function serviceValues(
   organizationId: string,
   locationId: string | null,
   slug: string,
+  revenueCategory: RevenueCategorySnapshot | null,
+  existingMetadata: unknown = {},
 ) {
+  const metadata =
+    typeof existingMetadata === "object" &&
+    existingMetadata !== null &&
+    !Array.isArray(existingMetadata)
+      ? existingMetadata
+      : {};
   return {
     organizationId,
     locationId,
@@ -346,7 +358,7 @@ function serviceValues(
     slidingScaleMinPrice: moneyValue(input.slidingScaleMinPrice),
     slidingScaleMaxPrice: moneyValue(input.slidingScaleMaxPrice),
     currency: input.currency.toUpperCase(),
-    revenueCategory: input.revenueCategory || null,
+    revenueCategory: revenueCategory?.id ?? null,
     bookingRestrictionTags: input.bookingRestrictionTags,
     workoutTypes: input.workoutTypes,
     areasOfFocus: input.areasOfFocus,
@@ -361,6 +373,10 @@ function serviceValues(
     displayImageAtCheckout: input.displayImageAtCheckout,
     calendarColor: input.calendarColor || null,
     sortOrder: input.sortOrder ?? 0,
+    metadata: {
+      ...metadata,
+      revenueCategorySnapshot: revenueCategory,
+    },
     updatedAt: new Date(),
   };
 }
@@ -544,6 +560,10 @@ export const serviceCatalogRouter = createTRPCRouter({
         input.categoryId,
         input.classTypeId,
       );
+      const revenueCategory = await resolveRevenueCategorySelection({
+        scope: { organizationId, locationId: ctx.locationId },
+        selection: input.revenueCategory,
+      });
 
       const now = new Date();
       const slug = await uniqueServiceSlug(organizationId, input.name);
@@ -567,6 +587,7 @@ export const serviceCatalogRouter = createTRPCRouter({
             organizationId,
             ctx.locationId ?? null,
             slug,
+            revenueCategory,
           ),
           createdAt: now,
           updatedAt: now,
@@ -611,6 +632,10 @@ export const serviceCatalogRouter = createTRPCRouter({
         input.categoryId,
         input.classTypeId,
       );
+      const revenueCategory = await resolveRevenueCategorySelection({
+        scope: { organizationId, locationId: ctx.locationId },
+        selection: input.revenueCategory,
+      });
 
       const parsedInput = serviceTypeUpdateInputSchema.parse(input);
       const resolvedInput: ResolvedServiceTypeInput = {
@@ -633,6 +658,8 @@ export const serviceCatalogRouter = createTRPCRouter({
             organizationId,
             ctx.locationId ?? null,
             slug,
+            revenueCategory,
+            existing.metadata,
           ),
         )
         .where(

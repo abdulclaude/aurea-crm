@@ -6,6 +6,7 @@ import {
   decimalToMinorUnits,
   formatDecimalMoney,
   minorUnitsToDecimal,
+  multiplyDecimalsToMinorUnits,
   normalizeCurrency,
 } from "../money";
 
@@ -20,6 +21,12 @@ test("converts minor units back to canonical decimal strings", () => {
   assert.equal(minorUnitsToDecimal(12345, 2), "123.45");
   assert.equal(minorUnitsToDecimal(-50, 2), "-0.50");
   assert.equal(minorUnitsToDecimal(25, 0), "25");
+});
+
+test("multiplies decimal quantities and prices without floating point arithmetic", () => {
+  assert.equal(multiplyDecimalsToMinorUnits("3", "19.99", 2), 5997);
+  assert.equal(multiplyDecimalsToMinorUnits("0.1", "0.2", 2), 2);
+  assert.equal(multiplyDecimalsToMinorUnits("1.005", "1", 2), 101);
 });
 
 test("rejects lossy or unsafe values", () => {

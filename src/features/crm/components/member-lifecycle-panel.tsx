@@ -35,7 +35,9 @@ export function MemberLifecyclePanel({
     return <MemberHouseholdsView clientId={clientId} />;
   }
   if (view === "notes") return <MemberNotesView clientId={clientId} />;
-  if (view === "guest-passes") return <MemberGuestPassesView />;
+  if (view === "guest-passes") {
+    return <MemberGuestPassesView clientId={clientId} />;
+  }
   if (view === "inbox") return <MemberInboxView clientId={clientId} />;
   return <LifecycleDataPanel clientId={clientId} view={view} />;
 }

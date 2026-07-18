@@ -52,6 +52,51 @@ export function decimalToMinorUnits(value: string, exponent: number): number {
   return signed;
 }
 
+export function multiplyDecimalsToMinorUnits(
+  left: string,
+  right: string,
+  exponent: number,
+): number {
+  if (!Number.isInteger(exponent) || exponent < 0 || exponent > 6) {
+    throw new Error("Currency exponent is outside the supported range");
+  }
+
+  const parse = (value: string) => {
+    const match = DECIMAL_MONEY_PATTERN.exec(value.trim());
+    if (!match || !match[2]) {
+      throw new Error("Decimal factor must be a decimal string");
+    }
+    const fraction = match[3] ?? "";
+    return {
+      negative: match[1] === "-",
+      magnitude: BigInt(`${match[2]}${fraction}`),
+      scale: fraction.length,
+    };
+  };
+
+  const leftDecimal = parse(left);
+  const rightDecimal = parse(right);
+  const product = leftDecimal.magnitude * rightDecimal.magnitude;
+  const sourceDivisor =
+    BigInt(10) ** BigInt(leftDecimal.scale + rightDecimal.scale);
+  const scaledProduct = product * BigInt(10) ** BigInt(exponent);
+  const quotient = scaledProduct / sourceDivisor;
+  const remainder = scaledProduct % sourceDivisor;
+  const rounded =
+    quotient +
+    (remainder * BigInt(2) >= sourceDivisor ? BigInt(1) : BigInt(0));
+  const signed = leftDecimal.negative !== rightDecimal.negative ? -rounded : rounded;
+
+  if (
+    signed > BigInt(Number.MAX_SAFE_INTEGER) ||
+    signed < BigInt(Number.MIN_SAFE_INTEGER)
+  ) {
+    throw new Error("Money value exceeds the supported range");
+  }
+
+  return Number(signed);
+}
+
 export function minorUnitsToDecimal(value: number, exponent: number): string {
   if (!Number.isSafeInteger(value)) {
     throw new Error("Minor-unit money value must be a safe integer");

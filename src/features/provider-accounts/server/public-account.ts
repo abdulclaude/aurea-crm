@@ -2,6 +2,8 @@ import type { providerAccount } from "@/db/schema";
 import {
   type AdConversionConfig,
   adConversionProviderSchema,
+  type IntegrationProviderConfig,
+  integrationProviderSchema,
   parseAdConversionConfig,
   type ResendProviderConfig,
   resendProviderConfigSchema,
@@ -11,6 +13,7 @@ import {
   type TwilioPlatformProviderConfig,
   twilioPlatformProviderConfigSchema,
 } from "@/features/provider-accounts/contracts";
+import { parseIntegrationProviderConfig } from "@/features/provider-accounts/integration-catalog";
 
 export type PublicProviderAccount = {
   id: string;
@@ -29,6 +32,7 @@ export type PublicProviderAccount = {
     | SmsProviderConfig
     | PublicTwilioPlatformConfig
     | AdConversionConfig
+    | IntegrationProviderConfig
     | null;
   hasSecret: boolean;
   hasWebhookSecret: boolean;
@@ -67,6 +71,10 @@ export function toPublicProviderAccount(
   const adConfig = adProvider.success
     ? parseAdConfigSafely(adProvider.data, row.config)
     : null;
+  const integrationProvider = integrationProviderSchema.safeParse(row.provider);
+  const integrationConfig = integrationProvider.success
+    ? parseIntegrationConfigSafely(integrationProvider.data, row.config)
+    : null;
   const config =
     resendConfig?.success === true
       ? resendConfig.data
@@ -82,7 +90,7 @@ export function toPublicProviderAccount(
           }
         : smsConfig?.success === true
         ? smsConfig.data
-        : adConfig;
+        : adConfig ?? integrationConfig;
 
   return {
     id: row.id,
@@ -114,6 +122,23 @@ export function toPublicProviderAccount(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+function parseIntegrationConfigSafely(
+  provider:
+    | "CLASSPASS"
+    | "WELLHUB"
+    | "KISI"
+    | "MAILCHIMP"
+    | "ZOOM"
+    | "SPIVI",
+  config: unknown,
+): IntegrationProviderConfig | null {
+  try {
+    return parseIntegrationProviderConfig(provider, config);
+  } catch {
+    return null;
+  }
 }
 
 function parseAdConfigSafely(

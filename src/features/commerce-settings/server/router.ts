@@ -3,15 +3,20 @@ import {
   archiveRevenueCategorySchema,
   archiveTaxAssignmentSchema,
   archiveTaxRateSchema,
+  approveGuestPassSchema,
   createOfflinePaymentMethodSchema,
   createRevenueCategorySchema,
   createTaxRateSchema,
+  issueGuestPassSchema,
+  listGuestPassesSchema,
+  redeemGuestPassSchema,
   saveDocumentDefaultsSchema,
   updateOfflinePaymentMethodSchema,
   updateRevenueCategorySchema,
   updateTaxRateSchema,
   upsertTaxAssignmentSchema,
   versionGuestPassPolicySchema,
+  revokeGuestPassSchema,
 } from "@/features/commerce-settings/contracts";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 
@@ -32,6 +37,13 @@ import {
   versionGuestPassPolicy,
 } from "./mutation-service";
 import { getCommerceSettings } from "./query-service";
+import {
+  approveGuestPass,
+  issueGuestPass,
+  listGuestPasses,
+  redeemGuestPass,
+  revokeGuestPass,
+} from "./guest-pass-runtime-service";
 
 export const commerceSettingsRouter = createTRPCRouter({
   get: protectedProcedure.query(async ({ ctx }) =>
@@ -151,6 +163,50 @@ export const commerceSettingsRouter = createTRPCRouter({
     .input(versionGuestPassPolicySchema)
     .mutation(async ({ ctx, input }) =>
       versionGuestPassPolicy({
+        scope: await requireCommerceSettingsAccess(ctx, "commerce.manage"),
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      }),
+    ),
+  listGuestPasses: protectedProcedure
+    .input(listGuestPassesSchema)
+    .query(async ({ ctx, input }) =>
+      listGuestPasses({
+        scope: await requireCommerceSettingsAccess(ctx, "commerce.view"),
+        ...input,
+      }),
+    ),
+  issueGuestPass: protectedProcedure
+    .input(issueGuestPassSchema)
+    .mutation(async ({ ctx, input }) =>
+      issueGuestPass({
+        scope: await requireCommerceSettingsAccess(ctx, "commerce.manage"),
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      }),
+    ),
+  approveGuestPass: protectedProcedure
+    .input(approveGuestPassSchema)
+    .mutation(async ({ ctx, input }) =>
+      approveGuestPass({
+        scope: await requireCommerceSettingsAccess(ctx, "commerce.manage"),
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      }),
+    ),
+  redeemGuestPass: protectedProcedure
+    .input(redeemGuestPassSchema)
+    .mutation(async ({ ctx, input }) =>
+      redeemGuestPass({
+        scope: await requireCommerceSettingsAccess(ctx, "commerce.manage"),
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      }),
+    ),
+  revokeGuestPass: protectedProcedure
+    .input(revokeGuestPassSchema)
+    .mutation(async ({ ctx, input }) =>
+      revokeGuestPass({
         scope: await requireCommerceSettingsAccess(ctx, "commerce.manage"),
         actorUserId: ctx.auth.user.id,
         ...input,

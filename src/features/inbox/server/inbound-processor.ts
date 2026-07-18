@@ -33,6 +33,7 @@ import {
   type ResendReceivingEmail,
 } from "@/features/inbox/server/inbound-contracts";
 import { resolveProviderAccount } from "@/features/provider-accounts/server/resolver";
+import { findActiveMailboxBlock } from "@/features/communications/server/control-service";
 
 const RECEIPT_LEASE_MS = 2 * 60_000;
 const MAX_RECEIPT_ATTEMPTS = 5;
@@ -242,6 +243,20 @@ async function applyEmail(
   const sender = extractEmailAddress(email.from);
   if (!sender) {
     await completeReceipt(receipt, "IGNORED", "INVALID_SENDER_ADDRESS");
+    return;
+  }
+  const mailboxBlock = await findActiveMailboxBlock({
+    organizationId: match.route.organizationId,
+    locationId: match.route.locationId,
+    sender,
+  });
+  if (mailboxBlock) {
+    await completeReceipt(
+      receipt,
+      "IGNORED",
+      "MAILBOX_SENDER_BLOCKED",
+      "The inbound sender matched an active mailbox blocklist entry.",
+    );
     return;
   }
 

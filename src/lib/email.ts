@@ -3,6 +3,7 @@ import "server-only";
 import type { EmailAttachmentReference } from "@/features/delivery/lib/payload-schemas";
 import type { DeliveryPurpose } from "@/features/delivery/contracts";
 import { enqueueEmail } from "@/features/delivery/server/transactional-email";
+import { enqueueConfiguredTransactionalEmail } from "@/features/communications/server/configured-transactional-email";
 
 export type SendEmailOptions = {
   organizationId: string;
@@ -166,27 +167,59 @@ export async function sendInvoiceReminder(params: {
 </html>
   `;
 
-  return sendEmail({
-    organizationId,
-    locationId,
-    clientId,
-    sourceType: "INVOICE_REMINDER",
-    sourceId: reminderId,
-    idempotencyKey: `invoice-reminder:${reminderId}:email`,
-    to,
-    fromName: "Invoices",
-    subject,
-    html,
-    text: message,
-    attachments: [
-      {
-        kind: "INVOICE_PDF",
-        invoiceId,
-        filename: `invoice-${invoiceNumber}.pdf`,
-        contentType: "application/pdf",
+  try {
+    const delivery = await enqueueConfiguredTransactionalEmail({
+      organizationId,
+      locationId,
+      clientId,
+      eventKey: "invoice.reminder",
+      sourceType: "INVOICE_REMINDER",
+      sourceId: reminderId,
+      idempotencyKey: `invoice-reminder:${reminderId}:email`,
+      to,
+      fromName: "Invoices",
+      variables: {
+        "invoice.number": invoiceNumber,
+        "invoice.message": message,
+        "invoice.payment_link": paymentLink ?? "",
+        "reminder.subject": subject,
       },
-    ],
-  });
+      fallback: { subject, html, text: message },
+      attachments: [
+        {
+          kind: "INVOICE_PDF",
+          invoiceId,
+          filename: `invoice-${invoiceNumber}.pdf`,
+          contentType: "application/pdf",
+        },
+      ],
+    });
+    if (delivery.status === "SUPPRESSED") {
+      return {
+        success: false,
+        queued: false,
+        deliveryId: delivery.id,
+        status: "SUPPRESSED",
+        error:
+          "Email delivery is blocked by an active communication suppression.",
+      };
+    }
+    return {
+      success: true,
+      queued: true,
+      deliveryId: delivery.id,
+      status: "QUEUED",
+    };
+  } catch (error) {
+    return {
+      success: false,
+      queued: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to queue the invoice reminder",
+    };
+  }
 }
 
 /**

@@ -16,11 +16,13 @@ test("parses every route worksheet item in onboarding order", () => {
   );
 
   assert.equal(checklist.updatedAt, "2026-07-18");
-  assert.equal(items.length, 301);
+  assert.equal(items.length, 303);
   assert.equal(items[0]?.route, "/");
   assert.ok(items.some((item) => item.route === "/location/new"));
   assert.ok(items.some((item) => item.route === "/settings/cancellations"));
   assert.ok(items.some((item) => item.route === "/settings/communications"));
+  assert.ok(items.some((item) => item.route === "/settings/content"));
+  assert.ok(items.some((item) => item.route === "/settings/integrations"));
   assert.ok(items.some((item) => item.route === "/settings/commerce/[section]"));
   assert.ok(items.some((item) => item.route === "/settings/payments/recovery"));
   assert.ok(items.some((item) => item.route === "/recover-payment/[token]"));

@@ -11,6 +11,8 @@ import { requireCapability } from "@/features/permissions/server/authorization";
 import { encrypt } from "@/lib/encryption";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { saveAdConversionAccountProcedure } from "./ad-account-procedure";
+import { integrationLifecycleProcedures } from "./integration-lifecycle-procedures";
+import { integrationProviderProcedures } from "./integration-procedures";
 import { toPublicProviderAccount } from "./public-account";
 
 type ProviderContext = {
@@ -54,6 +56,8 @@ const saveResendSchema = z.object({
 });
 
 export const providerAccountsRouter = createTRPCRouter({
+  ...integrationProviderProcedures,
+  ...integrationLifecycleProcedures,
   list: protectedProcedure.query(async ({ ctx }) => {
     const organizationId = requireOrganization(ctx);
     await requireCapability({

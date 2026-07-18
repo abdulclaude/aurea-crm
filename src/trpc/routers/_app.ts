@@ -103,6 +103,7 @@ import { communicationsRouter } from "@/features/communications/server/router";
 import { commerceSettingsRouter } from "@/features/commerce-settings/server/router";
 import { customerSettingsRouter } from "@/features/customer-settings/server/router";
 import { staffSettingsRouter } from "@/features/staff-settings/server/router";
+import { contentSettingsRouter } from "@/features/content-settings/server/router";
 import { createTRPCRouter } from "@/trpc/init";
 
 export const appRouter = createTRPCRouter({
@@ -217,6 +218,7 @@ export const appRouter = createTRPCRouter({
   commerceSettings: commerceSettingsRouter,
   customerSettings: customerSettingsRouter,
   staffSettings: staffSettingsRouter,
+  contentSettings: contentSettingsRouter,
 });
 
 // export type definition of API

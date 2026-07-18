@@ -9,6 +9,11 @@ import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
 import crypto from "crypto";
 import { generateShiftOccurrences } from "../lib/recurrence-utils";
 import { generateInstructorMagicLinkToken } from "@/features/instructors/lib/magic-link-token";
+import { resolveStaffRuntimeSnapshot } from "@/features/staff-settings/server/runtime-resolver";
+import {
+  calculateAmount,
+  withStaffRuntimeSnapshot,
+} from "@/features/staff-settings/server/runtime-snapshot";
 
 // ============================================================================
 // Input Schemas
@@ -148,6 +153,17 @@ export const rotasRouter = createTRPCRouter({
         });
       }
 
+      const runtimeSnapshot = await resolveStaffRuntimeSnapshot({
+        organizationId: orgId,
+        locationId: locationId ?? null,
+        instructorId: foundInstructor.id,
+        effectiveAt: input.startTime,
+        legacyHourlyRate: foundInstructor.hourlyRate,
+        legacyCurrency: foundInstructor.currency,
+      });
+      const resolvedHourlyRate = runtimeSnapshot.compensation.hourlyRate;
+      const resolvedCurrency = runtimeSnapshot.compensation.currency;
+
       // Check for scheduling conflicts - overlapping shifts for the same instructor
       const conflictingRota = await db.query.rota.findFirst({
         where: buildConflictWhere(input.instructorId, orgId, input.startTime, input.endTime),
@@ -210,10 +226,14 @@ export const rotasRouter = createTRPCRouter({
         }
 
         // Calculate deal value based on instructor's hourly rate and duration
-        const durationMs = input.endTime.getTime() - input.startTime.getTime();
-        const durationHours = durationMs / (1000 * 60 * 60); // Convert milliseconds to hours
-        const hourlyRate = foundInstructor.hourlyRate ? Number(foundInstructor.hourlyRate) : null;
-        const dealValue = hourlyRate ? durationHours * hourlyRate : null;
+        const durationMinutes = Math.floor(
+          (input.endTime.getTime() - input.startTime.getTime()) / 60000,
+        );
+        const dealValue = calculateAmount(
+          durationMinutes,
+          0,
+          resolvedHourlyRate,
+        );
 
         const newDealId = crypto.randomUUID();
         await db.transaction(async (tx) => {
@@ -225,8 +245,8 @@ export const rotasRouter = createTRPCRouter({
             pipelineId: input.pipelineId!,
             pipelineStageId: input.pipelineStageId!,
             deadline: input.endTime,
-            value: dealValue !== null ? String(dealValue) : null,
-            currency: foundInstructor.currency || "GBP",
+            value: dealValue,
+            currency: resolvedCurrency,
             createdAt: new Date(),
             updatedAt: new Date(),
           });
@@ -243,8 +263,11 @@ export const rotasRouter = createTRPCRouter({
       // Calculate scheduled hours and value
       const scheduledMs = input.endTime.getTime() - input.startTime.getTime();
       const scheduledHours = scheduledMs / (1000 * 60 * 60); // Convert to hours
-      const hourlyRate = foundInstructor.hourlyRate ? Number(foundInstructor.hourlyRate) : null;
-      const scheduledValue = hourlyRate ? scheduledHours * hourlyRate : null;
+      const scheduledValue = calculateAmount(
+        Math.floor(scheduledMs / 60000),
+        0,
+        resolvedHourlyRate,
+      );
 
       const newRotaId = crypto.randomUUID();
       await db.insert(rota).values({
@@ -259,9 +282,11 @@ export const rotasRouter = createTRPCRouter({
         endTime: input.endTime,
         status: RotaStatus.SCHEDULED,
         color: input.color,
-        hourlyRate: foundInstructor.hourlyRate,
+        hourlyRate: resolvedHourlyRate,
+        currency: resolvedCurrency,
         scheduledHours: scheduledHours !== null ? String(scheduledHours) : null,
-        scheduledValue: scheduledValue !== null ? String(scheduledValue) : null,
+        scheduledValue,
+        customFields: withStaffRuntimeSnapshot(null, runtimeSnapshot),
         isRecurring: input.isRecurring || false,
         recurrenceRule: input.recurrenceRule || null,
         createdAt: new Date(),
@@ -356,6 +381,13 @@ export const rotasRouter = createTRPCRouter({
   update: protectedProcedure
     .input(updateRotaSchema)
     .mutation(async ({ ctx, input }) => {
+      if (input.hourlyRate !== undefined) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message:
+            "Manual pay-rate overrides require an audited reason and are not supported on rota edits.",
+        });
+      }
       const orgId = ctx.orgId;
 
       if (!orgId) {

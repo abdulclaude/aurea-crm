@@ -56,6 +56,15 @@ const catalogScopeConditions = ({
     : isNull(studioProduct.locationId),
 ];
 
+function rejectLegacyProductTaxRate(taxRate: number | null | undefined): void {
+  if (taxRate === undefined || taxRate === null) return;
+  throw new TRPCError({
+    code: "BAD_REQUEST",
+    message:
+      "Assign product tax in Commerce settings. Product tax percentages are retained for historical reads only.",
+  });
+}
+
 export const productCatalogRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
@@ -128,6 +137,7 @@ export const productCatalogRouter = createTRPCRouter({
     .input(ProductBaseSchema)
     .mutation(async ({ ctx, input }) => {
       const scope = await requireCommerceSettingsAccess(ctx, "commerce.manage");
+      rejectLegacyProductTaxRate(input.taxRate);
 
       const now = new Date();
       const [createdProduct] = await db
@@ -145,7 +155,7 @@ export const productCatalogRouter = createTRPCRouter({
           price: input.price.toString(),
           cost: input.cost?.toString() ?? null,
           currency: input.currency.toUpperCase(),
-          taxRate: input.taxRate?.toString() ?? null,
+          taxRate: null,
           trackInventory: input.trackInventory,
           stockQuantity: input.stockQuantity ?? null,
           lowStockThreshold: input.lowStockThreshold ?? null,
@@ -165,6 +175,7 @@ export const productCatalogRouter = createTRPCRouter({
       const scope = await requireCommerceSettingsAccess(ctx, "commerce.manage");
 
       const { id, price, cost, taxRate, ...data } = input;
+      rejectLegacyProductTaxRate(taxRate);
       const existing = await db.query.studioProduct.findFirst({
         where: and(
           eq(studioProduct.id, id),
@@ -192,9 +203,6 @@ export const productCatalogRouter = createTRPCRouter({
           ...(price !== undefined ? { price: price.toString() } : {}),
           ...(cost !== undefined
             ? { cost: cost === null ? null : cost.toString() }
-            : {}),
-          ...(taxRate !== undefined
-            ? { taxRate: taxRate === null ? null : taxRate.toString() }
             : {}),
           updatedAt: new Date(),
         })

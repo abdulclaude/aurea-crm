@@ -50,6 +50,11 @@ import {
   listClientPaymentMethods,
 } from "@/features/crm/server/client-payment-methods";
 import {
+  applyCustomerFieldWrite,
+  canonicalizeCustomerTags,
+  resolveCustomerRuntimeSettings,
+} from "@/features/customer-settings/server/runtime-settings-service";
+import {
   and,
   arrayOverlaps,
   asc,
@@ -166,7 +171,7 @@ async function getClientWithRelations(
       scope
         ? scope.locationId
           ? eq(clientTable.locationId, scope.locationId)
-          : undefined
+          : isNull(clientTable.locationId)
         : undefined,
     ),
     with: {
@@ -1275,6 +1280,7 @@ export const clientsRouter = createTRPCRouter({
         website: z.string().optional(),
         linkedin: z.string().optional(),
         tags: z.array(z.string()).optional(),
+        customFields: z.record(z.string(), z.unknown()).optional(),
         birthMonth: z.number().int().min(1).max(12).optional(),
         birthDay: z.number().int().min(1).max(31).optional(),
         emergencyContactName: z.string().optional(),
@@ -1298,6 +1304,20 @@ export const clientsRouter = createTRPCRouter({
 
       const clientId = crypto.randomUUID();
       const now = new Date();
+      const runtimeSettings = await resolveCustomerRuntimeSettings({
+        organizationId: orgId,
+        locationId: locationId ?? null,
+      });
+      const tags = canonicalizeCustomerTags(
+        input.tags ?? [],
+        runtimeSettings.tags,
+      );
+      const metadata = applyCustomerFieldWrite({
+        metadata: null,
+        patch: input.customFields ?? {},
+        definitions: runtimeSettings.fields,
+        requireAllRequired: true,
+      });
 
       await db.transaction(async (tx) => {
         await tx.insert(clientTable).values({
@@ -1325,7 +1345,8 @@ export const clientsRouter = createTRPCRouter({
           source: input.source,
           website: input.website,
           linkedin: input.linkedin,
-          tags: input.tags ?? [],
+          tags,
+          metadata,
           birthMonth: input.birthMonth,
           birthDay: input.birthDay,
           emergencyContactName: input.emergencyContactName,
@@ -1433,6 +1454,7 @@ export const clientsRouter = createTRPCRouter({
         website: z.string().optional(),
         linkedin: z.string().optional(),
         tags: z.array(z.string()).optional(),
+        customFields: z.record(z.string(), z.unknown()).optional(),
         assigneeIds: z.array(z.string()).optional(),
         instructorIds: z.array(z.string()).optional(),
         emergencyContactName: z.string().optional(),
@@ -1456,14 +1478,16 @@ export const clientsRouter = createTRPCRouter({
         });
       }
 
-      const { id, assigneeIds, instructorIds, ...data } = input;
+      const { id, assigneeIds, instructorIds, customFields, ...data } = input;
 
       // Fetch old client data for change tracking
       const oldClient = await db.query.client.findFirst({
         where: and(
           eq(clientTable.id, id),
           eq(clientTable.organizationId, orgId),
-          locationId ? eq(clientTable.locationId, locationId) : undefined
+          locationId
+            ? eq(clientTable.locationId, locationId)
+            : isNull(clientTable.locationId),
         ),
         columns: {
           name: true,
@@ -1478,6 +1502,7 @@ export const clientsRouter = createTRPCRouter({
           website: true,
           linkedin: true,
           tags: true,
+          metadata: true,
           acquisitionStage: true,
           birthMonth: true,
           birthDay: true,
@@ -1490,6 +1515,24 @@ export const clientsRouter = createTRPCRouter({
           message: "Client not found",
         });
       }
+
+      const runtimeSettings = await resolveCustomerRuntimeSettings({
+        organizationId: orgId,
+        locationId: locationId ?? null,
+      });
+      const canonicalTags =
+        data.tags === undefined
+          ? undefined
+          : canonicalizeCustomerTags(data.tags, runtimeSettings.tags);
+      const metadata =
+        customFields === undefined
+          ? undefined
+          : applyCustomerFieldWrite({
+              metadata: oldClient.metadata,
+              patch: customFields,
+              definitions: runtimeSettings.fields,
+              requireAllRequired: true,
+            });
 
       // Validate assigneeIds belong to the same location (only if in location context)
       if (assigneeIds && assigneeIds.length > 0 && locationId) {
@@ -1547,7 +1590,8 @@ export const clientsRouter = createTRPCRouter({
         ...(data.linkedin !== undefined && {
           linkedin: data.linkedin || null,
         }),
-        ...(data.tags !== undefined && { tags: data.tags }),
+        ...(canonicalTags !== undefined && { tags: canonicalTags }),
+        ...(metadata !== undefined && { metadata }),
         ...(data.emergencyContactName !== undefined && {
           emergencyContactName: data.emergencyContactName || null,
         }),
@@ -1578,8 +1622,10 @@ export const clientsRouter = createTRPCRouter({
             and(
               eq(clientTable.id, id),
               eq(clientTable.organizationId, orgId),
-              locationId ? eq(clientTable.locationId, locationId) : undefined
-            )
+              locationId
+                ? eq(clientTable.locationId, locationId)
+                : isNull(clientTable.locationId),
+            ),
           )
           .returning({ id: clientTable.id });
 

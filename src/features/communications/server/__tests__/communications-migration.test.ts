@@ -17,6 +17,10 @@ const convergenceMigration = readFileSync(
   ),
   "utf8",
 );
+const controlsMigration = readFileSync(
+  path.join(process.cwd(), "drizzle/0086_communication_controls.sql"),
+  "utf8",
+);
 
 describe("communications migration", () => {
   it("is forward-only and preserves legacy communications tables", () => {
@@ -132,5 +136,42 @@ describe("communications migration", () => {
       /CREATE UNIQUE INDEX "OutboundDelivery_organizationId_id_key"/,
     );
     assert.doesNotMatch(convergenceMigration, /DROP TABLE/);
+  });
+
+  it("adds versioned communication controls without rewriting deliveries", () => {
+    for (const table of ["CommunicationRule", "CommunicationRuleVersion", "MailboxBlocklistEntry"]) {
+      assert.match(controlsMigration, new RegExp(`CREATE TABLE "${table}"`));
+      assert.match(
+        controlsMigration,
+        new RegExp(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`),
+      );
+    }
+    assert.match(controlsMigration, /ADD COLUMN "communicationRuleVersionId" text/);
+    assert.match(controlsMigration, /OutboundDelivery_scope_communicationRuleVersion_fkey/);
+    assert.match(controlsMigration, /CommunicationRuleVersion_org_rule_id_key/);
+    assert.match(controlsMigration, /CommunicationRule_exact_scope_id_key/);
+    assert.match(controlsMigration, /OutboundDelivery_communicationRuleBinding_check/);
+    assert.match(
+      controlsMigration,
+      /FOREIGN KEY \("organizationId", "scopeKey", "ruleId"\)/,
+    );
+    assert.match(controlsMigration, /OutboundDelivery_communication_scope_integrity/);
+    assert.match(controlsMigration, /IS NOT DISTINCT FROM NEW\."locationId"/);
+    assert.doesNotMatch(controlsMigration, /UPDATE "OutboundDelivery"/);
+    assert.doesNotMatch(controlsMigration, /DROP TABLE|DROP COLUMN/);
+  });
+
+  it("preserves immutable delivery rule references", () => {
+    for (const constraint of [
+      "OutboundDelivery_scope_communicationRule_fkey",
+      "OutboundDelivery_scope_communicationRuleVersion_fkey",
+    ]) {
+      const statement = controlsMigration
+        .split(";\n")
+        .find((part) => part.includes(`CONSTRAINT "${constraint}"`));
+      assert.ok(statement, `missing ${constraint}`);
+      assert.match(statement, /ON DELETE restrict/);
+      assert.doesNotMatch(statement, /ON DELETE set null/);
+    }
   });
 });

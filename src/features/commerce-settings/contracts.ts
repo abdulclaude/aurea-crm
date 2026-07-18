@@ -136,4 +136,32 @@ export const versionGuestPassPolicySchema = z.object({
   changeNote: z.string().trim().max(240).nullable().default(null),
 });
 
+const guestPassIdempotencyKeySchema = z.string().trim().min(8).max(200);
+
+export const listGuestPassesSchema = z.object({
+  ownerClientId: idSchema,
+});
+
+export const issueGuestPassSchema = z.object({
+  ownerClientId: idSchema,
+  guestName: z.string().trim().min(1).max(160),
+  guestEmail: z.string().trim().email().max(320).nullable().default(null),
+  guestPhone: z.string().trim().max(40).nullable().default(null),
+  idempotencyKey: guestPassIdempotencyKeySchema,
+});
+
+export const approveGuestPassSchema = z.object({
+  guestPassId: idSchema,
+});
+
+export const redeemGuestPassSchema = z.object({
+  guestPassId: idSchema,
+  bookingReference: z.string().trim().max(200).nullable().default(null),
+  idempotencyKey: guestPassIdempotencyKeySchema,
+});
+
+export const revokeGuestPassSchema = z.object({
+  guestPassId: idSchema,
+});
+
 export type GuestPassPolicyValues = z.infer<typeof guestPassPolicyValuesSchema>;

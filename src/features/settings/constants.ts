@@ -105,6 +105,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
         requiredCapability: "settings.view",
       },
       {
+        id: "content-settings",
+        title: "Content",
+        description:
+          "Manage terminology, FAQs, message macros, and public profiles.",
+        href: "/settings/content",
+        icon: BookOpenCheck,
+        audience: "operators",
+        requiredCapability: "settings.view",
+      },
+      {
         id: "customer-settings",
         title: "Customers",
         description:
@@ -203,6 +213,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     description: "Connected apps, credentials, calendars, and webhooks.",
     icon: PlugZap,
     items: [
+      {
+        id: "integration-accounts",
+        title: "Integration accounts",
+        description:
+          "Manage marketplace, access, marketing, meeting, and fitness providers.",
+        href: "/settings/integrations",
+        icon: PlugZap,
+        audience: "operators",
+        requiredCapability: "provider.manage",
+      },
       {
         id: "apps",
         title: "Apps",

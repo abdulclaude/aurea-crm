@@ -8,6 +8,9 @@ import { CommunicationsUsage } from "@/features/communications/components/commun
 import { ManagedEmailSettings } from "@/features/communications/components/managed-email-settings";
 import { ManagedSmsSettings } from "@/features/communications/components/managed-sms-settings";
 import { ManagedVoiceSettings } from "@/features/communications/components/managed-voice-settings";
+import { CommunicationRulesSettings } from "@/features/communications/components/communication-rules-settings";
+import { CommunicationSuppressionsSettings } from "@/features/communications/components/communication-suppressions-settings";
+import { MailboxBlocklistSettings } from "@/features/communications/components/mailbox-blocklist-settings";
 import { InboxRouteSettings } from "@/features/inbox/components/inbox-route-settings";
 
 const tabs = [
@@ -15,6 +18,9 @@ const tabs = [
   { id: "sms", label: "SMS" },
   { id: "voice", label: "Voice" },
   { id: "inbox", label: "Inbox" },
+  { id: "rules", label: "Rules" },
+  { id: "suppressions", label: "Suppressions" },
+  { id: "blocklist", label: "Blocklist" },
   { id: "usage", label: "Usage" },
 ] as const;
 
@@ -56,5 +62,8 @@ function TabContent({ tab }: { tab: CommunicationsTab }) {
   if (tab === "sms") return <ManagedSmsSettings />;
   if (tab === "voice") return <ManagedVoiceSettings />;
   if (tab === "inbox") return <InboxRouteSettings />;
+  if (tab === "rules") return <CommunicationRulesSettings />;
+  if (tab === "suppressions") return <CommunicationSuppressionsSettings />;
+  if (tab === "blocklist") return <MailboxBlocklistSettings />;
   return <CommunicationsUsage />;
 }

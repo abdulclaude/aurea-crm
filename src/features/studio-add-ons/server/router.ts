@@ -168,6 +168,18 @@ export const studioAddOnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { orgId } = scopedConditions(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+        resource: {
+          organizationId: orgId,
+          locationId: ctx.locationId,
+        },
+      });
       const existing = await db.query.externalChannelIntegration.findFirst({
         where: and(
           tableScope(externalChannelIntegration, orgId, ctx.locationId),
@@ -198,7 +210,12 @@ export const studioAddOnsRouter = createTRPCRouter({
       const [updated] = await db
         .update(externalChannelIntegration)
         .set(values)
-        .where(eq(externalChannelIntegration.id, existing.id))
+        .where(
+          and(
+            eq(externalChannelIntegration.id, existing.id),
+            tableScope(externalChannelIntegration, orgId, ctx.locationId),
+          ),
+        )
         .returning();
       return updated;
     }),
@@ -406,6 +423,18 @@ export const studioAddOnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { orgId } = scopedConditions(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+        resource: {
+          organizationId: orgId,
+          locationId: ctx.locationId,
+        },
+      });
       const [created] = await db.insert(accessControlIntegration).values({
         id: crypto.randomUUID(),
         organizationId: orgId,
@@ -567,6 +596,18 @@ export const studioAddOnsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { orgId } = scopedConditions(ctx);
+      await requireCapability({
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+        capability: "provider.manage",
+        resource: {
+          organizationId: orgId,
+          locationId: ctx.locationId,
+        },
+      });
       const data = {
         organizationId: orgId,
         locationId: ctx.locationId ?? null,
@@ -590,7 +631,12 @@ export const studioAddOnsRouter = createTRPCRouter({
       const [updated] = await db
         .update(marketplaceListing)
         .set(data)
-        .where(eq(marketplaceListing.id, input.id))
+        .where(
+          and(
+            eq(marketplaceListing.id, input.id),
+            tableScope(marketplaceListing, orgId, ctx.locationId),
+          ),
+        )
         .returning();
       return updated;
     }),

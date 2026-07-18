@@ -8,6 +8,7 @@ import {
   type DeliveryChannel,
   type DeliveryProvider,
 } from "@/features/delivery/contracts";
+import { communicationRuleSnapshotSchema } from "@/features/communications/contracts";
 
 export type JsonValue =
   | string
@@ -218,6 +219,14 @@ export const enqueueDeliveryInputSchema = z
     sourceId: z.string().trim().min(1),
     destination: z.string().trim().min(1),
     sender: deliverySenderRefSchema,
+    communicationRule: z
+      .object({
+        ruleId: z.string().trim().min(1),
+        versionId: z.string().trim().min(1),
+        snapshot: communicationRuleSnapshotSchema.strict(),
+      })
+      .strict()
+      .optional(),
     payload: deliveryPayloadSchema,
     idempotencyKey: z.string().trim().min(1).max(500),
     availableAt: z.date().optional(),
@@ -230,6 +239,22 @@ export const enqueueDeliveryInputSchema = z
         code: "custom",
         message: "Payload channel must match the delivery channel",
         path: ["payload", "channel"],
+      });
+    }
+
+    if (
+      input.communicationRule &&
+      (input.communicationRule.snapshot.ruleId !==
+        input.communicationRule.ruleId ||
+        input.communicationRule.snapshot.versionId !==
+          input.communicationRule.versionId ||
+        input.communicationRule.snapshot.channel !== input.channel ||
+        input.communicationRule.snapshot.purpose !== input.purpose)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Communication rule binding must match the delivery.",
+        path: ["communicationRule"],
       });
     }
 

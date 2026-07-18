@@ -1,20 +1,18 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
+import type { inferRouterOutputs } from "@trpc/server";
 import { format } from "date-fns";
 import * as React from "react";
 
+import { useTRPC } from "@/trpc/client";
+import type { AppRouter } from "@/trpc/routers/_app";
 import { MemberDataTable } from "./member-data-table";
 import { MemberStatusBadge } from "./member-status-badge";
 
-type GuestPassRow = {
-  id: string;
-  guestName: string;
-  status: string;
-  issuedAt: Date;
-  expiresAt: Date | null;
-  redeemedAt: Date | null;
-};
+type GuestPassRow =
+  inferRouterOutputs<AppRouter>["commerceSettings"]["listGuestPasses"][number];
 
 const GUEST_PASS_COLUMN_ORDER = [
   "guestName",
@@ -41,7 +39,7 @@ const guestPassColumns: ColumnDef<GuestPassRow>[] = [
     accessorKey: "issuedAt",
     header: "Issued date",
     meta: { label: "Issued date" },
-    cell: ({ row }) => format(row.original.issuedAt, "d MMM yyyy"),
+    cell: ({ row }) => format(new Date(row.original.issuedAt), "d MMM yyyy"),
   },
   {
     accessorKey: "expiresAt",
@@ -49,7 +47,7 @@ const guestPassColumns: ColumnDef<GuestPassRow>[] = [
     meta: { label: "Expiry date" },
     cell: ({ row }) =>
       row.original.expiresAt
-        ? format(row.original.expiresAt, "d MMM yyyy")
+        ? format(new Date(row.original.expiresAt), "d MMM yyyy")
         : "No expiry",
   },
   {
@@ -58,14 +56,28 @@ const guestPassColumns: ColumnDef<GuestPassRow>[] = [
     meta: { label: "Redeemed date" },
     cell: ({ row }) =>
       row.original.redeemedAt
-        ? format(row.original.redeemedAt, "d MMM yyyy")
+        ? format(new Date(row.original.redeemedAt), "d MMM yyyy")
         : "Not redeemed",
   },
 ];
 
-export function MemberGuestPassesView() {
+export function MemberGuestPassesView({ clientId }: { clientId: string }) {
+  const trpc = useTRPC();
   const [statuses, setStatuses] = React.useState<string[]>([]);
-  const rows: GuestPassRow[] = [];
+  const passesQuery = useQuery(
+    trpc.commerceSettings.listGuestPasses.queryOptions({
+      ownerClientId: clientId,
+    }),
+  );
+  const rows = React.useMemo(
+    () =>
+      statuses.length === 0
+        ? (passesQuery.data ?? [])
+        : (passesQuery.data ?? []).filter((pass) =>
+            statuses.includes(pass.status),
+          ),
+    [passesQuery.data, statuses],
+  );
 
   return (
     <div className="py-5">
@@ -81,14 +93,17 @@ export function MemberGuestPassesView() {
           {
             label: "Pass status",
             options: [
-              { value: "ISSUED", label: "Issued" },
+              { value: "PENDING_APPROVAL", label: "Pending approval" },
+              { value: "ACTIVE", label: "Active" },
               { value: "REDEEMED", label: "Redeemed" },
               { value: "EXPIRED", label: "Expired" },
+              { value: "REVOKED", label: "Revoked" },
             ],
             selectedValues: statuses,
             onChange: setStatuses,
           },
         ]}
+        isLoading={passesQuery.isLoading}
       />
     </div>
   );

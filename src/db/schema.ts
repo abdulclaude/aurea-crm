@@ -15072,6 +15072,279 @@ export const campaignRun = pgTable(
   ],
 ).enableRLS();
 
+export const communicationRule = pgTable(
+  "CommunicationRule",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    name: text().notNull(),
+    eventKey: text().notNull(),
+    channel: deliveryChannel().notNull(),
+    purpose: deliveryPurpose().notNull(),
+    currentVersion: integer().default(0).notNull(),
+    archivedAt: timestamp({ precision: 3, mode: "date" }),
+    archivedById: text(),
+    createdById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("CommunicationRule_active_org_event_channel_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.eventKey.asc().nullsLast().op("text_ops"),
+        table.channel.asc().nullsLast().op("enum_ops"),
+      )
+      .where(sql`${table.locationId} IS NULL AND ${table.archivedAt} IS NULL`),
+    uniqueIndex("CommunicationRule_active_location_event_channel_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.locationId.asc().nullsLast().op("text_ops"),
+        table.eventKey.asc().nullsLast().op("text_ops"),
+        table.channel.asc().nullsLast().op("enum_ops"),
+      )
+      .where(
+        sql`${table.locationId} IS NOT NULL AND ${table.archivedAt} IS NULL`,
+      ),
+    uniqueIndex("CommunicationRule_organization_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("CommunicationRule_exact_scope_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.scopeKey.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    check(
+      "CommunicationRule_currentVersion_check",
+      sql`${table.currentVersion} >= 0`,
+    ),
+    check(
+      "CommunicationRule_channel_check",
+      sql`${table.channel} IN ('EMAIL', 'SMS')`,
+    ),
+    check(
+      "CommunicationRule_eventKey_check",
+      sql`${table.eventKey} ~ '^[a-z][a-z0-9_.-]{1,119}$'`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "CommunicationRule_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "CommunicationRule_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.archivedById],
+      foreignColumns: [user.id],
+      name: "CommunicationRule_archivedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "CommunicationRule_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const communicationRuleVersion = pgTable(
+  "CommunicationRuleVersion",
+  {
+    id: text().primaryKey().notNull(),
+    ruleId: text().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    version: integer().notNull(),
+    isEnabled: boolean().default(true).notNull(),
+    scheduleOffsetMinutes: integer().default(0).notNull(),
+    subject: text(),
+    textBody: text(),
+    htmlBody: text(),
+    changeNote: text(),
+    createdById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("CommunicationRuleVersion_rule_version_key").using(
+      "btree",
+      table.ruleId.asc().nullsLast().op("text_ops"),
+      table.version.asc().nullsLast().op("int4_ops"),
+    ),
+    uniqueIndex("CommunicationRuleVersion_organization_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("CommunicationRuleVersion_org_rule_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.ruleId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    index("CommunicationRuleVersion_scope_createdAt_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.createdAt.asc().nullsLast().op("timestamp_ops"),
+    ),
+    check("CommunicationRuleVersion_version_check", sql`${table.version} > 0`),
+    check(
+      "CommunicationRuleVersion_scheduleOffset_check",
+      sql`${table.scheduleOffsetMinutes} BETWEEN -525600 AND 525600`,
+    ),
+    check(
+      "CommunicationRuleVersion_content_check",
+      sql`${table.subject} IS NOT NULL OR ${table.textBody} IS NOT NULL OR ${table.htmlBody} IS NOT NULL`,
+    ),
+    check(
+      "CommunicationRuleVersion_note_check",
+      sql`${table.changeNote} IS NULL OR length(${table.changeNote}) <= 240`,
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.scopeKey, table.ruleId],
+      foreignColumns: [
+        communicationRule.organizationId,
+        communicationRule.scopeKey,
+        communicationRule.id,
+      ],
+      name: "CommunicationRuleVersion_scope_rule_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "CommunicationRuleVersion_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "CommunicationRuleVersion_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const mailboxBlocklistEntry = pgTable(
+  "MailboxBlocklistEntry",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    matchType: text({ enum: ["ADDRESS", "DOMAIN"] }).notNull(),
+    valueNormalized: text().notNull(),
+    reason: text().notNull(),
+    expiresAt: timestamp({ precision: 3, mode: "date" }),
+    revokedAt: timestamp({ precision: 3, mode: "date" }),
+    createdById: text(),
+    revokedById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("MailboxBlocklistEntry_active_org_value_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.matchType.asc().nullsLast().op("text_ops"),
+        table.valueNormalized.asc().nullsLast().op("text_ops"),
+      )
+      .where(sql`${table.locationId} IS NULL AND ${table.revokedAt} IS NULL`),
+    uniqueIndex("MailboxBlocklistEntry_active_location_value_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.locationId.asc().nullsLast().op("text_ops"),
+        table.matchType.asc().nullsLast().op("text_ops"),
+        table.valueNormalized.asc().nullsLast().op("text_ops"),
+      )
+      .where(
+        sql`${table.locationId} IS NOT NULL AND ${table.revokedAt} IS NULL`,
+      ),
+    index("MailboxBlocklistEntry_scope_value_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.valueNormalized.asc().nullsLast().op("text_ops"),
+    ),
+    check(
+      "MailboxBlocklistEntry_matchType_check",
+      sql`${table.matchType} IN ('ADDRESS', 'DOMAIN')`,
+    ),
+    check(
+      "MailboxBlocklistEntry_reason_check",
+      sql`length(${table.reason}) BETWEEN 1 AND 500`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "MailboxBlocklistEntry_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "MailboxBlocklistEntry_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "MailboxBlocklistEntry_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.revokedById],
+      foreignColumns: [user.id],
+      name: "MailboxBlocklistEntry_revokedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
 export const outboundDelivery = pgTable(
   "OutboundDelivery",
   {
@@ -15082,6 +15355,9 @@ export const outboundDelivery = pgTable(
     workflowId: text(),
     executionId: text(),
     nodeId: text(),
+    communicationRuleId: text(),
+    communicationRuleVersionId: text(),
+    communicationRuleSnapshot: jsonb(),
     channel: deliveryChannel().notNull(),
     purpose: deliveryPurpose().notNull(),
     provider: deliveryProvider().notNull(),
@@ -15177,6 +15453,10 @@ export const outboundDelivery = pgTable(
       "btree",
       table.leaseExpiresAt.asc().nullsLast().op("timestamp_ops"),
     ),
+    index("OutboundDelivery_communicationRuleVersionId_idx").using(
+      "btree",
+      table.communicationRuleVersionId.asc().nullsLast().op("text_ops"),
+    ),
     foreignKey({
       columns: [table.providerAccountId],
       foreignColumns: [providerAccount.id],
@@ -15226,6 +15506,36 @@ export const outboundDelivery = pgTable(
     })
       .onUpdate("cascade")
       .onDelete("set null"),
+    foreignKey({
+      columns: [table.organizationId, table.communicationRuleId],
+      foreignColumns: [communicationRule.organizationId, communicationRule.id],
+      name: "OutboundDelivery_scope_communicationRule_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.organizationId,
+        table.communicationRuleId,
+        table.communicationRuleVersionId,
+      ],
+      foreignColumns: [
+        communicationRuleVersion.organizationId,
+        communicationRuleVersion.ruleId,
+        communicationRuleVersion.id,
+      ],
+      name: "OutboundDelivery_scope_communicationRuleVersion_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    check(
+      "OutboundDelivery_communicationRuleSnapshot_check",
+      sql`${table.communicationRuleSnapshot} IS NULL OR jsonb_typeof(${table.communicationRuleSnapshot}) = 'object'`,
+    ),
+    check(
+      "OutboundDelivery_communicationRuleBinding_check",
+      sql`(${table.communicationRuleId} IS NULL AND ${table.communicationRuleVersionId} IS NULL AND ${table.communicationRuleSnapshot} IS NULL) OR (${table.communicationRuleId} IS NOT NULL AND ${table.communicationRuleVersionId} IS NOT NULL AND ${table.communicationRuleSnapshot} IS NOT NULL)`,
+    ),
   ],
 ).enableRLS();
 
@@ -17724,6 +18034,216 @@ export const workspaceOperationsSettingsVersion = pgTable(
   ],
 ).enableRLS();
 
+export const contentLibraryItem = pgTable(
+  "ContentLibraryItem",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    kind: text({
+      enum: [
+        "TERMINOLOGY_PACK",
+        "FAQ_COLLECTION",
+        "MESSAGE_MACRO",
+        "PUBLIC_PROFILE",
+      ],
+    }).notNull(),
+    key: text().notNull(),
+    name: text().notNull(),
+    description: text(),
+    currentVersion: integer().default(0).notNull(),
+    publishedVersion: integer(),
+    publishedAt: timestamp({ precision: 3, mode: "date" }),
+    publishedById: text(),
+    archivedAt: timestamp({ precision: 3, mode: "date" }),
+    archivedById: text(),
+    createdById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("ContentLibraryItem_active_org_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.kind.asc().nullsLast().op("text_ops"),
+        table.key.asc().nullsLast().op("text_ops"),
+      )
+      .where(sql`${table.locationId} IS NULL AND ${table.archivedAt} IS NULL`),
+    uniqueIndex("ContentLibraryItem_active_location_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.locationId.asc().nullsLast().op("text_ops"),
+        table.kind.asc().nullsLast().op("text_ops"),
+        table.key.asc().nullsLast().op("text_ops"),
+      )
+      .where(
+        sql`${table.locationId} IS NOT NULL AND ${table.archivedAt} IS NULL`,
+      ),
+    uniqueIndex("ContentLibraryItem_organization_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("ContentLibraryItem_exact_scope_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.scopeKey.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    index("ContentLibraryItem_scope_kind_updatedAt_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.kind.asc().nullsLast().op("text_ops"),
+      table.updatedAt.asc().nullsLast().op("timestamp_ops"),
+    ),
+    check(
+      "ContentLibraryItem_key_check",
+      sql`${table.key} ~ '^[a-z][a-z0-9_-]{1,79}$'`,
+    ),
+    check(
+      "ContentLibraryItem_kind_check",
+      sql`${table.kind} IN ('TERMINOLOGY_PACK', 'FAQ_COLLECTION', 'MESSAGE_MACRO', 'PUBLIC_PROFILE')`,
+    ),
+    check(
+      "ContentLibraryItem_version_check",
+      sql`${table.currentVersion} >= 0 AND (${table.publishedVersion} IS NULL OR (${table.publishedVersion} > 0 AND ${table.publishedVersion} <= ${table.currentVersion}))`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "ContentLibraryItem_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "ContentLibraryItem_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.publishedById],
+      foreignColumns: [user.id],
+      name: "ContentLibraryItem_publishedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.archivedById],
+      foreignColumns: [user.id],
+      name: "ContentLibraryItem_archivedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "ContentLibraryItem_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const contentLibraryItemVersion = pgTable(
+  "ContentLibraryItemVersion",
+  {
+    id: text().primaryKey().notNull(),
+    itemId: text().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    kind: text({
+      enum: [
+        "TERMINOLOGY_PACK",
+        "FAQ_COLLECTION",
+        "MESSAGE_MACRO",
+        "PUBLIC_PROFILE",
+      ],
+    }).notNull(),
+    version: integer().notNull(),
+    payload: jsonb().$type<Record<string, unknown>>().notNull(),
+    changeNote: text(),
+    sourceVersion: integer(),
+    createdById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("ContentLibraryItemVersion_item_version_key").using(
+      "btree",
+      table.itemId.asc().nullsLast().op("text_ops"),
+      table.version.asc().nullsLast().op("int4_ops"),
+    ),
+    index("ContentLibraryItemVersion_scope_createdAt_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.createdAt.asc().nullsLast().op("timestamp_ops"),
+    ),
+    check("ContentLibraryItemVersion_version_check", sql`${table.version} > 0`),
+    check(
+      "ContentLibraryItemVersion_kind_check",
+      sql`${table.kind} IN ('TERMINOLOGY_PACK', 'FAQ_COLLECTION', 'MESSAGE_MACRO', 'PUBLIC_PROFILE')`,
+    ),
+    check(
+      "ContentLibraryItemVersion_payload_check",
+      sql`jsonb_typeof(${table.payload}) = 'object'`,
+    ),
+    check(
+      "ContentLibraryItemVersion_source_check",
+      sql`${table.sourceVersion} IS NULL OR ${table.sourceVersion} > 0`,
+    ),
+    check(
+      "ContentLibraryItemVersion_note_check",
+      sql`${table.changeNote} IS NULL OR length(${table.changeNote}) <= 240`,
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.scopeKey, table.itemId],
+      foreignColumns: [
+        contentLibraryItem.organizationId,
+        contentLibraryItem.scopeKey,
+        contentLibraryItem.id,
+      ],
+      name: "ContentLibraryItemVersion_scope_item_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "ContentLibraryItemVersion_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "ContentLibraryItemVersion_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
 export const customerFieldDefinition = pgTable(
   "CustomerFieldDefinition",
   {
@@ -18553,6 +19073,11 @@ export const commerceGuestPassPolicyVersion = pgTable(
     id: text().primaryKey().notNull(),
     organizationId: text().notNull(),
     locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
     version: integer().notNull(),
     values: jsonb().$type<Record<string, unknown>>().notNull(),
     isActive: boolean().default(false).notNull(),
@@ -18578,6 +19103,17 @@ export const commerceGuestPassPolicyVersion = pgTable(
         table.version.asc().nullsLast().op("int4_ops"),
       )
       .where(sql`${table.locationId} IS NOT NULL`),
+    uniqueIndex("CommerceGuestPassPolicyVersion_organization_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("CommerceGuestPassPolicyVersion_exact_scope_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.scopeKey.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
     uniqueIndex("CommerceGuestPassPolicyVersion_active_org_key")
       .using("btree", table.organizationId.asc().nullsLast().op("text_ops"))
       .where(sql`${table.locationId} IS NULL AND ${table.isActive} = true`),
@@ -18624,6 +19160,220 @@ export const commerceGuestPassPolicyVersion = pgTable(
       columns: [table.createdById],
       foreignColumns: [user.id],
       name: "CommerceGuestPassPolicyVersion_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const commerceGuestPass = pgTable(
+  "CommerceGuestPass",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    ownerClientId: text().notNull(),
+    policyVersionId: text().notNull(),
+    guestName: text().notNull(),
+    guestEmail: text(),
+    guestPhone: text(),
+    status: text({
+      enum: [
+        "PENDING_APPROVAL",
+        "ACTIVE",
+        "REDEEMED",
+        "EXPIRED",
+        "REVOKED",
+      ],
+    }).notNull(),
+    allowedUses: integer().default(1).notNull(),
+    usedCount: integer().default(0).notNull(),
+    policySnapshot: jsonb().$type<Record<string, unknown>>().notNull(),
+    idempotencyKey: text().notNull(),
+    issuedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    expiresAt: timestamp({ precision: 3, mode: "date" }).notNull(),
+    approvedAt: timestamp({ precision: 3, mode: "date" }),
+    approvedById: text(),
+    revokedAt: timestamp({ precision: 3, mode: "date" }),
+    revokedById: text(),
+    createdById: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("CommerceGuestPass_scope_idempotency_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.idempotencyKey.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("CommerceGuestPass_organization_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    uniqueIndex("CommerceGuestPass_exact_scope_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.scopeKey.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    index("CommerceGuestPass_owner_status_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.ownerClientId.asc().nullsLast().op("text_ops"),
+      table.status.asc().nullsLast().op("text_ops"),
+    ),
+    index("CommerceGuestPass_expiry_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.expiresAt.asc().nullsLast().op("timestamp_ops"),
+    ),
+    check(
+      "CommerceGuestPass_usage_check",
+      sql`${table.allowedUses} > 0 AND ${table.usedCount} BETWEEN 0 AND ${table.allowedUses}`,
+    ),
+    check(
+      "CommerceGuestPass_status_check",
+      sql`${table.status} IN ('PENDING_APPROVAL', 'ACTIVE', 'REDEEMED', 'EXPIRED', 'REVOKED')`,
+    ),
+    check(
+      "CommerceGuestPass_expiry_check",
+      sql`${table.expiresAt} > ${table.issuedAt}`,
+    ),
+    check(
+      "CommerceGuestPass_policy_snapshot_check",
+      sql`jsonb_typeof(${table.policySnapshot}) = 'object'`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "CommerceGuestPass_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "CommerceGuestPass_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.ownerClientId],
+      foreignColumns: [client.organizationId, client.id],
+      name: "CommerceGuestPass_scope_ownerClientId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      columns: [table.organizationId, table.scopeKey, table.policyVersionId],
+      foreignColumns: [
+        commerceGuestPassPolicyVersion.organizationId,
+        commerceGuestPassPolicyVersion.scopeKey,
+        commerceGuestPassPolicyVersion.id,
+      ],
+      name: "CommerceGuestPass_scope_policyVersionId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      columns: [table.approvedById],
+      foreignColumns: [user.id],
+      name: "CommerceGuestPass_approvedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.revokedById],
+      foreignColumns: [user.id],
+      name: "CommerceGuestPass_revokedById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+    foreignKey({
+      columns: [table.createdById],
+      foreignColumns: [user.id],
+      name: "CommerceGuestPass_createdById_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const commerceGuestPassRedemption = pgTable(
+  "CommerceGuestPassRedemption",
+  {
+    id: text().primaryKey().notNull(),
+    guestPassId: text().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    bookingReference: text(),
+    idempotencyKey: text().notNull(),
+    redeemedById: text(),
+    redeemedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("CommerceGuestPassRedemption_scope_idempotency_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.idempotencyKey.asc().nullsLast().op("text_ops"),
+    ),
+    index("CommerceGuestPassRedemption_pass_redeemedAt_idx").using(
+      "btree",
+      table.guestPassId.asc().nullsLast().op("text_ops"),
+      table.redeemedAt.asc().nullsLast().op("timestamp_ops"),
+    ),
+    foreignKey({
+      columns: [table.organizationId, table.scopeKey, table.guestPassId],
+      foreignColumns: [
+        commerceGuestPass.organizationId,
+        commerceGuestPass.scopeKey,
+        commerceGuestPass.id,
+      ],
+      name: "CommerceGuestPassRedemption_scope_guestPassId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "CommerceGuestPassRedemption_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "CommerceGuestPassRedemption_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.redeemedById],
+      foreignColumns: [user.id],
+      name: "CommerceGuestPassRedemption_redeemedById_fkey",
     })
       .onUpdate("restrict")
       .onDelete("set null"),

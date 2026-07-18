@@ -603,6 +603,27 @@
       "when": 1784379600000,
       "tag": "0085_communications_schema_convergence",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1784383200000,
+      "tag": "0086_communication_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1784386800000,
+      "tag": "0087_content_library",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1784390400000,
+      "tag": "0088_guest_pass_runtime",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@ import {
   gt,
   sql,
 } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
 import {
@@ -32,7 +33,9 @@ import {
   organization,
   stripeConnection,
   bankTransferSettings,
+  client,
   location,
+  studioProduct,
   timeLog,
 } from "@/db/schema";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
@@ -56,8 +59,18 @@ import {
   currencyExponent,
   decimalToMinorUnits,
   minorUnitsToDecimal,
+  multiplyDecimalsToMinorUnits,
   normalizeCurrency,
 } from "@/features/commerce/lib/money";
+import {
+  calculateTaxedMinorAmount,
+  manualTaxSnapshot,
+  resolveTaxForInvoiceLines,
+  type CommerceLineType,
+  type TaxRateSnapshot,
+} from "@/features/commerce-settings/server/tax-runtime-resolver";
+import { resolveRevenueCategorySelections } from "@/features/commerce-settings/server/revenue-runtime-resolver";
+import { getEffectiveWorkspaceRegionalValues } from "@/features/workspace-settings/server/query-service";
 import { resolvePaymentRecoveryCases } from "@/features/commerce/server/recovery/payment-recovery-case-service";
 import {
   invoiceTemplatePresetSchema,
@@ -107,6 +120,253 @@ const invoiceWith = {
   invoiceReminders: true,
   invoiceTemplate: true,
 } as const;
+
+const commerceLineTypeSchema = z.enum([
+  "MEMBERSHIP",
+  "CLASS",
+  "ADD_ON",
+  "GIFT_CARD",
+  "RETAIL",
+  "OTHER",
+]);
+const invoiceLineInputSchema = z.object({
+  id: z.string().optional(),
+  description: z.string().min(1),
+  quantity: z.number().positive(),
+  unitPrice: z.number().min(0),
+  timeLogId: z.string().min(1).optional(),
+  productId: z.string().min(1).optional().nullable(),
+  lineType: commerceLineTypeSchema.default("OTHER"),
+  revenueCategory: z.string().trim().min(1).optional().nullable(),
+});
+const manualTaxOverrideSchema = z.object({
+  rateBasisPoints: z.number().int().min(0).max(10_000),
+  kind: z.enum(["EXCLUSIVE", "INCLUSIVE"]),
+  reason: z.string().trim().min(10).max(500),
+});
+
+type InvoiceCommerceLine = z.infer<typeof invoiceLineInputSchema>;
+type InvoiceTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+function exactInvoiceLocation(
+  column: AnyPgColumn,
+  locationId: string | null,
+) {
+  return locationId === null ? isNull(column) : eq(column, locationId);
+}
+
+async function requireInvoiceReferences(
+  tx: InvoiceTransaction,
+  input: {
+    organizationId: string;
+    locationId: string | null;
+    clientId?: string;
+    templateId?: string;
+    lineItems?: InvoiceCommerceLine[];
+  },
+): Promise<void> {
+  if (input.clientId) {
+    const [scopedClient] = await tx
+      .select({ id: client.id })
+      .from(client)
+      .where(
+        and(
+          eq(client.id, input.clientId),
+          eq(client.organizationId, input.organizationId),
+          exactInvoiceLocation(client.locationId, input.locationId),
+        ),
+      )
+      .limit(1);
+    if (!scopedClient) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Client not found" });
+    }
+  }
+
+  if (input.templateId && input.templateId !== "__default__") {
+    const [scopedTemplate] = await tx
+      .select({ id: invoiceTemplate.id })
+      .from(invoiceTemplate)
+      .where(
+        and(
+          eq(invoiceTemplate.id, input.templateId),
+          eq(invoiceTemplate.organizationId, input.organizationId),
+          exactInvoiceLocation(invoiceTemplate.locationId, input.locationId),
+        ),
+      )
+      .limit(1);
+    if (!scopedTemplate) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Invoice template not found",
+      });
+    }
+  }
+
+  const timeLogIds = Array.from(
+    new Set(
+      input.lineItems
+        ?.map((item) => item.timeLogId)
+        .filter((id): id is string => Boolean(id)) ?? [],
+    ),
+  );
+  if (timeLogIds.length > 0) {
+    const scopedTimeLogs = await tx
+      .select({ id: timeLog.id })
+      .from(timeLog)
+      .where(
+        and(
+          inArray(timeLog.id, timeLogIds),
+          eq(timeLog.organizationId, input.organizationId),
+          exactInvoiceLocation(timeLog.locationId, input.locationId),
+        ),
+      );
+    if (scopedTimeLogs.length !== timeLogIds.length) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Time log not found",
+      });
+    }
+  }
+
+  const productIds = Array.from(
+    new Set(
+      input.lineItems
+        ?.map((item) => item.productId)
+        .filter((id): id is string => Boolean(id)) ?? [],
+    ),
+  );
+  if (productIds.length > 0) {
+    const scopedProducts = await tx
+      .select({ id: studioProduct.id })
+      .from(studioProduct)
+      .where(
+        and(
+          inArray(studioProduct.id, productIds),
+          eq(studioProduct.organizationId, input.organizationId),
+          exactInvoiceLocation(studioProduct.locationId, input.locationId),
+          eq(studioProduct.isActive, true),
+          isNull(studioProduct.deletedAt),
+        ),
+      );
+    if (scopedProducts.length !== productIds.length) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Product not found" });
+    }
+  }
+}
+
+type InvoiceCommerceFinancials = {
+  subtotal: string;
+  taxAmount: string;
+  totalBeforeDiscount: string;
+  taxRate: string | null;
+  taxSnapshots: TaxRateSnapshot[];
+  lineItems: Array<{
+    amount: string;
+    metadata: Record<string, unknown>;
+  }>;
+};
+
+async function resolveInvoiceCommerceFinancials(input: {
+  organizationId: string;
+  locationId: string | null;
+  currency: string;
+  lineItems: InvoiceCommerceLine[];
+  manualTaxOverride?: z.infer<typeof manualTaxOverrideSchema>;
+}): Promise<InvoiceCommerceFinancials> {
+  const scope = {
+    organizationId: input.organizationId,
+    locationId: input.locationId,
+  };
+  const [configuredTaxes, revenueCategories] = await Promise.all([
+    resolveTaxForInvoiceLines({
+      scope,
+      lines: input.lineItems.map((line) => ({
+        productId: line.productId,
+        lineType: line.lineType as CommerceLineType,
+      })),
+    }),
+    resolveRevenueCategorySelections({
+      scope,
+      selections: input.lineItems.map((line) => line.revenueCategory),
+    }),
+  ]);
+  const taxSnapshots = input.manualTaxOverride
+    ? input.lineItems.map(() => manualTaxSnapshot(input.manualTaxOverride!))
+    : configuredTaxes;
+  const exponent = currencyExponent(input.currency);
+  let subtotalMinor = 0;
+  let taxMinor = 0;
+  let totalMinor = 0;
+
+  const lineItems = input.lineItems.map((line, index) => {
+    const enteredAmountMinor = multiplyDecimalsToMinorUnits(
+      String(line.quantity),
+      String(line.unitPrice),
+      exponent,
+    );
+    const financials = calculateTaxedMinorAmount({
+      enteredAmountMinor,
+      tax: taxSnapshots[index]!,
+    });
+    subtotalMinor += financials.subtotalMinor;
+    taxMinor += financials.taxMinor;
+    totalMinor += financials.totalMinor;
+    return {
+      amount: minorUnitsToDecimal(financials.subtotalMinor, exponent),
+      metadata: {
+        commerceSnapshotVersion: 1,
+        enteredAmount: minorUnitsToDecimal(enteredAmountMinor, exponent),
+        lineType: line.lineType,
+        productId: line.productId ?? null,
+        tax: taxSnapshots[index],
+        revenueCategory: revenueCategories[index],
+      },
+    };
+  });
+  const distinctRates = new Set(
+    taxSnapshots
+      .filter((tax) => tax.rateBasisPoints > 0)
+      .map((tax) => `${tax.rateBasisPoints}:${tax.kind}`),
+  );
+  const commonTax =
+    distinctRates.size === 1
+      ? taxSnapshots.find((tax) => tax.rateBasisPoints > 0)
+      : null;
+
+  return {
+    subtotal: minorUnitsToDecimal(subtotalMinor, exponent),
+    taxAmount: minorUnitsToDecimal(taxMinor, exponent),
+    totalBeforeDiscount: minorUnitsToDecimal(totalMinor, exponent),
+    taxRate: commonTax ? (commonTax.rateBasisPoints / 100).toFixed(2) : null,
+    taxSnapshots,
+    lineItems,
+  };
+}
+
+async function authorizeManualTaxOverride(input: {
+  override?: z.infer<typeof manualTaxOverrideSchema>;
+  legacyTaxRate?: number;
+  actor: { userId: string; organizationId: string; locationId: string | null };
+}): Promise<void> {
+  if (!input.override) {
+    if (input.legacyTaxRate !== undefined && input.legacyTaxRate !== 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          "Use a reasoned manual tax override or configure the tax assignment in Commerce settings.",
+      });
+    }
+    return;
+  }
+  await requireCapability({
+    actor: input.actor,
+    capability: "commerce.manage",
+    resource: {
+      organizationId: input.actor.organizationId,
+      locationId: input.actor.locationId,
+    },
+  });
+}
 
 /**
  * Determine available payment methods for an invoice based on configured integrations
@@ -354,7 +614,7 @@ export const invoicesRouter = createTRPCRouter({
   create: protectedProcedure
     .input(
       z.object({
-        clientId: z.string().optional(),
+        clientId: z.string().min(1).optional(),
         clientName: z.string().min(1),
         clientEmail: z.string().email().optional(),
         clientAddress: z
@@ -370,17 +630,11 @@ export const invoicesRouter = createTRPCRouter({
         title: z.string().optional(),
         type: z.nativeEnum(InvoiceType).default(InvoiceType.SENT),
         billingModel: z.nativeEnum(BillingModel).default("CUSTOM"),
-        templateId: z.string().optional(),
+        templateId: z.string().min(1).optional(),
         dueDate: z.date(),
-        lineItems: z.array(
-          z.object({
-            description: z.string().min(1),
-            quantity: z.number().positive(),
-            unitPrice: z.number(),
-            timeLogId: z.string().optional(),
-          }),
-        ),
+        lineItems: z.array(invoiceLineInputSchema),
         taxRate: z.number().min(0).max(100).optional(),
+        manualTaxOverride: manualTaxOverrideSchema.optional(),
         discountAmount: z.number().min(0).optional(),
         notes: z.string().optional(),
         internalNotes: z.string().optional(),
@@ -396,15 +650,42 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Calculate line items totals
-      const subtotal = input.lineItems.reduce(
-        (sum, item) => sum + item.quantity * item.unitPrice,
-        0,
+      await authorizeManualTaxOverride({
+        override: input.manualTaxOverride,
+        legacyTaxRate: input.taxRate,
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+      });
+      const { currency } = await getEffectiveWorkspaceRegionalValues({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      const exponent = currencyExponent(currency);
+      const financials = await resolveInvoiceCommerceFinancials({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        currency,
+        lineItems: input.lineItems,
+        manualTaxOverride: input.manualTaxOverride,
+      });
+      const discountMinor = decimalToMinorUnits(
+        (input.discountAmount ?? 0).toFixed(exponent),
+        exponent,
       );
-
-      const taxAmount = input.taxRate ? (subtotal * input.taxRate) / 100 : 0;
-      const discountAmount = input.discountAmount ?? 0;
-      const total = subtotal + taxAmount - discountAmount;
+      const totalMinor =
+        decimalToMinorUnits(financials.totalBeforeDiscount, exponent) -
+        discountMinor;
+      if (totalMinor < 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Discount cannot exceed the invoice total.",
+        });
+      }
+      const discountAmount = minorUnitsToDecimal(discountMinor, exponent);
+      const total = minorUnitsToDecimal(totalMinor, exponent);
 
       // Generate invoice number
       const invoiceNumber = await generateInvoiceNumber(
@@ -420,6 +701,14 @@ export const invoicesRouter = createTRPCRouter({
 
       // Create invoice with line items in a transaction
       const createdInvoice = await db.transaction(async (tx) => {
+        await requireInvoiceReferences(tx, {
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId,
+          clientId: input.clientId,
+          templateId: input.templateId,
+          lineItems: input.lineItems,
+        });
+
         const invoiceId = crypto.randomUUID();
         const now = new Date();
 
@@ -442,18 +731,24 @@ export const invoicesRouter = createTRPCRouter({
                 ? input.templateId
                 : undefined,
             dueDate: input.dueDate,
-            subtotal: String(subtotal),
-            taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
-            taxAmount: String(taxAmount),
-            discountAmount: String(discountAmount),
-            total: String(total),
-            amountDue: String(total),
+            subtotal: financials.subtotal,
+            taxRate: financials.taxRate,
+            taxAmount: financials.taxAmount,
+            discountAmount,
+            total,
+            amountDue: total,
             amountPaid: "0",
+            currency,
             notes: input.notes,
             internalNotes: input.internalNotes,
             termsConditions: input.termsConditions,
             documentUrl: input.documentUrl,
             paymentMethods,
+            metadata: {
+              commerceSnapshotVersion: 1,
+              tax: financials.taxSnapshots,
+              manualTaxOverride: input.manualTaxOverride ?? null,
+            },
             createdAt: now,
             updatedAt: now,
           })
@@ -467,9 +762,10 @@ export const invoicesRouter = createTRPCRouter({
               description: item.description,
               quantity: String(item.quantity),
               unitPrice: String(item.unitPrice),
-              amount: String(item.quantity * item.unitPrice),
+              amount: financials.lineItems[index]!.amount,
               timeLogId: item.timeLogId,
               order: index,
+              metadata: financials.lineItems[index]!.metadata,
               createdAt: now,
               updatedAt: now,
             })),
@@ -504,7 +800,7 @@ export const invoicesRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        clientId: z.string().optional(),
+        clientId: z.string().min(1).optional(),
         clientName: z.string().min(1).optional(),
         clientEmail: z.string().email().optional(),
         clientAddress: z
@@ -519,20 +815,11 @@ export const invoicesRouter = createTRPCRouter({
           .optional(),
         title: z.string().optional(),
         status: z.nativeEnum(InvoiceStatus).optional(),
-        templateId: z.string().optional(),
+        templateId: z.string().min(1).optional(),
         dueDate: z.date().optional(),
-        lineItems: z
-          .array(
-            z.object({
-              id: z.string().optional(), // Existing line item ID
-              description: z.string().min(1),
-              quantity: z.number().positive(),
-              unitPrice: z.number(),
-              timeLogId: z.string().optional(),
-            }),
-          )
-          .optional(),
+        lineItems: z.array(invoiceLineInputSchema).optional(),
         taxRate: z.number().min(0).max(100).optional(),
+        manualTaxOverride: manualTaxOverrideSchema.optional(),
         discountAmount: z.number().min(0).optional(),
         notes: z.string().optional(),
         internalNotes: z.string().optional(),
@@ -566,34 +853,82 @@ export const invoicesRouter = createTRPCRouter({
         organizationId: ctx.orgId,
         locationId: ctx.locationId,
       });
+      await authorizeManualTaxOverride({
+        override: updateData.manualTaxOverride,
+        legacyTaxRate:
+          updateData.taxRate !== undefined &&
+          updateData.taxRate !== Number(existingInvoice.taxRate ?? 0)
+            ? updateData.taxRate
+            : undefined,
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: existingInvoice.organizationId,
+          locationId: existingInvoice.locationId,
+        },
+      });
+      if (updateData.manualTaxOverride && !lineItems) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Include invoice lines when applying a manual tax override.",
+        });
+      }
 
       // Calculate totals if line items are updated
       let financialUpdate: Record<string, unknown> = {};
+      let resolvedLineFinancials: InvoiceCommerceFinancials | null = null;
 
       if (lineItems) {
-        const subtotal = lineItems.reduce(
-          (sum, item) => sum + item.quantity * item.unitPrice,
-          0,
+        const financials = await resolveInvoiceCommerceFinancials({
+          organizationId: existingInvoice.organizationId,
+          locationId: existingInvoice.locationId,
+          currency: existingInvoice.currency,
+          lineItems,
+          manualTaxOverride: updateData.manualTaxOverride,
+        });
+        resolvedLineFinancials = financials;
+        const exponent = currencyExponent(existingInvoice.currency);
+        const discountMinor = decimalToMinorUnits(
+          (
+            updateData.discountAmount ?? Number(existingInvoice.discountAmount)
+          ).toFixed(exponent),
+          exponent,
         );
-
-        const taxRate =
-          updateData.taxRate ??
-          (existingInvoice.taxRate
-            ? parseFloat(existingInvoice.taxRate)
-            : undefined);
-        const taxAmount = taxRate ? (subtotal * taxRate) / 100 : 0;
-        const discountAmount =
-          updateData.discountAmount ??
-          parseFloat(existingInvoice.discountAmount);
-        const total = subtotal + taxAmount - discountAmount;
-        const amountPaid = parseFloat(existingInvoice.amountPaid);
+        const totalMinor =
+          decimalToMinorUnits(financials.totalBeforeDiscount, exponent) -
+          discountMinor;
+        const amountPaidMinor = decimalToMinorUnits(
+          existingInvoice.amountPaid,
+          exponent,
+        );
+        if (totalMinor < 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Discount cannot exceed the invoice total.",
+          });
+        }
+        const existingMetadata =
+          typeof existingInvoice.metadata === "object" &&
+          existingInvoice.metadata !== null &&
+          !Array.isArray(existingInvoice.metadata)
+            ? existingInvoice.metadata
+            : {};
 
         financialUpdate = {
-          subtotal: String(subtotal),
-          taxAmount: String(taxAmount),
-          discountAmount: String(discountAmount),
-          total: String(total),
-          amountDue: String(total - amountPaid),
+          subtotal: financials.subtotal,
+          taxRate: financials.taxRate,
+          taxAmount: financials.taxAmount,
+          discountAmount: minorUnitsToDecimal(discountMinor, exponent),
+          total: minorUnitsToDecimal(totalMinor, exponent),
+          amountDue: minorUnitsToDecimal(
+            Math.max(0, totalMinor - amountPaidMinor),
+            exponent,
+          ),
+          metadata: {
+            ...existingMetadata,
+            commerceSnapshotVersion: 1,
+            tax: financials.taxSnapshots,
+            manualTaxOverride: updateData.manualTaxOverride ?? null,
+          },
         };
       }
 
@@ -615,8 +950,6 @@ export const invoicesRouter = createTRPCRouter({
       if (updateData.status !== undefined) updateSet.status = updateData.status;
       if (updateData.dueDate !== undefined)
         updateSet.dueDate = updateData.dueDate;
-      if (updateData.taxRate !== undefined)
-        updateSet.taxRate = String(updateData.taxRate);
       if (updateData.discountAmount !== undefined)
         updateSet.discountAmount = String(updateData.discountAmount);
       if (updateData.notes !== undefined) updateSet.notes = updateData.notes;
@@ -629,6 +962,14 @@ export const invoicesRouter = createTRPCRouter({
 
       // Update invoice in a transaction
       await db.transaction(async (tx) => {
+        await requireInvoiceReferences(tx, {
+          organizationId: existingInvoice.organizationId,
+          locationId: existingInvoice.locationId,
+          clientId: updateData.clientId,
+          templateId,
+          lineItems,
+        });
+
         // Delete old line items if updating
         if (lineItems) {
           await tx
@@ -645,9 +986,10 @@ export const invoicesRouter = createTRPCRouter({
                 description: item.description,
                 quantity: String(item.quantity),
                 unitPrice: String(item.unitPrice),
-                amount: String(item.quantity * item.unitPrice),
+                amount: resolvedLineFinancials!.lineItems[index]!.amount,
                 timeLogId: item.timeLogId,
                 order: index,
+                metadata: resolvedLineFinancials!.lineItems[index]!.metadata,
                 createdAt: now,
                 updatedAt: now,
               })),
@@ -1238,13 +1580,17 @@ export const invoicesRouter = createTRPCRouter({
       z.object({
         timeLogIds: z
           .array(z.string())
-          .min(1, "At least one time log is required"),
-        clientId: z.string().optional(),
+          .min(1, "At least one time log is required")
+          .refine((ids) => new Set(ids).size === ids.length, {
+            message: "Time log IDs must be unique",
+          }),
+        clientId: z.string().min(1).optional(),
         clientName: z.string().min(1).optional(),
         clientEmail: z.string().email().optional().or(z.literal("")),
         title: z.string().optional(),
         dueDate: z.date(),
         taxRate: z.number().min(0).max(100).optional(),
+        manualTaxOverride: manualTaxOverrideSchema.optional(),
         discountAmount: z.number().min(0).optional(),
         notes: z.string().optional(),
         termsConditions: z.string().optional(),
@@ -1265,6 +1611,7 @@ export const invoicesRouter = createTRPCRouter({
           and(
             inArray(t.id, input.timeLogIds),
             eq(t.organizationId, ctx.orgId!),
+            exactInvoiceLocation(t.locationId, ctx.locationId),
             eq(t.status, "APPROVED"),
           ),
         with: {
@@ -1273,10 +1620,10 @@ export const invoicesRouter = createTRPCRouter({
         },
       });
 
-      if (timeLogs.length === 0) {
+      if (timeLogs.length !== input.timeLogIds.length) {
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "No approved time logs found",
+          code: "NOT_FOUND",
+          message: "One or more approved time logs were not found",
         });
       }
 
@@ -1405,14 +1752,46 @@ export const invoicesRouter = createTRPCRouter({
         });
       }
 
-      // Calculate totals
-      const subtotal = lineItems.reduce(
-        (sum, item) => sum + item.quantity * item.unitPrice,
-        0,
+      await authorizeManualTaxOverride({
+        override: input.manualTaxOverride,
+        legacyTaxRate: input.taxRate,
+        actor: {
+          userId: ctx.auth.user.id,
+          organizationId: ctx.orgId,
+          locationId: ctx.locationId,
+        },
+      });
+      const { currency } = await getEffectiveWorkspaceRegionalValues({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+      });
+      const exponent = currencyExponent(currency);
+      const commerceLines: InvoiceCommerceLine[] = lineItems.map((line) => ({
+        ...line,
+        lineType: "OTHER",
+      }));
+      const financials = await resolveInvoiceCommerceFinancials({
+        organizationId: ctx.orgId,
+        locationId: ctx.locationId,
+        currency,
+        lineItems: commerceLines,
+        manualTaxOverride: input.manualTaxOverride,
+      });
+      const discountMinor = decimalToMinorUnits(
+        (input.discountAmount ?? 0).toFixed(exponent),
+        exponent,
       );
-      const taxAmount = input.taxRate ? (subtotal * input.taxRate) / 100 : 0;
-      const discountAmount = input.discountAmount ?? 0;
-      const total = subtotal + taxAmount - discountAmount;
+      const totalMinor =
+        decimalToMinorUnits(financials.totalBeforeDiscount, exponent) -
+        discountMinor;
+      if (totalMinor < 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Discount cannot exceed the invoice total.",
+        });
+      }
+      const discountAmount = minorUnitsToDecimal(discountMinor, exponent);
+      const total = minorUnitsToDecimal(totalMinor, exponent);
 
       // Get client info from time logs (we've already validated all time logs have the same client)
       const timeLogClient = timeLogs[0]?.client;
@@ -1464,6 +1843,12 @@ export const invoicesRouter = createTRPCRouter({
 
       // Create invoice
       const createdInvoice = await db.transaction(async (tx) => {
+        await requireInvoiceReferences(tx, {
+          organizationId: ctx.orgId!,
+          locationId: ctx.locationId,
+          clientId,
+        });
+
         const invoiceId = crypto.randomUUID();
         const now = new Date();
 
@@ -1482,16 +1867,22 @@ export const invoicesRouter = createTRPCRouter({
               `Time Tracking Invoice - ${format(new Date(), "MMM yyyy")}`,
             billingModel: "HOURLY",
             dueDate: input.dueDate,
-            subtotal: String(subtotal),
-            taxRate: input.taxRate != null ? String(input.taxRate) : undefined,
-            taxAmount: String(taxAmount),
-            discountAmount: String(discountAmount),
-            total: String(total),
-            amountDue: String(total),
+            subtotal: financials.subtotal,
+            taxRate: financials.taxRate,
+            taxAmount: financials.taxAmount,
+            discountAmount,
+            total,
+            amountDue: total,
             amountPaid: "0",
+            currency,
             notes: input.notes,
             termsConditions: input.termsConditions,
             paymentMethods,
+            metadata: {
+              commerceSnapshotVersion: 1,
+              tax: financials.taxSnapshots,
+              manualTaxOverride: input.manualTaxOverride ?? null,
+            },
             createdAt: now,
             updatedAt: now,
           })
@@ -1505,9 +1896,10 @@ export const invoicesRouter = createTRPCRouter({
               description: item.description,
               quantity: String(item.quantity),
               unitPrice: String(item.unitPrice),
-              amount: String(item.quantity * item.unitPrice),
+              amount: financials.lineItems[index]!.amount,
               timeLogId: item.timeLogId,
               order: index,
+              metadata: financials.lineItems[index]!.metadata,
               createdAt: now,
               updatedAt: now,
             })),
@@ -1515,13 +1907,29 @@ export const invoicesRouter = createTRPCRouter({
         }
 
         // Update all time logs to mark them as invoiced
-        await tx
+        const updatedTimeLogs = await tx
           .update(timeLog)
           .set({
             invoiceId,
             status: "INVOICED",
           })
-          .where(inArray(timeLog.id, input.timeLogIds));
+          .where(
+            and(
+              inArray(timeLog.id, input.timeLogIds),
+              eq(timeLog.organizationId, ctx.orgId!),
+              exactInvoiceLocation(timeLog.locationId, ctx.locationId),
+              eq(timeLog.status, "APPROVED"),
+              isNull(timeLog.invoiceId),
+            ),
+          )
+          .returning({ id: timeLog.id });
+
+        if (updatedTimeLogs.length !== input.timeLogIds.length) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "One or more time logs changed before invoicing",
+          });
+        }
 
         return inv!;
       });

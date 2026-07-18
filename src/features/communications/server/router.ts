@@ -15,7 +15,19 @@ import {
   twilioComplianceRegistration,
   voiceCall,
 } from "@/db/schema";
-import { communicationProfileUpdateSchema } from "@/features/communications/contracts";
+import {
+  archiveCommunicationRuleSchema,
+  cloneCommunicationRuleSchema,
+  communicationControlsListSchema,
+  communicationProfileUpdateSchema,
+  createCommunicationRuleSchema,
+  createCommunicationSuppressionSchema,
+  createMailboxBlocklistEntrySchema,
+  previewCommunicationRuleSchema,
+  revokeCommunicationSuppressionSchema,
+  revokeMailboxBlocklistEntrySchema,
+  versionCommunicationRuleSchema,
+} from "@/features/communications/contracts";
 import {
   communicationProvisioningSafeInputSchema,
   outboundVoiceCallSchema,
@@ -48,6 +60,20 @@ import { resolveTwilioPlatformAccount } from "./twilio-client";
 import { applyTwilioVoiceStatus } from "./twilio-voice-application";
 import { releaseVoiceSpendReservation } from "./voice-spend-policy";
 import { inngest } from "@/inngest/client";
+import { renderCommunicationRuleContent } from "../lib/rule-rendering";
+import {
+  archiveCommunicationRule,
+  cloneCommunicationRule,
+  createCommunicationRule,
+  createCommunicationSuppression,
+  createMailboxBlocklistEntry,
+  listCommunicationRules,
+  listCommunicationSuppressions,
+  listMailboxBlocklistEntries,
+  revokeCommunicationSuppression,
+  revokeMailboxBlocklistEntry,
+  versionCommunicationRule,
+} from "./control-service";
 
 type CommunicationsContext = {
   auth: { user: { id: string } };
@@ -59,6 +85,7 @@ async function authorize(
   ctx: CommunicationsContext,
   capability:
     | "messaging.view"
+    | "messaging.manage"
     | "provider.manage"
     | "voice.call"
     | "voice.recording.view",
@@ -107,6 +134,212 @@ function locationCondition(locationId: string | null) {
 }
 
 export const communicationsRouter = createTRPCRouter({
+  listRules: protectedProcedure
+    .input(communicationControlsListSchema)
+    .query(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.view");
+      return listCommunicationRules({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        ...input,
+      });
+    }),
+
+  createRule: protectedProcedure
+    .input(createCommunicationRuleSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const result = await createCommunicationRule({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        values: input,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.rule.created",
+        resourceType: "COMMUNICATION_RULE",
+        resourceId: result.rule.id,
+        safeMetadata: { eventKey: result.rule.eventKey, channel: result.rule.channel },
+      });
+      return result;
+    }),
+
+  versionRule: protectedProcedure
+    .input(versionCommunicationRuleSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const result = await versionCommunicationRule({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.rule.versioned",
+        resourceType: "COMMUNICATION_RULE",
+        resourceId: result.rule.id,
+        safeMetadata: { version: result.version.version },
+      });
+      return result;
+    }),
+
+  cloneRule: protectedProcedure
+    .input(cloneCommunicationRuleSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const result = await cloneCommunicationRule({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.rule.cloned",
+        resourceType: "COMMUNICATION_RULE",
+        resourceId: result.rule.id,
+        safeMetadata: { sourceRuleId: input.ruleId },
+      });
+      return result;
+    }),
+
+  archiveRule: protectedProcedure
+    .input(archiveCommunicationRuleSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const rule = await archiveCommunicationRule({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        ruleId: input.ruleId,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.rule.archived",
+        resourceType: "COMMUNICATION_RULE",
+        resourceId: rule.id,
+      });
+      return rule;
+    }),
+
+  previewRule: protectedProcedure
+    .input(previewCommunicationRuleSchema)
+    .mutation(async ({ ctx, input }) => {
+      await authorize(ctx, "messaging.view");
+      return renderCommunicationRuleContent(input);
+    }),
+
+  listSuppressions: protectedProcedure
+    .input(communicationControlsListSchema)
+    .query(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.view");
+      return listCommunicationSuppressions({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        ...input,
+      });
+    }),
+
+  createSuppression: protectedProcedure
+    .input(createCommunicationSuppressionSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const entry = await createCommunicationSuppression({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        channel: input.channel,
+        suppressionScope: input.scope,
+        reason: input.reason,
+        destination: input.destination,
+        expiresAt: input.expiresAt,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.suppression.created",
+        resourceType: "COMMUNICATION_SUPPRESSION",
+        resourceId: entry.id,
+        safeMetadata: { channel: entry.channel, reason: entry.reason },
+      });
+      return entry;
+    }),
+
+  revokeSuppression: protectedProcedure
+    .input(revokeCommunicationSuppressionSchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const entry = await revokeCommunicationSuppression({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        id: input.id,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.suppression.revoked",
+        resourceType: "COMMUNICATION_SUPPRESSION",
+        resourceId: entry.id,
+      });
+      return entry;
+    }),
+
+  listMailboxBlocklist: protectedProcedure
+    .input(communicationControlsListSchema)
+    .query(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.view");
+      return listMailboxBlocklistEntries({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        ...input,
+      });
+    }),
+
+  createMailboxBlock: protectedProcedure
+    .input(createMailboxBlocklistEntrySchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const entry = await createMailboxBlocklistEntry({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        ...input,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.mailbox_block.created",
+        resourceType: "MAILBOX_BLOCKLIST_ENTRY",
+        resourceId: entry.id,
+        safeMetadata: { matchType: entry.matchType },
+      });
+      return entry;
+    }),
+
+  revokeMailboxBlock: protectedProcedure
+    .input(revokeMailboxBlocklistEntrySchema)
+    .mutation(async ({ ctx, input }) => {
+      const organizationId = await authorize(ctx, "messaging.manage");
+      const entry = await revokeMailboxBlocklistEntry({
+        scope: { organizationId, locationId: ctx.locationId ?? null },
+        actorUserId: ctx.auth.user.id,
+        id: input.id,
+      });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "communications.mailbox_block.revoked",
+        resourceType: "MAILBOX_BLOCKLIST_ENTRY",
+        resourceId: entry.id,
+      });
+      return entry;
+    }),
+
   overview: protectedProcedure.query(async ({ ctx }) => {
     const organizationId = await authorizeOrganizationManagement(ctx);
     const [

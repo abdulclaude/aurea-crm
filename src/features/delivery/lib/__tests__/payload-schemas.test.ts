@@ -219,4 +219,72 @@ describe("delivery request contracts", () => {
 
     assert.equal(result.success, false);
   });
+
+  it("accepts an immutable communication-rule version binding", () => {
+    const result = enqueueDeliveryInputSchema.safeParse({
+      organizationId: "org_123",
+      locationId: "location_123",
+      clientId: "client_123",
+      channel: "SMS",
+      purpose: "SYSTEM",
+      provider: "TWILIO",
+      providerAccountId: "provider_account_123",
+      providerAccountRef: "sms_config_123",
+      sourceType: "BOOKING_REMINDER",
+      sourceId: "booking_123",
+      destination: "+447700900123",
+      sender: { kind: "SMS_CONFIG", id: "sms_config_123" },
+      communicationRule: {
+        ruleId: "rule_123",
+        versionId: "rule_version_2",
+        snapshot: {
+          ruleId: "rule_123",
+          versionId: "rule_version_2",
+          version: 2,
+          eventKey: "booking.class_reminder",
+          channel: "SMS",
+          purpose: "SYSTEM",
+          scheduleOffsetMinutes: -1_440,
+        },
+      },
+      payload: { channel: "SMS", body: "Class starts tomorrow" },
+      idempotencyKey: "booking_123:rule_version_2",
+    });
+
+    assert.equal(result.success, true);
+  });
+
+  it("rejects a rule snapshot that does not match the delivery channel", () => {
+    const result = enqueueDeliveryInputSchema.safeParse({
+      organizationId: "org_123",
+      locationId: null,
+      clientId: null,
+      channel: "SMS",
+      purpose: "SYSTEM",
+      provider: "TWILIO",
+      providerAccountId: "provider_account_123",
+      providerAccountRef: "sms_config_123",
+      sourceType: "REMINDER",
+      sourceId: "reminder_123",
+      destination: "+447700900123",
+      sender: { kind: "SMS_CONFIG", id: "sms_config_123" },
+      communicationRule: {
+        ruleId: "rule_123",
+        versionId: "version_1",
+        snapshot: {
+          ruleId: "rule_123",
+          versionId: "version_1",
+          version: 1,
+          eventKey: "booking.confirmed",
+          channel: "EMAIL",
+          purpose: "SYSTEM",
+          scheduleOffsetMinutes: 0,
+        },
+      },
+      payload: { channel: "SMS", body: "Hello" },
+      idempotencyKey: "reminder_123:send",
+    });
+
+    assert.equal(result.success, false);
+  });
 });

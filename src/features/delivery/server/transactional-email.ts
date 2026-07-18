@@ -11,6 +11,7 @@ import { enqueueDeliveryInTransaction } from "@/features/delivery/server/outbox"
 import { requestDeliveryDispatch } from "@/features/delivery/server/request-dispatch";
 import { protectEmailContent } from "@/features/delivery/server/protected-email-content";
 import type { DeliveryPurpose } from "@/features/delivery/contracts";
+import type { CommunicationRuleSnapshot } from "@/features/communications/contracts";
 
 export type EnqueueTransactionalEmailInput = {
   organizationId: string;
@@ -30,6 +31,11 @@ export type EnqueueTransactionalEmailInput = {
   attachments?: EmailAttachmentReference[];
   protectContent?: boolean;
   availableAt?: Date;
+  communicationRule?: {
+    ruleId: string;
+    versionId: string;
+    snapshot: CommunicationRuleSnapshot;
+  };
 };
 
 export type EnqueueEmailInput = EnqueueTransactionalEmailInput & {
@@ -84,6 +90,7 @@ async function enqueueEmailWithPurpose(
       sourceId: input.sourceId,
       destination: input.to,
       sender: resolvedSender.sender,
+      communicationRule: input.communicationRule,
       payload: parsedPayload.data,
       idempotencyKey: input.idempotencyKey,
       availableAt: input.availableAt,
