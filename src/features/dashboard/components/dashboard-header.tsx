@@ -33,7 +33,7 @@ export function DashboardHeader({
             className="size-9 rounded-full object-cover"
           />
         ) : (
-          <div className="flex size-9 items-center justify-center rounded-full bg-black/6 text-[13px] font-semibold text-black/50">
+          <div className="flex size-8 items-center justify-center rounded-full bg-black/6 text-sm font-semibold text-black/50">
             {userName
               ?.split(" ")
               .map((p) => p[0])
@@ -42,9 +42,11 @@ export function DashboardHeader({
               .toUpperCase() ?? "U"}
           </div>
         )}
-        <p className="min-w-0 text-[15px] font-semibold text-black/80">
+        <h1 className="min-w-0 text-lg tracking-tight font-semibold text-black">
           {getGreeting(userName ?? "there")}
-        </p>
+
+
+        </h1>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
         {demoDataControl}

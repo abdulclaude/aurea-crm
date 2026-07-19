@@ -18,7 +18,7 @@ import {
 } from "@/db/schema";
 import { inngest } from "@/inngest/client";
 import { getCommunicationsPublicUrl } from "./platform-credentials";
-import { getPlatformResendCredentials } from "./platform-credentials";
+import { getPlatformResendApiCredentials } from "./platform-credentials";
 import { resolveTwilioPlatformAccount } from "./twilio-client";
 import { applyTwilioSmsStatus } from "./twilio-sms-application";
 import { requestDeliveryDispatch } from "@/features/delivery/server/request-dispatch";
@@ -279,7 +279,7 @@ export async function reconcileResendPlatformHealth(): Promise<number> {
   const now = new Date();
   let unavailable = false;
   try {
-    const credentials = getPlatformResendCredentials();
+    const credentials = getPlatformResendApiCredentials();
     const response = await new Resend(credentials.apiKey).domains.list({
       limit: 1,
     });

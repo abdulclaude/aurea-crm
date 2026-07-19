@@ -7,7 +7,6 @@ import {
   PublicFormWorkflowDispatchTerminalError,
 } from "@/features/publications/server/form-workflow-dispatch";
 import { deleteExpiredPublicationRequestQuotas } from "@/features/publications/server/publication-request-quota";
-import { deleteExpiredFunnelTelemetryQuotas } from "@/features/external-funnels/server/telemetry-quota";
 import { deleteExpiredPublicFormSubmissions } from "@/features/publications/server/form-submission-retention";
 import { inngest } from "@/inngest/client";
 import {
@@ -100,11 +99,7 @@ export const purgeExpiredPublicationRequestQuotas = inngest.createFunction(
       "delete-expired-publication-quotas",
       () => deleteExpiredPublicationRequestQuotas(),
     );
-    const telemetryDeleted = await step.run(
-      "delete-expired-funnel-telemetry-quotas",
-      () => deleteExpiredFunnelTelemetryQuotas(),
-    );
-    return { publicationDeleted, telemetryDeleted };
+    return { publicationDeleted };
   },
 );
 

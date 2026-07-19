@@ -92,7 +92,7 @@ export async function getWorkflowProviderReadinessIssues(input: {
       });
     } catch {
       issues.push(
-        "Connect an active Resend account and verified sender domain before activating email steps.",
+        "Connect a verified sender domain before activating email steps.",
       );
       break;
     }

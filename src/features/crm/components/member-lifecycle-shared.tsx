@@ -6,17 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LifecycleSummary } from "./member-lifecycle-types";
-import { funnelSteps, labelize } from "./member-lifecycle-types";
+import { lifecycleSteps, labelize } from "./member-lifecycle-types";
 
 export function LifecycleStrip({ data }: { data: LifecycleSummary }) {
   return (
     <div className="space-y-2">
       <p className="text-[11px] font-medium text-primary/55">
-        Funnel position
+        Lifecycle position
       </p>
       <div className="space-y-2">
-        {funnelSteps.map(([key, label], index) => {
-          const complete = data.funnel[key];
+        {lifecycleSteps.map(([key, label], index) => {
+          const complete = data.lifecycleProgress[key];
           return (
             <div key={key} className="flex items-center gap-2">
               <div

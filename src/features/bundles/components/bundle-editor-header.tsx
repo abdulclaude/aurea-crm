@@ -16,42 +16,41 @@ import {
 import Link from "next/link";
 import {
   useSuspenseBundle,
-  useUpdateBundle,
   useUpdateBundleName,
 } from "@/features/bundles/hooks/use-bundles";
 import { Input } from "@/components/ui/input";
-import { useAtomValue } from "jotai";
-import { editorAtom } from "@/features/editor/store/atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import {
+  editorAtom,
+  editorSaveRequestAtom,
+  editorSaveStateAtom,
+} from "@/features/editor/store/atoms";
 import { useRouter } from "next/navigation";
 
 export const BundleEditorSaveButton = ({ bundleId }: { bundleId: string }) => {
   const editor = useAtomValue(editorAtom);
-  const saveBundle = useUpdateBundle();
+  const saveState = useAtomValue(editorSaveStateAtom);
+  const requestSave = useSetAtom(editorSaveRequestAtom);
+  const isDirty = saveState.workflowId === bundleId && saveState.isDirty;
 
   const handleSave = () => {
-    if (!editor) {
-      return;
-    }
-
-    const nodes = editor.getNodes();
-    const edges = editor.getEdges();
-
-    saveBundle.mutate({
-      id: bundleId,
-      nodes,
-      edges,
-    });
+    if (!editor || !isDirty) return;
+    requestSave((request) => request + 1);
   };
 
   return (
     <Button
       size="sm"
       onClick={handleSave}
-      disabled={saveBundle.isPending}
+      disabled={!editor || !isDirty || saveState.isSaving}
       variant="gradient"
     >
       <SaveIcon className="size-3.5" />
-      Save changes
+      {saveState.isSaving
+        ? "Saving..."
+        : saveState.saveFailed
+          ? "Retry save"
+          : "Save changes"}
     </Button>
   );
 };

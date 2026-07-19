@@ -22,6 +22,10 @@ export function WorkflowsPageContent() {
   const view = params.view || "all";
 
   const handleTabChange = (tabId: string) => {
+    if (tabId === "bundles") {
+      router.push("/bundles");
+      return;
+    }
     if (tabId === "archived") {
       router.push("/archives");
       return;
@@ -40,6 +44,7 @@ export function WorkflowsPageContent() {
       <PageTabs
         tabs={[
           { id: "all", label: "All workflows" },
+          { id: "bundles", label: "Bundles" },
           { id: "archived", label: "Archived" },
           { id: "templates", label: "Templates" },
           { id: "activity", label: "Activity" },

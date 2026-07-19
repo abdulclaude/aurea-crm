@@ -75,9 +75,9 @@ function RenderSection({
             textAlign: "center",
           }}
         >
-          {section.logoUrl && (
+          {(section.logoUrl || design?.logoUrl) && (
             <Img
-              src={section.logoUrl}
+              src={section.logoUrl || design?.logoUrl}
               alt="Logo"
               width={120}
               height={40}
@@ -87,7 +87,11 @@ function RenderSection({
           {section.title && (
             <Heading
               style={{
-                color: "#ffffff",
+                color: design?.headerTextColor || "#ffffff",
+                fontFamily:
+                  design?.headingFontFamily ||
+                  design?.fontFamily ||
+                  "Arial, sans-serif",
                 fontSize: "28px",
                 fontWeight: "bold",
                 margin: "0 0 8px",
@@ -115,7 +119,14 @@ function RenderSection({
         <Section style={{ padding: "24px" }}>
           <Text
             style={{
-              color: design?.textColor || "#374151",
+                color:
+                  design?.bodyTextColor ||
+                  design?.textColor ||
+                  "#374151",
+                fontFamily:
+                  design?.bodyFontFamily ||
+                  design?.fontFamily ||
+                  "Arial, sans-serif",
               fontSize: "16px",
               lineHeight: "24px",
               textAlign: section.align || "left",
@@ -153,7 +164,8 @@ function RenderSection({
     case "button":
       const buttonStyles: Record<string, React.CSSProperties> = {
         primary: {
-          backgroundColor: design?.primaryColor || "#4F46E5",
+          backgroundColor:
+            design?.buttonColor || design?.primaryColor || "#4F46E5",
           color: "#ffffff",
           padding: "12px 24px",
           borderRadius: "6px",
@@ -174,10 +186,10 @@ function RenderSection({
         },
         outline: {
           backgroundColor: "transparent",
-          color: design?.primaryColor || "#4F46E5",
+          color: design?.buttonColor || design?.primaryColor || "#4F46E5",
           padding: "10px 22px",
           borderRadius: "6px",
-          border: `2px solid ${design?.primaryColor || "#4F46E5"}`,
+          border: `2px solid ${design?.buttonColor || design?.primaryColor || "#4F46E5"}`,
           textDecoration: "none",
           fontWeight: "600",
           fontSize: "16px",
@@ -252,6 +264,11 @@ function RenderSection({
 }
 
 export function BaseTemplate({ content, design, variables }: BaseTemplateProps) {
+  const hasHeader = content.sections.some((section) => section.type === "header");
+  const hasSocialLinks = Boolean(
+    design?.socialLinks && Object.values(design.socialLinks).some(Boolean),
+  );
+
   return (
     <Html lang="en">
       <Head>
@@ -270,7 +287,10 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
       <Body
         style={{
           backgroundColor: design?.backgroundColor || "#F9FAFB",
-          fontFamily: design?.fontFamily || "Arial, sans-serif",
+          fontFamily:
+            design?.bodyFontFamily ||
+            design?.fontFamily ||
+            "Arial, sans-serif",
           margin: 0,
           padding: "40px 0",
         }}
@@ -286,6 +306,17 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
             boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
           }}
         >
+          {design?.logoUrl && !hasHeader ? (
+            <Section style={{ padding: "24px 24px 0", textAlign: "center" }}>
+              <Img
+                src={design.logoUrl}
+                alt={design.companyName || "Company logo"}
+                width={120}
+                height={40}
+                style={{ margin: "0 auto", objectFit: "contain" }}
+              />
+            </Section>
+          ) : null}
           {content.sections.map((section, index) => (
             <RenderSection
               key={section.id || index}
@@ -303,7 +334,7 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
               borderTop: "1px solid #E5E7EB",
             }}
           >
-            {design?.socialLinks && (
+            {hasSocialLinks && design?.socialLinks ? (
               <Row style={{ marginBottom: "16px" }}>
                 <Column style={{ textAlign: "center" }}>
                   {design.socialLinks.facebook && (
@@ -358,8 +389,49 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
                       />
                     </Link>
                   )}
+                  {design.socialLinks.pinterest && (
+                    <Link
+                      href={design.socialLinks.pinterest}
+                      style={{ margin: "0 8px" }}
+                    >
+                      Pinterest
+                    </Link>
+                  )}
+                  {design.socialLinks.youtube && (
+                    <Link
+                      href={design.socialLinks.youtube}
+                      style={{ margin: "0 8px" }}
+                    >
+                      YouTube
+                    </Link>
+                  )}
                 </Column>
               </Row>
+            ) : null}
+
+            {design?.companyName && (
+              <Text
+                style={{
+                  color: design.bodyTextColor || "#6B7280",
+                  fontSize: "12px",
+                  textAlign: "center",
+                  margin: "0 0 4px",
+                }}
+              >
+                {design.companyName}
+                {design.companyAddress ? ` · ${design.companyAddress}` : ""}
+              </Text>
+            )}
+            {design?.website && (
+              <Text
+                style={{
+                  fontSize: "12px",
+                  textAlign: "center",
+                  margin: "0 0 8px",
+                }}
+              >
+                <Link href={design.website}>{design.website}</Link>
+              </Text>
             )}
 
             {design?.footerText && (
@@ -375,7 +447,7 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
               </Text>
             )}
 
-            <Text
+            {variables.unsubscribe_url ? <Text
               style={{
                 color: "#9CA3AF",
                 fontSize: "12px",
@@ -391,7 +463,7 @@ export function BaseTemplate({ content, design, variables }: BaseTemplateProps) 
               >
                 Unsubscribe
               </Link>
-            </Text>
+            </Text> : null}
           </Section>
         </Container>
       </Body>

@@ -24,7 +24,7 @@ import { KIND_LABELS, type ContentItem } from "./types";
 
 const DESCRIPTIONS: Record<ContentLibraryKind, string> = {
   TERMINOLOGY_PACK: "Published workspace language for bounded customer, staff, service, and schedule labels.",
-  FAQ_COLLECTION: "Versioned question collections for published profiles and funnel surfaces.",
+  FAQ_COLLECTION: "Versioned question collections for published profiles and pages.",
   MESSAGE_MACRO: "Reusable approved copy for inbox, SMS, and email composers.",
   PUBLIC_PROFILE: "Public business identity and contact content with an explicit publication step.",
 };

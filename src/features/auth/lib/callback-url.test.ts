@@ -6,8 +6,8 @@ import { getSafeCallbackUrl } from "@/features/auth/lib/callback-url";
 describe("getSafeCallbackUrl", () => {
   it("keeps local paths and their query strings", () => {
     assert.equal(
-      getSafeCallbackUrl("/settings/provider-accounts?tab=email"),
-      "/settings/provider-accounts?tab=email",
+      getSafeCallbackUrl("/settings/integrations?tab=accounts"),
+      "/settings/integrations?tab=accounts",
     );
   });
 

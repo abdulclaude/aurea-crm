@@ -22,6 +22,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+import { TABLE_BADGE_COLORS, TableBadge } from "@/components/ui/table-badge";
 import {
   Table,
   TableBody,
@@ -64,13 +65,29 @@ const statusConfig: Record<
   {
     label: string;
     icon: React.ElementType;
-    variant: "default" | "secondary" | "destructive" | "outline";
+    color: string;
   }
 > = {
-  PENDING: { label: "Pending", icon: Clock, variant: "secondary" },
-  VERIFYING: { label: "Verifying", icon: Loader2, variant: "outline" },
-  VERIFIED: { label: "Verified", icon: CheckCircle2, variant: "default" },
-  FAILED: { label: "Failed", icon: AlertCircle, variant: "destructive" },
+  PENDING: {
+    label: "Pending",
+    icon: Clock,
+    color: TABLE_BADGE_COLORS.slate,
+  },
+  VERIFYING: {
+    label: "Verifying",
+    icon: Loader2,
+    color: TABLE_BADGE_COLORS.amber,
+  },
+  VERIFIED: {
+    label: "Verified",
+    icon: CheckCircle2,
+    color: TABLE_BADGE_COLORS.emerald,
+  },
+  FAILED: {
+    label: "Failed",
+    icon: AlertCircle,
+    color: TABLE_BADGE_COLORS.rose,
+  },
 };
 
 interface DnsRecord {
@@ -91,13 +108,18 @@ export function DomainsTable() {
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
 
   const { data: domains } = useSuspenseQuery(
-    trpc.emailDomains.list.queryOptions(),
+    trpc.emailDomains.list.queryOptions(undefined, {
+      refetchInterval: (query) =>
+        query.state.data?.some((domain) => domain.status === "VERIFYING")
+          ? 5_000
+          : false,
+    }),
   );
 
   const deleteMutation = useMutation(
     trpc.emailDomains.delete.mutationOptions({
       onSuccess: () => {
-        toast.success("Domain release scheduled");
+        toast.success("Domain deletion started");
         queryClient.invalidateQueries({
           queryKey: trpc.emailDomains.list.queryKey(),
         });
@@ -193,12 +215,12 @@ export function DomainsTable() {
                     <div className="font-medium">{domain.domain}</div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={status.variant} className="gap-1">
+                    <TableBadge color={status.color} className="gap-1">
                       <StatusIcon
                         className={`h-3 w-3 ${domain.status === "VERIFYING" ? "animate-spin" : ""}`}
                       />
                       {status.label}
-                    </Badge>
+                    </TableBadge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {domain.defaultFromName
@@ -391,10 +413,11 @@ export function DomainsTable() {
       <AlertDialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Domain</AlertDialogTitle>
+            <AlertDialogTitle>Delete domain?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this domain? You will need to
-              re-verify it to use it again.
+              This permanently removes the domain from Aurea and Resend,
+              including its configured sender addresses. DNS records at your
+              provider are not changed automatically.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

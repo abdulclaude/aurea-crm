@@ -7,9 +7,9 @@ import {
   CalendarClock,
   Columns3,
   Database,
-  GalleryVerticalEnd,
   Handshake,
   ListTodo,
+  MailCheck,
   ReceiptText,
   Repeat2,
   Send,
@@ -43,8 +43,8 @@ import { useTRPC } from "@/trpc/client";
 
 const groupIcons: Record<NotificationGroupId, LucideIcon> = {
   workflows: Workflow,
-  funnels: GalleryVerticalEnd,
   campaigns: Send,
+  communications: MailCheck,
   clients: Users,
   deals: Handshake,
   tasks: ListTodo,
@@ -157,7 +157,10 @@ export function NotificationSettingsPage() {
                 <Label htmlFor="email-enabled" className="text-xs font-medium">
                   Enable email notifications
                 </Label>
-                <p id="email-enabled-description" className="text-xs text-primary/65">
+                <p
+                  id="email-enabled-description"
+                  className="text-xs text-primary/65"
+                >
                   Applies only to events that support email delivery.
                 </p>
               </div>
@@ -181,9 +184,16 @@ export function NotificationSettingsPage() {
             <Card key={group.id} className="h-full shadow-none">
               <CardHeader>
                 <div className="flex items-start gap-3">
-                  <GroupIcon aria-hidden="true" className="mt-0.5 size-4 text-primary/50" />
+                  <GroupIcon
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 text-primary/50"
+                  />
                   <div className="flex flex-col">
-                    <CardTitle role="heading" aria-level={2} className="text-sm">
+                    <CardTitle
+                      role="heading"
+                      aria-level={2}
+                      className="text-sm"
+                    >
                       {group.title}
                     </CardTitle>
                     <CardDescription className="text-xs">
@@ -202,10 +212,16 @@ export function NotificationSettingsPage() {
                         className="flex items-center justify-between gap-4"
                       >
                         <div className="space-y-0.5">
-                          <Label htmlFor={item.type} className="text-xs font-medium">
+                          <Label
+                            htmlFor={item.type}
+                            className="text-xs font-medium"
+                          >
                             {item.label}
                           </Label>
-                          <p id={descriptionId} className="text-xs text-primary/70">
+                          <p
+                            id={descriptionId}
+                            className="text-xs text-primary/70"
+                          >
                             {item.description}
                           </p>
                         </div>

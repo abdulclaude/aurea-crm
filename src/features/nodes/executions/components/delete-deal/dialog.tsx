@@ -73,12 +73,13 @@ export const DeleteDealDialog: React.FC<Props> = ({
   const trpc = useTRPC();
 
   // Fetch deals list for Select mode
-  const dealsQuery = useQuery(
-    trpc.deals.list.queryOptions({
+  const dealsQuery = useQuery({
+    ...trpc.deals.list.queryOptions({
       cursor: undefined,
       limit: 100,
-    })
-  );
+    }),
+    enabled: open,
+  });
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),

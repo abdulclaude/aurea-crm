@@ -3,8 +3,6 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { publicationSeoConfigSchema } from "@/features/publications/contracts";
-import { getPublishedFunnelPage } from "@/features/publications/public/funnel-snapshot";
-import { PublishedTargetFunnel } from "@/features/publications/public/published-target-funnel";
 import { PublishedForm } from "@/features/publications/public/published-form";
 import { PublishedSchedule } from "@/features/publications/public/published-schedule";
 import { PublishedWidget } from "@/features/publications/public/published-widget";
@@ -37,26 +35,9 @@ export async function generateMetadata({
   if (!target) return { title: "Page not found", robots: { index: false } };
 
   const seo = publicationSeoConfigSchema.parse(target.seoSnapshot);
-  let pageTitle: string | null = null;
-  let pageDescription: string | null = null;
-  let pageImage: string | null = null;
-  if (target.kind === "FUNNEL") {
-    try {
-      const page = getPublishedFunnelPage({
-        snapshot: target.snapshot,
-        pageSlug: route.path?.[0] ?? null,
-      }).data.page;
-      pageTitle = page.metaTitle ?? page.name;
-      pageDescription = page.metaDescription;
-      pageImage = page.metaImage;
-    } catch {
-      return { title: "Page not found", robots: { index: false } };
-    }
-  }
-
-  const title = seo.title ?? pageTitle ?? target.name;
-  const description = seo.description ?? pageDescription ?? undefined;
-  const image = seo.imageUrl ?? pageImage;
+  const title = seo.title ?? target.name;
+  const description = seo.description ?? undefined;
+  const image = seo.imageUrl;
   return {
     title,
     description,
@@ -124,26 +105,13 @@ export default async function PublicationPage({
     );
   }
 
-  if (target.kind !== "FUNNEL") {
-    redirectPublishedChannel({
-      kind: target.kind,
-      organizationSlug: route.organizationSlug,
-      sourceId: target.sourceId,
-      snapshot: target.snapshot,
-      targetSlug: route.targetSlug,
-    });
-  }
-
-  return (
-    <PublishedTargetFunnel
-      pageSlug={route.path?.[0] ?? null}
-      snapshot={target.snapshot}
-      targetId={target.id}
-      versionId={target.versionId}
-      themeSnapshot={target.themeSnapshot}
-      consentSnapshot={target.consentSnapshot}
-    />
-  );
+  redirectPublishedChannel({
+    kind: target.kind,
+    organizationSlug: route.organizationSlug,
+    sourceId: target.sourceId,
+    snapshot: target.snapshot,
+    targetSlug: route.targetSlug,
+  });
 }
 
 export const dynamic = "force-dynamic";

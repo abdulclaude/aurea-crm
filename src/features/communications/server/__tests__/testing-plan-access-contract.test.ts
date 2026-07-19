@@ -19,6 +19,14 @@ test("all direct communications plan gates use the testing access overlay", () =
   }
 });
 
+test("testing access is unconditional without subscription-provider checks", () => {
+  const profileService = source(
+    "src/features/communications/server/profile-service.ts",
+  );
+  assert.doesNotMatch(profileService, /PlanRestrictionsDisabled/);
+  assert.doesNotMatch(profileService, /NODE_ENV/);
+});
+
 test("testing access does not bypass spend controls or rewrite channel health", () => {
   const profileService = source(
     "src/features/communications/server/profile-service.ts",

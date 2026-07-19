@@ -59,7 +59,8 @@ Target verticals: Yoga studios, Pilates studios, Gyms, CrossFit boxes, Barre stu
 - TypeScript strict mode
 - Prisma (PostgreSQL) with custom output to `src/generated/prisma`
 - tRPC for type-safe API routes
-- Better Auth with Polar.sh for subscriptions
+- Better Auth for authentication and organization membership
+- Stripe for payments and billing infrastructure
 - Inngest for background jobs and workflow orchestration
 - React Flow for visual workflow editor
 - Stripe Connect for multi-tenant payments
@@ -89,7 +90,7 @@ Target verticals: Yoga studios, Pilates studios, Gyms, CrossFit boxes, Barre stu
 - Invoice, InvoiceLineItem, InvoicePayment, InvoiceReminder, InvoiceTemplate, RecurringInvoice, BankTransferSettings
 
 **Marketing:**
-- Funnel, FunnelPage, FunnelBlock, FunnelAnalytics, Form, FormStep, FormField, FormSubmission
+- Form, FormStep, FormField, FormSubmission
 - Campaign, CampaignRecipient, EmailDomain, EmailTemplate
 
 **Module System:**
@@ -104,7 +105,6 @@ Target verticals: Yoga studios, Pilates studios, Gyms, CrossFit boxes, Barre stu
 | Feature | Why |
 |---------|-----|
 | **Workflow automation engine** | 150+ node types, visual builder, Inngest execution. Massive competitive advantage — Mindbody/Glofox have basic automations at best |
-| **Funnel builder** | Lead capture pages, landing pages for class promos, workshop signups |
 | **Form builder** | Intake forms, health questionnaires, liability waivers |
 | **Email campaigns + templates** | Member communications, win-back sequences |
 | **Invoice system** | Already has recurring invoices, Stripe, bank transfers, dunning |
@@ -145,7 +145,6 @@ Target verticals: Yoga studios, Pilates studios, Gyms, CrossFit boxes, Barre stu
 | Outlook integration nodes | Low priority (keep Gmail / Google Cal) |
 | Discord nodes | Not relevant (keep Slack as optional) |
 | BillingRule model (RETAINER etc.) | Agency billing model, not applicable |
-| External funnels tracking | Replace with simpler referral tracking |
 
 ---
 
@@ -447,7 +446,7 @@ Plus custom segments with any filter combination (age, class type, membership, l
 - **Automated Google review requests** (from Barbr — triggered post-class)
 - **NFC review cards** (from Barbr — tap to leave Google review at front desk)
 - Referral program with tracking, rewards, and leaderboard
-- Landing pages via funnel builder (already exists)
+- Landing pages via managed publications
 - **Reserve with Google** integration (from Booksy — free acquisition channel, book from Google Maps)
 - Social media content creator (design promo images for Instagram/stories in-app, from Booksy)
 
@@ -669,7 +668,7 @@ Everything in Tier 1, plus:
 
 ### 12. Studio Website Builder
 
-*Extend existing funnel builder (from Arketa's approach)*
+*Build managed landing pages from reusable publication components*
 
 #### Pre-Built Templates
 - **Yoga studio** template (serene, earthy tones)
@@ -690,13 +689,12 @@ Everything in Tier 1, plus:
 | **Blog** | Studio news, wellness tips, class spotlights |
 
 #### Features
-- Drag-and-drop page builder (already exists in funnel builder)
+- Composable page editor
 - Custom domain support (already exists)
 - SSL certificates (auto-provisioned)
 - Mobile responsive
 - SEO optimization (meta tags, Open Graph, schema markup for local business)
 - Integrated booking widget on every page
-- Google Analytics / Meta Pixel integration (already exists)
 
 ---
 
@@ -1185,7 +1183,7 @@ enum VideoAccessLevel {
 - [ ] On-demand video library: upload, categorize, restrict by membership, track views
 - [ ] Virtual / livestream classes: Zoom or native WebRTC integration
 - [ ] Community features in branded app: member social feed, challenges, leaderboards
-- [ ] Studio website builder: pre-built templates, page editor, custom domains (extend funnel builder)
+- [ ] Studio website builder: pre-built templates, page editor, custom domains
 - [ ] AI analytics: churn prediction, class recommendations, pricing optimization suggestions
 - [ ] Corporate wellness program management: employer accounts, subsidized memberships, reporting
 - [ ] Competitive benchmarking: anonymous, aggregated analytics across Aurea studios

@@ -6,7 +6,6 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   form,
-  funnel,
   location,
   organization,
   pricingOption,
@@ -77,37 +76,6 @@ export async function resolvePublicationSource(input: {
   sourceKey: string;
 }): Promise<PublicationSource> {
   const { scope, kind, sourceKey } = input;
-  if (kind === "FUNNEL") {
-    const id = parseSourceId(sourceKey, "funnel:");
-    const [row] = await db
-      .select({
-        id: funnel.id,
-        name: funnel.name,
-        locationId: funnel.locationId,
-        updatedAt: funnel.updatedAt,
-      })
-      .from(funnel)
-      .where(
-        and(
-          eq(funnel.id, id),
-          eq(funnel.organizationId, scope.organizationId),
-          scope.locationId
-            ? eq(funnel.locationId, scope.locationId)
-            : isNull(funnel.locationId),
-        ),
-      )
-      .limit(1);
-    if (!row) sourceNotFound();
-    return toSource({
-      kind,
-      sourceKey,
-      sourceId: row.id,
-      name: row.name,
-      locationId: row.locationId,
-      updatedAt: row.updatedAt,
-    });
-  }
-
   if (kind === "FORM") {
     const id = parseSourceId(sourceKey, "form:");
     const [row] = await db

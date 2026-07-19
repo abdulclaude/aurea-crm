@@ -141,9 +141,10 @@ export function PublicationSettingsForm({
           onChange={setConsentConfig}
         />
       </section>
+
       <div className="sticky bottom-0 flex justify-end border-t bg-background/95 p-4 backdrop-blur">
-        <Button onClick={() => void save()} disabled={update.isPending}>
-          <Save aria-hidden="true" />
+        <Button className="w-max" variant="gradient" onClick={() => void save()} disabled={update.isPending}>
+
           {update.isPending ? "Saving" : "Save draft"}
         </Button>
       </div>

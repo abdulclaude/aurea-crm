@@ -9,6 +9,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ConversationChannel } from "@/db/enums";
+import { InboxEmailFields } from "@/features/inbox/components/inbox-email-fields";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { MemberStatusBadge } from "./member-status-badge";
@@ -21,6 +23,7 @@ export function MemberInboxThread({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [reply, setReply] = React.useState("");
+  const [senderAddressId, setSenderAddressId] = React.useState("");
   const conversationQuery = useQuery({
     ...trpc.inbox.getConversation.queryOptions({ id: conversationId ?? "" }),
     enabled: Boolean(conversationId),
@@ -53,6 +56,13 @@ export function MemberInboxThread({
   }
 
   const conversation = conversationQuery.data;
+  const isEmail = conversation.channel === ConversationChannel.EMAIL;
+  const preferredFromAddress = [...conversation.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.direction === "OUTBOUND" && message.fromAddress,
+    )?.fromAddress;
   return (
     <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/5 px-5 py-3 dark:border-white/5">
@@ -96,31 +106,45 @@ export function MemberInboxThread({
           </div>
         ))}
       </div>
-      <div className="flex shrink-0 items-end gap-2 border-t border-black/5 p-4 dark:border-white/5">
-        <Textarea
-          value={reply}
-          onChange={(event) => setReply(event.target.value)}
-          placeholder="Write a reply..."
-          className="min-h-20 resize-none text-xs"
-        />
-        <Button
-          size="icon"
-          disabled={!reply.trim() || sendMessage.isPending}
-          onClick={() => {
-            if (conversationId && reply.trim()) {
-              sendMessage.mutate({
-                conversationId,
-                content: reply.trim(),
-              });
+      <div className="shrink-0 space-y-3 border-t border-black/5 p-4 dark:border-white/5">
+        {isEmail ? (
+          <InboxEmailFields
+            senderAddressId={senderAddressId}
+            onSenderAddressChange={setSenderAddressId}
+            preferredFromAddress={preferredFromAddress}
+          />
+        ) : null}
+        <div className="flex items-end gap-2">
+          <Textarea
+            value={reply}
+            onChange={(event) => setReply(event.target.value)}
+            placeholder="Write a reply..."
+            className="min-h-20 resize-none text-xs"
+          />
+          <Button
+            size="icon"
+            disabled={
+              !reply.trim() ||
+              sendMessage.isPending ||
+              (isEmail && !senderAddressId)
             }
-          }}
-        >
-          {sendMessage.isPending ? (
-            <LoaderCircle className="size-3.5 animate-spin" />
-          ) : (
-            <Send className="size-3.5" />
-          )}
-        </Button>
+            onClick={() => {
+              if (conversationId && reply.trim()) {
+                sendMessage.mutate({
+                  conversationId,
+                  content: reply.trim(),
+                  senderAddressId: isEmail ? senderAddressId : undefined,
+                });
+              }
+            }}
+          >
+            {sendMessage.isPending ? (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            ) : (
+              <Send className="size-3.5" />
+            )}
+          </Button>
+        </div>
       </div>
     </section>
   );

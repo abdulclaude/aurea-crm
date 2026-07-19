@@ -71,7 +71,7 @@ import { AppProvider, NodeType } from "@/db/enums";
 import type { JsonObject } from "@/db/json";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { useSuspenseAppProviders } from "@/features/apps/hooks/use-apps";
+import { useAppProviders } from "@/features/apps/hooks/use-apps";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { Separator } from "./ui/separator";
@@ -1500,7 +1500,7 @@ export const NodeSelector: React.FC<NodeSelectorProps> = ({
   isBundle = false,
 }) => {
   const { setNodes, getNodes, screenToFlowPosition } = useReactFlow();
-  const { data: connectedProviders } = useSuspenseAppProviders();
+  const { data: connectedProviders } = useAppProviders(open);
   const connectedProviderSet = React.useMemo(
     () => new Set(connectedProviders || []),
     [connectedProviders],

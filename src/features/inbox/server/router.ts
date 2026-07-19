@@ -36,6 +36,10 @@ import {
 } from "@/features/inbox/server/outbound-message";
 import { inboxManagementProcedures } from "@/features/inbox/server/management-procedures";
 import {
+  createInboxConversationInputSchema,
+  sendInboxMessageInputSchema,
+} from "@/features/inbox/contracts";
+import {
   inboxConversationViewColumns,
   inboxMessageViewColumns,
 } from "@/features/inbox/server/conversation-view";
@@ -345,12 +349,7 @@ export const inboxRouter = createTRPCRouter({
     }),
 
   sendMessage: protectedProcedure
-    .input(
-      z.object({
-        conversationId: z.string(),
-        content: z.string().min(1).max(4000),
-      })
-    )
+    .input(sendInboxMessageInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { orgId, locationId, auth } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -374,6 +373,15 @@ export const inboxRouter = createTRPCRouter({
         },
       });
       if (!conversation) throw new TRPCError({ code: "NOT_FOUND" });
+      if (
+        conversation.channel === ConversationChannel.EMAIL &&
+        !input.senderAddressId
+      ) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Select a sender address before sending an email.",
+        });
+      }
 
       const prepared = await prepareInboxDelivery({
         organizationId: orgId,
@@ -384,6 +392,7 @@ export const inboxRouter = createTRPCRouter({
         content: input.content,
         conversationId: conversation.id,
         routeId: conversation.routeId,
+        senderAddressId: input.senderAddressId,
       });
       const result = await db.transaction(async (tx) => {
         const queuedMessage = await enqueueInboxMessageInTransaction(tx, {
@@ -400,7 +409,10 @@ export const inboxRouter = createTRPCRouter({
             status: ConversationStatus.OPEN,
             isRead: true,
             updatedAt: new Date(),
-            routeId: prepared.routeId ?? conversation.routeId,
+            routeId:
+              conversation.channel === ConversationChannel.EMAIL
+                ? prepared.routeId
+                : (prepared.routeId ?? conversation.routeId),
             replyRoutingTokenHash: prepared.replyRoutingTokenHash,
           })
           .where(
@@ -420,14 +432,7 @@ export const inboxRouter = createTRPCRouter({
     }),
 
   createConversation: protectedProcedure
-    .input(
-      z.object({
-        clientId: z.string().optional(),
-        channel: z.nativeEnum(ConversationChannel),
-        subject: z.string().optional(),
-        initialMessage: z.string().min(1).max(4000),
-      })
-    )
+    .input(createInboxConversationInputSchema)
     .mutation(async ({ ctx, input }) => {
       const { orgId, locationId, auth } = ctx;
       if (!orgId) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -445,6 +450,7 @@ export const inboxRouter = createTRPCRouter({
         subject: input.subject ?? null,
         content: input.initialMessage,
         conversationId,
+        senderAddressId: input.senderAddressId,
       });
 
       const result = await db.transaction(async (tx) => {

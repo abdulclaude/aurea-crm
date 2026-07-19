@@ -29,6 +29,19 @@ import { FormStatusBadge } from "@/features/forms-builder/components/form-status
 
 type RouterOutput = inferRouterOutputs<AppRouter>;
 export type FormListRow = RouterOutput["forms"]["list"][number];
+export type FormDisplayStatus =
+  | "DRAFT"
+  | "PUBLISHED"
+  | "PAUSED"
+  | "ARCHIVED";
+
+export function getFormDisplayStatus(
+  form: FormListRow,
+  publication: PublicationTargetSummary | undefined,
+): FormDisplayStatus {
+  if (form.status === "ARCHIVED") return "ARCHIVED";
+  return publication?.status ?? "DRAFT";
+}
 
 export function buildFormColumns(input: {
   onArchive: (form: FormListRow) => void;
@@ -51,9 +64,20 @@ export function buildFormColumns(input: {
     },
     {
       id: "status",
-      accessorKey: "status",
+      accessorFn: (row) =>
+        getFormDisplayStatus(
+          row,
+          input.publicationsBySourceKey.get(`form:${row.id}`),
+        ),
       header: "Status",
-      cell: ({ row }) => <FormStatusBadge status={row.original.status} />,
+      cell: ({ row }) => (
+        <FormStatusBadge
+          status={getFormDisplayStatus(
+            row.original,
+            input.publicationsBySourceKey.get(`form:${row.original.id}`),
+          )}
+        />
+      ),
     },
     {
       id: "steps",

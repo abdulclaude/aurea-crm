@@ -12,6 +12,7 @@ import {
   publicationTarget,
   publicationVersion,
   room,
+  studioClass,
   stripeConnection,
   widgetConfig,
 } from "@/db/schema";
@@ -119,6 +120,7 @@ export const launchpadRouter = createTRPCRouter({
       rooms,
       classTypes,
       instructors,
+      classes,
       pricing,
       paidPublicPrices,
       publicSchedule,
@@ -181,6 +183,15 @@ export const launchpadRouter = createTRPCRouter({
           ),
         ),
       db
+        .select({ total: count() })
+        .from(studioClass)
+        .where(
+          and(
+            eq(studioClass.organizationId, organizationId),
+            exactLocation(studioClass.locationId, locationId),
+          ),
+        ),
+      db
         .select({ currency: pricingOption.currency, price: pricingOption.price })
         .from(pricingOption)
         .where(
@@ -236,6 +247,7 @@ export const launchpadRouter = createTRPCRouter({
 
     return {
       currency,
+      hasClasses: (classes[0]?.total ?? 0) > 0,
       ...buildLaunchpadReadiness({
         hasStudioProfile: workspaceRows.length > 0,
         hasRooms: (rooms[0]?.total ?? 0) > 0,

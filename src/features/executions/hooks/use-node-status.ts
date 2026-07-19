@@ -1,7 +1,11 @@
 import type { Realtime } from "@inngest/realtime";
-import { useInngestSubscription } from "@inngest/realtime/hooks";
+import {
+  InngestSubscriptionState,
+  useInngestSubscription,
+} from "@inngest/realtime/hooks";
 import { useEffect, useState } from "react";
 import type { NodeStatus } from "@/components/react-flow/node-status-indicator";
+import { useWorkflowRealtime } from "@/features/editor/store/workflow-realtime-context";
 
 interface UseNodeStatusOptions<TToken extends Realtime.Subscribe.Token> {
   nodeId: string;
@@ -10,25 +14,13 @@ interface UseNodeStatusOptions<TToken extends Realtime.Subscribe.Token> {
   refreshToken: () => Promise<TToken>;
 }
 
-function getCreatedAtTimestamp(message: unknown): number {
-  if (
-    typeof message !== "object" ||
-    message === null ||
-    !("createdAt" in message)
-  ) {
-    return 0;
-  }
-
-  const { createdAt } = message;
-  if (createdAt instanceof Date) {
-    return createdAt.getTime();
-  }
-
-  if (typeof createdAt === "string" || typeof createdAt === "number") {
-    return new Date(createdAt).getTime();
-  }
-
-  return 0;
+function isNodeStatus(value: unknown): value is NodeStatus {
+  return (
+    value === "initial" ||
+    value === "loading" ||
+    value === "success" ||
+    value === "error"
+  );
 }
 
 export function useNodeStatus<TToken extends Realtime.Subscribe.Token>({
@@ -38,35 +30,70 @@ export function useNodeStatus<TToken extends Realtime.Subscribe.Token>({
   refreshToken,
 }: UseNodeStatusOptions<TToken>): NodeStatus {
   const [status, setStatus] = useState<NodeStatus>("initial");
+  const [token, setToken] = useState<TToken | null>(null);
+  const {
+    enabled,
+    registerSubscription,
+    reportSubscriptionReady,
+  } = useWorkflowRealtime();
+  const subscriptionKey = `${channel}:${nodeId}`;
 
-  const { data } = useInngestSubscription({
-    refreshToken,
-    enabled: true,
-  });
+  useEffect(
+    () => registerSubscription(subscriptionKey),
+    [registerSubscription, subscriptionKey],
+  );
 
   useEffect(() => {
-    if (!data?.length) {
+    if (!enabled) {
+      setToken(null);
+      setStatus("initial");
       return;
     }
 
-    // find the latest message for this node
+    let cancelled = false;
+    void refreshToken()
+      .then((nextToken) => {
+        if (!cancelled) {
+          setToken(nextToken);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setToken(null);
+        }
+      });
 
-    const latestMessage = data
-      .filter(
-        (msg) =>
-          msg.kind === "data" &&
-          msg.channel === channel &&
-          msg.topic === topic &&
-          msg.data.nodeId === nodeId
-      )
-      .sort(
-        (a, b) => getCreatedAtTimestamp(b) - getCreatedAtTimestamp(a)
-      )[0];
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, refreshToken]);
 
-    if (latestMessage?.kind === "data") {
-      setStatus(latestMessage.data.status as NodeStatus);
+  const { latestData, state } = useInngestSubscription({
+    token,
+    enabled: enabled && token !== null,
+    key: subscriptionKey,
+  });
+
+  useEffect(() => {
+    reportSubscriptionReady(
+      subscriptionKey,
+      state === InngestSubscriptionState.Active,
+    );
+  }, [reportSubscriptionReady, state, subscriptionKey]);
+
+  useEffect(() => {
+    if (
+      latestData?.kind !== "data" ||
+      latestData.channel !== channel ||
+      latestData.topic !== topic ||
+      latestData.data.nodeId !== nodeId ||
+      !isNodeStatus(latestData.data.status)
+    ) {
+      return;
     }
-  }, [data, channel, nodeId, topic]);
+
+    setStatus(latestData.data.status);
+  }, [channel, latestData, nodeId, topic]);
 
   return status;
 }

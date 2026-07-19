@@ -168,7 +168,7 @@ graph, reusable variables, branching, and provider actions in Advanced mode.
    subscribers, Stripe health, and automations.
 4. **Members**: member detail owns bookings, memberships, credits, forms,
    messages, and lifecycle automations.
-5. **Marketing**: Forms and Funnels are distinct neighboring destinations.
+5. **Marketing**: Forms and managed publications are neighboring destinations.
 6. **Automations**: Recipes first, Blank workflow second; Studio resources are
    selected by name, with variables and graph primitives available in Advanced.
 

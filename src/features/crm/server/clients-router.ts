@@ -1163,7 +1163,7 @@ export const clientsRouter = createTRPCRouter({
                   : "NO_PAYMENTS",
           churnRisk,
         },
-        funnel: {
+        lifecycleProgress: {
           leadCaptured: true,
           introPurchased: introRedemptions.length > 0,
           firstClassBooked:

@@ -6,7 +6,10 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { providerAccount } from "@/db/schema";
 import { resendProviderConfigSchema } from "@/features/provider-accounts/contracts";
-import { getPlatformResendCredentials } from "./platform-credentials";
+import {
+  getPlatformResendApiCredentials,
+  getPlatformResendSenderDefaults,
+} from "./platform-credentials";
 
 export async function ensurePlatformResendBinding(input: {
   organizationId: string;
@@ -26,7 +29,8 @@ export async function ensurePlatformResendBinding(input: {
     .limit(1);
   if (existing) return existing;
 
-  const credentials = getPlatformResendCredentials();
+  getPlatformResendApiCredentials();
+  const senderDefaults = getPlatformResendSenderDefaults();
   const now = new Date();
   const created = await db.transaction(async (tx) => {
     await tx.execute(
@@ -72,9 +76,9 @@ export async function ensurePlatformResendBinding(input: {
         capabilities: ["email.send", "domain.manage", "template.read"],
         config: resendProviderConfigSchema.parse({
           ownershipMode: "PLATFORM_MANAGED",
-          defaultFromEmail: credentials.fallbackFromEmail,
-          defaultFromName: credentials.fallbackFromName,
-          defaultReplyTo: credentials.fallbackReplyTo ?? null,
+          defaultFromEmail: senderDefaults.fallbackFromEmail ?? null,
+          defaultFromName: senderDefaults.fallbackFromName ?? null,
+          defaultReplyTo: senderDefaults.fallbackReplyTo ?? null,
           inheritToLocations: true,
         }),
         createdByUserId: input.createdByUserId ?? null,

@@ -83,7 +83,7 @@ export function InstructorUtilization({
           <UserRound className="mb-2 size-5 text-black/50" />
           <p className="text-[12px] text-black/40">No instructor data yet</p>
           <Link
-            href="/launchpad/instructors"
+            href="/team"
             className="mt-2 text-[11px] font-medium text-black/50 underline underline-offset-4 hover:text-black/70"
           >
             Add instructors

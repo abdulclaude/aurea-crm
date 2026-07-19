@@ -73,12 +73,13 @@ export const DeleteClientDialog: React.FC<Props> = ({
   const trpc = useTRPC();
 
   // Fetch clients list for Select mode
-  const clientsQuery = useQuery(
-    trpc.clients.list.queryOptions({
+  const clientsQuery = useQuery({
+    ...trpc.clients.list.queryOptions({
       cursor: undefined,
       limit: 100,
-    })
-  );
+    }),
+    enabled: open,
+  });
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),

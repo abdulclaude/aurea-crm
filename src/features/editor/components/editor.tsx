@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ReactFlow,
@@ -41,10 +41,13 @@ import { editorAtom } from "../store/atoms";
 import { NodeType } from "@/db/enums";
 import { ExecuteWorkflowButton } from "./execute-workflow-button";
 import { WorkflowContextProvider } from "../store/workflow-context";
+import { WorkflowRealtimeProvider } from "../store/workflow-realtime-context";
 import { useTRPC } from "@/trpc/client";
 import { useQuery } from "@tanstack/react-query";
 import { getExampleContextForNodeType } from "@/features/workflows/lib/build-node-context";
 import { isWorkflowTriggerNodeType } from "@/features/workflows/lib/workflow-node-types";
+import { readWorkflowDraft } from "../lib/workflow-editor-draft";
+import { WorkflowAutosave } from "./workflow-autosave";
 
 export function CustomEdge({
   id,
@@ -188,6 +191,29 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
       type: "custom-edge",
     }))
   );
+  const [draftChecked, setDraftChecked] = useState(false);
+  const restoredWorkflowIdRef = useRef<string | null>(null);
+
+  const initialEdges = useMemo(
+    () =>
+      workflow.edges.map((edge) => ({
+        ...edge,
+        type: "custom-edge",
+      })),
+    [workflow.edges],
+  );
+
+  useEffect(() => {
+    if (restoredWorkflowIdRef.current === workflowId) return;
+    restoredWorkflowIdRef.current = workflowId;
+    const draft = readWorkflowDraft(
+      workflowId,
+      workflow.updatedAt.toISOString(),
+    );
+    setNodes(draft?.nodes ?? workflow.nodes);
+    setEdges(draft?.edges ?? initialEdges);
+    setDraftChecked(true);
+  }, [initialEdges, workflow.nodes, workflow.updatedAt, workflowId]);
 
   const isBundle = workflow.isBundle ?? false;
 
@@ -323,62 +349,75 @@ export const Editor = ({ workflowId }: { workflowId: string }) => {
     return nodes.some((node) => node.type === NodeType.MANUAL_TRIGGER);
   }, [nodes]);
 
-  return (
-    <WorkflowContextProvider
-      value={{
-        isBundle,
-        bundleInputs: (workflow as any).bundleInputs as
-          | Array<{
-              name: string;
-              type: string;
-              description?: string;
-              defaultValue?: unknown;
-            }>
-          | undefined,
-        workflowName: workflow.name,
-        parentWorkflowContext,
-      }}
-    >
-      <div className="size-full bg-[#f7f8fa] dark:bg-[#101416]">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          edgeTypes={edgeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeComponents}
-          onInit={setEditor}
-          fitView
-          fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
-          snapGrid={[10, 10]}
-          snapToGrid
-          panOnScroll
-          panOnDrag={false}
-          selectionOnDrag
-          proOptions={{
-            hideAttribution: true,
-          }}
-        >
-          <Background gap={18} size={1} color="rgba(100,116,139,0.22)" />
-          <Controls
-            showInteractive={false}
-            className="overflow-hidden rounded-lg border border-black/10 bg-background shadow-sm dark:border-white/10"
-          />
-          <Panel position="top-left" className="m-3">
-            <WorkflowSummaryPanel nodes={nodes} />
-          </Panel>
-          <Panel position="top-right" className="m-3">
-            <AddNodeButton isBundle={isBundle} />
-          </Panel>
+  const workflowContextValue = useMemo(
+    () => ({
+      isBundle,
+      bundleInputs: workflow.bundleInputs,
+      workflowName: workflow.name,
+      parentWorkflowContext,
+    }),
+    [
+      isBundle,
+      parentWorkflowContext,
+      workflow.bundleInputs,
+      workflow.name,
+    ],
+  );
 
-          {hasManualTrigger && (
-            <Panel position="bottom-center">
-              <ExecuteWorkflowButton workflowId={workflowId} />
+  return (
+    <WorkflowContextProvider value={workflowContextValue}>
+      <WorkflowRealtimeProvider>
+        <div className="size-full bg-[#f7f8fa] dark:bg-[#101416]">
+          {draftChecked ? (
+            <WorkflowAutosave
+              workflowId={workflowId}
+              baseUpdatedAt={workflow.updatedAt.toISOString()}
+              initialNodes={workflow.nodes}
+              initialEdges={initialEdges}
+              nodes={nodes}
+              edges={edges}
+            />
+          ) : null}
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            nodeTypes={nodeComponents}
+            onInit={setEditor}
+            fitView
+            fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+            snapGrid={[10, 10]}
+            snapToGrid
+            panOnScroll
+            panOnDrag={false}
+            selectionOnDrag
+            proOptions={{
+              hideAttribution: true,
+            }}
+          >
+            <Background gap={18} size={1} color="rgba(100,116,139,0.22)" />
+            <Controls
+              showInteractive={false}
+              className="overflow-hidden rounded-lg border border-black/10 bg-background shadow-sm dark:border-white/10"
+            />
+            <Panel position="top-left" className="m-3">
+              <WorkflowSummaryPanel nodes={nodes} />
             </Panel>
-          )}
-        </ReactFlow>
-      </div>
+            <Panel position="top-right" className="m-3">
+              <AddNodeButton isBundle={isBundle} />
+            </Panel>
+
+            {hasManualTrigger && (
+              <Panel position="bottom-center">
+                <ExecuteWorkflowButton workflowId={workflowId} />
+              </Panel>
+            )}
+          </ReactFlow>
+        </div>
+      </WorkflowRealtimeProvider>
     </WorkflowContextProvider>
   );
 };

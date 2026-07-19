@@ -6,7 +6,6 @@ import {
   getPublicationTrackingCategories,
   hasPublicationConsentDecision,
 } from "../consent";
-import { getPublishedFunnelPage } from "../funnel-snapshot";
 import {
   getPublishedPricingSnapshot,
   publishedPricingSourceIsCurrent,
@@ -123,56 +122,6 @@ test("enforces publication analytics policy independently of consent mode", () =
     }),
     ["ANALYTICS", "MARKETING"],
   );
-});
-
-test("builds a published page only from the immutable selected version", () => {
-  const result = getPublishedFunnelPage({
-    pageSlug: "welcome",
-    snapshot: {
-      schemaVersion: 1,
-      channelConfig: {
-        kind: "FUNNEL",
-        allowCustomCode: false,
-        analytics: "CONSENTED",
-      },
-      source: {
-        type: "FUNNEL",
-        funnel: { id: "funnel-1", name: "Funnel", locationId: null },
-        pages: [
-          {
-            id: "page-1",
-            name: "Welcome",
-            slug: "welcome",
-            order: 0,
-            isPublished: true,
-            metaTitle: null,
-            metaDescription: null,
-            metaImage: null,
-            customCss: null,
-            customJs: null,
-          },
-        ],
-        blocks: [
-          {
-            id: "block-1",
-            pageId: "page-1",
-            parentBlockId: null,
-            type: "HEADING",
-            props: { text: "Immutable" },
-            styles: {},
-            order: 0,
-            visible: true,
-          },
-        ],
-        breakpoints: [],
-        events: [],
-        pixels: [],
-      },
-    },
-  });
-  assert.equal(result.data.page.name, "Welcome");
-  assert.equal(result.data.page.blocks[0]?.id, "block-1");
-  assert.equal(result.allowCustomCode, false);
 });
 
 test("uses the immutable pricing version and detects source drift", () => {

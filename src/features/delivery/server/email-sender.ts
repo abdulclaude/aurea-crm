@@ -4,12 +4,13 @@ import { TRPCError } from "@trpc/server";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { emailDomain } from "@/db/schema";
+import { emailDomain, emailSenderAddress } from "@/db/schema";
 import type { DeliveryPurpose } from "@/features/delivery/contracts";
 import { normalizeEmailDestination } from "@/features/delivery/lib/normalization";
 import type { DeliverySenderRef } from "@/features/delivery/lib/payload-schemas";
+import { selectApprovedEmailSender } from "@/features/delivery/server/email-sender-policy";
 import { resolveProviderAccount } from "@/features/provider-accounts/server/resolver";
-import { getPlatformResendCredentials } from "@/features/communications/server/platform-credentials";
+import { getPlatformResendSenderDefaults } from "@/features/communications/server/platform-credentials";
 import { getOrCreateCommunicationProfile, requireCommunicationEntitlement } from "@/features/communications/server/profile-service";
 import { ensurePlatformResendBinding } from "@/features/communications/server/resend-binding";
 
@@ -20,6 +21,7 @@ type ResolveEmailSenderInput = {
   fromName?: string | null;
   fromEmail?: string | null;
   replyTo?: string | null;
+  senderAddressId?: string;
   purpose: DeliveryPurpose;
 };
 
@@ -38,39 +40,97 @@ export async function resolveEmailSender(
       )
     : isNull(emailDomain.locationId);
 
-  const [domain] = await db
-    .select({
-      id: emailDomain.id,
-      providerAccountId: emailDomain.providerAccountId,
-      domain: emailDomain.domain,
-      defaultFromName: emailDomain.defaultFromName,
-      defaultFromEmail: emailDomain.defaultFromEmail,
-      defaultReplyTo: emailDomain.defaultReplyTo,
-      locationId: emailDomain.locationId,
-    })
-    .from(emailDomain)
-    .where(
-      and(
-        eq(emailDomain.organizationId, input.organizationId),
-        locationScope,
-        eq(emailDomain.status, "VERIFIED"),
-        eq(emailDomain.lifecycleState, "ACTIVE"),
-        eq(emailDomain.isDisabled, false),
-        isNull(emailDomain.verificationStaleAt),
-        isNull(emailDomain.removedAt),
-        input.emailDomainId
-          ? eq(emailDomain.id, input.emailDomainId)
-          : undefined,
-      ),
-    )
-    .orderBy(
-      desc(emailDomain.isDefault),
-      input.locationId
-        ? sql`CASE WHEN ${emailDomain.locationId} = ${input.locationId} THEN 0 ELSE 1 END`
-        : sql`0`,
-      desc(emailDomain.createdAt),
-    )
-    .limit(1);
+  const [selectedSender] = input.senderAddressId
+    ? await db
+        .select({
+          senderAddressId: emailSenderAddress.id,
+          email: emailSenderAddress.email,
+          displayName: emailSenderAddress.displayName,
+          replyTo: emailSenderAddress.replyTo,
+          isDefault: emailSenderAddress.isDefault,
+          isDisabled: emailSenderAddress.isDisabled,
+          removedAt: emailSenderAddress.removedAt,
+          id: emailDomain.id,
+          providerAccountId: emailDomain.providerAccountId,
+          domain: emailDomain.domain,
+          defaultFromName: emailDomain.defaultFromName,
+          defaultFromEmail: emailDomain.defaultFromEmail,
+          defaultReplyTo: emailDomain.defaultReplyTo,
+          locationId: emailDomain.locationId,
+        })
+        .from(emailSenderAddress)
+        .innerJoin(
+          emailDomain,
+          and(
+            eq(emailDomain.id, emailSenderAddress.emailDomainId),
+            eq(emailDomain.organizationId, emailSenderAddress.organizationId),
+          ),
+        )
+        .where(
+          and(
+            eq(emailSenderAddress.id, input.senderAddressId),
+            eq(emailSenderAddress.organizationId, input.organizationId),
+            input.locationId
+              ? or(
+                  eq(emailSenderAddress.locationId, input.locationId),
+                  isNull(emailSenderAddress.locationId),
+                )
+              : isNull(emailSenderAddress.locationId),
+            eq(emailSenderAddress.isDisabled, false),
+            isNull(emailSenderAddress.removedAt),
+            locationScope,
+            eq(emailDomain.status, "VERIFIED"),
+            eq(emailDomain.lifecycleState, "ACTIVE"),
+            eq(emailDomain.isDisabled, false),
+            isNull(emailDomain.verificationStaleAt),
+            isNull(emailDomain.removedAt),
+          ),
+        )
+        .limit(1)
+    : [undefined];
+  if (input.senderAddressId && !selectedSender) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "The selected sender address is not available in this workspace.",
+    });
+  }
+
+  const [defaultDomain] = selectedSender
+    ? [undefined]
+    : await db
+        .select({
+          id: emailDomain.id,
+          providerAccountId: emailDomain.providerAccountId,
+          domain: emailDomain.domain,
+          defaultFromName: emailDomain.defaultFromName,
+          defaultFromEmail: emailDomain.defaultFromEmail,
+          defaultReplyTo: emailDomain.defaultReplyTo,
+          locationId: emailDomain.locationId,
+        })
+        .from(emailDomain)
+        .where(
+          and(
+            eq(emailDomain.organizationId, input.organizationId),
+            locationScope,
+            eq(emailDomain.status, "VERIFIED"),
+            eq(emailDomain.lifecycleState, "ACTIVE"),
+            eq(emailDomain.isDisabled, false),
+            isNull(emailDomain.verificationStaleAt),
+            isNull(emailDomain.removedAt),
+            input.emailDomainId
+              ? eq(emailDomain.id, input.emailDomainId)
+              : undefined,
+          ),
+        )
+        .orderBy(
+          desc(emailDomain.isDefault),
+          input.locationId
+            ? sql`CASE WHEN ${emailDomain.locationId} = ${input.locationId} THEN 0 ELSE 1 END`
+            : sql`0`,
+          desc(emailDomain.createdAt),
+        )
+        .limit(1);
+  const domain = selectedSender ?? defaultDomain;
 
   if (input.emailDomainId && !domain) {
     throw new TRPCError({
@@ -98,13 +158,29 @@ export async function resolveEmailSender(
         locationId: input.locationId,
       },
     });
-    const fromEmail = normalizeEmailDestination(
-      input.fromEmail ?? domain.defaultFromEmail ?? `noreply@${domain.domain}`,
-    );
-    if (!fromEmail.endsWith(`@${domain.domain.toLowerCase()}`)) {
+    const approvedAddress = selectedSender
+      ? selectedSender
+      : selectApprovedEmailSender(
+          await db.query.emailSenderAddress.findMany({
+            where: and(
+              eq(emailSenderAddress.organizationId, input.organizationId),
+              domain.locationId
+                ? eq(emailSenderAddress.locationId, domain.locationId)
+                : isNull(emailSenderAddress.locationId),
+              eq(emailSenderAddress.emailDomainId, domain.id),
+              eq(emailSenderAddress.isDisabled, false),
+              isNull(emailSenderAddress.removedAt),
+            ),
+          }),
+          input.fromEmail
+            ? normalizeEmailDestination(input.fromEmail)
+            : null,
+        );
+    if (!approvedAddress) {
       throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "The sender address must use the selected verified domain.",
+        code: "PRECONDITION_FAILED",
+        message:
+          "Select an active approved sender address for this email domain.",
       });
     }
 
@@ -113,9 +189,9 @@ export async function resolveEmailSender(
       sender: {
         kind: "EMAIL_DOMAIN",
         id: domain.id,
-        fromName: input.fromName ?? domain.defaultFromName ?? undefined,
-        fromEmail,
-        replyTo: input.replyTo ?? domain.defaultReplyTo ?? undefined,
+        fromName: approvedAddress.displayName,
+        fromEmail: approvedAddress.email,
+        replyTo: approvedAddress.replyTo ?? undefined,
       },
     };
   }
@@ -145,8 +221,9 @@ export async function resolveEmailSender(
       locationId: input.locationId,
     },
   });
-  const fallback = getPlatformResendCredentials();
-  const configuredFrom = account.config.defaultFromEmail ?? fallback.fallbackFromEmail;
+  const fallback = getPlatformResendSenderDefaults();
+  const configuredFrom =
+    account.config.defaultFromEmail ?? fallback.fallbackFromEmail;
   if (!configuredFrom) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
@@ -167,6 +244,16 @@ export async function resolveEmailSender(
     });
   }
 
+  const fallbackFromName =
+    account.config.defaultFromName ?? fallback.fallbackFromName;
+  if (!fallbackFromName) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Configure a platform fallback sender name before sending system email.",
+    });
+  }
+
   return {
     providerAccountRef: account.id,
     sender: {
@@ -174,8 +261,7 @@ export async function resolveEmailSender(
       id: account.id,
       fromName:
         input.fromName ??
-        account.config.defaultFromName ??
-        fallback.fallbackFromName,
+        fallbackFromName,
       fromEmail: requestedFrom,
       replyTo: input.replyTo
         ? normalizeEmailDestination(input.replyTo)

@@ -135,7 +135,6 @@ function determineActivityType(entityType: string): ActivityTypeValue {
     credential: ActivityType.CREDENTIAL,
     webhook: ActivityType.WEBHOOK,
     booking: ActivityType.BOOKING,
-    funnel: ActivityType.FUNNEL,
     campaign: ActivityType.CAMPAIGN,
     location: ActivityType.LOCATION,
     organization: ActivityType.ORGANIZATION,

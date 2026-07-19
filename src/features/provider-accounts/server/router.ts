@@ -10,7 +10,6 @@ import {
 import { requireCapability } from "@/features/permissions/server/authorization";
 import { encrypt } from "@/lib/encryption";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
-import { saveAdConversionAccountProcedure } from "./ad-account-procedure";
 import { integrationLifecycleProcedures } from "./integration-lifecycle-procedures";
 import { integrationProviderProcedures } from "./integration-procedures";
 import { toPublicProviderAccount } from "./public-account";
@@ -148,8 +147,6 @@ export const providerAccountsRouter = createTRPCRouter({
       }
       return toPublicProviderAccount(saved);
     }),
-
-  saveAdConversion: saveAdConversionAccountProcedure,
 
   disconnect: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))

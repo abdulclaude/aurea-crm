@@ -15,6 +15,7 @@ const exactScope = {
 
 test("every upload route has an explicit authorization policy", () => {
   assert.deepEqual(Object.keys(UPLOAD_ROUTE_POLICIES).sort(), [
+    "emailLogo",
     "instructorDocument",
     "instructorProfilePhoto",
     "invoiceDocument",

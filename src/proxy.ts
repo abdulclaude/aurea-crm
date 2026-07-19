@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import {
+  applyAuthenticatedPreviewSecurityHeaders,
   applyPublicationSecurityHeaders,
   getPublicationFrameOrigins,
   PUBLICATION_TARGET_HEADER,
@@ -13,6 +14,12 @@ export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.delete(PUBLICATION_TARGET_HEADER);
   requestHeaders.delete(PUBLICATION_VERSION_HEADER);
+
+  if (request.nextUrl.pathname.startsWith("/widget-preview/")) {
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    applyAuthenticatedPreviewSecurityHeaders(response.headers);
+    return response;
+  }
 
   const segments = request.nextUrl.pathname.split("/").filter(Boolean);
   const organizationSlug = segments[1];
@@ -40,5 +47,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/p/:path*"],
+  matcher: ["/p/:path*", "/widget-preview/:path*"],
 };

@@ -64,7 +64,7 @@ export function PublicationTargetState({
           <EmptyDescription>
             {totalCount
               ? "Adjust the filters to see more targets."
-              : "Create a draft from an existing funnel, schedule, price, form, gift card, or widget source."}
+              : "Create a draft from an existing schedule, price, form, gift card, or widget source."}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>

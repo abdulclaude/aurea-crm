@@ -48,6 +48,7 @@ import {
   widgetScopeWhere,
 } from "@/features/studio/server/widget-router-support";
 import { getWidgetPublicationHealth } from "@/features/studio/server/widget-publication-health";
+import { getWidgetDraftPreview } from "@/features/studio/server/widget-draft-preview";
 import {
   bookingWidgetConfigSchema,
   eventWidgetConfigSchema,
@@ -255,6 +256,15 @@ export const widgetsRouter = createTRPCRouter({
         .returning();
       return { widget };
     }),
+
+  getDraftPreview: publicationViewProcedure
+    .input(z.object({ id: z.string().cuid() }))
+    .query(async ({ ctx, input }) =>
+      getWidgetDraftPreview({
+        id: input.id,
+        scope: requireWidgetScope(ctx),
+      }),
+    ),
 
   update: publicationManageProcedure
     .input(updateWidgetSchema)

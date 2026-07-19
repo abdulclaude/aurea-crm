@@ -46,7 +46,8 @@ Aurea CRM is a Next.js 16-based workflow automation and CRM platform with a visu
 - TypeScript with strict mode
 - Drizzle ORM (PostgreSQL) with schema in `src/db/schema.ts`
 - tRPC for type-safe API routes
-- Better Auth with Polar.sh for subscriptions
+- Better Auth for authentication and organization membership
+- Stripe for payments and billing infrastructure
 - Inngest for background jobs and workflow orchestration
 - React Flow for visual workflow editor
 - Tanstack Table for data tables
@@ -148,7 +149,8 @@ src/features/*/server/routers.ts # Feature routers
 
 - `baseProcedure` - No auth required
 - `protectedProcedure` - Requires auth, loads org/location context
-- `premiumProcedure` - Requires active Polar subscription
+
+SaaS subscription access is not enforced while the application is in testing.
 
 **Context Available:**
 
@@ -209,7 +211,6 @@ Schema lives in `src/db/schema.ts`; the shared client lives in `src/db/client.ts
 
 - Email/password + Google/Facebook OAuth
 - Organization plugin for multi-tenancy
-- Polar.sh plugin for subscription management
 - Session stores active organization/location context
 
 **Permission Model:**
@@ -316,7 +317,7 @@ Key variables (see `.env.local`):
 - `INNGEST_*` - Inngest configuration
 - `GOOGLE_CLIENT_ID/SECRET` - Google OAuth
 - `FACEBOOK_CLIENT_ID/SECRET` - WhatsApp integration
-- `POLAR_*` - Subscription management
+- `STRIPE_*` - Stripe payments, billing, webhooks, and Connect
 - `ENCRYPTION_KEY` - For Cryptr (credentials)
 - `APP_URL` - Base URL for OAuth callbacks
 

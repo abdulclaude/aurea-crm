@@ -19,7 +19,7 @@ import {
 } from "@/features/inbox/server/inbound-receipts";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { inngest } from "@/inngest/client";
-import { getPlatformResendCredentials } from "./platform-credentials";
+import { getPlatformResendApiCredentials } from "./platform-credentials";
 
 const RECEIPT_LEASE_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
@@ -140,7 +140,7 @@ export async function processManagedResendReceipt(
       JSON.parse(decrypt(receipt.encryptedPayload)) as unknown,
     );
     if (event.type === "email.received") {
-      const credentials = getPlatformResendCredentials();
+      const credentials = getPlatformResendApiCredentials();
       const response = await new Resend(credentials.apiKey).emails.receiving.get(
         event.data.email_id,
       );

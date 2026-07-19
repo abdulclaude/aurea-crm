@@ -2,7 +2,6 @@ import { and, eq } from "drizzle-orm";
 
 import {
   adSpend,
-  anonymousUserProfiles,
   campaign,
   campaignRecipient,
   campaignRun,
@@ -14,12 +13,6 @@ import {
   formField,
   formStep,
   formSubmission,
-  funnel,
-  funnelBlock,
-  funnelEvent,
-  funnelPage,
-  funnelSession,
-  funnelWebVital,
   inboxConversation,
   inboxMessage,
   inboxRoute,
@@ -93,9 +86,6 @@ export async function seedGrowthPack(
   await tx.insert(form).values(fixtures.forms);
   await tx.insert(formStep).values(fixtures.formSteps);
   await tx.insert(formField).values(fixtures.formFields);
-  await tx.insert(funnel).values(fixtures.funnels);
-  await tx.insert(funnelPage).values(fixtures.funnelPages);
-  await tx.insert(funnelBlock).values(fixtures.funnelBlocks);
   await tx.insert(publicationTarget).values(
     fixtures.publicationTargets.map((target) => ({ ...target, publishedVersionId: null })),
   );
@@ -113,11 +103,9 @@ export async function seedGrowthPack(
       );
   }
   await insertBatches(fixtures.formSubmissions, (batch) => tx.insert(formSubmission).values(batch));
-  await tx.insert(anonymousUserProfiles).values(fixtures.profiles);
-  await insertBatches(fixtures.sessions, (batch) => tx.insert(funnelSession).values(batch));
-  await insertBatches(fixtures.events, (batch) => tx.insert(funnelEvent).values(batch));
-  await insertBatches(fixtures.vitals, (batch) => tx.insert(funnelWebVital).values(batch));
-  await insertBatches(fixtures.adSpendRows, (batch) => tx.insert(adSpend).values(batch));
+  await insertBatches(fixtures.adSpendRows, (batch) =>
+    tx.insert(adSpend).values(batch),
+  );
 
   const entries = Object.entries({ ...fixtures, smsConfigs }) as [
     string,

@@ -43,7 +43,7 @@ function shouldShowBackButton(pathname: string): boolean {
       lastSegment === "editor" ||
       !["page", "layout"].includes(lastSegment) &&
         /^[a-z0-9_-]{10,}$/.test(lastSegment) &&
-        !/^(dashboard|clients|deals|workflows|executions|credentials|webhooks|studio|classes|service-types|instructors|funnels|pipelines|campaigns|builder|reports|settings)$/.test(
+        !/^(dashboard|clients|deals|workflows|executions|credentials|webhooks|studio|classes|service-types|instructors|pipelines|campaigns|builder|reports|settings)$/.test(
           lastSegment,
         )
     ) {

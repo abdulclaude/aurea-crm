@@ -12,8 +12,8 @@ export const BaseNode = forwardRef<HTMLDivElement, BaseNodeProps>(
     <div
       ref={ref}
       className={cn(
-        "relative rounded-lg border border-black/10 bg-background text-primary shadow-sm dark:border-white/10",
-        "transition duration-150 hover:border-primary/35 hover:shadow-md",
+        "relative rounded-lg border border-black/10 bg-background text-primary shadow-xs dark:border-white/10",
+        "transition duration-150 hover:border-primary/35 hover:shadow-xs",
         status === "loading" && "border-none",
         status === "success" && "border-none",
         status === "error" && "border-none",

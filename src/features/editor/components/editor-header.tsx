@@ -16,33 +16,29 @@ import {
 import Link from "next/link";
 import {
   useSuspenseWorkflow,
-  useUpdateWorkflow,
   useUpdateWorkflowName,
 } from "@/features/workflows/hooks/use-workflows";
 import { Input } from "@/components/ui/input";
-import { useAtomValue } from "jotai";
-import { editorAtom } from "../store/atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import {
+  editorAtom,
+  editorSaveRequestAtom,
+  editorSaveStateAtom,
+} from "../store/atoms";
 import { useRouter } from "next/navigation";
 import { WorkflowStateActions } from "./workflow-state-actions";
 import { WorkflowBehaviorSheet } from "@/features/workflows/components/workflow-behavior-sheet";
 
 export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
   const editor = useAtomValue(editorAtom);
-  const saveWorkflow = useUpdateWorkflow();
+  const saveState = useAtomValue(editorSaveStateAtom);
+  const requestSave = useSetAtom(editorSaveRequestAtom);
+  const isCurrentWorkflow = saveState.workflowId === workflowId;
+  const isDirty = isCurrentWorkflow && saveState.isDirty;
 
   const handleSave = () => {
-    if (!editor) {
-      return;
-    }
-
-    const nodes = editor.getNodes();
-    const edges = editor.getEdges();
-
-    saveWorkflow.mutate({
-      id: workflowId,
-      nodes,
-      edges,
-    });
+    if (!editor || !isDirty) return;
+    requestSave((request) => request + 1);
   };
 
   return (
@@ -50,11 +46,15 @@ export const EditorSaveButton = ({ workflowId }: { workflowId: string }) => {
       size="sm"
       variant="gradient"
       onClick={handleSave}
-      disabled={saveWorkflow.isPending}
+      disabled={!editor || !isDirty || saveState.isSaving}
       className="h-8 w-max gap-1.5 rounded-lg px-3.5 text-xs"
     >
       <SaveIcon className="size-3.5" />
-      Save changes
+      {saveState.isSaving
+        ? "Saving..."
+        : saveState.saveFailed
+          ? "Retry save"
+          : "Save changes"}
     </Button>
   );
 };
@@ -110,14 +110,16 @@ export const EditorNameInput = ({ workflowId }: { workflowId: string }) => {
 
   if (isEditing) {
     return (
-      <Input
-        ref={inputRef}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={handleSave}
-        onKeyDown={handleKeyDown}
-        className="h-8 w-auto min-w-[100px] rounded-lg border-black/10 bg-background px-2 text-xs text-primary hover:bg-primary-foreground/25 hover:text-primary dark:border-white/10"
-      />
+      <BreadcrumbItem className="min-w-0 flex-1">
+        <Input
+          ref={inputRef}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={handleSave}
+          onKeyDown={handleKeyDown}
+          className="h-8 min-w-[100px] rounded-lg border-black/10 bg-background px-2 text-xs text-primary hover:bg-primary-foreground/25 hover:text-primary dark:border-white/10"
+        />
+      </BreadcrumbItem>
     );
   }
 
@@ -133,8 +135,8 @@ export const EditorNameInput = ({ workflowId }: { workflowId: string }) => {
 
 export const EditorBreadcrumbs = ({ workflowId }: { workflowId: string }) => {
   return (
-    <Breadcrumb className="flex min-w-0 flex-1 items-center">
-      <BreadcrumbList>
+    <Breadcrumb className="hidden min-w-0 flex-1 items-center sm:flex">
+      <BreadcrumbList className="min-w-0 flex-1 flex-nowrap">
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
             <Link

@@ -43,12 +43,6 @@ export const acquisitionStage = pgEnum("AcquisitionStage", [
   "LOST",
 ]);
 
-export const adConversionDeliveryStatus = pgEnum("AdConversionDeliveryStatus", [
-  "PROCESSING",
-  "SUCCEEDED",
-  "FAILED",
-]);
-
 export const activityAction = pgEnum("ActivityAction", [
   "CREATED",
   "UPDATED",
@@ -82,7 +76,6 @@ export const activityType = pgEnum("ActivityType", [
   "LOCATION",
   "ORGANIZATION",
   "BOOKING",
-  "FUNNEL",
   "CAMPAIGN",
 ]);
 
@@ -457,8 +450,6 @@ export const devicePlatform = pgEnum("DevicePlatform", [
   "WEB",
 ]);
 
-export const deviceType = pgEnum("DeviceType", ["DESKTOP", "TABLET", "MOBILE"]);
-
 export const discountType = pgEnum("DiscountType", ["PERCENT", "FIXED"]);
 
 export const deliveryAttemptOutcome = pgEnum("DeliveryAttemptOutcome", [
@@ -559,51 +550,6 @@ export const formStatus = pgEnum("FormStatus", [
   "PUBLISHED",
   "ARCHIVED",
 ]);
-
-export const funnelBlockType = pgEnum("FunnelBlockType", [
-  "CONTAINER",
-  "ONE_COLUMN",
-  "TWO_COLUMN",
-  "THREE_COLUMN",
-  "SECTION",
-  "HEADING",
-  "PARAGRAPH",
-  "LABEL",
-  "RICH_TEXT",
-  "IMAGE",
-  "VIDEO",
-  "ICON",
-  "INPUT",
-  "TEXTAREA",
-  "SELECT",
-  "CHECKBOX",
-  "BUTTON",
-  "FORM",
-  "CARD",
-  "FAQ",
-  "TESTIMONIAL",
-  "PRICING",
-  "FEATURE_GRID",
-  "IFRAME",
-  "CUSTOM_HTML",
-  "SCRIPT",
-  "POPUP",
-  "COUNTDOWN_TIMER",
-  "STICKY_BAR",
-]);
-
-export const funnelDomainType = pgEnum("FunnelDomainType", [
-  "SUBDOMAIN",
-  "CUSTOM",
-]);
-
-export const funnelStatus = pgEnum("FunnelStatus", [
-  "DRAFT",
-  "PUBLISHED",
-  "ARCHIVED",
-]);
-
-export const funnelType = pgEnum("FunnelType", ["INTERNAL", "EXTERNAL"]);
 
 export const householdRole = pgEnum("HouseholdRole", [
   "PRIMARY",
@@ -926,7 +872,6 @@ export const staffIdentityStatus = pgEnum("StaffIdentityStatus", [
 ]);
 
 export const publicationTargetKind = pgEnum("PublicationTargetKind", [
-  "FUNNEL",
   "SCHEDULE",
   "PRICING",
   "FORM",
@@ -1014,13 +959,6 @@ export const performanceMetricSource = pgEnum("PerformanceMetricSource", [
   "MANUAL",
   "WEARABLE",
   "IMPORT",
-]);
-
-export const pixelProvider = pgEnum("PixelProvider", [
-  "META_PIXEL",
-  "GOOGLE_ANALYTICS",
-  "TIKTOK_PIXEL",
-  "CUSTOM",
 ]);
 
 export const pricingAdjustmentType = pgEnum("PricingAdjustmentType", [
@@ -1440,21 +1378,6 @@ export const waitlistStatus = pgEnum("WaitlistStatus", [
   "CONFIRMED",
   "EXPIRED",
   "CANCELLED_WAITLIST",
-]);
-
-export const webVitalMetric = pgEnum("WebVitalMetric", [
-  "LCP",
-  "INP",
-  "CLS",
-  "FCP",
-  "TTFB",
-  "FID",
-]);
-
-export const webVitalRating = pgEnum("WebVitalRating", [
-  "GOOD",
-  "NEEDS_IMPROVEMENT",
-  "POOR",
 ]);
 
 export const webhookProvider = pgEnum("WebhookProvider", [
@@ -8543,200 +8466,19 @@ export const formSubmission = pgTable(
   ],
 ).enableRLS();
 
-export const funnelAnalytics = pgTable(
-  "FunnelAnalytics",
-  {
-	id: text().primaryKey().notNull(),
-	funnelId: text().notNull(),
-	pageId: text(),
-	pageViews: integer().default(0).notNull(),
-	uniqueVisitors: integer().default(0).notNull(),
-	leads: integer().default(0).notNull(),
-	conversions: integer().default(0).notNull(),
-	date: date().notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    index("FunnelAnalytics_funnelId_date_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("date_ops"),
-      table.date.asc().nullsLast().op("date_ops"),
-    ),
-    uniqueIndex("FunnelAnalytics_funnelId_pageId_date_key").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.pageId.asc().nullsLast().op("text_ops"),
-      table.date.asc().nullsLast().op("date_ops"),
-    ),
-    index("FunnelAnalytics_pageId_date_idx").using(
-      "btree",
-      table.pageId.asc().nullsLast().op("text_ops"),
-      table.date.asc().nullsLast().op("date_ops"),
-    ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "FunnelAnalytics_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.pageId],
-			foreignColumns: [funnelPage.id],
-      name: "FunnelAnalytics_pageId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelPage = pgTable(
-  "FunnelPage",
-  {
-	id: text().primaryKey().notNull(),
-	funnelId: text().notNull(),
-	name: text().notNull(),
-	slug: text().notNull(),
-	order: integer().default(0).notNull(),
-	isPublished: boolean().default(false).notNull(),
-	metaTitle: text(),
-	metaDescription: text(),
-	metaImage: text(),
-	customCss: text(),
-	customJs: text(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    index("FunnelPage_funnelId_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelPage_funnelId_order_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.order.asc().nullsLast().op("int4_ops"),
-    ),
-    uniqueIndex("FunnelPage_funnelId_slug_key").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.slug.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "FunnelPage_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelBlock = pgTable(
-  "FunnelBlock",
-  {
-	id: text().primaryKey().notNull(),
-	pageId: text(),
-	parentBlockId: text(),
-	type: funnelBlockType().notNull(),
-	props: jsonb().default({}).notNull(),
-	styles: jsonb().default({}).notNull(),
-	order: integer().default(0).notNull(),
-	visible: boolean().default(true).notNull(),
-	locked: boolean().default(false).notNull(),
-	targetWorkflowId: text(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-	smartSectionId: text(),
-	smartSectionInstanceId: text(),
-  },
-  (table) => [
-    index("FunnelBlock_pageId_idx").using(
-      "btree",
-      table.pageId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelBlock_pageId_order_idx").using(
-      "btree",
-      table.pageId.asc().nullsLast().op("text_ops"),
-      table.order.asc().nullsLast().op("int4_ops"),
-    ),
-    index("FunnelBlock_pageId_parentBlockId_order_idx").using(
-      "btree",
-      table.pageId.asc().nullsLast().op("text_ops"),
-      table.parentBlockId.asc().nullsLast().op("text_ops"),
-      table.order.asc().nullsLast().op("int4_ops"),
-    ),
-    index("FunnelBlock_parentBlockId_idx").using(
-      "btree",
-      table.parentBlockId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelBlock_smartSectionId_idx").using(
-      "btree",
-      table.smartSectionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelBlock_smartSectionId_order_idx").using(
-      "btree",
-      table.smartSectionId.asc().nullsLast().op("text_ops"),
-      table.order.asc().nullsLast().op("int4_ops"),
-    ),
-    index("FunnelBlock_smartSectionInstanceId_idx").using(
-      "btree",
-      table.smartSectionInstanceId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("FunnelBlock_smartSectionInstanceId_key").using(
-      "btree",
-      table.smartSectionInstanceId.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.pageId],
-			foreignColumns: [funnelPage.id],
-      name: "FunnelBlock_pageId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.parentBlockId],
-			foreignColumns: [table.id],
-      name: "FunnelBlock_parentBlockId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.smartSectionId],
-			foreignColumns: [smartSection.id],
-      name: "FunnelBlock_smartSectionId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.smartSectionInstanceId],
-			foreignColumns: [smartSectionInstance.id],
-      name: "FunnelBlock_smartSectionInstanceId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
 
 export const smartSection = pgTable(
   "SmartSection",
   {
-	id: text().primaryKey().notNull(),
-	organizationId: text().notNull(),
-	locationId: text(),
-	name: text().notNull(),
-	description: text(),
-	category: text(),
-	thumbnail: text(),
-	blockStructure: jsonb().default([]).notNull(),
-	usageCount: integer().default(0).notNull(),
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    name: text().notNull(),
+    description: text(),
+    category: text(),
+    thumbnail: text(),
+    blockStructure: jsonb().default([]).notNull(),
+    usageCount: integer().default(0).notNull(),
     createdAt: timestamp({ precision: 3, mode: "date" })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
@@ -8755,16 +8497,16 @@ export const smartSection = pgTable(
       "btree",
       table.locationId.asc().nullsLast().op("text_ops"),
     ),
-	foreignKey({
-			columns: [table.organizationId],
-			foreignColumns: [organization.id],
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
       name: "SmartSection_organizationId_fkey",
     })
       .onUpdate("cascade")
       .onDelete("cascade"),
-	foreignKey({
-			columns: [table.locationId],
-			foreignColumns: [location.id],
+    foreignKey({
+      columns: [table.locationId],
+      foreignColumns: [location.id],
       name: "SmartSection_locationId_fkey",
     })
       .onUpdate("cascade")
@@ -8775,180 +8517,35 @@ export const smartSection = pgTable(
 export const smartSectionInstance = pgTable(
   "SmartSectionInstance",
   {
-	id: text().primaryKey().notNull(),
-	sectionId: text().notNull(),
-	funnelPageId: text(),
-	formId: text(),
+    id: text().primaryKey().notNull(),
+    sectionId: text().notNull(),
+    formId: text(),
     createdAt: timestamp({ precision: 3, mode: "date" })
       .default(sql`CURRENT_TIMESTAMP`)
       .notNull(),
     updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-	order: integer().default(0).notNull(),
+    order: integer().default(0).notNull(),
   },
   (table) => [
     index("SmartSectionInstance_formId_idx").using(
       "btree",
       table.formId.asc().nullsLast().op("text_ops"),
     ),
-    index("SmartSectionInstance_funnelPageId_idx").using(
-      "btree",
-      table.funnelPageId.asc().nullsLast().op("text_ops"),
-    ),
     index("SmartSectionInstance_sectionId_idx").using(
       "btree",
       table.sectionId.asc().nullsLast().op("text_ops"),
     ),
-	foreignKey({
-			columns: [table.formId],
-			foreignColumns: [form.id],
+    foreignKey({
+      columns: [table.formId],
+      foreignColumns: [form.id],
       name: "SmartSectionInstance_formId_fkey",
     })
       .onUpdate("cascade")
       .onDelete("cascade"),
-	foreignKey({
-			columns: [table.funnelPageId],
-			foreignColumns: [funnelPage.id],
-      name: "SmartSectionInstance_funnelPageId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.sectionId],
-			foreignColumns: [smartSection.id],
+    foreignKey({
+      columns: [table.sectionId],
+      foreignColumns: [smartSection.id],
       name: "SmartSectionInstance_sectionId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelBlockAnalytics = pgTable(
-  "FunnelBlockAnalytics",
-  {
-	id: text().primaryKey().notNull(),
-	blockId: text().notNull(),
-	views: integer().default(0).notNull(),
-	clicks: integer().default(0).notNull(),
-	engagementTime: integer().default(0).notNull(),
-	date: date().notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    index("FunnelBlockAnalytics_blockId_date_idx").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("date_ops"),
-      table.date.asc().nullsLast().op("date_ops"),
-    ),
-    uniqueIndex("FunnelBlockAnalytics_blockId_date_key").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("text_ops"),
-      table.date.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.blockId],
-			foreignColumns: [funnelBlock.id],
-      name: "FunnelBlockAnalytics_blockId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelBlockEvent = pgTable(
-  "FunnelBlockEvent",
-  {
-	id: text().primaryKey().notNull(),
-	blockId: text().notNull(),
-	eventType: text().notNull(),
-	eventName: text(),
-	parameters: jsonb(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    index("FunnelBlockEvent_blockId_idx").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("FunnelBlockEvent_blockId_key").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.blockId],
-			foreignColumns: [funnelBlock.id],
-      name: "FunnelBlockEvent_blockId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelBreakpoint = pgTable(
-  "FunnelBreakpoint",
-  {
-	id: text().primaryKey().notNull(),
-	blockId: text().notNull(),
-	device: deviceType().notNull(),
-	styles: jsonb().default({}).notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    uniqueIndex("FunnelBreakpoint_blockId_device_key").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("text_ops"),
-      table.device.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelBreakpoint_blockId_idx").using(
-      "btree",
-      table.blockId.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.blockId],
-			foreignColumns: [funnelBlock.id],
-      name: "FunnelBreakpoint_blockId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelPixelIntegration = pgTable(
-  "FunnelPixelIntegration",
-  {
-	id: text().primaryKey().notNull(),
-	funnelId: text().notNull(),
-	provider: pixelProvider().notNull(),
-	pixelId: text().notNull(),
-	enabled: boolean().default(true).notNull(),
-	metadata: jsonb(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-  },
-  (table) => [
-    index("FunnelPixelIntegration_funnelId_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("FunnelPixelIntegration_funnelId_provider_key").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.provider.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "FunnelPixelIntegration_funnelId_fkey",
     })
       .onUpdate("cascade")
       .onDelete("cascade"),
@@ -11214,795 +10811,6 @@ export const studioStaffMember = pgTable(
   ],
 ).enableRLS();
 
-export const funnel = pgTable(
-  "Funnel",
-  {
-	id: text().primaryKey().notNull(),
-	name: text().notNull(),
-	description: text(),
-    status: funnelStatus().default("DRAFT").notNull(),
-	organizationId: text().notNull(),
-	locationId: text(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-    publishedAt: timestamp({ precision: 3, mode: "date" }),
-	stylePresetId: text(),
-	customDomain: text(),
-    domainType: funnelDomainType().default("SUBDOMAIN").notNull(),
-	domainVerified: boolean().default(false).notNull(),
-	subdomain: text(),
-	apiKey: text(),
-	externalDomains: text().array(),
-	externalMetadata: jsonb(),
-	externalUrl: text(),
-    funnelType: funnelType().default("INTERNAL").notNull(),
-	isReadOnly: boolean().default(false).notNull(),
-    lastSyncedAt: timestamp({ precision: 3, mode: "date" }),
-	trackingConfig: jsonb(),
-  },
-  (table) => [
-    index("Funnel_apiKey_idx").using(
-      "btree",
-      table.apiKey.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("Funnel_apiKey_key").using(
-      "btree",
-      table.apiKey.asc().nullsLast().op("text_ops"),
-    ),
-    index("Funnel_customDomain_idx").using(
-      "btree",
-      table.customDomain.asc().nullsLast().op("text_ops"),
-    ),
-    index("Funnel_funnelType_idx").using(
-      "btree",
-      table.funnelType.asc().nullsLast().op("enum_ops"),
-    ),
-    index("Funnel_organizationId_idx").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("Funnel_organizationId_id_key").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-      table.id.asc().nullsLast().op("text_ops"),
-    ),
-    index("Funnel_organizationId_locationId_idx").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-      table.locationId.asc().nullsLast().op("text_ops"),
-    ),
-    index("Funnel_status_idx").using(
-      "btree",
-      table.status.asc().nullsLast().op("enum_ops"),
-    ),
-    index("Funnel_locationId_idx").using(
-      "btree",
-      table.locationId.asc().nullsLast().op("text_ops"),
-    ),
-    index("Funnel_subdomain_idx").using(
-      "btree",
-      table.subdomain.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.organizationId],
-			foreignColumns: [organization.id],
-      name: "Funnel_organizationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.stylePresetId],
-			foreignColumns: [globalStylePreset.id],
-      name: "Funnel_stylePresetId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.locationId],
-			foreignColumns: [location.id],
-      name: "Funnel_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-  ],
-).enableRLS();
-
-export const externalFormSubmission = pgTable(
-  "ExternalFormSubmission",
-  {
-	id: text().primaryKey().notNull(),
-    mirroredFormSubmissionId: text(),
-    idempotencyKey: text(),
-    payloadHash: text(),
-	funnelId: text().notNull(),
-	organizationId: text().notNull(),
-	locationId: text(),
-	formId: text(),
-	formKey: text().notNull(),
-	formName: text(),
-	formType: text(),
-	formVersion: text(),
-    status: text().default("submitted").notNull(),
-	qualified: boolean(),
-	score: doublePrecision(),
-	reasonCodes: text().array().default([]).notNull(),
-	data: jsonb().notNull(),
-	normalized: jsonb().default({}).notNull(),
-	metadata: jsonb().default({}).notNull(),
-	sessionId: text(),
-	anonymousId: text(),
-	userId: text(),
-	pageUrl: text(),
-	pagePath: text(),
-	pageTitle: text(),
-	referrer: text(),
-	utmSource: text(),
-	utmMedium: text(),
-	utmCampaign: text(),
-	utmTerm: text(),
-	utmContent: text(),
-	firstTouchUtm: jsonb(),
-	lastTouchUtm: jsonb(),
-	clickIds: jsonb(),
-	cookies: jsonb(),
-	device: jsonb(),
-	ipAddress: text(),
-	userAgent: text(),
-    submittedAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-  },
-  (table) => [
-    index("ExternalFormSubmission_anonymousId_idx").using(
-      "btree",
-      table.anonymousId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("ExternalFormSubmission_mirroredFormSubmissionId_key").using(
-      "btree",
-      table.mirroredFormSubmissionId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("ExternalFormSubmission_funnelId_idempotencyKey_key")
-      .using(
-        "btree",
-        table.funnelId.asc().nullsLast().op("text_ops"),
-        table.idempotencyKey.asc().nullsLast().op("text_ops"),
-      )
-      .where(sql`${table.idempotencyKey} IS NOT NULL`),
-    check(
-      "ExternalFormSubmission_idempotency_hash_check",
-      sql`${table.idempotencyKey} IS NULL OR char_length(${table.payloadHash}) = 64`,
-    ),
-    index("ExternalFormSubmission_formKey_idx").using(
-      "btree",
-      table.formKey.asc().nullsLast().op("text_ops"),
-    ),
-    index("ExternalFormSubmission_funnelId_submittedAt_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.submittedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("ExternalFormSubmission_locationId_submittedAt_idx").using(
-      "btree",
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.submittedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("ExternalFormSubmission_organizationId_idx").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-    ),
-    index("ExternalFormSubmission_qualified_idx").using(
-      "btree",
-      table.qualified.asc().nullsLast().op("bool_ops"),
-    ),
-    index("ExternalFormSubmission_sessionId_idx").using(
-      "btree",
-      table.sessionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("ExternalFormSubmission_status_idx").using(
-      "btree",
-      table.status.asc().nullsLast().op("text_ops"),
-    ),
-    foreignKey({
-      columns: [table.mirroredFormSubmissionId],
-      foreignColumns: [formSubmission.id],
-      name: "ExternalFormSubmission_mirroredFormSubmissionId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.formId],
-			foreignColumns: [form.id],
-      name: "ExternalFormSubmission_formId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "ExternalFormSubmission_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.locationId],
-			foreignColumns: [location.id],
-      name: "ExternalFormSubmission_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.organizationId],
-			foreignColumns: [organization.id],
-      name: "ExternalFormSubmission_organizationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const anonymousUserProfiles = pgTable(
-  "anonymous_user_profiles",
-  {
-	id: text().primaryKey().notNull(),
-    organizationId: text().notNull(),
-    locationId: text(),
-    anonymousId: text().notNull(),
-	displayName: text().notNull(),
-    firstSeen: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    lastSeen: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-	totalSessions: integer().default(0).notNull(),
-	totalEvents: integer().default(0).notNull(),
-	avgEngagementRate: doublePrecision(),
-	avgExperienceScore: doublePrecision(),
-    identifiedAt: timestamp({ precision: 3, mode: "date" }),
-	identifiedUserId: text(),
-	lifecycleStage: text(),
-	tags: text().array().default([]),
-	userProperties: jsonb().default({}).notNull(),
-	consentGiven: boolean().default(false).notNull(),
-    consentTimestamp: timestamp({ precision: 3, mode: "date" }),
-    consentVersion: text().default("1.0"),
-	dataRetentionDays: integer().default(90).notNull(),
-    deletionRequestedAt: timestamp({ precision: 3, mode: "date" }),
-  },
-  (table) => [
-    uniqueIndex("anonymous_user_profiles_org_identity_key")
-      .using(
-        "btree",
-        table.organizationId.asc().nullsLast().op("text_ops"),
-        table.anonymousId.asc().nullsLast().op("text_ops"),
-      )
-      .where(sql`${table.locationId} IS NULL`),
-    uniqueIndex("anonymous_user_profiles_location_identity_key")
-      .using(
-        "btree",
-        table.organizationId.asc().nullsLast().op("text_ops"),
-        table.locationId.asc().nullsLast().op("text_ops"),
-        table.anonymousId.asc().nullsLast().op("text_ops"),
-      )
-      .where(sql`${table.locationId} IS NOT NULL`),
-    index("anonymous_user_profiles_scope_lastSeen_idx").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.lastSeen.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("anonymous_user_profiles_consentGiven_idx").using(
-      "btree",
-      table.consentGiven.asc().nullsLast().op("bool_ops"),
-    ),
-    index("anonymous_user_profiles_deletionRequestedAt_idx").using(
-      "btree",
-      table.deletionRequestedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("anonymous_user_profiles_identifiedUserId_idx").using(
-      "btree",
-      table.identifiedUserId.asc().nullsLast().op("text_ops"),
-    ),
-    index("anonymous_user_profiles_lifecycleStage_idx").using(
-      "btree",
-      table.lifecycleStage.asc().nullsLast().op("text_ops"),
-    ),
-    foreignKey({
-      columns: [table.organizationId],
-      foreignColumns: [organization.id],
-      name: "anonymous_user_profiles_organizationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-    foreignKey({
-      columns: [table.organizationId, table.locationId],
-      foreignColumns: [location.organizationId, location.id],
-      name: "anonymous_user_profiles_organizationId_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelWebVital = pgTable(
-  "FunnelWebVital",
-  {
-	id: text().primaryKey().notNull(),
-	funnelId: text().notNull(),
-	locationId: text(),
-	sessionId: text().notNull(),
-	anonymousId: text(),
-	pageUrl: text().notNull(),
-	pagePath: text().notNull(),
-	pageTitle: text(),
-	metric: webVitalMetric().notNull(),
-	value: doublePrecision().notNull(),
-	rating: webVitalRating().notNull(),
-	delta: doublePrecision(),
-	idMetric: text("id_metric"),
-	deviceType: text(),
-	browserName: text(),
-	browserVersion: text(),
-	osName: text(),
-	osVersion: text(),
-	screenWidth: integer(),
-	screenHeight: integer(),
-	countryCode: text(),
-	countryName: text(),
-	region: text(),
-	city: text(),
-    timestamp: timestamp({ precision: 3, mode: "date" }).notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-  },
-  (table) => [
-    index("FunnelWebVital_anonymousId_idx").using(
-      "btree",
-      table.anonymousId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelWebVital_funnelId_timestamp_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.timestamp.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelWebVital_metric_rating_idx").using(
-      "btree",
-      table.metric.asc().nullsLast().op("enum_ops"),
-      table.rating.asc().nullsLast().op("enum_ops"),
-    ),
-    index("FunnelWebVital_pageUrl_metric_idx").using(
-      "btree",
-      table.pageUrl.asc().nullsLast().op("text_ops"),
-      table.metric.asc().nullsLast().op("enum_ops"),
-    ),
-    index("FunnelWebVital_sessionId_idx").using(
-      "btree",
-      table.sessionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelWebVital_locationId_timestamp_idx").using(
-      "btree",
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.timestamp.asc().nullsLast().op("timestamp_ops"),
-    ),
-    foreignKey({
-      columns: [table.funnelId, table.sessionId],
-      foreignColumns: [funnelSession.funnelId, funnelSession.sessionId],
-      name: "FunnelWebVital_funnelId_sessionId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
-
-export const funnelEvent = pgTable(
-  "FunnelEvent",
-  {
-	id: text().primaryKey().notNull(),
-	eventId: text().notNull(),
-	funnelId: text().notNull(),
-	locationId: text(),
-	eventName: text().notNull(),
-	eventProperties: jsonb().default({}).notNull(),
-	sessionId: text().notNull(),
-	userId: text(),
-	anonymousId: text(),
-	pageUrl: text(),
-	pagePath: text(),
-	pageTitle: text(),
-	referrer: text(),
-	utmSource: text(),
-	utmMedium: text(),
-	utmCampaign: text(),
-	utmTerm: text(),
-	utmContent: text(),
-	userAgent: text(),
-	deviceType: text(),
-	browserName: text(),
-	browserVersion: text(),
-	osName: text(),
-	osVersion: text(),
-	screenWidth: integer(),
-	screenHeight: integer(),
-	ipAddress: text(),
-	countryCode: text(),
-	region: text(),
-	city: text(),
-	timezone: text(),
-	isConversion: boolean().default(false).notNull(),
-	conversionType: text(),
-	revenue: numeric({ precision: 10, scale:  2 }),
-	currency: text(),
-	orderId: text(),
-    timestamp: timestamp({ precision: 3, mode: "date" }).notNull(),
-    serverTimestamp: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-	countryName: text(),
-	cls: doublePrecision(),
-	fcp: doublePrecision(),
-	inp: doublePrecision(),
-	lcp: doublePrecision(),
-	ttfb: doublePrecision(),
-	vitalRating: text(),
-	funnelStage: text(),
-	isMicroConversion: boolean().default(false).notNull(),
-	microConversionType: text(),
-	microConversionValue: doublePrecision(),
-	eventCategory: text(),
-	eventDescription: text(),
-	eventColor: text(),
-	scCid: text("ScCid"),
-	dclid: text(),
-	epik: text(),
-	fbc: text(),
-	fbclid: text(),
-	fbp: text(),
-	gbraid: text(),
-	gclid: text(),
-	liFatId: text("li_fat_id"),
-	msclkid: text(),
-	rdtCid: text("rdt_cid"),
-	ttclid: text(),
-	ttp: text(),
-	twclid: text(),
-	wbraid: text(),
-	abTestId: text(),
-	abTestVariant: text(),
-	customDimensions: jsonb(),
-	engagementLevel: text(),
-	engagementScore: doublePrecision(),
-	eventSource: text(),
-    firstTouchTimestamp: timestamp({ precision: 3, mode: "date" }),
-	firstTouchUtmCampaign: text(),
-	firstTouchUtmContent: text(),
-	firstTouchUtmMedium: text(),
-	firstTouchUtmSource: text(),
-	firstTouchUtmTerm: text(),
-    lastTouchTimestamp: timestamp({ precision: 3, mode: "date" }),
-	lastTouchUtmCampaign: text(),
-	lastTouchUtmContent: text(),
-	lastTouchUtmMedium: text(),
-	lastTouchUtmSource: text(),
-	lastTouchUtmTerm: text(),
-	leadScore: doublePrecision(),
-	leadScoreGrade: text(),
-  },
-  (table) => [
-    index("FunnelEvent_abTestId_idx").using(
-      "btree",
-      table.abTestId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_anonymousId_idx").using(
-      "btree",
-      table.anonymousId.asc().nullsLast().op("text_ops"),
-    ),
-    uniqueIndex("FunnelEvent_eventId_key").using(
-      "btree",
-      table.eventId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_eventName_funnelId_idx").using(
-      "btree",
-      table.eventName.asc().nullsLast().op("text_ops"),
-      table.funnelId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_fbclid_idx").using(
-      "btree",
-      table.fbclid.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_funnelId_timestamp_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.timestamp.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_gclid_idx").using(
-      "btree",
-      table.gclid.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_isConversion_funnelId_idx").using(
-      "btree",
-      table.isConversion.asc().nullsLast().op("bool_ops"),
-      table.funnelId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_leadScoreGrade_idx").using(
-      "btree",
-      table.leadScoreGrade.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_msclkid_idx").using(
-      "btree",
-      table.msclkid.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_sessionId_idx").using(
-      "btree",
-      table.sessionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_funnelId_sessionId_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.sessionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_locationId_timestamp_idx").using(
-      "btree",
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.timestamp.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("FunnelEvent_ttclid_idx").using(
-      "btree",
-      table.ttclid.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelEvent_userId_timestamp_idx").using(
-      "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
-      table.timestamp.asc().nullsLast().op("timestamp_ops"),
-    ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "FunnelEvent_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.locationId],
-			foreignColumns: [location.id],
-      name: "FunnelEvent_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-  ],
-).enableRLS();
-
-export const adConversionDelivery = pgTable(
-  "AdConversionDelivery",
-  {
-    id: text().primaryKey().notNull(),
-    eventId: text().notNull(),
-    organizationId: text().notNull(),
-    locationId: text(),
-    providerAccountId: text().notNull(),
-    provider: text().notNull(),
-    status: adConversionDeliveryStatus().default("PROCESSING").notNull(),
-    attemptCount: integer().default(1).notNull(),
-    providerEventId: text(),
-    lastErrorCode: text(),
-    lastAttemptAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-    succeededAt: timestamp({ precision: 3, mode: "date" }),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-  },
-  (table) => [
-    uniqueIndex("AdConversionDelivery_eventId_providerAccountId_key").using(
-      "btree",
-      table.eventId.asc().nullsLast().op("text_ops"),
-      table.providerAccountId.asc().nullsLast().op("text_ops"),
-    ),
-    index("AdConversionDelivery_scope_status_idx").using(
-      "btree",
-      table.organizationId.asc().nullsLast().op("text_ops"),
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.status.asc().nullsLast().op("enum_ops"),
-    ),
-    index("AdConversionDelivery_providerAccountId_idx").using(
-      "btree",
-      table.providerAccountId.asc().nullsLast().op("text_ops"),
-    ),
-    foreignKey({
-      columns: [table.eventId],
-      foreignColumns: [funnelEvent.eventId],
-      name: "AdConversionDelivery_eventId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-    foreignKey({
-      columns: [table.organizationId],
-      foreignColumns: [organization.id],
-      name: "AdConversionDelivery_organizationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-    foreignKey({
-      columns: [table.organizationId, table.locationId],
-      foreignColumns: [location.organizationId, location.id],
-      name: "AdConversionDelivery_organizationId_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-    foreignKey({
-      columns: [table.organizationId, table.providerAccountId],
-      foreignColumns: [providerAccount.organizationId, providerAccount.id],
-      name: "AdConversionDelivery_providerAccountId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-  ],
-).enableRLS();
-
-export const funnelSession = pgTable(
-  "FunnelSession",
-  {
-	id: text().primaryKey().notNull(),
-	sessionId: text().notNull(),
-	funnelId: text().notNull(),
-	locationId: text(),
-	userId: text(),
-	anonymousId: text(),
-    startedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-    endedAt: timestamp({ precision: 3, mode: "date" }),
-	durationSeconds: integer(),
-	firstSource: text(),
-	firstMedium: text(),
-	firstCampaign: text(),
-	firstReferrer: text(),
-	firstPageUrl: text(),
-	lastSource: text(),
-	lastMedium: text(),
-	lastCampaign: text(),
-	lastPageUrl: text(),
-	pageViews: integer().default(0).notNull(),
-	eventsCount: integer().default(0).notNull(),
-	converted: boolean().default(false).notNull(),
-	conversionValue: numeric({ precision: 10, scale:  2 }),
-	conversionType: text(),
-	ipAddress: text(),
-	userAgent: text(),
-	deviceType: text(),
-	countryCode: text(),
-	city: text(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-	profileId: text(),
-	browserName: text(),
-	browserVersion: text(),
-	countryName: text(),
-	osName: text(),
-	osVersion: text(),
-	region: text(),
-	activeTimeSeconds: integer(),
-	avgCls: doublePrecision(),
-	avgFcp: doublePrecision(),
-	avgInp: doublePrecision(),
-	avgLcp: doublePrecision(),
-	avgTtfb: doublePrecision(),
-	engagementRate: doublePrecision(),
-	experienceScore: integer(),
-	idleTimeSeconds: integer(),
-	abandonReason: text(),
-    abandonedAt: timestamp({ precision: 3, mode: "date" }),
-    checkoutCompletedAt: timestamp({ precision: 3, mode: "date" }),
-	checkoutDuration: integer(),
-    checkoutStartedAt: timestamp({ precision: 3, mode: "date" }),
-	currentStage: text(),
-	firstTouchSource: text(),
-	isAbandoned: boolean().default(false).notNull(),
-	lastTouchSource: text(),
-	linkedSessionId: text(),
-	stageHistory: jsonb().default([]).notNull(),
-	touchpoints: text().array().default([]),
-	consentGiven: boolean().default(false).notNull(),
-    consentTimestamp: timestamp({ precision: 3, mode: "date" }),
-    consentVersion: text().default("1.0"),
-	conversionPlatform: text(),
-	fbc: text(),
-	fbp: text(),
-	firstFbclid: text(),
-	firstGclid: text(),
-	firstLiFatId: text(),
-	firstMsclkid: text(),
-	firstTtclid: text(),
-	firstTwclid: text(),
-	lastFbclid: text(),
-	lastGclid: text(),
-	lastLiFatId: text(),
-	lastMsclkid: text(),
-	lastTtclid: text(),
-	lastTwclid: text(),
-	ttp: text(),
-	gbraid: text(),
-	wbraid: text(),
-	latitude: doublePrecision(),
-	longitude: doublePrecision(),
-  },
-  (table) => [
-    index("FunnelSession_anonymousId_idx").using(
-      "btree",
-      table.anonymousId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelSession_consentGiven_idx").using(
-      "btree",
-      table.consentGiven.asc().nullsLast().op("bool_ops"),
-    ),
-    index("FunnelSession_converted_funnelId_idx").using(
-      "btree",
-      table.converted.asc().nullsLast().op("bool_ops"),
-      table.funnelId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelSession_funnelId_startedAt_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.startedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    uniqueIndex("FunnelSession_funnelId_sessionId_key").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.sessionId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelSession_profileId_idx").using(
-      "btree",
-      table.profileId.asc().nullsLast().op("text_ops"),
-    ),
-    index("FunnelSession_locationId_startedAt_idx").using(
-      "btree",
-      table.locationId.asc().nullsLast().op("text_ops"),
-      table.startedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("FunnelSession_userId_idx").using(
-      "btree",
-      table.userId.asc().nullsLast().op("text_ops"),
-    ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "FunnelSession_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-	foreignKey({
-			columns: [table.linkedSessionId],
-			foreignColumns: [table.id],
-      name: "FunnelSession_linkedSessionId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.profileId],
-			foreignColumns: [anonymousUserProfiles.id],
-      name: "FunnelSession_profileId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-	foreignKey({
-			columns: [table.locationId],
-			foreignColumns: [location.id],
-      name: "FunnelSession_locationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
-  ],
-).enableRLS();
 
 export const adSpend = pgTable(
   "AdSpend",
@@ -12010,7 +10818,6 @@ export const adSpend = pgTable(
 	id: text().primaryKey().notNull(),
 	organizationId: text().notNull(),
 	locationId: text(),
-	funnelId: text(),
 	platform: text().notNull(),
 	campaignId: text(),
 	campaignName: text(),
@@ -12037,11 +10844,6 @@ export const adSpend = pgTable(
     updatedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
   },
   (table) => [
-    index("AdSpend_funnelId_date_idx").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("date_ops"),
-      table.date.asc().nullsLast().op("text_ops"),
-    ),
     index("AdSpend_organizationId_date_idx").using(
       "btree",
       table.organizationId.asc().nullsLast().op("text_ops"),
@@ -12059,13 +10861,6 @@ export const adSpend = pgTable(
       table.platform.asc().nullsLast().op("text_ops"),
       table.date.asc().nullsLast().op("text_ops"),
     ),
-	foreignKey({
-			columns: [table.funnelId],
-			foreignColumns: [funnel.id],
-      name: "AdSpend_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("set null"),
 	foreignKey({
 			columns: [table.organizationId],
 			foreignColumns: [organization.id],
@@ -12526,6 +11321,179 @@ export const emailDomain = pgTable(
     })
       .onUpdate("cascade")
       .onDelete("restrict"),
+  ],
+).enableRLS();
+
+export const emailSenderAddress = pgTable(
+  "EmailSenderAddress",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    emailDomainId: text().notNull(),
+    email: text().notNull(),
+    displayName: text().notNull(),
+    replyTo: text(),
+    isDefault: boolean().default(false).notNull(),
+    isDisabled: boolean().default(false).notNull(),
+    createdByUserId: text(),
+    removedAt: timestamp({ precision: 3, mode: "date" }),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("EmailSenderAddress_active_scope_email_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.scopeKey.asc().nullsLast().op("text_ops"),
+        sql`lower(${table.email})`,
+      )
+      .where(sql`${table.removedAt} IS NULL`),
+    uniqueIndex("EmailSenderAddress_scope_default_key")
+      .using(
+        "btree",
+        table.organizationId.asc().nullsLast().op("text_ops"),
+        table.scopeKey.asc().nullsLast().op("text_ops"),
+      )
+      .where(
+        sql`${table.isDefault} = true AND ${table.isDisabled} = false AND ${table.removedAt} IS NULL`,
+      ),
+    uniqueIndex("EmailSenderAddress_organizationId_id_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.id.asc().nullsLast().op("text_ops"),
+    ),
+    index("EmailSenderAddress_scope_domain_idx").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.locationId.asc().nullsLast().op("text_ops"),
+      table.emailDomainId.asc().nullsLast().op("text_ops"),
+    ),
+    check(
+      "EmailSenderAddress_default_enabled_check",
+      sql`${table.isDefault} = false OR ${table.isDisabled} = false`,
+    ),
+    check(
+      "EmailSenderAddress_display_name_check",
+      sql`length(${table.displayName}) BETWEEN 1 AND 120`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "EmailSenderAddress_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "EmailSenderAddress_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.emailDomainId],
+      foreignColumns: [emailDomain.organizationId, emailDomain.id],
+      name: "EmailSenderAddress_organization_domain_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      columns: [table.createdByUserId],
+      foreignColumns: [user.id],
+      name: "EmailSenderAddress_createdByUserId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
+  ],
+).enableRLS();
+
+export const emailDesignProfile = pgTable(
+  "EmailDesignProfile",
+  {
+    id: text().primaryKey().notNull(),
+    organizationId: text().notNull(),
+    locationId: text(),
+    scopeKey: text()
+      .notNull()
+      .generatedAlwaysAs(
+        sql`CASE WHEN "locationId" IS NULL THEN 'ORG' ELSE 'LOC:' || "locationId" END`,
+      ),
+    logoMode: text({ enum: ["WORKSPACE", "CUSTOM", "NONE"] })
+      .default("WORKSPACE")
+      .notNull(),
+    customLogoUrl: text(),
+    colorMode: text({ enum: ["WORKSPACE", "CUSTOM"] })
+      .default("WORKSPACE")
+      .notNull(),
+    headerTextColor: text().default("#111827").notNull(),
+    bodyTextColor: text().default("#374151").notNull(),
+    buttonColor: text().default("#111827").notNull(),
+    backgroundColor: text().default("#f8f8ef").notNull(),
+    primaryFont: text().default("Helvetica Neue").notNull(),
+    secondaryFont: text().default("Arial").notNull(),
+    socialLinks: jsonb().default({}).notNull(),
+    updatedByUserId: text(),
+    createdAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+    updatedAt: timestamp({ precision: 3, mode: "date" })
+      .default(sql`CURRENT_TIMESTAMP`)
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("EmailDesignProfile_scope_key").using(
+      "btree",
+      table.organizationId.asc().nullsLast().op("text_ops"),
+      table.scopeKey.asc().nullsLast().op("text_ops"),
+    ),
+    check(
+      "EmailDesignProfile_logo_mode_check",
+      sql`${table.logoMode} IN ('WORKSPACE', 'CUSTOM', 'NONE')`,
+    ),
+    check(
+      "EmailDesignProfile_custom_logo_check",
+      sql`${table.logoMode} <> 'CUSTOM' OR ${table.customLogoUrl} IS NOT NULL`,
+    ),
+    check(
+      "EmailDesignProfile_color_mode_check",
+      sql`${table.colorMode} IN ('WORKSPACE', 'CUSTOM')`,
+    ),
+    check(
+      "EmailDesignProfile_colors_check",
+      sql`${table.headerTextColor} ~ '^#[0-9a-fA-F]{6}$' AND ${table.bodyTextColor} ~ '^#[0-9a-fA-F]{6}$' AND ${table.buttonColor} ~ '^#[0-9a-fA-F]{6}$' AND ${table.backgroundColor} ~ '^#[0-9a-fA-F]{6}$'`,
+    ),
+    foreignKey({
+      columns: [table.organizationId],
+      foreignColumns: [organization.id],
+      name: "EmailDesignProfile_organizationId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.organizationId, table.locationId],
+      foreignColumns: [location.organizationId, location.id],
+      name: "EmailDesignProfile_scope_location_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("cascade"),
+    foreignKey({
+      columns: [table.updatedByUserId],
+      foreignColumns: [user.id],
+      name: "EmailDesignProfile_updatedByUserId_fkey",
+    })
+      .onUpdate("restrict")
+      .onDelete("set null"),
   ],
 ).enableRLS();
 
@@ -16261,59 +15229,6 @@ export const publicationRequestQuota = pgTable(
   ],
 ).enableRLS();
 
-export const funnelRequestQuota = pgTable(
-  "FunnelRequestQuota",
-  {
-    id: text().primaryKey().notNull(),
-    organizationId: text().notNull(),
-    funnelId: text().notNull(),
-    action: text().notNull(),
-    dimension: text().notNull(),
-    subjectKeyHash: text().notNull(),
-    windowStartedAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-    windowSeconds: integer().notNull(),
-    requestCount: integer().default(1).notNull(),
-    expiresAt: timestamp({ precision: 3, mode: "date" }).notNull(),
-    createdAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-    updatedAt: timestamp({ precision: 3, mode: "date" })
-      .default(sql`CURRENT_TIMESTAMP`)
-      .notNull(),
-  },
-  (table) => [
-    uniqueIndex("FunnelRequestQuota_counter_key").using(
-      "btree",
-      table.funnelId.asc().nullsLast().op("text_ops"),
-      table.action.asc().nullsLast().op("text_ops"),
-      table.dimension.asc().nullsLast().op("text_ops"),
-      table.subjectKeyHash.asc().nullsLast().op("text_ops"),
-      table.windowStartedAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    index("FunnelRequestQuota_expiresAt_idx").using(
-      "btree",
-      table.expiresAt.asc().nullsLast().op("timestamp_ops"),
-    ),
-    check(
-      "FunnelRequestQuota_values_check",
-      sql`char_length(${table.action}) BETWEEN 1 AND 100 AND ${table.dimension} IN ('SUBJECT', 'GLOBAL') AND char_length(${table.subjectKeyHash}) = 64 AND ${table.windowSeconds} BETWEEN 1 AND 86400 AND ${table.requestCount} > 0`,
-    ),
-    foreignKey({
-      columns: [table.organizationId],
-      foreignColumns: [organization.id],
-      name: "FunnelRequestQuota_organizationId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-    foreignKey({
-      columns: [table.organizationId, table.funnelId],
-      foreignColumns: [funnel.organizationId, funnel.id],
-      name: "FunnelRequestQuota_funnelId_fkey",
-    })
-      .onUpdate("cascade")
-      .onDelete("cascade"),
-  ],
-).enableRLS();
 
 export const reportSavedView = pgTable(
   "ReportSavedView",

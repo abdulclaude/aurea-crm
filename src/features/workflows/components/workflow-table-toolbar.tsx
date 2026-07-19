@@ -8,6 +8,7 @@ import type {
 
 import { StudioTableToolbar } from "@/features/studio/components/studio-table-toolbar";
 import { useWorkflowsParams } from "../hooks/use-workflows-params";
+import { WorkflowFolderCreateButton } from "./workflow-folder-create-button";
 import type { WorkflowFolder } from "./workflow-folders";
 import type { WorkflowTableRow } from "./workflow-table-types";
 
@@ -99,6 +100,7 @@ export function WorkflowTableToolbar({
       onColumnOrderChange={onColumnOrderChange}
       initialColumnOrder={initialColumnOrder}
       primaryColumnId="name"
+      additionalControls={<WorkflowFolderCreateButton />}
     />
   );
 }

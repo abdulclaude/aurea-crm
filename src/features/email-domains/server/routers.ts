@@ -1,22 +1,19 @@
 import { createId } from "@paralleldrive/cuid2";
 import { TRPCError } from "@trpc/server";
-import { and, count, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/db";
-import {
-  campaign,
-  communicationProvisioningOperation,
-  emailDomain,
-} from "@/db/schema";
+import { communicationProvisioningOperation, emailDomain } from "@/db/schema";
 import { requireCommunicationEntitlement } from "@/features/communications/server/profile-service";
-import {
-  requestCommunicationProvisioning,
-} from "@/features/communications/server/provisioning";
+import { PlatformResendConfigurationError } from "@/features/communications/server/platform-credentials";
+import { requestCommunicationProvisioning } from "@/features/communications/server/provisioning";
 import { ensurePlatformResendBinding } from "@/features/communications/server/resend-binding";
 import { requireCapability } from "@/features/permissions/server/authorization";
 import { createTRPCRouter, protectedProcedure } from "@/trpc/init";
 import { recordCommunicationAudit } from "@/features/communications/server/audit";
+import { buildEmailDomainCreateIdempotencyKey } from "@/features/email-domains/lib/operation-keys";
+import { requestEmailDomainRelease } from "./release-service";
 
 type EmailDomainContext = {
   auth: { user: { id: string } };
@@ -95,10 +92,7 @@ export const emailDomainsRouter = createTRPCRouter({
   list: protectedProcedure.query(async ({ ctx }) => {
     const organizationId = await requireProviderManagement(ctx);
     return db.query.emailDomain.findMany({
-      where: emailDomainScopeWhere(
-        organizationId,
-        ctx.locationId ?? null,
-      ),
+      where: emailDomainScopeWhere(organizationId, ctx.locationId ?? null),
       orderBy: [desc(emailDomain.isDefault), desc(emailDomain.createdAt)],
     });
   }),
@@ -115,7 +109,10 @@ export const emailDomainsRouter = createTRPCRouter({
         ),
       });
       if (!domain) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Domain not found." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Domain not found.",
+        });
       }
       return domain;
     }),
@@ -147,6 +144,15 @@ export const emailDomainsRouter = createTRPCRouter({
       const binding = await ensurePlatformResendBinding({
         organizationId,
         createdByUserId: ctx.auth.user.id,
+      }).catch((error: unknown) => {
+        if (error instanceof PlatformResendConfigurationError) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: error.message,
+            cause: error,
+          });
+        }
+        throw error;
       });
       const now = new Date();
       const domainId = createId();
@@ -188,7 +194,7 @@ export const emailDomainsRouter = createTRPCRouter({
           emailDomainId: domainId,
           service: "RESEND_DOMAIN",
           operationType: "CREATE",
-          idempotencyKey: `resend-domain:create:${input.domain}`,
+          idempotencyKey: buildEmailDomainCreateIdempotencyKey(domainId),
           safeInput: { kind: "RESEND_DOMAIN_CREATE", domain: input.domain },
           requestedByUserId: ctx.auth.user.id,
           nextAttemptAt: now,
@@ -196,7 +202,14 @@ export const emailDomainsRouter = createTRPCRouter({
         return created;
       });
       await requestCommunicationProvisioning(organizationId);
-      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.create_requested", resourceType: "EMAIL_DOMAIN", resourceId: result?.id ?? null });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "resend.domain.create_requested",
+        resourceType: "EMAIL_DOMAIN",
+        resourceId: result?.id ?? null,
+      });
       return { domain: result, operationId };
     }),
 
@@ -205,10 +218,12 @@ export const emailDomainsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const organizationId = await requireProviderManagement(ctx);
       const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      await requireNoPendingDomainRelease(organizationId, domain.id);
       if (!domain.providerAccountId || !domain.resendDomainId) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Wait for domain registration before requesting verification.",
+          message:
+            "Wait for domain registration before requesting verification.",
         });
       }
       const operation = await enqueueDomainOperation({
@@ -229,6 +244,7 @@ export const emailDomainsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const organizationId = await requireProviderManagement(ctx);
       const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      await requireNoPendingDomainRelease(organizationId, domain.id);
       if (!domain.providerAccountId || !domain.resendDomainId) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
@@ -263,6 +279,7 @@ export const emailDomainsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const organizationId = await requireProviderManagement(ctx);
       const domain = await requireOwnedDomain(ctx, organizationId, input.id);
+      await requireNoPendingDomainRelease(organizationId, domain.id);
       if (
         input.defaultFromEmail &&
         !input.defaultFromEmail
@@ -279,7 +296,9 @@ export const emailDomainsRouter = createTRPCRouter({
           await tx
             .update(emailDomain)
             .set({ isDefault: false, updatedAt: new Date() })
-            .where(emailDomainScopeWhere(organizationId, ctx.locationId ?? null));
+            .where(
+              emailDomainScopeWhere(organizationId, ctx.locationId ?? null),
+            );
         }
         const [updated] = await tx
           .update(emailDomain)
@@ -307,7 +326,18 @@ export const emailDomainsRouter = createTRPCRouter({
         }
         return updated;
       });
-      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.updated", resourceType: "EMAIL_DOMAIN", resourceId: updated.id, safeMetadata: { isDefault: input.isDefault ?? null, isDisabled: input.isDisabled ?? null } });
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: "resend.domain.updated",
+        resourceType: "EMAIL_DOMAIN",
+        resourceId: updated.id,
+        safeMetadata: {
+          isDefault: input.isDefault ?? null,
+          isDisabled: input.isDisabled ?? null,
+        },
+      });
       return updated;
     }),
 
@@ -315,47 +345,26 @@ export const emailDomainsRouter = createTRPCRouter({
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const organizationId = await requireProviderManagement(ctx);
-      const domain = await requireOwnedDomain(ctx, organizationId, input.id);
-      const [campaignCount] = await db
-        .select({ value: count() })
-        .from(campaign)
-        .where(
-          and(
-            eq(campaign.organizationId, organizationId),
-            eq(campaign.emailDomainId, domain.id),
-          ),
-        );
-      if ((campaignCount?.value ?? 0) > 0) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: `This domain is used by ${campaignCount?.value ?? 0} campaign(s). Remove those references first.`,
-        });
-      }
-      if (!domain.providerAccountId || !domain.resendDomainId) {
-        await db
-          .update(emailDomain)
-          .set({
-            isDisabled: true,
-            lifecycleState: "RELEASED",
-            removedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(emailDomain.id, domain.id));
-        await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.released", resourceType: "EMAIL_DOMAIN", resourceId: domain.id });
-        return { success: true, operationId: null };
-      }
-      const operation = await enqueueDomainOperation({
+      const result = await requestEmailDomainRelease({
+        id: input.id,
         organizationId,
         locationId: ctx.locationId ?? null,
-        emailDomainId: domain.id,
-        providerAccountId: domain.providerAccountId,
-        userId: ctx.auth.user.id,
-        operationType: "RELEASE",
-        idempotencyKey: `resend-domain:delete:${domain.id}`,
-        safeInput: { kind: "RESEND_DOMAIN_DELETE", emailDomainId: domain.id },
+        requestedByUserId: ctx.auth.user.id,
       });
-      await recordCommunicationAudit({ organizationId, locationId: ctx.locationId ?? null, actorUserId: ctx.auth.user.id, action: "resend.domain.release_requested", resourceType: "EMAIL_DOMAIN", resourceId: domain.id });
-      return { success: true, operationId: operation?.id ?? null };
+      if (result.operationId) {
+        await requestCommunicationProvisioning(organizationId);
+      }
+      await recordCommunicationAudit({
+        organizationId,
+        locationId: ctx.locationId ?? null,
+        actorUserId: ctx.auth.user.id,
+        action: result.deletedLocally
+          ? "resend.domain.deleted"
+          : "resend.domain.delete_requested",
+        resourceType: "EMAIL_DOMAIN",
+        resourceId: input.id,
+      });
+      return { success: true, operationId: result.operationId };
     }),
 });
 
@@ -371,6 +380,28 @@ async function requireOwnedDomain(
     throw new TRPCError({ code: "NOT_FOUND", message: "Domain not found." });
   }
   return domain;
+}
+
+async function requireNoPendingDomainRelease(
+  organizationId: string,
+  emailDomainId: string,
+): Promise<void> {
+  const releaseOperation =
+    await db.query.communicationProvisioningOperation.findFirst({
+      where: and(
+        eq(communicationProvisioningOperation.organizationId, organizationId),
+        eq(communicationProvisioningOperation.emailDomainId, emailDomainId),
+        eq(communicationProvisioningOperation.operationType, "RELEASE"),
+      ),
+      columns: { id: true },
+    });
+  if (releaseOperation) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message:
+        "This domain has a pending deletion request. Retry deletion instead of changing its settings.",
+    });
+  }
 }
 
 function emailDomainScopeWhere(

@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 export const publicationKindSchema = z.enum([
-  "FUNNEL",
   "SCHEDULE",
   "PRICING",
   "FORM",
@@ -47,12 +46,6 @@ export const publicationConsentConfigSchema = z.object({
     .array(z.enum(["ANALYTICS", "MARKETING", "PERSONALIZATION"]))
     .max(3)
     .default([]),
-});
-
-const funnelChannelConfigSchema = z.object({
-  kind: z.literal("FUNNEL"),
-  allowCustomCode: z.boolean().default(false),
-  analytics: z.enum(["DISABLED", "CONSENTED", "ALWAYS"]).default("CONSENTED"),
 });
 
 const scheduleChannelConfigSchema = z.object({
@@ -143,7 +136,6 @@ const widgetChannelConfigSchema = z.object({
 });
 
 export const publicationChannelConfigSchema = z.discriminatedUnion("kind", [
-  funnelChannelConfigSchema,
   scheduleChannelConfigSchema,
   pricingChannelConfigSchema,
   formChannelConfigSchema,
@@ -179,10 +171,6 @@ const targetBaseSchema = z.object({
 });
 
 export const createPublicationTargetSchema = z.discriminatedUnion("kind", [
-  targetBaseSchema.extend({
-    kind: z.literal("FUNNEL"),
-    channelConfig: funnelChannelConfigSchema,
-  }),
   targetBaseSchema.extend({
     kind: z.literal("SCHEDULE"),
     channelConfig: scheduleChannelConfigSchema,

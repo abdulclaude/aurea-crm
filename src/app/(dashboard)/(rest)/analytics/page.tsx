@@ -75,7 +75,6 @@ export default function AnalyticsPage() {
           { id: "clients", label: "Clients" },
           { id: "deals", label: "Deals" },
           { id: "user-behavior", label: "User Behaviour" },
-          { id: "funnels", label: "Funnels" },
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -628,28 +627,6 @@ export default function AnalyticsPage() {
           </div>
         )}
 
-        {activeTab === "funnels" && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Conversion Funnels</CardTitle>
-              <CardDescription>Track conversion rates through your sales funnel</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-md border p-4">
-                <p className="text-sm text-muted-foreground">
-                  Funnel analytics dashboard
-                </p>
-                <ul className="text-xs text-muted-foreground mt-4 space-y-2">
-                  <li>• Lead to client conversion</li>
-                  <li>• Client to deal conversion</li>
-                  <li>• Deal stage progression rates</li>
-                  <li>• Drop-off analysis</li>
-                  <li>• Optimization opportunities</li>
-                </ul>
-              </div>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   );

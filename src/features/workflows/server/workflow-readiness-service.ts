@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 
 import { db } from "@/db";
 import { NodeType } from "@/db/enums";
-import { form, workflows } from "@/db/schema";
+import { form, publicationTarget, workflows } from "@/db/schema";
 import { getWorkflowActivationIssues } from "@/features/workflows/lib/workflow-activation-policy";
 import { formSubmittedTriggerConfigSchema } from "@/features/workflows/lib/studio-trigger-config";
 import { getWorkflowFormReadinessIssues } from "@/features/workflows/lib/workflow-form-readiness";
@@ -91,13 +91,39 @@ export async function getScopedWorkflowReadinessIssues(
         },
       })
     : [];
+  const publishedFormTargets = formIds.length
+    ? await db
+        .select({ sourceId: publicationTarget.sourceId })
+        .from(publicationTarget)
+        .where(
+          and(
+            eq(publicationTarget.organizationId, scope.organizationId),
+            scope.locationId
+              ? eq(publicationTarget.locationId, scope.locationId)
+              : isNull(publicationTarget.locationId),
+            eq(publicationTarget.kind, "FORM"),
+            eq(publicationTarget.status, "PUBLISHED"),
+            inArray(publicationTarget.sourceId, formIds),
+          ),
+        )
+    : [];
+  const publishedFormIds = new Set(
+    publishedFormTargets.flatMap((target) =>
+      target.sourceId ? [target.sourceId] : [],
+    ),
+  );
   const formIssues = getWorkflowFormReadinessIssues({
     nodes: candidate.nodes,
     connections: candidate.connections,
     forms: scopedForms.map((selectedForm) => ({
       id: selectedForm.id,
       name: selectedForm.name,
-      status: selectedForm.status,
+      status:
+        selectedForm.status === "ARCHIVED"
+          ? "ARCHIVED"
+          : publishedFormIds.has(selectedForm.id)
+            ? "PUBLISHED"
+            : "DRAFT",
       crmResolutionConfig: selectedForm.crmResolutionConfig,
       automationConfig: selectedForm.automationConfig,
       fields: selectedForm.formSteps.flatMap((step) => step.formFields),

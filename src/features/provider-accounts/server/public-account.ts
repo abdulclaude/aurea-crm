@@ -1,10 +1,7 @@
 import type { providerAccount } from "@/db/schema";
 import {
-  type AdConversionConfig,
-  adConversionProviderSchema,
   type IntegrationProviderConfig,
   integrationProviderSchema,
-  parseAdConversionConfig,
   type ResendProviderConfig,
   resendProviderConfigSchema,
   type SmsProviderConfig,
@@ -31,7 +28,6 @@ export type PublicProviderAccount = {
     | ResendProviderConfig
     | SmsProviderConfig
     | PublicTwilioPlatformConfig
-    | AdConversionConfig
     | IntegrationProviderConfig
     | null;
   hasSecret: boolean;
@@ -67,10 +63,6 @@ export function toPublicProviderAccount(
     row.provider === "TWILIO" && row.ownershipMode === "PLATFORM_MANAGED"
       ? twilioPlatformProviderConfigSchema.safeParse(row.config)
       : null;
-  const adProvider = adConversionProviderSchema.safeParse(row.provider);
-  const adConfig = adProvider.success
-    ? parseAdConfigSafely(adProvider.data, row.config)
-    : null;
   const integrationProvider = integrationProviderSchema.safeParse(row.provider);
   const integrationConfig = integrationProvider.success
     ? parseIntegrationConfigSafely(integrationProvider.data, row.config)
@@ -90,7 +82,7 @@ export function toPublicProviderAccount(
           }
         : smsConfig?.success === true
         ? smsConfig.data
-        : adConfig ?? integrationConfig;
+        : integrationConfig;
 
   return {
     id: row.id,
@@ -136,17 +128,6 @@ function parseIntegrationConfigSafely(
 ): IntegrationProviderConfig | null {
   try {
     return parseIntegrationProviderConfig(provider, config);
-  } catch {
-    return null;
-  }
-}
-
-function parseAdConfigSafely(
-  provider: "META_CONVERSIONS" | "GOOGLE_ADS" | "TIKTOK_EVENTS",
-  config: unknown,
-): AdConversionConfig | null {
-  try {
-    return parseAdConversionConfig(provider, config);
   } catch {
     return null;
   }

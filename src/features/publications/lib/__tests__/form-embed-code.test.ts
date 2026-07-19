@@ -29,18 +29,19 @@ test("form embeds require published exact frame origins and a form sandbox", () 
   assert.match(embed.iframeCode, /Lead form &quot;North&quot;/);
 });
 
-test("form embeds fail closed without an allowed website origin", () => {
-  assert.equal(
-    buildPublishedFormEmbed({
-      name: "Lead form",
-      slug: "lead-form",
-      organizationSlug: "studio-one",
-      snapshot: {
-        schemaVersion: 1,
-        source: {},
-        channelConfig: { kind: "FORM" },
-      },
-    }),
-    null,
-  );
+test("public form links remain available without iframe permission", () => {
+  const embed = buildPublishedFormEmbed({
+    name: "Lead form",
+    slug: "lead-form",
+    organizationSlug: "studio-one",
+    snapshot: {
+      schemaVersion: 1,
+      source: {},
+      channelConfig: { kind: "FORM" },
+    },
+  });
+
+  assert.ok(embed);
+  assert.match(embed.previewUrl, /\/p\/studio-one\/lead-form$/);
+  assert.equal(embed.iframeCode, null);
 });

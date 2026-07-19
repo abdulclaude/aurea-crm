@@ -72,6 +72,14 @@ import { getWorkflowProviderReadinessIssues } from "./workflow-provider-readines
 
 const positionSchema = z.object({ x: z.number(), y: z.number() });
 const jsonObjectSchema = z.record(z.string(), z.unknown());
+const bundleInputsSchema = z.array(
+  z.object({
+    name: z.string(),
+    type: z.string(),
+    description: z.string().optional(),
+    defaultValue: z.unknown().optional(),
+  }),
+);
 const workflowListSortSchema = z.enum([
   "updatedAt.desc",
   "updatedAt.asc",
@@ -1188,14 +1196,22 @@ export const workflowsRouter = createTRPCRouter({
 
         // update workflows 'updatedAt' time stamp
 
-        await tx
+        const [updatedWorkflow] = await tx
           .update(workflows)
           .set({
             updatedAt: new Date(),
           })
-          .where(and(eq(workflows.id, id), workflowScopeWhere(ctx)));
+          .where(and(eq(workflows.id, id), workflowScopeWhere(ctx)))
+          .returning();
 
-        return workflow;
+        if (!updatedWorkflow) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Workflow not found",
+          });
+        }
+
+        return updatedWorkflow;
       });
 
       const providerScope = {
@@ -1274,6 +1290,7 @@ export const workflowsRouter = createTRPCRouter({
         sourceHandle: item.fromOutput === "main" ? "source-1" : item.fromOutput,
         targetHandle: item.toInput === "main" ? "target-1" : item.toInput,
       }));
+      const bundleInputs = bundleInputsSchema.safeParse(workflow.bundleInputs);
 
       return {
         id: workflow.id,
@@ -1281,7 +1298,9 @@ export const workflowsRouter = createTRPCRouter({
         archived: workflow.archived,
         isTemplate: workflow.isTemplate,
         isBundle: workflow.isBundle,
+        bundleInputs: bundleInputs.success ? bundleInputs.data : undefined,
         behavior: parseWorkflowBehavior(workflow.behaviorConfig),
+        updatedAt: workflow.updatedAt,
         nodes,
         edges,
       };
@@ -1829,14 +1848,7 @@ export const workflowsRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        bundleInputs: z.array(
-          z.object({
-            name: z.string(),
-            type: z.string(),
-            description: z.string().optional(),
-            defaultValue: z.unknown().optional(),
-          }),
-        ),
+        bundleInputs: bundleInputsSchema,
         bundleOutputs: z.array(
           z.object({
             name: z.string(),

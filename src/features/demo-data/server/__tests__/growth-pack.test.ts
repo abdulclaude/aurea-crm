@@ -87,17 +87,13 @@ describe("growth demo fixtures", () => {
     assert.ok(data.deliveries.every((delivery) => delivery.providerAccountId && delivery.providerAccountRef === delivery.providerAccountId));
   });
 
-  it("populates pagination, long-range analytics, and materially different configurations", () => {
+  it("populates pagination and materially different configurations", () => {
     const data = fixtures();
 
     assert.ok(data.conversations.length > 30);
     assert.ok(data.smsMessages.length > 50);
     assert.ok(data.formSubmissions.length > 50);
-    assert.ok(data.sessions.length >= 500);
-    assert.ok(data.events.length >= 2_000);
-    assert.ok(data.vitals.length >= 800);
     assert.ok(data.adSpendRows.length >= 2_000);
-    assert.equal(new Set(data.sessions.map((session) => session.firstSource)).size >= 6, true);
     assert.equal(new Set(data.adSpendRows.map((row) => row.platform)).size, 3);
     assert.equal(new Set(data.workflowRows.map((workflow) => `${workflow.archived}:${workflow.isTemplate}`)).size >= 2, true);
     assert.equal(new Set(data.forms.map((item) => `${item.status}:${item.isMultiStep}`)).size >= 2, true);
@@ -108,32 +104,21 @@ describe("growth demo fixtures", () => {
     const blockedFieldTypes = new Set(["FILE_UPLOAD", "SIGNATURE", "PAYMENT"]);
 
     assert.ok(data.formFields.every((field) => !blockedFieldTypes.has(field.type)));
-    assert.ok(data.funnelPages.every((page) => page.customJs === null));
-    assert.ok(data.funnelBlocks.every((block) => !["IFRAME", "CUSTOM_HTML", "SCRIPT"].includes(block.type)));
-    assert.ok(data.publicationTargets.every((target) => {
-      const config = target.channelConfig as Record<string, unknown>;
-      return config.allowCustomCode !== true;
-    }));
     assert.ok(data.publicationVersions.every((version) => /^[a-f0-9]{64}$/.test(version.contentHash)));
     assert.ok(data.formSubmissions.every((submission) => submission.ipAddress === undefined && submission.userAgent === undefined));
-    assert.ok(data.sessions.every((session) => session.ipAddress === undefined && session.userAgent === undefined));
-    assert.ok(data.events.every((event) => event.ipAddress === undefined && event.userAgent === undefined));
   });
 
-  it("keeps ad metrics and conversion journeys mathematically consistent", () => {
+  it("keeps ad metrics mathematically consistent", () => {
     const data = fixtures();
 
     for (const row of data.adSpendRows.slice(0, 100)) {
       const spend = Number(row.spend);
       const revenue = Number(row.revenue);
-      assert.equal(Number(row.cpc).toFixed(2), (spend / (row.clicks ?? 1)).toFixed(2));
+      assert.equal(
+        Number(row.cpc).toFixed(2),
+        (spend / (row.clicks ?? 1)).toFixed(2),
+      );
       assert.equal(Number(row.roas).toFixed(2), (revenue / spend).toFixed(2));
     }
-    const conversionEvents = data.events.filter((event) => event.isConversion);
-    assert.ok(conversionEvents.length > 0);
-    assert.ok(conversionEvents.every((event) => event.eventName === "purchase"));
-    assert.ok(conversionEvents.every((event) => Number(event.revenue) > 0 && event.currency === context.currency));
-    assert.ok(data.sessions.filter((session) => session.converted).every((session) => session.currentStage === "purchase"));
-    assert.ok(data.sessions.filter((session) => session.isAbandoned).every((session) => session.currentStage === "abandoned"));
   });
 });

@@ -173,8 +173,7 @@ export const publicationsRouter = createTRPCRouter({
       if (!embed) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message:
-            "Add at least one allowed website origin and republish this form before copying embed code.",
+          message: "The published form could not be prepared for sharing.",
         });
       }
       return embed;

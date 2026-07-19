@@ -92,7 +92,7 @@ export function FormPublicationSheet({
             <div className="p-5">
               <Button asChild variant="outline" className="w-full">
                 <Link href={manageUrl}>
-                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                  <ExternalLink className="size-3" aria-hidden="true" />
                   Manage publication
                 </Link>
               </Button>
@@ -100,20 +100,21 @@ export function FormPublicationSheet({
           </>
         ) : source ? (
           <div className="space-y-4 p-5">
-            <div className="border bg-muted/20 p-4">
+            <div className="border rounded-lg bg-muted/20 p-4">
               <p className="text-sm font-medium">No publication yet</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
                 Create a draft target, then configure consent, website origins,
                 height, theme, and response collection before publishing.
               </p>
             </div>
             <Button
               type="button"
-              className="w-full"
+                  className="w-full"
+                  variant="gradient"
               disabled={create.isPending}
               onClick={() => create.mutate(createInputForSource(source))}
             >
-              <Send className="size-3.5" aria-hidden="true" />
+              <Send className="size-3" aria-hidden="true" />
               {create.isPending ? "Creating" : "Create shareable form"}
             </Button>
           </div>
@@ -141,11 +142,11 @@ function PublicationStatus({
       variant="outline"
       className={
         status === "PUBLISHED"
-          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          ? "ring-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "ring-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300"
       }
     >
-      {status.toLowerCase()}
+      <span className="capitalize"> {status.toLowerCase()} </span>
     </Badge>
   );
 }

@@ -2,15 +2,12 @@ import "server-only";
 
 import { createId } from "@paralleldrive/cuid2";
 import { TRPCError } from "@trpc/server";
-import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
-  communicationEntitlementGrant,
   communicationProvisioningOperation,
   communicationServiceProfile,
-  member,
-  organization,
   twilioPhoneNumber,
 } from "@/db/schema";
 import { inngest } from "@/inngest/client";
@@ -20,14 +17,12 @@ import type {
   CommunicationProfileUpdate,
 } from "@/features/communications/contracts";
 import type { DeliveryTransaction } from "@/features/delivery/server/outbox";
-import { areServerPlanRestrictionsDisabled } from "@/features/subscriptions/lib/plan-restrictions";
 
 type CommunicationProfile = typeof communicationServiceProfile.$inferSelect;
 
 export function applyTestingPlanAccess(
   profile: CommunicationProfile,
 ): CommunicationProfile {
-  if (!areServerPlanRestrictionsDisabled()) return profile;
   const entitledAt = profile.createdAt;
   return {
     ...profile,
@@ -386,238 +381,4 @@ export async function requireCommunicationEntitlement(input: {
     });
   }
   return profile;
-}
-
-function productIds(value: string | undefined): Set<string> {
-  return new Set(
-    value
-      ?.split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean) ?? [],
-  );
-}
-
-export type PolarCommunicationSubscription = {
-  id: string;
-  productId: string;
-  status: string;
-  currentPeriodEnd: Date | null;
-  modifiedAt: Date | null;
-  metadata: Record<string, string | number | boolean>;
-  customer?: { externalId: string | null };
-};
-
-export async function applyPolarCommunicationSubscription(
-  subscription: PolarCommunicationSubscription,
-): Promise<void> {
-  const emailProducts = productIds(
-    process.env.AUREA_COMMUNICATIONS_EMAIL_PRODUCT_IDS,
-  );
-  const smsProducts = productIds(
-    process.env.AUREA_COMMUNICATIONS_SMS_PRODUCT_IDS,
-  );
-  const voiceProducts = productIds(
-    process.env.AUREA_COMMUNICATIONS_VOICE_PRODUCT_IDS,
-  );
-  const emailEnabled = emailProducts.has(subscription.productId);
-  const smsEnabled = smsProducts.has(subscription.productId);
-  const voiceEnabled = voiceProducts.has(subscription.productId);
-  if (!emailEnabled && !smsEnabled && !voiceEnabled) return;
-
-  const requestedOrganizationId = subscription.metadata.referenceId;
-  if (typeof requestedOrganizationId !== "string" || !requestedOrganizationId) {
-    throw new Error(
-      "A communications subscription is missing its organization referenceId.",
-    );
-  }
-  const status =
-    subscription.status === "active" || subscription.status === "trialing"
-      ? "ACTIVE"
-      : subscription.status === "canceled" ||
-          subscription.status === "past_due"
-        ? "CANCELED"
-        : "REVOKED";
-  const now = new Date();
-  const result = await db.transaction(async (tx) => {
-    const [existingGrant] = await tx
-      .select({ organizationId: communicationEntitlementGrant.organizationId })
-      .from(communicationEntitlementGrant)
-      .where(
-        and(
-          eq(communicationEntitlementGrant.source, "POLAR"),
-          eq(
-            communicationEntitlementGrant.externalSubscriptionId,
-            subscription.id,
-          ),
-        ),
-      )
-      .limit(1)
-      .for("update");
-    if (
-      existingGrant &&
-      existingGrant.organizationId !== requestedOrganizationId
-    ) {
-      throw new Error(
-        "A communications subscription cannot be moved between organizations.",
-      );
-    }
-    const organizationId =
-      existingGrant?.organizationId ?? requestedOrganizationId;
-    if (!existingGrant) {
-      const customerUserId = subscription.customer?.externalId;
-      if (!customerUserId) {
-        throw new Error(
-          "A communications subscription is missing its Polar customer owner.",
-        );
-      }
-      const [authorizedOwner] = await tx
-        .select({ id: organization.id })
-        .from(organization)
-        .innerJoin(
-          member,
-          and(
-            eq(member.organizationId, organization.id),
-            eq(member.userId, customerUserId),
-            inArray(member.role, ["owner", "admin"]),
-          ),
-        )
-        .where(eq(organization.id, organizationId))
-        .limit(1);
-      if (!authorizedOwner) {
-        throw new Error(
-          "The Polar customer is not authorized to manage billing for this organization.",
-        );
-      }
-    }
-    await tx
-      .insert(communicationEntitlementGrant)
-      .values({
-        id: createId(),
-        organizationId,
-        source: "POLAR",
-        externalSubscriptionId: subscription.id,
-        externalProductId: subscription.productId,
-        status,
-        emailEnabled,
-        smsEnabled,
-        voiceEnabled,
-        currentPeriodEnd: subscription.currentPeriodEnd,
-        providerModifiedAt: subscription.modifiedAt,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          communicationEntitlementGrant.source,
-          communicationEntitlementGrant.externalSubscriptionId,
-        ],
-        set: {
-          externalProductId: subscription.productId,
-          status,
-          emailEnabled,
-          smsEnabled,
-          voiceEnabled,
-          currentPeriodEnd: subscription.currentPeriodEnd,
-          providerModifiedAt: subscription.modifiedAt,
-          updatedAt: now,
-        },
-        setWhere: subscription.modifiedAt
-          ? or(
-              isNull(communicationEntitlementGrant.providerModifiedAt),
-              lte(
-                communicationEntitlementGrant.providerModifiedAt,
-                subscription.modifiedAt,
-              ),
-            )
-          : isNull(communicationEntitlementGrant.providerModifiedAt),
-      });
-    const validGrants = await tx
-      .select()
-      .from(communicationEntitlementGrant)
-      .where(
-        and(
-          eq(communicationEntitlementGrant.organizationId, organizationId),
-          or(
-            eq(communicationEntitlementGrant.status, "ACTIVE"),
-            and(
-              eq(communicationEntitlementGrant.status, "CANCELED"),
-              gt(communicationEntitlementGrant.currentPeriodEnd, now),
-            ),
-          ),
-        ),
-      );
-    const entitlementResult = await setCommunicationEntitlementsInTransaction(tx, {
-      organizationId,
-      source: "POLAR",
-      email: validGrants.some((grant) => grant.emailEnabled),
-      sms: validGrants.some((grant) => grant.smsEnabled),
-      voice: validGrants.some((grant) => grant.voiceEnabled),
-      effectiveAt: now,
-    });
-    return { ...entitlementResult, organizationId };
-  });
-  if (result.queuedRelease) {
-    await requestEntitlementReleaseProcessing(result.organizationId, now);
-  }
-}
-
-export async function reconcileExpiredCommunicationEntitlements(): Promise<number> {
-  const now = new Date();
-  const dueOrganizations = await db
-    .selectDistinct({ organizationId: communicationEntitlementGrant.organizationId })
-    .from(communicationEntitlementGrant)
-    .where(
-      and(
-        eq(communicationEntitlementGrant.status, "CANCELED"),
-        lte(communicationEntitlementGrant.currentPeriodEnd, now),
-      ),
-    )
-    .limit(100);
-  for (const due of dueOrganizations) {
-    const result = await db.transaction(async (tx) => {
-      await tx
-        .update(communicationEntitlementGrant)
-        .set({ status: "REVOKED", updatedAt: now })
-        .where(
-          and(
-            eq(
-              communicationEntitlementGrant.organizationId,
-              due.organizationId,
-            ),
-            eq(communicationEntitlementGrant.status, "CANCELED"),
-            lte(communicationEntitlementGrant.currentPeriodEnd, now),
-          ),
-        );
-      const validGrants = await tx
-        .select()
-        .from(communicationEntitlementGrant)
-        .where(
-          and(
-            eq(
-              communicationEntitlementGrant.organizationId,
-              due.organizationId,
-            ),
-            or(
-              eq(communicationEntitlementGrant.status, "ACTIVE"),
-              and(
-                eq(communicationEntitlementGrant.status, "CANCELED"),
-                gt(communicationEntitlementGrant.currentPeriodEnd, now),
-              ),
-            ),
-          ),
-        );
-      return setCommunicationEntitlementsInTransaction(tx, {
-        organizationId: due.organizationId,
-        source: "POLAR_RECONCILIATION",
-        email: validGrants.some((grant) => grant.emailEnabled),
-        sms: validGrants.some((grant) => grant.smsEnabled),
-        voice: validGrants.some((grant) => grant.voiceEnabled),
-        effectiveAt: now,
-      });
-    });
-    if (result.queuedRelease) {
-      await requestEntitlementReleaseProcessing(due.organizationId, now);
-    }
-  }
-  return dueOrganizations.length;
 }

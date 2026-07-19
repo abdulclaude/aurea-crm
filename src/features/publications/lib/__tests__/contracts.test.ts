@@ -17,10 +17,6 @@ const base = {
 describe("publication target contracts", () => {
   it("validates each supported channel through its discriminated contract", () => {
     const variants = [
-      {
-        kind: "FUNNEL",
-        channelConfig: { kind: "FUNNEL", allowCustomCode: false },
-      },
       { kind: "SCHEDULE", channelConfig: { kind: "SCHEDULE" } },
       { kind: "PRICING", channelConfig: { kind: "PRICING" } },
       { kind: "FORM", channelConfig: { kind: "FORM" } },

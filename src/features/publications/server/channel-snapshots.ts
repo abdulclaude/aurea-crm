@@ -73,7 +73,7 @@ async function pricingSnapshot(input: {
 }
 
 export async function buildChannelSourceSnapshot(input: {
-  kind: Exclude<PublicationKind, "FUNNEL" | "FORM">;
+  kind: Exclude<PublicationKind, "FORM">;
   sourceId: string;
   scope: PublicationSourceScope;
 }): Promise<ReturnType<typeof canonicalPublicationValue>> {

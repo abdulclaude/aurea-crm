@@ -81,7 +81,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       disabled={disabled}
       className={cn(
-        "bg-background hover:bg-foreground/80 dark:focus:bg-[#202E32] dark:focus:text-white dark:[&_svg:not([class*='text-'])]:text-white/70 relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-primary/60 outline-hidden select-none transition-colors [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 cursor-pointer",
+        "bg-background hover:text-black font-medium hover:bg-foreground dark:focus:bg-[#202E32] dark:focus:text-white dark:[&_svg:not([class*='text-'])]:text-white/70 relative flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-primary/75 outline-hidden select-none transition duration-250 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 cursor-pointer tracking-tight",
         insetClasses,
         disabledClasses,
         destructiveClasses,

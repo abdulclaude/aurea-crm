@@ -16,7 +16,6 @@ import {
 } from "@/features/publications/lib/publication-policy";
 import { buildChannelSourceSnapshot } from "@/features/publications/server/channel-snapshots";
 import { buildFormSourceSnapshot } from "@/features/publications/server/form-snapshot";
-import { buildFunnelSourceSnapshot } from "@/features/publications/server/funnel-snapshot";
 import { resolvePublicationSource } from "@/features/publications/server/source-resolver";
 import { buildThemeSnapshot } from "@/features/publications/server/theme-snapshot";
 import { publishedWidgetSourceSchema } from "@/features/publications/public/contracts";
@@ -58,14 +57,7 @@ export async function buildPublicationSnapshot(
   let sourceSnapshot: PublicationJsonValue;
   let sourceErrors: string[] = [];
   let sourceWarnings: string[] = [];
-  if (target.kind === "FUNNEL") {
-    const funnelSnapshot = await buildFunnelSourceSnapshot({
-      sourceId: source.sourceId,
-      scope,
-    });
-    sourceSnapshot = funnelSnapshot.snapshot;
-    sourceErrors = funnelSnapshot.errors;
-  } else if (target.kind === "FORM") {
+  if (target.kind === "FORM") {
     const formSnapshot = await buildFormSourceSnapshot({
       sourceId: source.sourceId,
       scope,
@@ -132,33 +124,6 @@ export async function buildPublicationSnapshot(
     errors.push(
       "A privacy policy URL is required before this form can accept responses.",
     );
-  }
-  if (
-    target.kind === "FUNNEL" &&
-    channelConfig.kind === "FUNNEL" &&
-    channelConfig.allowCustomCode
-  ) {
-    warnings.push(
-      "Custom code is enabled and must be reviewed before each publication.",
-    );
-  }
-  if (target.kind === "FUNNEL" && channelConfig.kind === "FUNNEL") {
-    if (
-      channelConfig.analytics === "ALWAYS" &&
-      consentConfig.mode === "REQUIRED"
-    ) {
-      errors.push(
-        "Always-on analytics cannot be combined with required consent.",
-      );
-    }
-    if (
-      channelConfig.analytics === "CONSENTED" &&
-      consentConfig.mode === "DISABLED"
-    ) {
-      warnings.push(
-        "Consented analytics remain disabled until consent collection is enabled.",
-      );
-    }
   }
   const validation = canonicalPublicationValue({ errors, warnings });
   const contentHash = createPublicationContentHash({

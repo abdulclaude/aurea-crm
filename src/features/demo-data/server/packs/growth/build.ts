@@ -1,6 +1,6 @@
 import type { DemoSeedContext } from "@/features/demo-data/server/types";
 
-import { buildAnalyticsFixtures } from "./analytics";
+import { buildAdSpendFixtures } from "./ad-spend";
 import { buildAutomationFixtures } from "./automation";
 import { buildCampaignFixtures } from "./campaigns";
 import { buildFormFixtures } from "./forms";
@@ -22,7 +22,7 @@ export function buildGrowthPackFixtures(
   const automation = buildAutomationFixtures(scope);
   const forms = buildFormFixtures(scope);
   const publications = buildPublicationFixtures(scope, forms);
-  const analytics = buildAnalyticsFixtures(scope, publications.internalFunnelId);
+  const adSpend = buildAdSpendFixtures(scope);
 
   return {
     ...campaigns,
@@ -32,11 +32,8 @@ export function buildGrowthPackFixtures(
     formSteps: forms.formSteps,
     formFields: forms.formFields,
     formSubmissions: forms.formSubmissions,
-    funnels: publications.funnels,
-    funnelPages: publications.funnelPages,
-    funnelBlocks: publications.funnelBlocks,
     publicationTargets: publications.publicationTargets,
     publicationVersions: publications.publicationVersions,
-    ...analytics,
+    ...adSpend,
   };
 }

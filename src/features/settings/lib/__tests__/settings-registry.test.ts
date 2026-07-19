@@ -4,10 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { CAPABILITY_VALUES } from "@/features/permissions/capabilities";
-import {
-  SETTINGS_OVERVIEW_ITEM,
-  SETTINGS_SECTIONS,
-} from "@/features/settings/constants";
+import { SETTINGS_SECTIONS } from "@/features/settings/constants";
 import {
   filterSettingsSections,
   getActiveSettingsItemHref,
@@ -45,15 +42,36 @@ test("settings registry has unique item IDs and destinations", () => {
   assert.equal(items.every((item) => item.description.length > 0), true);
 });
 
+test("communications exposes every operational area as a sidebar item", () => {
+  const communications = SETTINGS_SECTIONS.find(
+    (section) => section.id === "communications",
+  );
+
+  assert.deepEqual(
+    communications?.items.slice(0, 8).map((item) => [
+      item.title,
+      item.href,
+    ]),
+    [
+      ["Email", "/settings/communications/email"],
+      ["SMS", "/settings/communications/sms"],
+      ["Voice", "/settings/communications/voice"],
+      ["Inbox", "/settings/communications/inbox"],
+      ["Rules", "/settings/communications/rules"],
+      ["Suppressions", "/settings/communications/suppressions"],
+      ["Blocklist", "/settings/communications/blocklist"],
+      ["Usage", "/settings/communications/usage"],
+    ],
+  );
+});
+
 test("every settings destination resolves to a file-backed route", () => {
-  const registeredHrefs = [
-    SETTINGS_OVERVIEW_ITEM.href,
-    ...SETTINGS_SECTIONS.flatMap((section) =>
-      section.items.map((item) => item.href),
-    ),
-  ].sort();
+  const registeredHrefs = SETTINGS_SECTIONS.flatMap((section) =>
+    section.items.map((item) => item.href),
+  ).sort();
 
   const pageHrefs = settingsPageHrefs().sort();
+  const legacyRedirects = ["/settings", "/settings/communications"];
   const resolvesToPage = (href: string) =>
     pageHrefs.some((pageHref) => {
       const pattern = new RegExp(
@@ -64,7 +82,12 @@ test("every settings destination resolves to a file-backed route", () => {
 
   assert.equal(registeredHrefs.every(resolvesToPage), true);
   for (const pageHref of pageHrefs.filter((href) => !href.includes("["))) {
-    if (pageHref === "/settings/commerce") continue;
+    if (
+      pageHref === "/settings/commerce" ||
+      legacyRedirects.includes(pageHref)
+    ) {
+      continue;
+    }
     assert.equal(
       registeredHrefs.includes(pageHref),
       true,

@@ -8,7 +8,7 @@ import {
   Position,
 } from "@xyflow/react";
 import { SwitchDialog, type SwitchFormValues } from "./dialog";
-import { IconArrowRightLeft as IconSwitch } from "central-icons/IconArrowRightLeft";
+// import { IconArrowRightLeft as IconSwitch } from "central-icons/IconArrowRightLeft";
 import { buildNodeContext } from "@/features/workflows/lib/build-node-context";
 import { useWorkflowContext } from "@/features/editor/store/workflow-context";
 import { BaseHandle } from "@/components/react-flow/base-handle";
@@ -60,18 +60,18 @@ export const SwitchNode: React.FC<NodeProps<SwitchNodeType>> = memo((props) => {
           };
         }
         return node;
-      })
+      }),
     );
   };
 
   const handleDelete = () => {
     setNodes((currentNodes) =>
-      currentNodes.filter((node) => node.id !== props.id)
+      currentNodes.filter((node) => node.id !== props.id),
     );
     setEdges((currentEdges) =>
       currentEdges.filter(
-        (edge) => edge.source !== props.id && edge.target !== props.id
-      )
+        (edge) => edge.source !== props.id && edge.target !== props.id,
+      ),
     );
   };
 
@@ -98,7 +98,7 @@ export const SwitchNode: React.FC<NodeProps<SwitchNodeType>> = memo((props) => {
         <NodeStatusIndicator status="initial">
           <BaseNode onDoubleClick={() => setDialogOpen(true)} status="initial">
             <BaseNodeContent>
-              <IconSwitch className="size-3 text-gray-400" />
+              {/* <IconSwitch className="size-3 text-gray-400" /> */}
 
               {/* Input handle */}
               <BaseHandle

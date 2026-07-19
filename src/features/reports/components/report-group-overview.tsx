@@ -56,7 +56,6 @@ export function ReportGroupOverview({
         className="px-6"
       />
 
-      <Separator className="bg-black/5 dark:bg-white/5" />
 
       <ReportCatalogTable
         reports={filteredReports}

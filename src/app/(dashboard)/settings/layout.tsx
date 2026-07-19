@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { Menu, X } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { IconChevronLeftMedium as ChevronLeftIcon } from "central-icons/IconChevronLeftMedium";
 import {
@@ -23,7 +23,6 @@ export default function SettingsLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const [navigationOpen, setNavigationOpen] = useState(false);
 
   return (
@@ -44,11 +43,13 @@ export default function SettingsLayout({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.back()}
               className="gap-2 border-none"
+              asChild
             >
-              <ChevronLeftIcon className="size-3" />
-              Go back
+              <Link href="/dashboard">
+                <ChevronLeftIcon className="size-3" />
+                Back to app
+              </Link>
             </Button>
           </div>
 

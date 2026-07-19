@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import React, { memo, type ReactNode } from "react";
 
 import { type NodeProps, Position, useReactFlow } from "@xyflow/react";
@@ -15,6 +14,7 @@ import {
   NodeStatus,
   NodeStatusIndicator,
 } from "@/components/react-flow/node-status-indicator";
+import { cn } from "@/lib/utils";
 
 interface BaseTriggerNodeProps extends NodeProps {
   icon: LucideIcon | React.ComponentType<{ className?: string }> | string;
@@ -24,17 +24,19 @@ interface BaseTriggerNodeProps extends NodeProps {
   status?: NodeStatus;
   onSettings?: () => void;
   onDoubleClick?: () => void;
+  className?: string;
 }
 
 export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
   ({
     id,
-    icon: Icon,
+    icon: _Icon,
     name,
     description,
     children,
     onSettings,
     onDoubleClick,
+    className,
     status = "initial",
   }) => {
     const { setNodes, setEdges } = useReactFlow();
@@ -47,7 +49,7 @@ export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
 
       setEdges((currentEdges) => {
         const updatedEdges = currentEdges.filter(
-          (edge) => edge.source !== id && edge.target !== id
+          (edge) => edge.source !== id && edge.target !== id,
         );
 
         return updatedEdges;
@@ -64,23 +66,25 @@ export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
           <BaseNode
             onDoubleClick={onDoubleClick}
             status={status}
-            className="group relative w-[240px]"
+            className={cn("group relative w-[240px]", className)}
           >
             <BaseNodeContent className="gap-0 p-0">
-              <div className="flex items-center gap-2.5 border-b border-black/5 px-3.5 py-3 dark:border-white/5">
+              <div className="flex items-center border-b border-black/5 px-3.5 py-3 dark:border-white/5">
+                {/* Workflow node icons are hidden for now. Restore this block when the icon treatment returns.
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-black/10 bg-primary-foreground/25 dark:border-white/10">
-                  {typeof Icon === "string" ? (
+                  {typeof _Icon === "string" ? (
                     <Image
-                      src={Icon}
+                      src={_Icon}
                       alt={name}
                       width={16}
                       height={16}
                       className="max-h-4 max-w-4 object-contain"
                     />
                   ) : (
-                    <Icon className="size-4 text-primary/60" />
+                    <_Icon className="size-4 text-primary/60" />
                   )}
                 </span>
+                */}
                 <span className="truncate text-xs font-medium text-primary">
                   {name}
                 </span>
@@ -104,7 +108,7 @@ export const BaseTriggerNode: React.FC<BaseTriggerNodeProps> = memo(
         </NodeStatusIndicator>
       </WorkflowNode>
     );
-  }
+  },
 );
 
 BaseTriggerNode.displayName = "BaseTriggerNode";

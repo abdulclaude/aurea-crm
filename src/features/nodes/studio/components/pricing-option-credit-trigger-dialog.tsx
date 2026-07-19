@@ -40,9 +40,10 @@ export function PricingOptionCreditTriggerDialog(props: {
   defaultValues?: Partial<PricingOptionCreditTriggerConfig>;
 }): React.ReactElement {
   const trpc = useTRPC();
-  const optionsQuery = useQuery(
-    trpc.pricingOptions.list.queryOptions({ includeInactive: false }),
-  );
+  const optionsQuery = useQuery({
+    ...trpc.pricingOptions.list.queryOptions({ includeInactive: false }),
+    enabled: props.open,
+  });
   const [targetMode, setTargetMode] = useState<"ALL" | "SELECTED">("ALL");
   const form = useForm<PricingOptionCreditTriggerConfig>({
     resolver: zodResolver(pricingOptionCreditTriggerConfigSchema),

@@ -48,8 +48,7 @@ and route QA. It is a tenant-scoped fixture system, not a database reset script.
 | SMS records | 60 | 120 |
 | Workflow executions | 48 | 96 |
 | Form submissions | 80 | 180 |
-| Funnel sessions | 600 | 1,200 |
-| Ad-spend rows | 78 | 78 |
+| Ad-spend rows | 2,000+ | 2,000+ |
 | Promo codes | 4 | 8 |
 | Gift cards | 12 | 40 |
 | Account credit balances | 24 | 100 |
@@ -78,7 +77,7 @@ The population run includes:
   runs, and deliberately varied success/failure/refund/dispute states.
 - Inert provider account/domain/config examples, templates, audiences,
   campaigns, inbox/SMS history, workflow graphs/executions, forms/submissions,
-  funnels/publication versions, anonymous analytics, web vitals, and ad spend.
+  publication versions, and ad spend.
 - Promo codes, gift-card liabilities, account credit ledgers, cancellation
   policies/charges, dynamic pricing, internal payment-plan definitions,
   waivers, room layouts/spots, typed widgets with safe draft publication targets,

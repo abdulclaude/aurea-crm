@@ -211,14 +211,14 @@ contracts exist.
 | --- | --- | --- | --- |
 | Navigation and setup | Aurea launchpad, grouped sidebar, tenant context | Role-aware home, complete route discovery, setup progress based on real postconditions | Duplicate nav layers and settings links to non-settings work |
 | Payments | Stripe-backed checkout, invoices, studio payments, bank transfer | Express onboarding, destination charges, signed typed webhooks, reconciliation, disputes/refunds, payment health | Unsigned generic webhooks, legacy Standard OAuth, manual-transfer illusions |
-| Website and embeds | Public schedule, pricing, gift cards, funnels, tracking SDK | Shared publication/channel contract, theme tokens, domain health, preview/live parity | Advertised widget types without a renderer; a separate visual language per channel |
+| Website and embeds | Public schedule, pricing, gift cards, and forms | Shared publication/channel contract, theme tokens, domain health, preview/live parity | Advertised widget types without a renderer; a separate visual language per channel |
 | Branding | Existing branding and style settings | One versioned tenant theme consumed by CRM-native public surfaces and embeds | Styling copied from Arketa or one-off client branches |
-| Analytics | Aurea funnel and attribution depth, provider-backed revenue direction | Metric contracts, saved views, dimensions, exports, reconciliation status | Dozens of route-specific report implementations over conflicting calculations |
+| Analytics | Studio and acquisition reporting, provider-backed revenue direction | Metric contracts, saved views, dimensions, exports, reconciliation status | Dozens of route-specific report implementations over conflicting calculations |
 | Staff | Team, instructors, location membership, time logs, rotas | Capability matrix, unified staff identity, availability, pay-rule versions, audit trail | Payroll execution before the earnings ledger is reliable |
-| Marketing | Campaigns, forms, workflows, referrals, funnels | Durable outbox, audience snapshots, consent/suppression, provider delivery events, reply handling, exception inbox | Campaign UI that schedules rows without a delivery contract |
+| Marketing | Campaigns, forms, workflows, and referrals | Durable outbox, audience snapshots, consent/suppression, provider delivery events, reply handling, exception inbox | Campaign UI that schedules rows without a delivery contract |
 | Customers | Clients, households, lifecycle, notes, payments | Shared timeline, segments, credits, guest passes, retention signals, inbox context | Separate customer definitions per module |
 | Classes | Schedule, service types, classes, series, check-in, substitutions | Consistent recurrence, capacity, waitlist, room/staff constraints, exception handling | Another scheduling engine |
-| Sales channels | Public pricing/gift cards/schedule and external funnels | Configurable channel publication, availability, catalog selection, SEO and consent | Mobile/community builders before core channel contracts are proven |
+| Sales channels | Public pricing, gift cards, schedules, and forms | Configurable channel publication, availability, catalog selection, SEO and consent | Mobile/community builders before core channel contracts are proven |
 | Inbox | Existing conversation surface | Provider-backed send/outbox, delivery/read/failure state, assignment, customer context, bounded AI assistance | Insert-only messages presented as delivered communication |
 | Locations and settings | Organization/location context and scoped resources | Ownership validation, configuration inheritance, override visibility, change history | Duplicated settings and ambiguous organization-vs-location values |
 | Accounting and payroll | Payment and time/earnings source data | Reconciliation first, then journals/approvals/exports | Premium-style shells without real financial contracts |
@@ -262,8 +262,8 @@ patterns. No Arketa styling or visual structure was copied.
      staff into one ambiguous record type.
 
 4. Versioned publication and sales channels
-   - Added a shared publication target/version model for funnels, schedules,
-     pricing, gift cards, widgets, custom domains, theme snapshots, SEO,
+   - Added a shared publication target/version model for schedules, pricing,
+     gift cards, forms, widgets, custom domains, theme snapshots, SEO,
      consent, pause, rollback, drift, and preview/live parity.
    - Public rendering uses immutable selected versions. Pricing checkout is
      blocked on source drift, direct-purchase policy is enforced server-side,
@@ -275,11 +275,6 @@ patterns. No Arketa styling or visual structure was copied.
      mirroring into the CRM form ledger, and workflow dispatch. Payment, file,
      and signature fields remain publish blockers until their own storage and
      trust contracts exist.
-   - Added consent-aware first-party tracking to published Aurea pages. The
-     runtime uses signed publication configuration, honors DNT/GPC, bounds
-     telemetry volume and freshness, and never treats browser events as
-     authoritative conversion or payment records.
-
 5. Trustworthy reporting
    - Added metric contracts, saved report views, visible freshness/currency/
      reconciliation gaps, bounded CSV export ledgers, and formula-injection
@@ -305,12 +300,6 @@ patterns. No Arketa styling or visual structure was copied.
      immediately before the provider request.
    - Workflow, inbox, bulk, and substitution SMS paths now use the durable
      outbox instead of inserting delivery-looking rows without a dispatch path.
-   - Meta Conversions API, Google Ads, and TikTok Events API now use the same
-     encrypted organization/location account model with inheritance disabled
-     by default. Funnel scope is database-authoritative, each account is
-     revalidated immediately before dispatch, and the account-bound delivery
-   ledger keeps deterministic event IDs and bounded health errors.
-
 8. Scoped AI and workflow activation safety
    - AI requests now resolve an explicit encrypted credential in the exact
      organization/location scope. Multiple credentials require a selected
@@ -346,18 +335,7 @@ patterns. No Arketa styling or visual structure was copied.
       the selected provider-account identity instead of appearing delivered at
       insert time.
 
-11. Tracking identity and privacy lifecycle
-    - Added exact organization/location ownership to visitor profiles,
-      sessions, events, web vitals, quotas, and external form submissions, with
-      database constraints and triggers that reject cross-scope identities.
-    - Added capability-gated visitor export and erasure. Erasure runs in one
-      transaction, removes telemetry and linked form records, leaves a minimal
-      tombstone that prevents reingestion, and purges matching realtime cache
-      entries. Export is bounded and reports when a collection is partial.
-    - IP hashing now requires a deployment secret and uses rotating HMAC-SHA256;
-      it fails closed rather than falling back to a predictable salt.
-
-12. OAuth operations and workflow readiness
+11. OAuth operations and workflow readiness
     - OAuth accounts now expose exact-scope connection health, inherited-account
       state, last success/error details, and reconnect controls instead of hiding
       degraded installations behind a new-connect action.
@@ -366,13 +344,13 @@ patterns. No Arketa styling or visual structure was copied.
       activation and subscription renewal both revalidate the persisted internal
       provider-account binding.
 
-13. Publication-backed studio channels
+12. Publication-backed studio channels
     - Added typed FORM, INTRO_OFFER, EVENT, ON_DEMAND, and REFERRAL widget
       publications on the same versioned, consent-aware channel foundation.
     - Referral conversion is tenant-scoped, idempotent, workflow-operable, and
       included in demo data and automation conversion classification.
 
-14. Attendance integrity and member passes
+13. Attendance integrity and member passes
     - Check-in, booking attendance, member streaks, and intro-offer usage now
       update in one transaction with exact organization/location validation and
       a database uniqueness guard per class/member.
@@ -388,7 +366,7 @@ patterns. No Arketa styling or visual structure was copied.
       index rejects duplicate active bookings without blocking a later rebooking
       after cancellation.
 
-15. Conversion and retention operations
+14. Conversion and retention operations
     - Analytics now exposes the persisted automation event explorer and selectable
       7/30/90-day conversion, referral, recovery, and workflow-success metrics
       instead of a static workflow placeholder.
@@ -396,7 +374,7 @@ patterns. No Arketa styling or visual structure was copied.
       recalculation, deterministic scoring, a single batch upsert, composite
       ownership constraints, and a database scope trigger.
 
-16. Cancellation and no-show operations
+15. Cancellation and no-show operations
     - Added reusable, location-scoped cancellation policies with configurable
       windows, exact decimal fees, class-credit deductions, notification
       behavior, default policy selection, and per-class assignment.
@@ -414,7 +392,7 @@ patterns. No Arketa styling or visual structure was copied.
       actions show the affected members and maximum fee and credit impact before
       an operator confirms; no Arketa styling or visual structure was copied.
 
-17. Payment recovery and authoritative paid class booking
+16. Payment recovery and authoritative paid class booking
     - Added versioned, tenant-scoped recovery policies, cases, actions, attempts,
       customer links, assignment, delivery history, and operator controls for
       invoice, membership, appointment, and class failures.
@@ -430,7 +408,7 @@ patterns. No Arketa styling or visual structure was copied.
       `/recover-payment/[token]` use Aurea's existing settings and public-page
       patterns; no Arketa styling was copied.
 
-18. Scoped developer and fitness-provider channels
+17. Scoped developer and fitness-provider channels
     - Developer API keys are exact-location resources with explicit scopes;
       location users cannot mutate ambiguous legacy organization-only keys.
     - Mindbody connections, sync cursors, imported records, and all four sync
@@ -445,7 +423,7 @@ patterns. No Arketa styling or visual structure was copied.
   typed/idempotent provider receipts, reconciliation, scoped refunds,
   capability gates, public invoice grants, durable outbound delivery, and
   scoped Resend/SMS accounts are implemented. OAuth installations, legacy
-  credentials/webhooks, account-bound subscriptions, advertising accounts,
+  credentials/webhooks, account-bound subscriptions,
   Stripe historical account binding, and scoped AI defaults are implemented.
 - **P1 implemented:** saved audiences, recipient snapshots, customer timeline,
   staff identity, the organization/location capability model, inbox assignment,
@@ -458,7 +436,7 @@ patterns. No Arketa styling or visual structure was copied.
   definition rather than client-specific query branches.
 - **P2 implemented for the retained scope:** versioned publication targets,
   consent-aware channel rendering, domain/parity/rollback controls, native
-  forms, consent-aware first-party tracking, metric contracts, saved views,
+  forms, metric contracts, saved views,
   data-health gaps, and bounded exports are implemented. Unsupported form field
   types and uncontracted reports fail closed instead of being advertised.
 - **P3 intentionally deferred:** native mobile layout building, community and
@@ -468,12 +446,12 @@ patterns. No Arketa styling or visual structure was copied.
 
 ## Verification evidence
 
-- Compatible Node test suite: 552 tests passed across 103 suites covering commerce, delivery,
+- Compatible Node test suite covers commerce, delivery,
   permissions, audiences, customer timeline, publication, reporting, staff
   identity, Stripe Connect, invoices, widgets, Stripe environment-mode checks,
-  bounded webhook body handling, provider-account scope policy, advertising,
+  bounded webhook body handling, provider-account scope policy,
   AI credentials/actions, workflow activation, inbox routing/ingestion, public
-  forms, tracking scope, privacy erasure, authentication callbacks, OAuth
+  forms, authentication callbacks, OAuth
   lifecycle, workflow provider readiness, check-in integrity, member passes,
   automation metrics, churn scoring, cancellation policy integrity, reversible
   credit allocations, Stripe destination binding, collection retry policy,
@@ -487,20 +465,20 @@ patterns. No Arketa styling or visual structure was copied.
 - `git diff --check` passed.
 - The configured local database migration ledger contains 64 applied migrations
   through `0063`. Read-only preflight checks found no scope conflicts or
-  ambiguous form mirrors and zero affected rows in the new inbox, form, and
-  tracking, check-in, OAuth, and churn-score tables. Postflight verification
+  ambiguous form mirrors and zero affected rows in the new inbox, form,
+  check-in, OAuth, and churn-score tables. Postflight verification
   preserved those counts and found
   every expected table, column, index, constraint, foreign key, and scope
   trigger. A rollback-only probe confirmed the public-form receipt scope guard;
-  tracking and inbox mismatch probes had no safe existing fixture to target.
+  the inbox mismatch probe had no safe existing fixture to target.
 - The rollback-only showcase demo population completed with 21,305 owned
   records across 128 record types, including 4,350 bookings, 300 classes, 320
   payments, and 83 booking payment links. The QA-exhaustive profile completed
   with 60,752 owned records across the same 128 record types, including 15,288
   bookings, 1,052 classes, 900 payments, and 233 booking payment links. Both
   runs rolled back and left no committed demo rows.
-- Clean desktop/mobile browser checks covered login, registration, protected
-  provider-account deep links, and the pricing, gift-card, schedule, and
+- Clean desktop/mobile browser checks covered login, registration, and the
+  pricing, gift-card, schedule, and
   publication missing-resource states with no horizontal overflow or console
   warnings/errors on the supported `localhost` origin. Authenticated checks also
   covered the cancellation policy and fee tabs, the complete unsaved policy
@@ -510,9 +488,8 @@ patterns. No Arketa styling or visual structure was copied.
 - A current authenticated read-only pass also covered the 286-item route
   checklist, recovery policy editor, and recovery operations queue on the local
   database with no console errors. No recovery policy or case was mutated.
-- Read-only HTTP probes confirmed anonymous tracking deletion returns `410`,
-  an external form submission without scoped credentials returns `401`, and an
-  unknown publication target returns a normal `404`.
+- A read-only HTTP probe confirmed an unknown publication target returns a
+  normal `404`.
 - The migrated publication runtime now returns a normal 404 for an unknown
   target instead of a missing-table error.
 - Stripe test-mode credentials passed a read-only provider authentication
@@ -525,16 +502,16 @@ patterns. No Arketa styling or visual structure was copied.
 
 ## Remaining risks and approval-gated work
 
-- Resend dispatch remains disabled until an authorized user creates an
-  organization/location-scoped account in Settings > Provider accounts and
+- Resend dispatch remains disabled until an authorized user configures an
+  organization/location-scoped sender in Settings > Communications > Email and
   registers its account-specific webhook endpoint. No provider account was
   created and no live Resend setting was changed during this work.
 - Product email cannot call Resend directly. The delivery worker resolves the
   persisted internal provider-account ID and revalidates provider,
   organization, location, active state, and explicit inheritance immediately
   before each provider request. No live message was sent during this work.
-- SMS dispatch remains disabled until an authorized user creates an encrypted
-  organization or location account in Settings > Provider accounts. No SMS
+- SMS dispatch remains disabled until an authorized user configures an encrypted
+  organization or location account in Settings > Communications > SMS. No SMS
   account was created and no test message was sent. Migration `0025` fails
   closed in any environment that contains legacy plaintext SMS rows rather than
   guessing ownership or destroying credentials.
@@ -543,9 +520,6 @@ patterns. No Arketa styling or visual structure was copied.
   and are revalidated at use time. Existing tenants may still need an
   authorized operator to reconnect or select a default account where migration
   could not infer one safely.
-- Ad conversion dispatch remains disabled until an authorized user configures
-  the relevant scoped Meta, Google Ads, or TikTok account in Settings > Provider
-  accounts. No live provider call or account mutation was made during this work.
 - Dedicated Stripe booking, invoice, membership, commerce, and Connect webhook
   secrets are not configured. Compatibility endpoints fall back to the generic
   secret, while Connect correctly remains unavailable. Endpoint registration
@@ -562,15 +536,6 @@ patterns. No Arketa styling or visual structure was copied.
 - Historical commerce ledger backfill and staff-identity linking were not part
   of DDL. Each needs a read-only dry run, reconciliation counts, and explicit
   approval before mutating existing records.
-- Privacy exports are deliberately bounded to 1,000 rows per collection and
-  flag partial results. A high-volume asynchronous export artifact and formal
-  privacy-request case workflow remain separate future work.
-- Visitor erasure covers scoped Aurea telemetry and linked native/external form
-  submissions. It intentionally does not silently erase CRM clients, payments,
-  provider-held copies, audit records, or backups; those require a broader,
-  reviewable privacy-request workflow. Historical external submissions without
-  an unambiguous linked mirror cannot be inferred safely, although the migrated
-  database contained no such rows.
 - Payment, file-upload, and signature form fields remain unavailable for native
   publication until their payment, storage, malware scanning, signature,
   retention, and consent contracts are implemented.

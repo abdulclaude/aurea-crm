@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { DeviceType, FunnelBlockType, PixelProvider } from "@/db/enums";
 import { publishedFormSourceSchema } from "@/features/forms-builder/lib/public-form-contract";
 import {
   publicationChannelConfigSchema,
@@ -41,66 +40,6 @@ const publicEventImageUrlSchema = z
   .refine((value) => parsePublicMediaUrl(value) === value, {
     message: "Event images must use credential-free public HTTPS URLs",
   });
-
-export const publishedFunnelSourceSchema = z.object({
-  type: z.literal("FUNNEL"),
-  funnel: z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      locationId: nullableText,
-    })
-    .nullable(),
-  pages: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      slug: z.string(),
-      order: z.number().int(),
-      isPublished: z.boolean(),
-      metaTitle: nullableText,
-      metaDescription: nullableText,
-      metaImage: nullableText,
-      customCss: nullableText,
-      customJs: nullableText,
-    }),
-  ),
-  blocks: z.array(
-    z.object({
-      id: z.string(),
-      pageId: nullableText,
-      parentBlockId: nullableText,
-      type: z.nativeEnum(FunnelBlockType),
-      props: z.unknown(),
-      styles: z.unknown(),
-      order: z.number().int(),
-      visible: z.boolean(),
-    }),
-  ),
-  breakpoints: z.array(
-    z.object({
-      blockId: z.string(),
-      device: z.nativeEnum(DeviceType),
-      styles: z.unknown(),
-    }),
-  ),
-  events: z.array(
-    z.object({
-      blockId: z.string(),
-      eventType: z.string(),
-      eventName: nullableText,
-      parameters: z.unknown().nullable(),
-    }),
-  ),
-  pixels: z.array(
-    z.object({
-      provider: z.nativeEnum(PixelProvider),
-      pixelId: z.string(),
-      enabled: z.boolean(),
-      metadata: z.unknown().nullable(),
-    }),
-  ),
-});
 
 const publicationBrandSchema = z.object({
   id: z.string(),
@@ -506,7 +445,6 @@ export const publishedPublicationConfigSchema = z.object({
   consent: publicationConsentConfigSchema,
 });
 
-export type PublishedFunnelSource = z.infer<typeof publishedFunnelSourceSchema>;
 export type PublishedScheduleWidgetSource = z.infer<
   typeof publishedScheduleWidgetSourceSchema
 >;

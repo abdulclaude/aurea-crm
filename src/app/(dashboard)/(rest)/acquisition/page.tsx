@@ -243,7 +243,7 @@ export default function AcquisitionPage() {
             Member acquisition
           </h1>
           <p className="text-xs text-primary/70">
-            Track the inquiry to trial to active member funnel.
+            Track the inquiry to trial to active member journey.
           </p>
         </div>
       </div>

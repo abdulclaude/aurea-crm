@@ -65,7 +65,10 @@ export function FormSubmittedTriggerDialog(props: {
   defaultValues?: Partial<FormSubmittedTriggerFormValues>;
 }) {
   const trpc = useTRPC();
-  const formsQuery = useQuery(trpc.forms.list.queryOptions());
+  const formsQuery = useQuery({
+    ...trpc.forms.list.queryOptions(),
+    enabled: props.open,
+  });
   const form = useForm<FormSubmittedTriggerFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {

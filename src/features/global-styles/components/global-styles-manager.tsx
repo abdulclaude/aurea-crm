@@ -136,7 +136,7 @@ export function GlobalStylesManager() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">
-            Style presets are used across funnels, forms, and other builders to
+            Style presets are used across forms and other builders to
             maintain brand consistency
           </p>
           <Button variant="outline" onClick={() => setCreateDialogOpen(true)}>

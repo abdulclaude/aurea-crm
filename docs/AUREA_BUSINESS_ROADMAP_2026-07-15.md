@@ -113,23 +113,22 @@ handling and delivery-status coverage also need completing before broader use.
 ### Websites, branding, forms, and embeds
 
 - Branding and style controls, publication settings, public schedules, pricing,
-  gift cards, forms, funnels, and reusable website widgets.
+  gift cards, forms, and reusable website widgets.
 - Versioned publishing, preview/live separation, allowed website origins,
-  consent-aware tracking, rollback controls, and analytics.
+  rollback controls, and analytics.
 - Schedule, membership catalogue, instructor, appointment-launcher, form,
   intro-offer, event, and referral channel foundations.
 
 **Status:** the publication foundation is built. Each advertised channel still
 needs real website testing, clearer setup, and proof that preview, embed, and
-live versions behave consistently. Funnel undo/redo, advanced form conditions,
-payments, uploads and signatures, live domain/SSL checks, and a public retail
-storefront are not yet complete.
+live versions behave consistently. Advanced form conditions, payments, uploads
+and signatures, live domain/SSL checks, and a public retail storefront are not
+yet complete.
 
 ### Analytics and reporting
 
 - Studio dashboard, revenue, attendance, occupancy, utilization, churn,
-  acquisition, funnel, campaign, automation, source, device, geography, and web
-  performance reporting.
+  acquisition, campaign, automation, and source reporting.
 - Saved reports, filters, exports, data-health checks, and 26 reports backed by
   reliable current data. The QA plan names a wider future report catalogue, but
   unsupported reports deliberately fail closed rather than showing invented

@@ -1,5 +1,6 @@
 import AppHeader from "@/components/sidebar/app-header";
 import AppSidebar from "@/components/sidebar/app-sidebar";
+import { ContextualPageTabs } from "@/components/sidebar/contextual-page-tabs";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { PresenceTracker } from "@/features/notifications/components/presence-tracker";
 
@@ -8,6 +9,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <PresenceTracker />
       <AppHeader />
+      <ContextualPageTabs />
       <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background text-primary">
         {children}
       </main>

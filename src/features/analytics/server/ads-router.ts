@@ -7,7 +7,7 @@ import { z } from "zod";
 import { and, asc, eq, gte, isNotNull, lte, type SQL } from "drizzle-orm";
 import { protectedProcedure, createTRPCRouter } from "@/trpc/init";
 import { db } from "@/db";
-import { adSpend, funnelSession } from "@/db/schema";
+import { adSpend } from "@/db/schema";
 
 type AdRecord = typeof adSpend.$inferSelect;
 type AdMetrics = {
@@ -48,7 +48,6 @@ const calculateDerivedMetrics = (metrics: AdMetrics) => {
 function adSpendWhere(input: {
 	organizationId: string;
 	locationId: string | null;
-	funnelId?: string;
 	startDate: string;
 	endDate: string;
 	platform?: "facebook" | "google" | "tiktok" | "all";
@@ -59,7 +58,6 @@ function adSpendWhere(input: {
 		gte(adSpend.date, input.startDate),
 		lte(adSpend.date, input.endDate),
 		input.locationId ? eq(adSpend.locationId, input.locationId) : undefined,
-		input.funnelId ? eq(adSpend.funnelId, input.funnelId) : undefined,
 		input.platform && input.platform !== "all" ? eq(adSpend.platform, input.platform) : undefined,
 		input.requireCampaign ? isNotNull(adSpend.campaignId) : undefined
 	);
@@ -72,7 +70,6 @@ export const adsRouter = createTRPCRouter({
 	getSpendByPlatform: protectedProcedure
 		.input(
 			z.object({
-				funnelId: z.string().optional(),
 				startDate: z.string(), // ISO date string
 				endDate: z.string(), // ISO date string
 				platform: z
@@ -82,12 +79,12 @@ export const adsRouter = createTRPCRouter({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const { funnelId, startDate, endDate, platform } = input;
+			const { startDate, endDate, platform } = input;
 
 			const records = await db
 				.select()
 				.from(adSpend)
-				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate, platform }));
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, startDate, endDate, platform }));
 
 			const byPlatform = new Map<string, AdMetrics>();
 			for (const record of records) {
@@ -125,7 +122,6 @@ export const adsRouter = createTRPCRouter({
 	getROASChart: protectedProcedure
 		.input(
 			z.object({
-				funnelId: z.string().optional(),
 				startDate: z.string(),
 				endDate: z.string(),
 				platform: z
@@ -136,12 +132,12 @@ export const adsRouter = createTRPCRouter({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const { funnelId, startDate, endDate, platform, groupBy } = input;
+			const { startDate, endDate, platform, groupBy } = input;
 
 			const records = await db
 				.select()
 				.from(adSpend)
-				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate, platform }))
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, startDate, endDate, platform }))
 				.orderBy(asc(adSpend.date));
 
 			const grouped = new Map<string, AdMetrics & { date: string }>();
@@ -193,7 +189,6 @@ export const adsRouter = createTRPCRouter({
 	getTopCampaigns: protectedProcedure
 		.input(
 			z.object({
-				funnelId: z.string().optional(),
 				startDate: z.string(),
 				endDate: z.string(),
 				platform: z
@@ -208,7 +203,7 @@ export const adsRouter = createTRPCRouter({
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const { funnelId, startDate, endDate, platform, orderBy, limit } = input;
+			const { startDate, endDate, platform, orderBy, limit } = input;
 
 			const records = await db
 				.select()
@@ -217,7 +212,6 @@ export const adsRouter = createTRPCRouter({
 					adSpendWhere({
 						organizationId: ctx.orgId!,
 						locationId: ctx.locationId,
-						funnelId,
 						startDate,
 						endDate,
 						platform,
@@ -272,134 +266,22 @@ export const adsRouter = createTRPCRouter({
 		}),
 
 	/**
-	 * Get attribution breakdown (first-touch vs last-touch)
-	 */
-	getAttributionBreakdown: protectedProcedure
-		.input(
-			z.object({
-				funnelId: z.string(),
-				startDate: z.string(),
-				endDate: z.string(),
-			}),
-		)
-		.query(async ({ ctx, input }) => {
-			const { funnelId, startDate, endDate } = input;
-
-			const sessions = await db.query.funnelSession.findMany({
-				where: and(
-					eq(funnelSession.funnelId, funnelId),
-					eq(funnelSession.converted, true),
-					gte(funnelSession.createdAt, new Date(startDate)),
-					lte(funnelSession.createdAt, new Date(endDate))
-				),
-				columns: {
-					conversionValue: true,
-					conversionPlatform: true,
-					firstFbclid: true,
-					firstGclid: true,
-					firstTtclid: true,
-					lastFbclid: true,
-					lastGclid: true,
-					lastTtclid: true,
-				},
-			});
-
-			// Count first-touch attribution
-			const firstTouch = {
-				facebook: 0,
-				google: 0,
-				tiktok: 0,
-				direct: 0,
-			};
-
-			// Count last-touch attribution
-			const lastTouch = {
-				facebook: 0,
-				google: 0,
-				tiktok: 0,
-				direct: 0,
-			};
-
-			// Revenue by platform
-			const firstTouchRevenue = {
-				facebook: 0,
-				google: 0,
-				tiktok: 0,
-				direct: 0,
-			};
-
-			const lastTouchRevenue = {
-				facebook: 0,
-				google: 0,
-				tiktok: 0,
-				direct: 0,
-			};
-
-			for (const session of sessions) {
-				const value = Number(session.conversionValue ?? 0);
-
-				// First-touch
-				if (session.firstFbclid) {
-					firstTouch.facebook++;
-					firstTouchRevenue.facebook += value;
-				} else if (session.firstGclid) {
-					firstTouch.google++;
-					firstTouchRevenue.google += value;
-				} else if (session.firstTtclid) {
-					firstTouch.tiktok++;
-					firstTouchRevenue.tiktok += value;
-				} else {
-					firstTouch.direct++;
-					firstTouchRevenue.direct += value;
-				}
-
-				// Last-touch
-				if (session.lastFbclid) {
-					lastTouch.facebook++;
-					lastTouchRevenue.facebook += value;
-				} else if (session.lastGclid) {
-					lastTouch.google++;
-					lastTouchRevenue.google += value;
-				} else if (session.lastTtclid) {
-					lastTouch.tiktok++;
-					lastTouchRevenue.tiktok += value;
-				} else {
-					lastTouch.direct++;
-					lastTouchRevenue.direct += value;
-				}
-			}
-
-			return {
-				firstTouch: {
-					conversions: firstTouch,
-					revenue: firstTouchRevenue,
-				},
-				lastTouch: {
-					conversions: lastTouch,
-					revenue: lastTouchRevenue,
-				},
-				total: sessions.length,
-			};
-		}),
-
-	/**
 	 * Get ad spend summary stats
 	 */
 	getSummary: protectedProcedure
 		.input(
 			z.object({
-				funnelId: z.string().optional(),
 				startDate: z.string(),
 				endDate: z.string(),
 			}),
 		)
 		.query(async ({ ctx, input }) => {
-			const { funnelId, startDate, endDate } = input;
+			const { startDate, endDate } = input;
 
 			const records = await db
 				.select()
 				.from(adSpend)
-				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, funnelId, startDate, endDate }));
+				.where(adSpendWhere({ organizationId: ctx.orgId!, locationId: ctx.locationId, startDate, endDate }));
 
 			const totals = records.reduce((acc, record) => {
 				addAdRecord(acc, record);

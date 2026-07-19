@@ -41,7 +41,7 @@ import {
   getPublishedPricingSnapshot,
   publishedPricingSourceIsCurrent,
 } from "@/features/publications/public/pricing-snapshot";
-import { sanitizeRichText } from "@/features/funnel-builder/lib/published-funnel-sanitization";
+import { sanitizeRichText } from "@/lib/public-content-sanitization";
 import { isSupportedCurrency } from "@/features/studio/lib/launchpad-readiness";
 
 const pricingOptionTypeSchema = z.enum([

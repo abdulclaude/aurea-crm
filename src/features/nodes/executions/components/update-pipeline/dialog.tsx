@@ -89,12 +89,13 @@ export const UpdatePipelineDialog: React.FC<Props> = ({
     enabled: open,
   });
 
-  const dealsQuery = useQuery(
-    trpc.deals.list.queryOptions({
+  const dealsQuery = useQuery({
+    ...trpc.deals.list.queryOptions({
       cursor: undefined,
       limit: 100,
-    })
-  );
+    }),
+    enabled: open,
+  });
 
   const pipelines = pipelinesQuery.data?.items || [];
   const selectedPipelineId = form.watch("pipelineId");

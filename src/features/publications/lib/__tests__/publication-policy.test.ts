@@ -17,7 +17,6 @@ describe("publication readiness", () => {
 
   it("allows implemented publication channels", () => {
     for (const kind of [
-      "FUNNEL",
       "SCHEDULE",
       "PRICING",
       "GIFT_CARDS",
@@ -31,9 +30,7 @@ describe("publication readiness", () => {
     assert.throws(
       () =>
         parseChannelConfigForKind("SCHEDULE", {
-          kind: "FUNNEL",
-          allowCustomCode: false,
-          analytics: "CONSENTED",
+          kind: "PRICING",
         }),
       /does not match/i,
     );

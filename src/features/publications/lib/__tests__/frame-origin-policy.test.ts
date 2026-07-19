@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyAuthenticatedPreviewSecurityHeaders,
   applyPublicationSecurityHeaders,
   buildFrameAncestorsPolicy,
   getPublicationFrameOrigins,
@@ -32,10 +33,6 @@ test("frame policy allows only immutable validated widget origins", () => {
     buildFrameAncestorsPolicy(["https://*.example.com"]),
     "frame-ancestors 'none';",
   );
-  assert.deepEqual(
-    getPublicationFrameOrigins({ kind: "FUNNEL", snapshot: {} }),
-    [],
-  );
 });
 
 test("publication security headers fail closed", () => {
@@ -45,6 +42,14 @@ test("publication security headers fail closed", () => {
   assert.equal(headers.get("referrer-policy"), "no-referrer");
   assert.equal(headers.get("x-content-type-options"), "nosniff");
   assert.match(headers.get("permissions-policy") ?? "", /camera=\(\)/);
+  assert.equal(headers.get("cache-control"), "private, no-store, max-age=0");
+});
+
+test("authenticated previews can only be framed by Aurea", () => {
+  const headers = new Headers();
+  applyAuthenticatedPreviewSecurityHeaders(headers);
+  assert.equal(headers.get("content-security-policy"), "frame-ancestors 'self';");
+  assert.equal(headers.get("referrer-policy"), "no-referrer");
   assert.equal(headers.get("cache-control"), "private, no-store, max-age=0");
 });
 

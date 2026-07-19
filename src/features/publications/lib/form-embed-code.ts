@@ -34,10 +34,12 @@ export function buildPublishedFormEmbed(input: {
     return null;
   }
   const channel = envelope.data.channelConfig;
-  if (channel.allowedFrameOrigins.length === 0) return null;
   const previewUrl = `${appBaseUrl()}/p/${encodeURIComponent(input.organizationSlug)}/${encodeURIComponent(input.slug)}`;
   return {
     previewUrl,
-    iframeCode: `<iframe src="${htmlAttribute(previewUrl)}" title="${htmlAttribute(input.name)}" width="100%" height="${channel.height}" style="border:0" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"></iframe>`,
+    iframeCode:
+      channel.allowedFrameOrigins.length > 0
+        ? `<iframe src="${htmlAttribute(previewUrl)}" title="${htmlAttribute(input.name)}" width="100%" height="${channel.height}" style="border:0" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"></iframe>`
+        : null,
   };
 }

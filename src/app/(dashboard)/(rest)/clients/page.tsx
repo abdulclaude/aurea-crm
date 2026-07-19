@@ -59,9 +59,9 @@ export default function ClientsPage() {
     <div className="space-y-0">
       <div className="flex items-end justify-between gap-2 p-6 pb-6">
         <div>
-          <h1 className="text-lg font-semibold text-primary">Clients</h1>
+          <h1 className="text-lg font-semibold text-primary">Members</h1>
           <p className="text-xs text-primary/75">
-            Manage client profiles, memberships, and activity
+            Manage member profiles, memberships, and activity
           </p>
         </div>
 

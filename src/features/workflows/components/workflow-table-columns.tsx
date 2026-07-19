@@ -5,7 +5,7 @@ import { format } from "date-fns";
 import { FolderIcon, PackageIcon, WorkflowIcon } from "lucide-react";
 import * as React from "react";
 
-import { Badge } from "@/components/ui/badge";
+import { TABLE_BADGE_COLORS, TableBadge } from "@/components/ui/table-badge";
 import type { WorkflowFolder } from "./workflow-folders";
 import { WorkflowTableActions } from "./workflow-table-actions";
 import type {
@@ -57,16 +57,16 @@ export function useWorkflowTableColumns({
         header: "Status",
         meta: { label: "Status" },
         cell: () => (
-          <Badge
-            variant="outline"
-            className={
+          <TableBadge
+            color={
               mode === "active"
-                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                : "border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                ? TABLE_BADGE_COLORS.teal
+                : TABLE_BADGE_COLORS.slate
             }
+            className="font-normal"
           >
             {mode === "active" ? "Active" : "Archived"}
-          </Badge>
+          </TableBadge>
         ),
       },
       {

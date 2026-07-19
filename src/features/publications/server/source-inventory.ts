@@ -5,7 +5,6 @@ import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
   form,
-  funnel,
   location,
   organization,
   pricingOption,
@@ -52,7 +51,6 @@ export async function getPublicationSourceInventory(
 ): Promise<PublicationSource[]> {
   const exactLocation = scope.locationId ?? undefined;
   const [
-    funnelRows,
     formRows,
     pricingRows,
     locationRows,
@@ -60,24 +58,6 @@ export async function getPublicationSourceInventory(
     widgetRows,
     existingTargets,
   ] = await Promise.all([
-    db
-      .select({
-        id: funnel.id,
-        name: funnel.name,
-        locationId: funnel.locationId,
-        updatedAt: funnel.updatedAt,
-      })
-      .from(funnel)
-      .where(
-        and(
-          eq(funnel.organizationId, scope.organizationId),
-          exactLocation
-            ? eq(funnel.locationId, exactLocation)
-            : isNull(funnel.locationId),
-        ),
-      )
-      .orderBy(asc(funnel.name), asc(funnel.id))
-      .limit(INVENTORY_LIMIT_PER_KIND),
     db
       .select({
         id: form.id,
@@ -189,20 +169,6 @@ export async function getPublicationSourceInventory(
     targetBySource.get(`${kind}:${sourceKey}`) ?? null;
   const sources: PublicationSource[] = [];
 
-  for (const row of funnelRows) {
-    const sourceKey = `funnel:${row.id}`;
-    sources.push(
-      source({
-        kind: "FUNNEL",
-        sourceKey,
-        sourceId: row.id,
-        name: row.name,
-        locationId: row.locationId,
-        updatedAt: row.updatedAt,
-        targetId: targetId("FUNNEL", sourceKey),
-      }),
-    );
-  }
   for (const row of formRows) {
     const sourceKey = `form:${row.id}`;
     sources.push(

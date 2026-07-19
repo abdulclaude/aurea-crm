@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 const STATUS_PRESENTATION = {
   DRAFT: { color: "#d97706", label: "Draft" },
   PUBLISHED: { color: "#059669", label: "Published" },
+  PAUSED: { color: "#d97706", label: "Paused" },
   ARCHIVED: { color: "#64748b", label: "Archived" },
 } as const;
 

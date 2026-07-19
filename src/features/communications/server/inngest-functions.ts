@@ -1,5 +1,6 @@
 import { processDueCommunicationProvisioning } from "@/features/communications/server/provisioning";
 import { inngest } from "@/inngest/client";
+import { enqueueVerifyingEmailDomainRefreshes } from "./email-domain-verification";
 import {
   processManagedResendReceipt,
   recoverManagedResendReceipts,
@@ -24,7 +25,6 @@ import {
   reconcileTwilioResources,
   reconcileTwilioSmsCosts,
 } from "./health-reconciliation";
-import { reconcileExpiredCommunicationEntitlements } from "./profile-service";
 
 export const provisionCommunications = inngest.createFunction(
   {
@@ -46,20 +46,18 @@ export const provisionCommunications = inngest.createFunction(
 
 export const reconcileCommunicationsProvisioning = inngest.createFunction(
   { id: "reconcile-communications-provisioning", retries: 0 },
-  { cron: "*/5 * * * *" },
-  async ({ step }) =>
-    step.run("recover-and-process-communications-provisioning", () =>
-      processDueCommunicationProvisioning(),
-    ),
-);
-
-export const reconcileCommunicationEntitlements = inngest.createFunction(
-  { id: "reconcile-communication-entitlements", retries: 2 },
-  { cron: "23 * * * *" },
-  async ({ step }) =>
-    step.run("expire-canceled-communication-entitlements", () =>
-      reconcileExpiredCommunicationEntitlements(),
-    ),
+  { cron: "* * * * *" },
+  async ({ step }) => {
+    const verificationRefreshes = await step.run(
+      "queue-verifying-email-domain-refreshes",
+      () => enqueueVerifyingEmailDomainRefreshes(),
+    );
+    const provisioning = await step.run(
+      "recover-and-process-communications-provisioning",
+      () => processDueCommunicationProvisioning(),
+    );
+    return { verificationRefreshes, provisioning };
+  },
 );
 
 export const processManagedResendWebhook = inngest.createFunction(

@@ -8,14 +8,14 @@ import {
   recordManagedResendWebhook,
   requestManagedResendReceiptProcessing,
 } from "@/features/communications/server/resend-webhook-receipts";
-import { getPlatformResendCredentials } from "@/features/communications/server/platform-credentials";
+import { getPlatformResendWebhookCredentials } from "@/features/communications/server/platform-credentials";
 import {
   readBoundedRawBody,
   WebhookPayloadTooLargeError,
 } from "@/features/webhooks/server/bounded-raw-body";
 
 function verifies(body: string, headers: Record<string, string>): boolean {
-  const credentials = getPlatformResendCredentials();
+  const credentials = getPlatformResendWebhookCredentials();
   return [credentials.webhookSecret, credentials.previousWebhookSecret]
     .filter((secret): secret is string => Boolean(secret))
     .some((secret) => {

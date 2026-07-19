@@ -35,6 +35,7 @@ export const ManualTriggerNode: React.FC<NodeProps> = memo((props) => {
         {...props}
         icon={ManualTriggerIcon}
         name="When clicking 'Execute workflow'"
+        className="w-max min-w-[240px]"
         status={nodeStatus}
         onSettings={handleOpenSettings}
         onDoubleClick={handleOpenSettings}

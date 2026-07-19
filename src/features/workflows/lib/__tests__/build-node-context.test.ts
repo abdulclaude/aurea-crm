@@ -36,5 +36,39 @@ test("keeps every previous node on a linear path", () => {
     { id: "b-c", source: "b", target: "c" },
   ];
 
-  assert.deepEqual(new Set(getGuaranteedUpstreamNodes("c", edges)), new Set(["a", "b"]));
+  assert.deepEqual(
+    new Set(getGuaranteedUpstreamNodes("c", edges)),
+    new Set(["a", "b"]),
+  );
+});
+
+test("handles a large linear workflow without repeatedly scanning every edge", () => {
+  const nodeCount = 500;
+  const edges: Edge[] = Array.from({ length: nodeCount - 1 }, (_, index) => ({
+    id: `${index}-${index + 1}`,
+    source: `node-${index}`,
+    target: `node-${index + 1}`,
+  }));
+
+  const upstream = getGuaranteedUpstreamNodes(
+    `node-${nodeCount - 1}`,
+    edges,
+  );
+
+  assert.equal(upstream.length, nodeCount - 1);
+  assert.equal(upstream.includes("node-0"), true);
+  assert.equal(upstream.includes(`node-${nodeCount - 2}`), true);
+});
+
+test("does not recurse forever when malformed data contains a cycle", () => {
+  const edges: Edge[] = [
+    { id: "a-b", source: "a", target: "b" },
+    { id: "b-c", source: "b", target: "c" },
+    { id: "c-a", source: "c", target: "a" },
+  ];
+
+  const upstream = getGuaranteedUpstreamNodes("c", edges);
+
+  assert.equal(upstream.includes("a"), true);
+  assert.equal(upstream.includes("b"), true);
 });

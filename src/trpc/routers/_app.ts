@@ -20,10 +20,7 @@ import { instructorsRouter } from "@/features/instructors/server/router";
 import { activityRouter } from "@/features/activity/server/router";
 import { analyticsRouter } from "@/features/analytics/server/analytics-router";
 import { adsRouter } from "@/features/analytics/server/ads-router";
-import { funnelsRouter } from "@/features/funnel-builder/server/funnels-router";
-import { integrationsRouter } from "@/features/funnel-builder/server/integrations-router";
 import { globalStylesRouter } from "@/features/global-styles/server/global-styles-router";
-import { smartSectionsRouter } from "@/features/smart-sections/server/smart-sections-router";
 import { formsRouter } from "@/features/forms-builder/server/forms-router";
 import { mindbodyRouter } from "@/features/modules/pilates-studio/server/mindbody-router";
 import { studioClassesRouter } from "@/features/modules/pilates-studio/server/classes-router";
@@ -57,9 +54,8 @@ import { stripeConnectRouter } from "@/features/stripe-connect/server/router";
 import { shiftSwapsRouter } from "@/features/shift-swaps/server/router";
 import { availabilityRouter } from "@/features/availability/server/router";
 import { payrollRouter } from "@/features/payroll/server/router";
-import { externalFunnelsRouter } from "@/features/external-funnels/server/external-funnels-router";
-import { webVitalsRouter } from "@/features/external-funnels/server/web-vitals-router";
 import { emailDomainsRouter } from "@/features/email-domains/server/routers";
+import { emailSettingsRouter } from "@/features/communications/server/email-settings-router";
 import { emailTemplatesRouter } from "@/features/email-templates/server/routers";
 import { campaignsRouter } from "@/features/campaigns/server/routers";
 import { bookingsRouter } from "@/features/bookings/server/bookings-router";
@@ -129,10 +125,7 @@ export const appRouter = createTRPCRouter({
   activity: activityRouter,
   analytics: analyticsRouter,
   ads: adsRouter,
-  funnels: funnelsRouter,
-  funnelIntegrations: integrationsRouter,
   globalStyles: globalStylesRouter,
-  smartSections: smartSectionsRouter,
   forms: formsRouter,
   mindbody: mindbodyRouter,
   studioClasses: studioClassesRouter,
@@ -145,9 +138,8 @@ export const appRouter = createTRPCRouter({
   shiftSwaps: shiftSwapsRouter,
   availability: availabilityRouter,
   payroll: payrollRouter,
-  externalFunnels: externalFunnelsRouter,
-  webVitals: webVitalsRouter,
   emailDomains: emailDomainsRouter,
+  emailSettings: emailSettingsRouter,
   emailTemplates: emailTemplatesRouter,
   campaigns: campaignsRouter,
   bookings: bookingsRouter,

@@ -1,6 +1,6 @@
-import type { LucideIcon } from "lucide-react";
-
 import type { Capability } from "@/features/permissions/capabilities";
+
+import type { SettingsIcon } from "./settings-icons";
 
 export type SettingsAudience = "all" | "operators";
 
@@ -20,7 +20,7 @@ export type SettingsItem = {
   title: string;
   description: string;
   href: string;
-  icon: LucideIcon;
+  icon: SettingsIcon;
   audience: SettingsAudience;
   requiredCapability?: Capability;
 };
@@ -29,6 +29,6 @@ export type SettingsSection = {
   id: SettingsSectionId;
   title: string;
   description: string;
-  icon: LucideIcon;
+  icon: SettingsIcon;
   items: readonly SettingsItem[];
 };

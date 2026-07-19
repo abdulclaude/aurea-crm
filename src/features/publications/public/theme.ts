@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { sanitizeCssValue } from "@/features/funnel-builder/lib/published-funnel-sanitization";
+import { sanitizeCssValue } from "@/lib/public-content-sanitization";
 
 const optionalToken = z.string().nullable().optional();
 const themeSchema = z.object({

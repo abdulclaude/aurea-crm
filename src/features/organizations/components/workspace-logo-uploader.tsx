@@ -25,12 +25,14 @@ export function WorkspaceLogoUploader({
   disabled,
   className,
   label = "Workspace logo",
+  uploadRoute = "workspaceLogo",
 }: {
   value?: string | null;
   onChange: (url?: string | null) => void;
   disabled?: boolean;
   className?: string;
   label?: string;
+  uploadRoute?: "workspaceLogo" | "emailLogo";
 }) {
   const [isUploading, setIsUploading] = React.useState(false);
   const [files, setFiles] = React.useState<File[]>([]);
@@ -41,7 +43,7 @@ export function WorkspaceLogoUploader({
   >(null);
   const currentFilesRef = React.useRef<File[]>([]);
 
-  const { startUpload } = useUploadThing("workspaceLogo", {
+  const { startUpload } = useUploadThing(uploadRoute, {
     onUploadProgress: (progress: number) => {
       const reporter = progressRef.current;
       if (!reporter) return;

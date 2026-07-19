@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator"
+
 import {
   Dialog,
   DialogContent,
@@ -29,17 +31,6 @@ const addDomainSchema = z.object({
       /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i,
       "Please enter a valid domain (e.g., mail.example.com or aureamedia.co.uk)"
     ),
-  defaultFromName: z.string().optional(),
-  defaultFromEmail: z
-    .string()
-    .email("Invalid sender email")
-    .optional()
-    .or(z.literal("")),
-  defaultReplyTo: z
-    .string()
-    .email("Invalid email")
-    .optional()
-    .or(z.literal("")),
 });
 
 type AddDomainFormData = z.infer<typeof addDomainSchema>;
@@ -53,9 +44,6 @@ export function AddDomainDialog() {
     resolver: zodResolver(addDomainSchema),
     defaultValues: {
       domain: "",
-      defaultFromName: "",
-      defaultFromEmail: "",
-      defaultReplyTo: "",
     },
   });
 
@@ -76,32 +64,26 @@ export function AddDomainDialog() {
   );
 
   const onSubmit = (data: AddDomainFormData) => {
-    createMutation.mutate({
-      domain: data.domain,
-      defaultFromName: data.defaultFromName || undefined,
-      defaultFromEmail: data.defaultFromEmail || undefined,
-      defaultReplyTo: data.defaultReplyTo || undefined,
-    });
+    createMutation.mutate({ domain: data.domain });
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-4 w-4 mr-1.5" />
-          Add Domain
+        <Button size="sm" className="w-max" variant="gradient">
+          <Plus className="size-3" />
+          Add domain
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Email Domain</DialogTitle>
-          <DialogDescription>
-            Add a custom domain to send emails with your own branding.
-          </DialogDescription>
+          <DialogTitle>Add sender domain</DialogTitle>
         </DialogHeader>
 
+        <Separator />
+
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-          <div className="grid gap-2">
+          <div className="grid gap-3">
             <Label htmlFor="domain">Domain</Label>
             <Input
               id="domain"
@@ -118,61 +100,21 @@ export function AddDomainDialog() {
             </p>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="defaultFromName">
-              Default From Name (optional)
-            </Label>
-            <Input
-              id="defaultFromName"
-              placeholder="e.g., Your Company"
-              {...form.register("defaultFromName")}
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="defaultFromEmail">
-              Default From Email (optional)
-            </Label>
-            <Input
-              id="defaultFromEmail"
-              placeholder="e.g., hello@mail.example.com"
-              {...form.register("defaultFromEmail")}
-            />
-            <p className="text-xs text-muted-foreground">
-              Must use the domain being added.
-            </p>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="defaultReplyTo">Default Reply-To (optional)</Label>
-            <Input
-              id="defaultReplyTo"
-              type="email"
-              placeholder="e.g., support@example.com"
-              {...form.register("defaultReplyTo")}
-            />
-            {form.formState.errors.defaultReplyTo && (
-              <p className="text-sm text-destructive">
-                {form.formState.errors.defaultReplyTo.message}
-              </p>
-            )}
-          </div>
-
           <DialogFooter>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={() => setOpen(false)}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={createMutation.isPending}>
+            <Button type="submit" className="w-max" variant="gradient" disabled={createMutation.isPending}>
               {createMutation.isPending ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="size-3 animate-spin" />
               ) : (
-                <Plus className="h-4 w-4 mr-2" />
+                <></>
               )}
-              Add Domain
+              Add domain
             </Button>
           </DialogFooter>
         </form>

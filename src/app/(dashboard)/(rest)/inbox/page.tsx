@@ -4,6 +4,7 @@ import { useTRPC } from "@/trpc/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { format, isToday, isYesterday } from "date-fns";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { InboxAssigneeSelect } from "@/features/inbox/components/inbox-assignee-select";
+import { InboxEmailFields } from "@/features/inbox/components/inbox-email-fields";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -250,11 +252,14 @@ function NewConversationPanel({
     ConversationChannel.EMAIL,
   );
   const [message, setMessage] = useState("");
+  const [subject, setSubject] = useState("");
+  const [senderAddressId, setSenderAddressId] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClient, setSelectedClient] = useState<{
     id: string;
     name: string | null;
     email: string | null;
+    phone: string | null;
     logo: string | null;
   } | null>(null);
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
@@ -273,8 +278,15 @@ function NewConversationPanel({
         qc.invalidateQueries({ queryKey: ["inbox"] });
         onCreated(conv.id);
       },
+      onError: (error) => toast.error(error.message),
     }),
   );
+  const isEmail = channel === ConversationChannel.EMAIL;
+  const emailReady =
+    !isEmail ||
+    Boolean(
+      senderAddressId && subject.trim() && selectedClient?.email,
+    );
 
   return (
     <div className="flex h-full flex-col">
@@ -296,9 +308,18 @@ function NewConversationPanel({
                   {clientInitials(selectedClient.name)}
                 </AvatarFallback>
               </Avatar>
-              <span className="flex-1 text-xs font-medium truncate">
-                {selectedClient.name ?? selectedClient.email ?? "Unknown"}
-              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium">
+                  {selectedClient.name ?? selectedClient.email ?? "Unknown"}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {channel === ConversationChannel.EMAIL
+                    ? (selectedClient.email ?? "No email address")
+                    : channel === ConversationChannel.SMS
+                      ? (selectedClient.phone ?? "No phone number")
+                      : "In-app message"}
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -406,6 +427,21 @@ function NewConversationPanel({
           </div>
         </div>
 
+        {isEmail ? (
+          <InboxEmailFields
+            senderAddressId={senderAddressId}
+            onSenderAddressChange={setSenderAddressId}
+            subject={subject}
+            onSubjectChange={setSubject}
+          />
+        ) : null}
+
+        {isEmail && selectedClient && !selectedClient.email ? (
+          <p className="text-[11px] text-destructive">
+            This customer does not have an email address.
+          </p>
+        ) : null}
+
         {/* Message */}
         <div className="flex flex-col gap-2">
           <label className="text-xs font-medium text-muted-foreground">
@@ -432,11 +468,18 @@ function NewConversationPanel({
 
         <Button
           type="button"
-          disabled={!message.trim() || !selectedClient || create.isPending}
+          disabled={
+            !message.trim() ||
+            !selectedClient ||
+            !emailReady ||
+            create.isPending
+          }
           onClick={() =>
             create.mutate({
               clientId: selectedClient?.id,
               channel,
+              subject: isEmail ? subject.trim() : undefined,
+              senderAddressId: isEmail ? senderAddressId : undefined,
               initialMessage: message.trim(),
             })
           }
@@ -457,6 +500,7 @@ function ConversationDetail({ id }: { id: string }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [reply, setReply] = useState("");
+  const [senderAddressId, setSenderAddressId] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const markedReadKey = useRef<string | null>(null);
 
@@ -477,6 +521,7 @@ function ConversationDetail({ id }: { id: string }) {
           exact: false,
         });
       },
+      onError: (error) => toast.error(error.message),
     }),
   );
 
@@ -523,8 +568,21 @@ function ConversationDetail({ id }: { id: string }) {
 
   const handleSend = () => {
     const content = reply.trim();
-    if (!content || send.isPending) return;
-    send.mutate({ conversationId: id, content });
+    if (
+      !content ||
+      send.isPending ||
+      (conv?.channel === ConversationChannel.EMAIL && !senderAddressId)
+    ) {
+      return;
+    }
+    send.mutate({
+      conversationId: id,
+      content,
+      senderAddressId:
+        conv?.channel === ConversationChannel.EMAIL
+          ? senderAddressId
+          : undefined,
+    });
   };
 
   if (isLoading) {
@@ -541,6 +599,12 @@ function ConversationDetail({ id }: { id: string }) {
   const typedConv = conv as unknown as ConversationWithMessages;
   const Icon = channelIcon(typedConv.channel);
   const isDone = typedConv.status === ConversationStatus.DONE;
+  const preferredFromAddress = [...typedConv.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.direction === "OUTBOUND" && message.fromAddress,
+    )?.fromAddress;
 
   return (
     <div className="flex h-full flex-col">
@@ -567,6 +631,12 @@ function ConversationDetail({ id }: { id: string }) {
               {channelLabel(typedConv.channel)}
               {typedConv.client?.email && <> · {typedConv.client.email}</>}
             </p>
+            {typedConv.channel === ConversationChannel.EMAIL &&
+            typedConv.subject ? (
+              <p className="truncate text-[11px] text-muted-foreground">
+                Subject: {typedConv.subject}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -623,6 +693,15 @@ function ConversationDetail({ id }: { id: string }) {
 
       {/* Reply box */}
       <div className="shrink-0 bg-background p-4">
+        {typedConv.channel === ConversationChannel.EMAIL ? (
+          <div className="mb-3">
+            <InboxEmailFields
+              senderAddressId={senderAddressId}
+              onSenderAddressChange={setSenderAddressId}
+              preferredFromAddress={preferredFromAddress}
+            />
+          </div>
+        ) : null}
         <p className="mb-1.5 text-center text-[10px] text-muted-foreground/40">
           ⌘ + Enter to send
         </p>
@@ -641,7 +720,12 @@ function ConversationDetail({ id }: { id: string }) {
 
           <button
             type="button"
-            disabled={!reply.trim() || send.isPending}
+            disabled={
+              !reply.trim() ||
+              send.isPending ||
+              (typedConv.channel === ConversationChannel.EMAIL &&
+                !senderAddressId)
+            }
             onClick={handleSend}
             className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-indigo-500 text-white transition-colors hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed"
           >

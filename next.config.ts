@@ -11,11 +11,7 @@ const nextConfig: NextConfig = {
     // Cache compaction was blocking local RSC navigations for over a minute.
     turbopackFileSystemCacheForDev: false,
   },
-  serverExternalPackages: [
-    "geoip-lite",
-    "pg",
-  ],
-  transpilePackages: ["react-map-gl", "mapbox-gl"],
+  serverExternalPackages: ["pg"],
   images: {
     remotePatterns: [
       {

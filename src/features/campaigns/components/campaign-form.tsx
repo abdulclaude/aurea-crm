@@ -135,11 +135,14 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
   const isEditing = !!campaignId;
   const isDraft = !initialData || initialData.status === "DRAFT";
 
-  // Fetch email domains
-  const { data: domains } = useSuspenseQuery(
-    trpc.emailDomains.list.queryOptions(),
+  const { data: senderAddresses } = useSuspenseQuery(
+    trpc.emailSettings.listApprovedSenderChoices.queryOptions(),
   );
-  const verifiedDomains = domains?.filter((d) => d.status === "VERIFIED") ?? [];
+  const activeSenderAddresses = senderAddresses.filter(
+    (sender) =>
+      sender.domainStatus === "VERIFIED" &&
+      sender.domainLifecycleState === "ACTIVE",
+  );
 
   const { data: resendTemplates } = useSuspenseQuery(
     trpc.emailTemplates.listResend.queryOptions({ limit: 100 }),
@@ -739,75 +742,43 @@ export function CampaignForm({ campaignId, initialData }: CampaignFormProps) {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="emailDomainId">Sending Domain</Label>
+                  <Label htmlFor="fromEmail">Sender address</Label>
                   <Select
-                    value={form.watch("emailDomainId") || ""}
-                    onValueChange={(value) =>
-                      form.setValue("emailDomainId", value)
-                    }
+                    value={form.watch("fromEmail") || ""}
+                    onValueChange={(email) => {
+                      const sender = activeSenderAddresses.find(
+                        (candidate) => candidate.email === email,
+                      );
+                      form.setValue("fromEmail", email);
+                      form.setValue("emailDomainId", sender?.emailDomainId ?? "");
+                    }}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select domain" />
+                    <SelectTrigger id="fromEmail">
+                      <SelectValue placeholder="Select an approved sender" />
                     </SelectTrigger>
                     <SelectContent>
-                      {verifiedDomains.length === 0 ? (
-                        <SelectItem value="" disabled>
-                          No verified domains
-                        </SelectItem>
+                      {activeSenderAddresses.length === 0 ? (
+                        <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No approved senders
+                        </p>
                       ) : (
-                        verifiedDomains.map((domain) => (
-                          <SelectItem key={domain.id} value={domain.id}>
-                            {domain.domain}
+                        activeSenderAddresses.map((sender) => (
+                          <SelectItem key={sender.id} value={sender.email}>
+                            {sender.displayName} &lt;{sender.email}&gt;
                           </SelectItem>
                         ))
                       )}
                     </SelectContent>
                   </Select>
-                  {verifiedDomains.length === 0 && (
+                  {activeSenderAddresses.length === 0 && (
                     <p className="text-xs text-muted-foreground">
                       <Link
-                        href="/campaigns/domains"
+                        href="/settings/communications/email?view=sender-addresses"
                         className="text-primary hover:underline"
                       >
-                        Add a verified domain
+                        Add an approved sender address
                       </Link>{" "}
-                      to send emails.
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="fromName">From Name</Label>
-                  <Input
-                    id="fromName"
-                    placeholder="e.g., Your Company"
-                    {...form.register("fromName")}
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="fromEmail">From Email (prefix)</Label>
-                  <Input
-                    id="fromEmail"
-                    placeholder="e.g., hello"
-                    {...form.register("fromEmail")}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    The full address will be prefix@your-domain.com
-                  </p>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="replyTo">Reply-To Email (optional)</Label>
-                  <Input
-                    id="replyTo"
-                    type="email"
-                    placeholder="e.g., support@example.com"
-                    {...form.register("replyTo")}
-                  />
-                  {form.formState.errors.replyTo && (
-                    <p className="text-sm text-destructive">
-                      {form.formState.errors.replyTo.message}
+                      to send campaigns.
                     </p>
                   )}
                 </div>

@@ -1,6 +1,5 @@
 import type {
   adSpend,
-  anonymousUserProfiles,
   campaign,
   campaignRecipient,
   campaignRun,
@@ -12,12 +11,6 @@ import type {
   formField,
   formStep,
   formSubmission,
-  funnel,
-  funnelBlock,
-  funnelEvent,
-  funnelPage,
-  funnelSession,
-  funnelWebVital,
   inboxConversation,
   inboxMessage,
   inboxRoute,
@@ -71,15 +64,8 @@ export type GrowthPackFixtures = {
   formSteps: (typeof formStep.$inferInsert)[];
   formFields: (typeof formField.$inferInsert)[];
   formSubmissions: (typeof formSubmission.$inferInsert)[];
-  funnels: (typeof funnel.$inferInsert)[];
-  funnelPages: (typeof funnelPage.$inferInsert)[];
-  funnelBlocks: (typeof funnelBlock.$inferInsert)[];
   publicationTargets: (typeof publicationTarget.$inferInsert)[];
   publicationVersions: (typeof publicationVersion.$inferInsert)[];
-  profiles: (typeof anonymousUserProfiles.$inferInsert)[];
-  sessions: (typeof funnelSession.$inferInsert)[];
-  events: (typeof funnelEvent.$inferInsert)[];
-  vitals: (typeof funnelWebVital.$inferInsert)[];
   adSpendRows: (typeof adSpend.$inferInsert)[];
 };
 
@@ -113,10 +99,7 @@ export type FormFixtures = Pick<
 
 export type PublicationFixtures = Pick<
   GrowthPackFixtures,
-  "funnels" | "funnelPages" | "funnelBlocks" | "publicationTargets" | "publicationVersions"
-> & { internalFunnelId: string };
-
-export type AnalyticsFixtures = Pick<
-  GrowthPackFixtures,
-  "profiles" | "sessions" | "events" | "vitals" | "adSpendRows"
+  "publicationTargets" | "publicationVersions"
 >;
+
+export type AdSpendFixtures = Pick<GrowthPackFixtures, "adSpendRows">;

@@ -26,6 +26,7 @@ import {
   buildClientWhereClause,
   buildSavedAudienceWhereClause,
 } from "@/features/campaigns/server/audience";
+import { resolveEmailDesign } from "@/features/communications/server/email-design-service";
 import { normalizeEmailDestination } from "@/features/delivery/lib/normalization";
 import type { DeliveryPayload } from "@/features/delivery/lib/payload-schemas";
 import { resolveEmailSender } from "@/features/delivery/server/email-sender";
@@ -132,10 +133,12 @@ export async function prepareCampaignRun(
     organizationId: input.organizationId,
     locationId: input.locationId,
     emailDomainId: selectedCampaign.emailDomainId,
-    fromName: selectedCampaign.fromName,
     fromEmail: selectedCampaign.fromEmail,
-    replyTo: selectedCampaign.replyTo,
     purpose: "MARKETING",
+  });
+  const emailDesign = await resolveEmailDesign({
+    organizationId: input.organizationId,
+    locationId: input.locationId,
   });
   const savedAudience = selectedCampaign.savedAudienceId
     ? await getActiveScopedAudienceDefinition({
@@ -198,6 +201,7 @@ export async function prepareCampaignRun(
       const unsubscribeUrl = `${baseUrl}/unsubscribe?token=${encodeURIComponent(token)}`;
       const rendered = await renderCampaignEmail({
         content: content.data,
+        design: emailDesign,
         variables: {
           name: recipient.name,
           firstName: getFirstName(recipient.name),
@@ -222,7 +226,6 @@ export async function prepareCampaignRun(
           subject: selectedCampaign.subject,
           html: rendered.html,
           text: rendered.text,
-          replyTo: selectedCampaign.replyTo ?? undefined,
           unsubscribeUrl: `${baseUrl}/api/unsubscribe?token=${encodeURIComponent(token)}`,
         },
       };
@@ -348,6 +351,7 @@ export async function prepareCampaignRun(
         content: selectedCampaign.content,
         templateId: selectedCampaign.templateId,
         resendTemplateId: selectedCampaign.resendTemplateId,
+        design: emailDesign,
       },
       senderSnapshot: sender,
       totalRecipients: preparedRecipients.length,

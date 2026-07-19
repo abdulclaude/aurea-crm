@@ -624,6 +624,20 @@
       "when": 1784390400000,
       "tag": "0088_guest_pass_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1784394000000,
+      "tag": "0089_email_sender_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1784474462000,
+      "tag": "0090_remove_funnels",
+      "breakpoints": true
     }
   ]
 }

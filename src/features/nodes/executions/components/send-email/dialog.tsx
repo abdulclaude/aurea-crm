@@ -250,8 +250,8 @@ export function SendEmailDialog({
               />
             ))}
 
-            <SheetFooter className="px-0 pb-6">
-              <Button type="submit">Save</Button>
+            <SheetFooter className="px-0 pb-6 justify-end">
+              <Button type="submit" className="w-max" variant="gradient">Save changes</Button>
             </SheetFooter>
           </form>
         </Form>

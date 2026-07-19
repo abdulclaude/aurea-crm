@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
+import { useRouter } from "next/navigation";
 
 import { ErrorBoundary } from "react-error-boundary";
 
@@ -13,11 +14,23 @@ import BundlesList, {
 } from "@/features/bundles/components/bundles";
 
 import { PageTabs } from "@/components/ui/page-tabs";
-import { ActivityTimeline } from "@/features/activity/components/activity-timeline";
 import { Separator } from "@/components/ui/separator";
 
 export default function Page() {
-  const [activeTab, setActiveTab] = useState("data");
+  const router = useRouter();
+
+  const handleTabChange = (tabId: string) => {
+    if (tabId === "bundles") return;
+    if (tabId === "all") {
+      router.push("/workflows");
+      return;
+    }
+    if (tabId === "archived") {
+      router.push("/archives");
+      return;
+    }
+    router.push(`/workflows?view=${tabId}`);
+  };
 
   return (
     <div className="space-y-0">
@@ -32,27 +45,24 @@ export default function Page() {
 
       <PageTabs
         tabs={[
-          { id: "data", label: "Data table" },
+          { id: "all", label: "All workflows" },
+          { id: "bundles", label: "Bundles" },
+          { id: "archived", label: "Archived" },
+          { id: "templates", label: "Templates" },
           { id: "activity", label: "Activity" },
         ]}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+        activeTab="bundles"
+        onTabChange={handleTabChange}
         className="px-6"
       />
 
-      {activeTab === "data" ? (
-        <BundlesContainer>
-          <ErrorBoundary fallback={<BundlesError />}>
-            <Suspense fallback={<BundlesLoading />}>
-              <BundlesList />
-            </Suspense>
-          </ErrorBoundary>
-        </BundlesContainer>
-      ) : (
-        <div className="p-6">
-          <ActivityTimeline limit={50} />
-        </div>
-      )}
+      <BundlesContainer>
+        <ErrorBoundary fallback={<BundlesError />}>
+          <Suspense fallback={<BundlesLoading />}>
+            <BundlesList />
+          </Suspense>
+        </ErrorBoundary>
+      </BundlesContainer>
     </div>
   );
 }

@@ -14,7 +14,7 @@ import {
   type SmsProviderConfig,
 } from "@/features/provider-accounts/contracts";
 import { decrypt } from "@/lib/encryption";
-import { getPlatformResendCredentials } from "@/features/communications/server/platform-credentials";
+import { getPlatformResendApiCredentials } from "@/features/communications/server/platform-credentials";
 import {
   chooseDefaultProviderAccount,
   providerAccountMatchesScope,
@@ -87,7 +87,7 @@ function parseResolvedAccount(
 
   const platformCredentials =
     row.ownershipMode === "PLATFORM_MANAGED"
-      ? getPlatformResendCredentials()
+      ? getPlatformResendApiCredentials()
       : null;
   return {
     id: row.id,
@@ -97,10 +97,11 @@ function parseResolvedAccount(
     ownershipMode: row.ownershipMode,
     secret: platformCredentials?.apiKey ?? decrypt(row.encryptedSecret!),
     webhookSecret:
-      platformCredentials?.webhookSecret ??
-      (row.encryptedWebhookSecret
+      row.ownershipMode === "PLATFORM_MANAGED"
+        ? null
+        : row.encryptedWebhookSecret
         ? decrypt(row.encryptedWebhookSecret)
-        : null),
+        : null,
     config: config.data,
   };
 }

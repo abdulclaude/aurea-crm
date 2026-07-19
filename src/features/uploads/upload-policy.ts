@@ -4,6 +4,7 @@ export const UPLOAD_ROUTE_POLICIES = {
   orgLogo: { capability: null, requireOrganization: false, requireLocation: false },
   profilePicture: { capability: null, requireOrganization: false, requireLocation: false },
   workspaceLogo: { capability: "settings.manage", requireOrganization: true, requireLocation: false },
+  emailLogo: { capability: "provider.manage", requireOrganization: true, requireLocation: false },
   instructorProfilePhoto: { capability: "team.manage", requireOrganization: true, requireLocation: true },
   instructorDocument: { capability: "team.manage", requireOrganization: true, requireLocation: true },
   mindbodyImportFile: { capability: "provider.manage", requireOrganization: true, requireLocation: true },

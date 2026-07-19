@@ -86,7 +86,7 @@ export const MODULE_CONFIG = {
     icon: "Dumbbell",
     features: [
       "Mindbody integration for class sync",
-      "Class schedule display on funnels",
+      "Class schedule display on public pages",
       "Client booking management",
       "Membership tracking",
       "Attendance analytics",

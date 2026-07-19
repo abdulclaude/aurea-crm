@@ -33,6 +33,7 @@ type PrepareInboxDeliveryInput = {
   content: string;
   conversationId: string;
   routeId?: string | null;
+  senderAddressId?: string;
 };
 
 type PreparedInboxDelivery = {
@@ -93,14 +94,25 @@ export async function prepareInboxDelivery(
       organizationId: input.organizationId,
       locationId: input.locationId,
       purpose: "ONE_TO_ONE",
+      senderAddressId: input.senderAddressId,
     });
-    const route = await resolveInboxOutboundRoute({
+    const preferredRoute = await resolveInboxOutboundRoute({
       organizationId: input.organizationId,
       locationId: input.locationId,
       providerAccountId: resolvedSender.providerAccountRef,
       conversationId: input.conversationId,
       routeId: input.routeId,
     });
+    const route =
+      preferredRoute ??
+      (input.routeId
+        ? await resolveInboxOutboundRoute({
+            organizationId: input.organizationId,
+            locationId: input.locationId,
+            providerAccountId: resolvedSender.providerAccountRef,
+            conversationId: input.conversationId,
+          })
+        : null);
     return {
       organizationId: input.organizationId,
       locationId: input.locationId,
@@ -289,6 +301,16 @@ export async function enqueueInboxMessageInTransaction(
       isRead: true,
       senderUserId: input.senderUserId,
       deliveryId: delivery.id,
+      providerAccountId: input.prepared.providerAccountId,
+      fromAddress:
+        input.prepared.sender.kind === "EMAIL_DOMAIN"
+          ? input.prepared.sender.fromEmail
+          : null,
+      toAddress: input.prepared.destination,
+      subject:
+        input.prepared.payload.channel === "EMAIL"
+          ? input.prepared.payload.subject
+          : null,
     })
     .returning();
   if (!message) {

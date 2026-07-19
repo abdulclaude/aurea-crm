@@ -72,14 +72,15 @@ export function BundleWorkflowDialog({
 
   const trpc = useTRPC();
 
-  const { data: bundleWorkflows } = useQuery(
-    trpc.workflows.listBundles.queryOptions()
-  );
+  const { data: bundleWorkflows } = useQuery({
+    ...trpc.workflows.listBundles.queryOptions(),
+    enabled: open,
+  });
   const { data: selectedBundle } = useQuery({
     ...trpc.workflows.getBundleById.queryOptions({
       id: selectedBundleId ?? "",
     }),
-    enabled: !!selectedBundleId,
+    enabled: open && !!selectedBundleId,
   });
 
   const form = useForm<BundleWorkflowFormValues>({

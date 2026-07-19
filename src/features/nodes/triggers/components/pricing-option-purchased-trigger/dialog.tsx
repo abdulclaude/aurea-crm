@@ -49,9 +49,10 @@ export function PricingOptionPurchasedTriggerDialog(props: {
   defaultValues?: Partial<PricingOptionPurchasedTriggerFormValues>;
 }) {
   const trpc = useTRPC();
-  const optionsQuery = useQuery(
-    trpc.pricingOptions.list.queryOptions({ includeInactive: false }),
-  );
+  const optionsQuery = useQuery({
+    ...trpc.pricingOptions.list.queryOptions({ includeInactive: false }),
+    enabled: props.open,
+  });
   const [targetMode, setTargetMode] = useState<"ALL" | "SELECTED">("ALL");
   const form = useForm<PricingOptionPurchasedTriggerFormValues>({
     resolver: zodResolver(schema),

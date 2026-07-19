@@ -102,12 +102,13 @@ export const CreateDealDialog: React.FC<Props> = ({
     enabled: open,
   });
 
-  const clientsQuery = useQuery(
-    trpc.clients.list.queryOptions({
+  const clientsQuery = useQuery({
+    ...trpc.clients.list.queryOptions({
       cursor: undefined,
       limit: 100,
     }),
-  );
+    enabled: open,
+  });
 
   const pipelines = pipelinesQuery.data?.items || [];
   const selectedPipelineId = form.watch("pipelineId");

@@ -864,6 +864,10 @@ async function validateCampaignReferences(input: {
       where: and(
         eq(emailDomain.id, input.emailDomainId),
         eq(emailDomain.organizationId, input.organizationId),
+        eq(emailDomain.status, "VERIFIED"),
+        eq(emailDomain.lifecycleState, "ACTIVE"),
+        eq(emailDomain.isDisabled, false),
+        isNull(emailDomain.removedAt),
         input.locationId
           ? or(
               isNull(emailDomain.locationId),
@@ -875,8 +879,8 @@ async function validateCampaignReferences(input: {
     });
     if (!domain) {
       throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Email domain not found in this workspace.",
+        code: "PRECONDITION_FAILED",
+        message: "Select a verified, active email domain from this workspace.",
       });
     }
   }

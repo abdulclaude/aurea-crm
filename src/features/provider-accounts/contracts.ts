@@ -16,9 +16,6 @@ export const providerAccountProviderSchema = z.enum([
   "MICROSOFT_365",
   "SLACK_OAUTH",
   "DISCORD_OAUTH",
-  "META_CONVERSIONS",
-  "GOOGLE_ADS",
-  "TIKTOK_EVENTS",
   "CLASSPASS",
   "WELLHUB",
   "KISI",
@@ -93,73 +90,6 @@ export const oauthProviderConfigSchema = z.object({
   guildId: z.string().trim().min(1).nullable().default(null),
 });
 export type OAuthProviderConfig = z.infer<typeof oauthProviderConfigSchema>;
-
-export const adConversionProviderSchema = z.enum([
-  "META_CONVERSIONS",
-  "GOOGLE_ADS",
-  "TIKTOK_EVENTS",
-]);
-export type AdConversionProvider = z.infer<
-  typeof adConversionProviderSchema
->;
-
-const adInheritanceSchema = z.object({
-  inheritToLocations: z.boolean().default(false),
-});
-
-export const metaConversionConfigSchema = adInheritanceSchema.extend({
-  pixelId: z.string().trim().min(1).max(100),
-  testEventCode: z.string().trim().min(1).max(100).nullable().default(null),
-});
-export const googleAdsConversionConfigSchema = adInheritanceSchema.extend({
-  customerId: z.string().trim().regex(/^\d{6,20}$/),
-  conversionActionId: z.string().trim().regex(/^\d{1,30}$/),
-  loginCustomerId: z
-    .string()
-    .trim()
-    .regex(/^\d{6,20}$/)
-    .nullable()
-    .default(null),
-});
-export const tiktokEventsConfigSchema = adInheritanceSchema.extend({
-  pixelCode: z.string().trim().min(1).max(100),
-  testEventCode: z.string().trim().min(1).max(100).nullable().default(null),
-});
-
-export const adConversionConfigSchema = z.discriminatedUnion("provider", [
-  metaConversionConfigSchema.extend({ provider: z.literal("META_CONVERSIONS") }),
-  googleAdsConversionConfigSchema.extend({ provider: z.literal("GOOGLE_ADS") }),
-  tiktokEventsConfigSchema.extend({ provider: z.literal("TIKTOK_EVENTS") }),
-]);
-export type AdConversionConfig = z.infer<typeof adConversionConfigSchema>;
-
-export const metaConversionSecretSchema = z.object({
-  accessToken: z.string().trim().min(1).max(4096),
-});
-export const googleAdsConversionSecretSchema = z.object({
-  developerToken: z.string().trim().min(1).max(4096),
-  accessToken: z.string().trim().min(1).max(8192),
-});
-export const tiktokEventsSecretSchema = z.object({
-  accessToken: z.string().trim().min(1).max(4096),
-});
-
-export const adConversionSecretSchema = z.discriminatedUnion("provider", [
-  metaConversionSecretSchema.extend({ provider: z.literal("META_CONVERSIONS") }),
-  googleAdsConversionSecretSchema.extend({ provider: z.literal("GOOGLE_ADS") }),
-  tiktokEventsSecretSchema.extend({ provider: z.literal("TIKTOK_EVENTS") }),
-]);
-export type AdConversionSecret = z.infer<typeof adConversionSecretSchema>;
-
-export function parseAdConversionConfig(
-  provider: AdConversionProvider,
-  value: unknown,
-): AdConversionConfig {
-  return adConversionConfigSchema.parse({
-    ...(typeof value === "object" && value !== null ? value : {}),
-    provider,
-  });
-}
 
 export const integrationProviderFamilySchema = z.enum([
   "MARKETPLACE",

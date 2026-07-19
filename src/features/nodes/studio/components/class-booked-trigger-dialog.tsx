@@ -43,12 +43,14 @@ export function ClassBookedTriggerDialog(props: {
   defaultValues?: Partial<ClassBookedTriggerConfig>;
 }): React.ReactElement {
   const trpc = useTRPC();
-  const servicesQuery = useQuery(
-    trpc.serviceCatalog.list.queryOptions({ includeInactive: true }),
-  );
-  const seriesQuery = useQuery(
-    trpc.classSeries.list.queryOptions({ statuses: ["ACTIVE", "PAUSED"] }),
-  );
+  const servicesQuery = useQuery({
+    ...trpc.serviceCatalog.list.queryOptions({ includeInactive: true }),
+    enabled: props.open,
+  });
+  const seriesQuery = useQuery({
+    ...trpc.classSeries.list.queryOptions({ statuses: ["ACTIVE", "PAUSED"] }),
+    enabled: props.open,
+  });
   const [scopeMode, setScopeMode] = useState<ScopeMode>("ANY");
   const form = useForm<ClassBookedTriggerConfig>({
     resolver: zodResolver(classBookedTriggerConfigSchema),

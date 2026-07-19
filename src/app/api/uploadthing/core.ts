@@ -36,6 +36,16 @@ export const uploadRouter = {
     .onUploadComplete(async ({ file }) => {
       return { url: file.ufsUrl };
     }),
+  emailLogo: f({
+    image: {
+      maxFileSize: "8MB",
+      maxFileCount: 1,
+    },
+  })
+    .middleware(({ req }) => authorizeUploadRequest(req, "emailLogo"))
+    .onUploadComplete(async ({ file }) => {
+      return { url: file.ufsUrl };
+    }),
   instructorProfilePhoto: f({
     image: {
       maxFileSize: "4MB",

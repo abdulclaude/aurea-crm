@@ -111,7 +111,7 @@ export function PublicationCreateDialog({
           <div className="relative min-w-0 flex-1">
             <Search
               aria-hidden="true"
-              className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+              className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground z-10"
             />
             <Input
               aria-label="Search publication sources"
@@ -138,6 +138,7 @@ export function PublicationCreateDialog({
             </SelectContent>
           </Select>
         </div>
+
         <ScrollArea className="h-[min(55vh,480px)]">
           {isLoading ? (
             <div className="space-y-2 p-4">

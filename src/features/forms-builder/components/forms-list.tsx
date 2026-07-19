@@ -20,6 +20,7 @@ import { StudioTableToolbar } from "@/features/studio/components/studio-table-to
 import { useTRPC } from "@/trpc/client";
 import {
   buildFormColumns,
+  getFormDisplayStatus,
   type FormListRow,
 } from "./forms-table-columns";
 import { FormDeleteDialog } from "./form-delete-dialog";
@@ -91,6 +92,17 @@ export function FormsList() {
     }),
   );
 
+  const publicationsBySourceKey = React.useMemo(
+    () =>
+      new Map(
+        (publicationsQuery.data ?? []).map((target) => [
+          target.sourceKey,
+          target,
+        ]),
+      ),
+    [publicationsQuery.data],
+  );
+
   const forms = React.useMemo(() => {
     let rows = formsQuery.data ?? [];
     if (search.trim()) {
@@ -102,7 +114,14 @@ export function FormsList() {
       );
     }
     if (statuses.length > 0) {
-      rows = rows.filter((form) => statuses.includes(form.status));
+      rows = rows.filter((form) =>
+        statuses.includes(
+          getFormDisplayStatus(
+            form,
+            publicationsBySourceKey.get(`form:${form.id}`),
+          ),
+        ),
+      );
     }
     const [field, direction] = sort.split(".");
     return [...rows].sort((left, right) => {
@@ -121,7 +140,7 @@ export function FormsList() {
       }
       return direction === "desc" ? -result : result;
     });
-  }, [formsQuery.data, search, sort, statuses]);
+  }, [formsQuery.data, publicationsBySourceKey, search, sort, statuses]);
 
   const columns = React.useMemo(
     () =>
@@ -129,14 +148,9 @@ export function FormsList() {
         onArchive: (form) => archiveForm.mutate({ id: form.id }),
         onDuplicate: (form) => duplicateForm.mutate({ id: form.id }),
         onDelete: setDeletingForm,
-        publicationsBySourceKey: new Map(
-          (publicationsQuery.data ?? []).map((target) => [
-            target.sourceKey,
-            target,
-          ]),
-        ),
+        publicationsBySourceKey,
       }),
-    [archiveForm, duplicateForm, publicationsQuery.data],
+    [archiveForm, duplicateForm, publicationsBySourceKey],
   );
 
   return (
@@ -150,8 +164,8 @@ export function FormsList() {
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" disabled={createForm.isPending}>
-              <Plus className="size-3.5" />
+            <Button size="sm" variant="gradient" className="w-max" disabled={createForm.isPending}>
+              <Plus className="size-3" />
               {createForm.isPending ? "Creating..." : "Create form"}
             </Button>
           </DropdownMenuTrigger>
@@ -163,7 +177,7 @@ export function FormsList() {
                 onSelect={() =>
                   createForm.mutate({
                     name:
-                      option.id === "BLANK" ? "Untitled Form" : option.name,
+                      option.id === "BLANK" ? "Untitled form" : option.name,
                     blueprint: option.id,
                     isMultiStep: option.id === "LEAD_NURTURE",
                   })
@@ -214,6 +228,7 @@ export function FormsList() {
                   options: [
                     { value: "DRAFT", label: "Draft" },
                     { value: "PUBLISHED", label: "Published" },
+                    { value: "PAUSED", label: "Paused" },
                     { value: "ARCHIVED", label: "Archived" },
                   ],
                   selectedValues: statuses,

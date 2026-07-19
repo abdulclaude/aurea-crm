@@ -139,24 +139,25 @@ export function FormFieldSettings({
           onCheckedChange={(required) => onChange({ ...draft, required })}
         />
       </div>
-      <div className="flex justify-between gap-2 border-t pt-4 sm:col-span-2">
+      <div className="flex justify-end gap-2 border-t pt-4 sm:col-span-2">
         <Button
           type="button"
           size="sm"
-          variant="ghost"
-          className="text-destructive hover:text-destructive"
+          variant="destructive"
+          className="w-max"
           onClick={onDelete}
         >
-          <Trash2 className="size-3.5" aria-hidden="true" />
           Remove
         </Button>
+
         <Button
           type="button"
           size="sm"
+          className="w-max"
+          variant="success"
           disabled={pending || !draft.label.trim()}
           onClick={onSave}
         >
-          <Save className="size-3.5" aria-hidden="true" />
           {pending ? "Saving" : "Save field"}
         </Button>
       </div>

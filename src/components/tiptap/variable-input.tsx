@@ -3,10 +3,11 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Mention } from "@tiptap/extension-mention";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { VariableExtension } from "./variable-extension";
 import { variableSuggestion, type VariableItem } from "./variable-suggestion";
 import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 
 interface VariableInputProps {
   value?: string;
@@ -19,7 +20,36 @@ interface VariableInputProps {
   ariaLabel?: string;
 }
 
-export const VariableInput = ({
+export const VariableInput = (props: VariableInputProps) => {
+  const [active, setActive] = useState(false);
+
+  if (active && !props.disabled) {
+    return <VariableInputEditor {...props} autoFocus />;
+  }
+
+  return (
+    <Textarea
+      value={props.value ?? ""}
+      placeholder={props.placeholder}
+      disabled={props.disabled}
+      readOnly
+      rows={3}
+      aria-label={props.ariaLabel ?? props.placeholder ?? "Variable input"}
+      className={cn(
+        "min-h-20 resize-none text-xs",
+        !props.disabled && "cursor-text",
+        props.className,
+      )}
+      onFocus={() => {
+        if (!props.disabled) {
+          setActive(true);
+        }
+      }}
+    />
+  );
+};
+
+const VariableInputEditor = ({
   value = "",
   onChange,
   placeholder,
@@ -27,7 +57,8 @@ export const VariableInput = ({
   className,
   disabled,
   ariaLabel,
-}: VariableInputProps) => {
+  autoFocus,
+}: VariableInputProps & { autoFocus: boolean }) => {
   // Use a ref to maintain the latest onChange callback
   const onChangeRef = useRef(onChange);
   // Use a ref to maintain the latest variables array
@@ -155,6 +186,15 @@ export const VariableInput = ({
     editor.setEditable(!disabled);
   }, [disabled, editor]);
 
+  useEffect(() => {
+    if (!editor || !autoFocus) return;
+    queueMicrotask(() => {
+      if (!editor.isDestroyed) {
+        editor.commands.focus("end");
+      }
+    });
+  }, [autoFocus, editor]);
+
   // Update suggestion items when variables change
   useEffect(() => {
     if (!editor) return;
@@ -210,7 +250,16 @@ export const VariableInput = ({
   }, [value, editor]); // Removed variables from deps to prevent reset on variable changes
 
   if (!editor) {
-    return null;
+    return (
+      <Textarea
+        value={value}
+        placeholder={placeholder}
+        readOnly
+        rows={3}
+        aria-label={ariaLabel ?? placeholder ?? "Variable input"}
+        className={cn("min-h-20 resize-none text-xs", className)}
+      />
+    );
   }
 
   return (

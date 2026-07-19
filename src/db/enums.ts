@@ -63,7 +63,6 @@ export const ActivityType = {
   LOCATION: "LOCATION",
   ORGANIZATION: "ORGANIZATION",
   BOOKING: "BOOKING",
-  FUNNEL: "FUNNEL",
   CAMPAIGN: "CAMPAIGN",
 } as const;
 export type ActivityType = (typeof ActivityType)[keyof typeof ActivityType];
@@ -335,13 +334,6 @@ export const DevicePlatform = {
 export type DevicePlatform =
   (typeof DevicePlatform)[keyof typeof DevicePlatform];
 
-export const DeviceType = {
-  DESKTOP: "DESKTOP",
-  TABLET: "TABLET",
-  MOBILE: "MOBILE",
-} as const;
-export type DeviceType = (typeof DeviceType)[keyof typeof DeviceType];
-
 export const DiscountType = {
   PERCENT: "PERCENT",
   FIXED: "FIXED",
@@ -421,60 +413,6 @@ export const FormStatus = {
   ARCHIVED: "ARCHIVED",
 } as const;
 export type FormStatus = (typeof FormStatus)[keyof typeof FormStatus];
-
-export const FunnelBlockType = {
-  CONTAINER: "CONTAINER",
-  ONE_COLUMN: "ONE_COLUMN",
-  TWO_COLUMN: "TWO_COLUMN",
-  THREE_COLUMN: "THREE_COLUMN",
-  SECTION: "SECTION",
-  HEADING: "HEADING",
-  PARAGRAPH: "PARAGRAPH",
-  LABEL: "LABEL",
-  RICH_TEXT: "RICH_TEXT",
-  IMAGE: "IMAGE",
-  VIDEO: "VIDEO",
-  ICON: "ICON",
-  INPUT: "INPUT",
-  TEXTAREA: "TEXTAREA",
-  SELECT: "SELECT",
-  CHECKBOX: "CHECKBOX",
-  BUTTON: "BUTTON",
-  FORM: "FORM",
-  CARD: "CARD",
-  FAQ: "FAQ",
-  TESTIMONIAL: "TESTIMONIAL",
-  PRICING: "PRICING",
-  FEATURE_GRID: "FEATURE_GRID",
-  IFRAME: "IFRAME",
-  CUSTOM_HTML: "CUSTOM_HTML",
-  SCRIPT: "SCRIPT",
-  POPUP: "POPUP",
-  COUNTDOWN_TIMER: "COUNTDOWN_TIMER",
-  STICKY_BAR: "STICKY_BAR",
-} as const;
-export type FunnelBlockType =
-  (typeof FunnelBlockType)[keyof typeof FunnelBlockType];
-
-export const FunnelDomainType = {
-  SUBDOMAIN: "SUBDOMAIN",
-  CUSTOM: "CUSTOM",
-} as const;
-export type FunnelDomainType =
-  (typeof FunnelDomainType)[keyof typeof FunnelDomainType];
-
-export const FunnelStatus = {
-  DRAFT: "DRAFT",
-  PUBLISHED: "PUBLISHED",
-  ARCHIVED: "ARCHIVED",
-} as const;
-export type FunnelStatus = (typeof FunnelStatus)[keyof typeof FunnelStatus];
-
-export const FunnelType = {
-  INTERNAL: "INTERNAL",
-  EXTERNAL: "EXTERNAL",
-} as const;
-export type FunnelType = (typeof FunnelType)[keyof typeof FunnelType];
 
 export const HouseholdRole = {
   PRIMARY: "PRIMARY",
@@ -868,14 +806,6 @@ export const PerformanceMetricSource = {
 export type PerformanceMetricSource =
   (typeof PerformanceMetricSource)[keyof typeof PerformanceMetricSource];
 
-export const PixelProvider = {
-  META_PIXEL: "META_PIXEL",
-  GOOGLE_ANALYTICS: "GOOGLE_ANALYTICS",
-  TIKTOK_PIXEL: "TIKTOK_PIXEL",
-  CUSTOM: "CUSTOM",
-} as const;
-export type PixelProvider = (typeof PixelProvider)[keyof typeof PixelProvider];
-
 export const PricingAdjustmentType = {
   PERCENT: "PERCENT",
   FIXED_AMOUNT: "FIXED_AMOUNT",
@@ -1156,25 +1086,6 @@ export const WaitlistStatus = {
 } as const;
 export type WaitlistStatus =
   (typeof WaitlistStatus)[keyof typeof WaitlistStatus];
-
-export const WebVitalMetric = {
-  LCP: "LCP",
-  INP: "INP",
-  CLS: "CLS",
-  FCP: "FCP",
-  TTFB: "TTFB",
-  FID: "FID",
-} as const;
-export type WebVitalMetric =
-  (typeof WebVitalMetric)[keyof typeof WebVitalMetric];
-
-export const WebVitalRating = {
-  GOOD: "GOOD",
-  NEEDS_IMPROVEMENT: "NEEDS_IMPROVEMENT",
-  POOR: "POOR",
-} as const;
-export type WebVitalRating =
-  (typeof WebVitalRating)[keyof typeof WebVitalRating];
 
 export const WebhookProvider = {
   SLACK: "SLACK",

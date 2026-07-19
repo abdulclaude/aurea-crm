@@ -11,15 +11,11 @@ test("form submissions persist dispatch state before requesting Inngest", () => 
   const publicService = source(
     "src/features/publications/server/form-submission-service.ts",
   );
-  const externalRoute = source(
-    "src/app/api/external-funnels/forms/submit/route.ts",
-  );
   const triggerService = source(
     "src/features/workflows/server/form-submitted-trigger-service.ts",
   );
 
   assert.match(publicService, /triggerDispatchStatus: "PENDING"/);
-  assert.match(externalRoute, /triggerDispatchStatus: "PENDING"/);
   assert.match(triggerService, /triggerDispatchStatus: "DISPATCHING"/);
   assert.match(triggerService, /triggerDispatchStatus: "DISPATCHED"/);
   assert.match(triggerService, /findPendingFormSubmittedWorkflowDispatches/);

@@ -13,6 +13,12 @@ const tableSource = readSource(
 const toolbarSource = readSource(
   "src/features/workflows/components/workflow-table-toolbar.tsx",
 );
+const columnsSource = readSource(
+  "src/features/workflows/components/workflow-table-columns.tsx",
+);
+const folderCreateButtonSource = readSource(
+  "src/features/workflows/components/workflow-folder-create-button.tsx",
+);
 const archivesPageSource = readSource(
   "src/app/(dashboard)/(rest)/archives/page.tsx",
 );
@@ -39,6 +45,15 @@ describe("workflow data table contract", () => {
     assert.match(toolbarSource, /sortOptions=\{SORT_OPTIONS\}/);
     assert.match(routerSource, /sort: workflowListSortSchema/);
     assert.match(routerSource, /folderId === "unfiled"/);
+  });
+
+  it("uses shared status badges and exposes folder creation from the table toolbar", () => {
+    assert.match(columnsSource, /TableBadge/);
+    assert.match(columnsSource, /TABLE_BADGE_COLORS\.teal/);
+    assert.match(columnsSource, /TABLE_BADGE_COLORS\.slate/);
+    assert.match(toolbarSource, /<WorkflowFolderCreateButton \/>/);
+    assert.match(folderCreateButtonSource, /New folder/);
+    assert.match(folderCreateButtonSource, /useCreateWorkflowFolder/);
   });
 
   it("exposes archives as a first-class data-table route", () => {

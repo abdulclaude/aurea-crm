@@ -29,7 +29,6 @@ export type EntityType =
   | "deal"
   | "pipeline"
   | "invitation"
-  | "funnel"
   | "campaign"
   | "invoice"
   | "booking"

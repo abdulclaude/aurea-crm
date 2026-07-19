@@ -1,16 +1,34 @@
 import "server-only";
 
 import { createId } from "@paralleldrive/cuid2";
-import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { Resend } from "resend";
 
 import { db } from "@/db";
-import { communicationProvisioningOperation, emailDomain } from "@/db/schema";
+import {
+  campaign,
+  communicationProvisioningOperation,
+  emailDomain,
+  emailSenderAddress,
+} from "@/db/schema";
 import { communicationProvisioningSafeInputSchema } from "@/features/communications/contracts";
 import { resendDnsRecordsSchema } from "@/features/communications/contracts";
 import { resolveProviderAccount } from "@/features/provider-accounts/server/resolver";
 import { inngest } from "@/inngest/client";
 import { CommunicationProvisioningError } from "./provisioning-error";
+import { insertEmailDomainVerifiedNotifications } from "./email-domain-verification";
+import { findResendDomainByName } from "./resend-domain-lookup";
 import { runTwilioProvisioningOperation } from "./twilio-provisioning";
 
 const LEASE_MS = 10 * 60_000;
@@ -34,38 +52,86 @@ export async function requestCommunicationProvisioning(
 async function claimOperation(operationId: string) {
   const now = new Date();
   const claimToken = createId();
-  const [claimed] = await db
-    .update(communicationProvisioningOperation)
-    .set({
-      status: "PROCESSING",
-      claimToken,
-      leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
-      attemptCount: sql`${communicationProvisioningOperation.attemptCount} + 1`,
-      startedAt: now,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(communicationProvisioningOperation.id, operationId),
-        or(
-          inArray(communicationProvisioningOperation.status, [
-            "PENDING",
-            "RETRYABLE_FAILURE",
-            "AMBIGUOUS",
-          ]),
+  return db.transaction(async (tx) => {
+    const [candidate] = await tx
+      .select()
+      .from(communicationProvisioningOperation)
+      .where(eq(communicationProvisioningOperation.id, operationId))
+      .limit(1);
+    if (!candidate) return null;
+
+    if (candidate.emailDomainId) {
+      const [lockedDomain] = await tx
+        .select({ id: emailDomain.id })
+        .from(emailDomain)
+        .where(
           and(
+            eq(emailDomain.id, candidate.emailDomainId),
+            eq(emailDomain.organizationId, candidate.organizationId),
+          ),
+        )
+        .limit(1)
+        .for("update");
+      if (!lockedDomain) return null;
+
+      const [activeDomainOperation] = await tx
+        .select({ id: communicationProvisioningOperation.id })
+        .from(communicationProvisioningOperation)
+        .where(
+          and(
+            eq(
+              communicationProvisioningOperation.organizationId,
+              candidate.organizationId,
+            ),
+            eq(
+              communicationProvisioningOperation.emailDomainId,
+              candidate.emailDomainId,
+            ),
+            ne(communicationProvisioningOperation.id, candidate.id),
             eq(communicationProvisioningOperation.status, "PROCESSING"),
-            lte(communicationProvisioningOperation.leaseExpiresAt, now),
+            or(
+              isNull(communicationProvisioningOperation.leaseExpiresAt),
+              gt(communicationProvisioningOperation.leaseExpiresAt, now),
+            ),
+          ),
+        )
+        .limit(1);
+      if (activeDomainOperation) return null;
+    }
+
+    const [claimed] = await tx
+      .update(communicationProvisioningOperation)
+      .set({
+        status: "PROCESSING",
+        claimToken,
+        leaseExpiresAt: new Date(now.getTime() + LEASE_MS),
+        attemptCount: sql`${communicationProvisioningOperation.attemptCount} + 1`,
+        startedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(communicationProvisioningOperation.id, operationId),
+          or(
+            inArray(communicationProvisioningOperation.status, [
+              "PENDING",
+              "RETRYABLE_FAILURE",
+              "AMBIGUOUS",
+            ]),
+            and(
+              eq(communicationProvisioningOperation.status, "PROCESSING"),
+              lte(communicationProvisioningOperation.leaseExpiresAt, now),
+            ),
+          ),
+          or(
+            isNull(communicationProvisioningOperation.nextAttemptAt),
+            lte(communicationProvisioningOperation.nextAttemptAt, now),
           ),
         ),
-        or(
-          isNull(communicationProvisioningOperation.nextAttemptAt),
-          lte(communicationProvisioningOperation.nextAttemptAt, now),
-        ),
-      ),
-    )
-    .returning();
-  return claimed ? { operation: claimed, claimToken } : null;
+      )
+      .returning();
+    return claimed ? { operation: claimed, claimToken } : null;
+  });
 }
 
 type Operation = typeof communicationProvisioningOperation.$inferSelect;
@@ -89,6 +155,7 @@ type DomainProvisioningValues = Partial<
 type ProvisioningResult = {
   externalResourceId: string | null;
   domainValues?: DomainProvisioningValues;
+  deleteDomainAfterSuccess?: boolean;
 };
 
 function providerError(error: { name?: string; message: string }) {
@@ -102,6 +169,21 @@ function providerError(error: { name?: string; message: string }) {
       "application_error",
     ].includes(code),
   );
+}
+
+async function lookupResendDomain(resend: Resend, domainName: string) {
+  return findResendDomainByName(async (options) => {
+    const listed = await resend.domains.list(options);
+    if (listed.error) throw providerError(listed.error);
+    return {
+      domains: (listed.data?.data ?? []).map((domain) => ({
+        id: domain.id,
+        name: domain.name,
+        status: domain.status,
+      })),
+      hasMore: listed.data?.has_more ?? false,
+    };
+  }, domainName);
 }
 
 async function loadDomain(operation: Operation) {
@@ -153,19 +235,7 @@ async function runResendOperation(
     if (domain.resendDomainId) {
       return { externalResourceId: domain.resendDomainId };
     }
-    let after: string | undefined;
-    let existing: { id: string; status: string } | undefined;
-    for (let page = 0; page < 10 && !existing; page += 1) {
-      const listed = await resend.domains.list({ limit: 100, after });
-      if (listed.error) throw providerError(listed.error);
-      existing = listed.data?.data.find(
-        (candidate) => candidate.name.toLowerCase() === safeInput.domain,
-      );
-      const rows = listed.data?.data ?? [];
-      if (!listed.data?.has_more || rows.length === 0) break;
-      after = rows.at(-1)?.id;
-      if (!after) break;
-    }
+    const existing = await lookupResendDomain(resend, safeInput.domain);
     if (existing) {
       const capabilityUpdate = await resend.domains.update({
         id: existing.id,
@@ -230,18 +300,12 @@ async function runResendOperation(
     };
   }
 
-  if (!domain.resendDomainId) {
-    throw new CommunicationProvisioningError(
-      "RESEND_DOMAIN_ID_MISSING",
-      "The email domain has not been created in Resend.",
-      false,
-    );
-  }
   if (safeInput.kind === "RESEND_DOMAIN_VERIFY") {
-    const response = await resend.domains.verify(domain.resendDomainId);
+    const resendDomainId = requireResendDomainId(domain.resendDomainId);
+    const response = await resend.domains.verify(resendDomainId);
     if (response.error) throw providerError(response.error);
     return {
-      externalResourceId: domain.resendDomainId,
+      externalResourceId: resendDomainId,
       domainValues: {
         status: "VERIFYING" as const,
         lifecycleState: "AWAITING_DNS" as const,
@@ -252,7 +316,8 @@ async function runResendOperation(
     };
   }
   if (safeInput.kind === "RESEND_DOMAIN_REFRESH") {
-    const response = await resend.domains.get(domain.resendDomainId);
+    const resendDomainId = requireResendDomainId(domain.resendDomainId);
+    const response = await resend.domains.get(resendDomainId);
     if (response.error) throw providerError(response.error);
     const status =
       response.data?.status === "verified"
@@ -263,7 +328,7 @@ async function runResendOperation(
             ? "FAILED"
             : "VERIFYING";
     return {
-      externalResourceId: domain.resendDomainId,
+      externalResourceId: resendDomainId,
       domainValues: {
         status,
         lifecycleState:
@@ -275,7 +340,8 @@ async function runResendOperation(
         dnsRecords: resendDnsRecordsSchema.parse(
           response.data?.records ?? domain.dnsRecords ?? [],
         ),
-        verifiedAt: status === "VERIFIED" ? new Date() : null,
+        verifiedAt:
+          status === "VERIFIED" ? (domain.verifiedAt ?? new Date()) : null,
         verificationStaleAt: null,
         lastCheckedAt: new Date(),
         lastErrorCode:
@@ -290,24 +356,28 @@ async function runResendOperation(
     };
   }
   if (safeInput.kind === "RESEND_DOMAIN_DELETE") {
-    const response = await resend.domains.remove(domain.resendDomainId);
-    if (response.error) throw providerError(response.error);
+    const existing = await lookupResendDomain(resend, domain.domain);
+    if (existing) {
+      const response = await resend.domains.remove(existing.id);
+      if (response.error) throw providerError(response.error);
+    }
     return {
-      externalResourceId: domain.resendDomainId,
-      domainValues: {
-        status: "FAILED" as const,
-        lifecycleState: "RELEASED" as const,
-        isDisabled: true,
-        isDefault: false,
-        removedAt: new Date(),
-        lastErrorCode: null,
-        lastErrorMessage: null,
-      },
+      externalResourceId: existing?.id ?? domain.resendDomainId,
+      deleteDomainAfterSuccess: true,
     };
   }
   throw new CommunicationProvisioningError(
     "OPERATION_INPUT_INVALID",
     "The provisioning input does not match a Resend domain operation.",
+    false,
+  );
+}
+
+function requireResendDomainId(value: string | null): string {
+  if (value) return value;
+  throw new CommunicationProvisioningError(
+    "RESEND_DOMAIN_ID_MISSING",
+    "The email domain has not been created in Resend.",
     false,
   );
 }
@@ -390,10 +460,7 @@ export async function processCommunicationProvisioningOperation(
         .from(communicationProvisioningOperation)
         .where(
           and(
-            eq(
-              communicationProvisioningOperation.id,
-              claimed.operation.id,
-            ),
+            eq(communicationProvisioningOperation.id, claimed.operation.id),
             eq(
               communicationProvisioningOperation.claimToken,
               claimed.claimToken,
@@ -405,30 +472,61 @@ export async function processCommunicationProvisioningOperation(
         .for("update");
       if (!ownedOperation) return;
       if (claimed.operation.emailDomainId && result.domainValues) {
-        await tx
-          .update(emailDomain)
-          .set({ ...result.domainValues, updatedAt: new Date() })
+        const [currentDomain] = await tx
+          .select({
+            id: emailDomain.id,
+            organizationId: emailDomain.organizationId,
+            locationId: emailDomain.locationId,
+            domain: emailDomain.domain,
+            status: emailDomain.status,
+            isDisabled: emailDomain.isDisabled,
+            removedAt: emailDomain.removedAt,
+          })
+          .from(emailDomain)
           .where(
             and(
               eq(emailDomain.id, claimed.operation.emailDomainId),
               eq(emailDomain.organizationId, claimed.operation.organizationId),
             ),
-          );
-        if (result.domainValues.lifecycleState === "ACTIVE") {
-          await tx.execute(sql`
-            UPDATE "EmailDomain" AS target
-            SET "isDefault" = true, "updatedAt" = CURRENT_TIMESTAMP
-            WHERE target."id" = ${claimed.operation.emailDomainId}
-              AND target."organizationId" = ${claimed.operation.organizationId}
-              AND NOT EXISTS (
-                SELECT 1 FROM "EmailDomain" AS existing
-                WHERE existing."organizationId" = target."organizationId"
-                  AND existing."locationId" IS NOT DISTINCT FROM target."locationId"
-                  AND existing."isDefault" = true
-                  AND existing."isDisabled" = false
-                  AND existing."lifecycleState" = 'ACTIVE'
-              )
-          `);
+          )
+          .limit(1)
+          .for("update");
+        if (
+          currentDomain &&
+          !currentDomain.isDisabled &&
+          !currentDomain.removedAt
+        ) {
+          await tx
+            .update(emailDomain)
+            .set({ ...result.domainValues, updatedAt: new Date() })
+            .where(
+              and(
+                eq(emailDomain.id, currentDomain.id),
+                eq(emailDomain.organizationId, currentDomain.organizationId),
+              ),
+            );
+          if (
+            currentDomain.status !== "VERIFIED" &&
+            result.domainValues.status === "VERIFIED"
+          ) {
+            await insertEmailDomainVerifiedNotifications(tx, currentDomain);
+          }
+          if (result.domainValues.lifecycleState === "ACTIVE") {
+            await tx.execute(sql`
+              UPDATE "EmailDomain" AS target
+              SET "isDefault" = true, "updatedAt" = CURRENT_TIMESTAMP
+              WHERE target."id" = ${claimed.operation.emailDomainId}
+                AND target."organizationId" = ${claimed.operation.organizationId}
+                AND NOT EXISTS (
+                  SELECT 1 FROM "EmailDomain" AS existing
+                  WHERE existing."organizationId" = target."organizationId"
+                    AND existing."locationId" IS NOT DISTINCT FROM target."locationId"
+                    AND existing."isDefault" = true
+                    AND existing."isDisabled" = false
+                    AND existing."lifecycleState" = 'ACTIVE'
+                )
+            `);
+          }
         }
       }
       await tx
@@ -453,10 +551,59 @@ export async function processCommunicationProvisioningOperation(
             ),
           ),
         );
+      if (result.deleteDomainAfterSuccess && claimed.operation.emailDomainId) {
+        const domainId = claimed.operation.emailDomainId;
+        await tx
+          .update(campaign)
+          .set({ emailDomainId: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(campaign.organizationId, claimed.operation.organizationId),
+              eq(campaign.emailDomainId, domainId),
+            ),
+          );
+        await tx
+          .delete(emailSenderAddress)
+          .where(
+            and(
+              eq(
+                emailSenderAddress.organizationId,
+                claimed.operation.organizationId,
+              ),
+              eq(emailSenderAddress.emailDomainId, domainId),
+            ),
+          );
+        await tx
+          .update(communicationProvisioningOperation)
+          .set({ emailDomainId: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(
+                communicationProvisioningOperation.organizationId,
+                claimed.operation.organizationId,
+              ),
+              eq(communicationProvisioningOperation.emailDomainId, domainId),
+            ),
+          );
+        await tx
+          .delete(emailDomain)
+          .where(
+            and(
+              eq(emailDomain.id, domainId),
+              eq(emailDomain.organizationId, claimed.operation.organizationId),
+            ),
+          );
+      }
     });
+    if (claimed.operation.emailDomainId) {
+      await requestCommunicationProvisioning(claimed.operation.organizationId);
+    }
     return true;
   } catch (error) {
     await markFailed({ ...claimed, error });
+    if (claimed.operation.emailDomainId) {
+      await requestCommunicationProvisioning(claimed.operation.organizationId);
+    }
     return false;
   }
 }
@@ -494,6 +641,7 @@ export async function processDueCommunicationProvisioning(input?: {
         ),
       ),
     )
+    .orderBy(asc(communicationProvisioningOperation.createdAt))
     .limit(input?.limit ?? 20);
   let processed = 0;
   for (const operation of operations) {

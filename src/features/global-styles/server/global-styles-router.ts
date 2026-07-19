@@ -8,7 +8,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { and, count, desc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { form, funnel, globalStylePreset } from "@/db/schema";
+import { form, globalStylePreset } from "@/db/schema";
 import { createTRPCRouter } from "@/trpc/init";
 import {
   publicationManageProcedure,
@@ -207,18 +207,16 @@ export const globalStylesRouter = createTRPCRouter({
       }
 
       // Check if it's being used
-      const [funnelCount, formCount] = await Promise.all([
-        db.select({ count: count(funnel.id) }).from(funnel).where(eq(funnel.stylePresetId, input.id)),
-        db.select({ count: count(form.id) }).from(form).where(eq(form.stylePresetId, input.id)),
-      ]);
-
-      const usedFunnels = funnelCount[0]?.count ?? 0;
+      const formCount = await db
+        .select({ count: count(form.id) })
+        .from(form)
+        .where(eq(form.stylePresetId, input.id));
       const usedForms = formCount[0]?.count ?? 0;
 
-      if (usedFunnels > 0 || usedForms > 0) {
+      if (usedForms > 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: `Cannot delete preset. It's being used by ${usedFunnels} funnel(s) and ${usedForms} form(s).`,
+          message: `Cannot delete preset. It's being used by ${usedForms} form(s).`,
         });
       }
 

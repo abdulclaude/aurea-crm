@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm/relations";
-import { classType, serviceType, studioClass, instructor, organization, room, location, client, studioMembership, membershipPlan, workflows, user, credential, node, connection, execution, googleCalendarSubscription, telegramTriggerState, gmailSubscription, gmailTriggerState, webhook, classCredit, classWaitlist, checkIn, apps, aiLog, outlookSubscription, outlookTriggerState, oneDriveSubscription, oneDriveTriggerState, studioPayment, promoCode, instructorPayout, giftCard, studioProduct, studioPaymentLineItem, apiKey, widgetConfig, importJob, deviceToken, mobileSession, inboxConversation, inboxMessage, clientInstructor, externalChannelIntegration, clientHousehold, clientHouseholdMember, instructorSubstitutionRequest, dynamicPricingRule, studioPaymentPlan, videoOnDemandAsset, accessControlIntegration, performanceMetric, workoutProgram, soapNote, marketplaceListing, automationEvent, smsConfig, smsMessage, waiverTemplate, waiverSignature, clientDocument, roomLayout, classReminderConfig, retentionAutomation, introOffer, introOfferRedemption, churnRiskScore, referralProgram, referral, loyaltyProgram, loyaltyBalance, loyaltyTransaction, loyaltyReward, spot, studioBooking, studioBookingPayment, spotBooking, cancellationPolicy, spotReservation, account, activity, bankTransferSettings, clientAssignee, locationMember, deal, pipeline, pipelineStage, dealClient, dealAssignee, form, globalStylePreset, formStep, formField, formSubmission, publicFormSubmissionReceipt, externalFormSubmission, funnel, funnelAnalytics, funnelPage, funnelBlock, smartSection, smartSectionInstance, funnelBlockAnalytics, funnelBlockEvent, funnelBreakpoint, funnelPixelIntegration, invitation, invoice, invoiceLineItem, invoicePayment, invoiceReminder, member, notification, notificationPreference, qrCode, recurringInvoice, recurringInvoiceGeneration, rota, session, stripeConnection, stripeEvent, commerceOperation, commerceLedgerEntry, locationModule, userPresence, instructorDocument, timeLog, shiftSwapRequest, instructorAvailability, timeOffRequest, overtimeTracking, invoiceTemplate, payrollRun, instructorPayment, payrollRunInstructor, studioStaffMember, funnelSession, funnelWebVital, funnelEvent, adConversionDelivery, anonymousUserProfiles, adSpend, adPlatformCredential, providerAccount, providerOAuthGrant, emailDomain, emailTemplate, campaign, campaignRecipient, unsubscribeToken, booking, bookingEventType, calComCredential, calComWebhookReceipt, bookingAvailability, bookingHoliday, note, noteMention, task, savedAudience } from "./schema";
+import { classType, serviceType, studioClass, instructor, organization, room, location, client, studioMembership, membershipPlan, workflows, user, credential, node, connection, execution, googleCalendarSubscription, telegramTriggerState, gmailSubscription, gmailTriggerState, webhook, classCredit, classWaitlist, checkIn, apps, aiLog, outlookSubscription, outlookTriggerState, oneDriveSubscription, oneDriveTriggerState, studioPayment, promoCode, instructorPayout, giftCard, studioProduct, studioPaymentLineItem, apiKey, widgetConfig, importJob, deviceToken, mobileSession, inboxConversation, inboxMessage, clientInstructor, externalChannelIntegration, clientHousehold, clientHouseholdMember, instructorSubstitutionRequest, dynamicPricingRule, studioPaymentPlan, videoOnDemandAsset, accessControlIntegration, performanceMetric, workoutProgram, soapNote, marketplaceListing, automationEvent, smsConfig, smsMessage, waiverTemplate, waiverSignature, clientDocument, roomLayout, classReminderConfig, retentionAutomation, introOffer, introOfferRedemption, churnRiskScore, referralProgram, referral, loyaltyProgram, loyaltyBalance, loyaltyTransaction, loyaltyReward, spot, studioBooking, studioBookingPayment, spotBooking, cancellationPolicy, spotReservation, account, activity, bankTransferSettings, clientAssignee, locationMember, deal, pipeline, pipelineStage, dealClient, dealAssignee, form, globalStylePreset, formStep, formField, formSubmission, publicFormSubmissionReceipt, smartSection, smartSectionInstance, invitation, invoice, invoiceLineItem, invoicePayment, invoiceReminder, member, notification, notificationPreference, qrCode, recurringInvoice, recurringInvoiceGeneration, rota, session, stripeConnection, stripeEvent, commerceOperation, commerceLedgerEntry, locationModule, userPresence, instructorDocument, timeLog, shiftSwapRequest, instructorAvailability, timeOffRequest, overtimeTracking, invoiceTemplate, payrollRun, instructorPayment, payrollRunInstructor, studioStaffMember, adSpend, adPlatformCredential, providerAccount, providerOAuthGrant, emailDomain, emailSenderAddress, emailDesignProfile, emailTemplate, campaign, campaignRecipient, unsubscribeToken, booking, bookingEventType, calComCredential, calComWebhookReceipt, bookingAvailability, bookingHoliday, note, noteMention, task, savedAudience } from "./schema";
 
 export const studioClassRelations = relations(studioClass, ({ one, many }) => ({
   classType: one(classType, {
@@ -151,9 +151,8 @@ export const organizationRelations = relations(organization, ({many}) => ({
 	deals: many(deal),
 	pipelines: many(pipeline),
 	forms: many(form),
-	externalFormSubmissions: many(externalFormSubmission),
-	globalStylePresets: many(globalStylePreset),
 	smartSections: many(smartSection),
+	globalStylePresets: many(globalStylePreset),
 	invitations: many(invitation),
 	members: many(member),
 	qrCodes: many(qrCode),
@@ -171,11 +170,12 @@ export const organizationRelations = relations(organization, ({many}) => ({
 	instructorPayments: many(instructorPayment),
 	instructors: many(instructor),
 	studioStaffMembers: many(studioStaffMember),
-	funnels: many(funnel),
 	adSpends: many(adSpend),
 	adPlatformCredentials: many(adPlatformCredential),
 	clients: many(client),
 	emailDomains: many(emailDomain),
+	emailSenderAddresses: many(emailSenderAddress),
+	emailDesignProfiles: many(emailDesignProfile),
 	emailTemplates: many(emailTemplate),
 	campaigns: many(campaign),
 	bookings: many(booking),
@@ -255,9 +255,8 @@ export const locationRelations = relations(location, ({one, many}) => ({
 	deals: many(deal),
 	pipelines: many(pipeline),
 	forms: many(form),
-	externalFormSubmissions: many(externalFormSubmission),
-	globalStylePresets: many(globalStylePreset),
 	smartSections: many(smartSection),
+	globalStylePresets: many(globalStylePreset),
 	qrCodes: many(qrCode),
 	rotas: many(rota),
 	stripeConnections: many(stripeConnection),
@@ -269,13 +268,12 @@ export const locationRelations = relations(location, ({one, many}) => ({
 	instructorPayments: many(instructorPayment),
 	instructors: many(instructor),
 	studioStaffMembers: many(studioStaffMember),
-	funnels: many(funnel),
-	funnelEvents: many(funnelEvent),
-	funnelSessions: many(funnelSession),
 	adSpends: many(adSpend),
 	adPlatformCredentials: many(adPlatformCredential),
 	clients: many(client),
 	emailDomains: many(emailDomain),
+	emailSenderAddresses: many(emailSenderAddress),
+	emailDesignProfiles: many(emailDesignProfile),
 	emailTemplates: many(emailTemplate),
 	campaigns: many(campaign),
 	bookings: many(booking),
@@ -1589,7 +1587,6 @@ export const formRelations = relations(form, ({one, many}) => ({
 	}),
 	formSteps: many(formStep),
 	formSubmissions: many(formSubmission),
-	externalFormSubmissions: many(externalFormSubmission),
 	smartSectionInstances: many(smartSectionInstance),
 }));
 
@@ -1603,7 +1600,6 @@ export const globalStylePresetRelations = relations(globalStylePreset, ({one, ma
 		fields: [globalStylePreset.locationId],
 		references: [location.id]
 	}),
-	funnels: many(funnel),
 }));
 
 export const formStepRelations = relations(formStep, ({one, many}) => ({
@@ -1667,96 +1663,8 @@ export const publicFormSubmissionReceiptRelations = relations(publicFormSubmissi
 	}),
 }));
 
-export const externalFormSubmissionRelations = relations(externalFormSubmission, ({one}) => ({
-	form: one(form, {
-		fields: [externalFormSubmission.formId],
-		references: [form.id]
-	}),
-	funnel: one(funnel, {
-		fields: [externalFormSubmission.funnelId],
-		references: [funnel.id]
-	}),
-	location: one(location, {
-		fields: [externalFormSubmission.locationId],
-		references: [location.id]
-	}),
-	organization: one(organization, {
-		fields: [externalFormSubmission.organizationId],
-		references: [organization.id]
-	}),
-}));
-
-export const funnelAnalyticsRelations = relations(funnelAnalytics, ({one}) => ({
-	funnel: one(funnel, {
-		fields: [funnelAnalytics.funnelId],
-		references: [funnel.id]
-	}),
-	funnelPage: one(funnelPage, {
-		fields: [funnelAnalytics.pageId],
-		references: [funnelPage.id]
-	}),
-}));
-
-export const funnelRelations = relations(funnel, ({one, many}) => ({
-	funnelAnalytics: many(funnelAnalytics),
-	funnelPages: many(funnelPage),
-	funnelPixelIntegrations: many(funnelPixelIntegration),
-	organization: one(organization, {
-		fields: [funnel.organizationId],
-		references: [organization.id]
-	}),
-	globalStylePreset: one(globalStylePreset, {
-		fields: [funnel.stylePresetId],
-		references: [globalStylePreset.id]
-	}),
-	location: one(location, {
-		fields: [funnel.locationId],
-		references: [location.id]
-	}),
-	funnelEvents: many(funnelEvent),
-	funnelSessions: many(funnelSession),
-	externalFormSubmissions: many(externalFormSubmission),
-	adSpends: many(adSpend),
-}));
-
-export const funnelPageRelations = relations(funnelPage, ({one, many}) => ({
-	funnelAnalytics: many(funnelAnalytics),
-	funnel: one(funnel, {
-		fields: [funnelPage.funnelId],
-		references: [funnel.id]
-	}),
-	funnelBlocks: many(funnelBlock),
-	smartSectionInstances: many(smartSectionInstance),
-}));
-
-export const funnelBlockRelations = relations(funnelBlock, ({one, many}) => ({
-	funnelPage: one(funnelPage, {
-		fields: [funnelBlock.pageId],
-		references: [funnelPage.id]
-	}),
-	funnelBlock: one(funnelBlock, {
-		fields: [funnelBlock.parentBlockId],
-		references: [funnelBlock.id],
-		relationName: "funnelBlock_parentBlockId_funnelBlock_id"
-	}),
-	funnelBlocks: many(funnelBlock, {
-		relationName: "funnelBlock_parentBlockId_funnelBlock_id"
-	}),
-	smartSection: one(smartSection, {
-		fields: [funnelBlock.smartSectionId],
-		references: [smartSection.id]
-	}),
-	smartSectionInstance: one(smartSectionInstance, {
-		fields: [funnelBlock.smartSectionInstanceId],
-		references: [smartSectionInstance.id]
-	}),
-	funnelBlockAnalytics: many(funnelBlockAnalytics),
-	funnelBlockEvents: many(funnelBlockEvent),
-	funnelBreakpoints: many(funnelBreakpoint),
-}));
 
 export const smartSectionRelations = relations(smartSection, ({one, many}) => ({
-	funnelBlocks: many(funnelBlock),
 	organization: one(organization, {
 		fields: [smartSection.organizationId],
 		references: [organization.id]
@@ -1768,47 +1676,14 @@ export const smartSectionRelations = relations(smartSection, ({one, many}) => ({
 	smartSectionInstances: many(smartSectionInstance),
 }));
 
-export const smartSectionInstanceRelations = relations(smartSectionInstance, ({one, many}) => ({
-	funnelBlocks: many(funnelBlock),
+export const smartSectionInstanceRelations = relations(smartSectionInstance, ({one}) => ({
 	form: one(form, {
 		fields: [smartSectionInstance.formId],
 		references: [form.id]
 	}),
-	funnelPage: one(funnelPage, {
-		fields: [smartSectionInstance.funnelPageId],
-		references: [funnelPage.id]
-	}),
 	smartSection: one(smartSection, {
 		fields: [smartSectionInstance.sectionId],
 		references: [smartSection.id]
-	}),
-}));
-
-export const funnelBlockAnalyticsRelations = relations(funnelBlockAnalytics, ({one}) => ({
-	funnelBlock: one(funnelBlock, {
-		fields: [funnelBlockAnalytics.blockId],
-		references: [funnelBlock.id]
-	}),
-}));
-
-export const funnelBlockEventRelations = relations(funnelBlockEvent, ({one}) => ({
-	funnelBlock: one(funnelBlock, {
-		fields: [funnelBlockEvent.blockId],
-		references: [funnelBlock.id]
-	}),
-}));
-
-export const funnelBreakpointRelations = relations(funnelBreakpoint, ({one}) => ({
-	funnelBlock: one(funnelBlock, {
-		fields: [funnelBreakpoint.blockId],
-		references: [funnelBlock.id]
-	}),
-}));
-
-export const funnelPixelIntegrationRelations = relations(funnelPixelIntegration, ({one}) => ({
-	funnel: one(funnel, {
-		fields: [funnelPixelIntegration.funnelId],
-		references: [funnel.id]
 	}),
 }));
 
@@ -2164,77 +2039,7 @@ export const payrollRunInstructorRelations = relations(payrollRunInstructor, ({o
 	}),
 }));
 
-export const funnelWebVitalRelations = relations(funnelWebVital, ({one}) => ({
-	funnelSession: one(funnelSession, {
-		fields: [funnelWebVital.sessionId],
-		references: [funnelSession.sessionId]
-	}),
-}));
-
-export const funnelSessionRelations = relations(funnelSession, ({one, many}) => ({
-	funnelWebVitals: many(funnelWebVital),
-	funnel: one(funnel, {
-		fields: [funnelSession.funnelId],
-		references: [funnel.id]
-	}),
-	funnelSession: one(funnelSession, {
-		fields: [funnelSession.linkedSessionId],
-		references: [funnelSession.id],
-		relationName: "funnelSession_linkedSessionId_funnelSession_id"
-	}),
-	funnelSessions: many(funnelSession, {
-		relationName: "funnelSession_linkedSessionId_funnelSession_id"
-	}),
-	anonymousUserProfile: one(anonymousUserProfiles, {
-		fields: [funnelSession.profileId],
-		references: [anonymousUserProfiles.id]
-	}),
-	location: one(location, {
-		fields: [funnelSession.locationId],
-		references: [location.id]
-	}),
-}));
-
-export const funnelEventRelations = relations(funnelEvent, ({one, many}) => ({
-	funnel: one(funnel, {
-		fields: [funnelEvent.funnelId],
-		references: [funnel.id]
-	}),
-	location: one(location, {
-		fields: [funnelEvent.locationId],
-		references: [location.id]
-	}),
-	adConversionDeliveries: many(adConversionDelivery),
-}));
-
-export const adConversionDeliveryRelations = relations(adConversionDelivery, ({one}) => ({
-	funnelEvent: one(funnelEvent, {
-		fields: [adConversionDelivery.eventId],
-		references: [funnelEvent.eventId],
-	}),
-	organization: one(organization, {
-		fields: [adConversionDelivery.organizationId],
-		references: [organization.id],
-	}),
-	location: one(location, {
-		fields: [adConversionDelivery.locationId],
-		references: [location.id],
-	}),
-	providerAccount: one(providerAccount, {
-		fields: [adConversionDelivery.providerAccountId],
-		references: [providerAccount.id],
-	}),
-}));
-
-export const anonymousUserProfilesRelations = relations(anonymousUserProfiles, ({many}) => ({
-	funnelSessions: many(funnelSession),
-}));
-
 export const adSpendRelations = relations(adSpend, ({one}) => ({
-	funnel: one(funnel, {
-		fields: [adSpend.funnelId],
-		references: [funnel.id]
-	}),
 	organization: one(organization, {
 		fields: [adSpend.organizationId],
 		references: [organization.id]
@@ -2273,7 +2078,6 @@ export const providerAccountRelations = relations(providerAccount, ({one, many})
 	gmailSubscriptions: many(gmailSubscription),
 	outlookSubscriptions: many(outlookSubscription),
 	oneDriveSubscriptions: many(oneDriveSubscription),
-	adConversionDeliveries: many(adConversionDelivery),
 	emailDomains: many(emailDomain),
 	smsConfigs: many(smsConfig),
 	nodes: many(node),
@@ -2308,7 +2112,42 @@ export const emailDomainRelations = relations(emailDomain, ({one, many}) => ({
 		fields: [emailDomain.providerAccountId],
 		references: [providerAccount.id]
 	}),
+	senderAddresses: many(emailSenderAddress),
 	campaigns: many(campaign),
+}));
+
+export const emailSenderAddressRelations = relations(emailSenderAddress, ({one}) => ({
+	organization: one(organization, {
+		fields: [emailSenderAddress.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [emailSenderAddress.locationId],
+		references: [location.id]
+	}),
+	emailDomain: one(emailDomain, {
+		fields: [emailSenderAddress.emailDomainId],
+		references: [emailDomain.id]
+	}),
+	createdBy: one(user, {
+		fields: [emailSenderAddress.createdByUserId],
+		references: [user.id]
+	}),
+}));
+
+export const emailDesignProfileRelations = relations(emailDesignProfile, ({one}) => ({
+	organization: one(organization, {
+		fields: [emailDesignProfile.organizationId],
+		references: [organization.id]
+	}),
+	location: one(location, {
+		fields: [emailDesignProfile.locationId],
+		references: [location.id]
+	}),
+	updatedBy: one(user, {
+		fields: [emailDesignProfile.updatedByUserId],
+		references: [user.id]
+	}),
 }));
 
 export const emailTemplateRelations = relations(emailTemplate, ({one, many}) => ({

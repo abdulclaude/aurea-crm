@@ -61,7 +61,7 @@ Sources reviewed:
 
 - [Mindbody fitness software](https://www.mindbodyonline.com/business/fitness) and [Mindbody scheduling](https://www.mindbodyonline.com/en-gb/business/scheduling).
 - [Arketa platform overview](https://help.arketa.com/getting-started/welcome), [membership and loyalty](https://www.arketa.com/features/membership-loyalty), [AI assistant](https://www.arketa.com/features/arketa-ai), [branded mobile app](https://help.arketa.com/website-app/app/overview), and [on-demand video](https://help.arketa.com/on-demand/overview).
-- [Momence studio software](https://momence.com/studio), [Momence funnels](https://help.momence.com/en/articles/9764461-funnels), and [Momence sequence FAQ](https://help.momence.com/en/articles/12030801-sequences-faq-s).
+- [Momence studio software](https://momence.com/studio) and [Momence sequence FAQ](https://help.momence.com/en/articles/12030801-sequences-faq-s).
 - [Mariana Tek fitness studio software](https://www.marianatek.com/fitness-studio-software/).
 - [Walla run your studio](https://www.hellowalla.com/solutions/manage), [studio management](https://www.hellowalla.com/features/studio-management), and [multi-location](https://www.hellowalla.com/features/multi-location).
 - [Glofox fitness management](https://www.glofox.com/fitness-management-software-revenue-2049/) and [Glofox gym management](https://www.glofox.com/business-types/gym-management-software/).
@@ -77,7 +77,7 @@ Competitive table stakes:
 - Room, equipment, reformer, mat, bike, and spot layouts for boutique studios.
 - Instructor management, permissions, availability, substitutions, time logs, payroll, and instructor app/business app workflows.
 - Marketing automation through email, SMS, push, forms, ads, lead capture, retargeting, and win-back campaigns.
-- Lead-to-intro-to-member funnels, intro-offer conversion reporting, referral funnels, renewal funnels, and inactive-member win-back funnels.
+- Lead-to-intro-to-member journeys, intro-offer conversion reporting, referrals, renewals, and inactive-member win-back journeys.
 - On-demand video library with categories, collections, rentals, membership-gated access, and branded app access.
 - Multi-location dashboards with location-level permissions, plan rules, reporting, and bank/payment views.
 - Marketplace/discovery and partner channels such as Mindbody app, Reserve with Google, ClassPass, Gympass/Wellhub, Google reviews, Meta lead ads, and Google/Meta conversion tracking.
@@ -87,14 +87,14 @@ Competitor-specific implications:
 
 - Mindbody sets the breadth baseline: scheduling, booking, payments, marketing, staff management, reporting, business app, branded app, self-check-in, and marketplace discovery. Aurea needs comparable breadth, but should avoid feeling like a generic all-industry suite.
 - Arketa sets the modern boutique benchmark: beautiful booking, branded website/app experiences, on-demand content, referrals, loyalty, intro offers, marketing automations, conversion tracking, and AI-assisted client messaging. Aurea should match these flows before over-investing in generic CRM depth.
-- Momence is a direct benchmark for funnels and sequences. Its funnel model explicitly tracks lead -> intro purchase -> first booking -> membership purchase -> next booking, plus win-back, referral, membership lead conversion, and renewal funnels. Aurea's automation event table and conversion reporting should be shaped around these journeys.
+- Momence is a direct benchmark for lifecycle sequences. Its journey model explicitly tracks lead -> intro purchase -> first booking -> membership purchase -> next booking, plus win-back, referral, membership lead conversion, and renewal paths. Aurea's automation event table and conversion reporting should be shaped around these journeys.
 - Mariana Tek is the strongest benchmark for boutique in-studio experience: pick-a-spot, book-a-guest, spot swapping, self check-in, automated no-show/late-cancel fees, app-driven upsells, and real-time performance reporting. Aurea's room visualizer and class detail roster should evolve toward this level of operational polish.
 - Walla reinforces the product direction away from generic CRM: front-desk clarity, automated sub management, expiring-plan and failed-payment visibility, class capacity rates, multi-location permissions, plan gain/loss reporting, branded app, self check-in, and real-time performance insight.
 - Glofox and WellnessLiving reinforce the need for a branded member app, member self-service, automated billing, rewards, marketing automation, reporting, access control, and a clean app/web portal experience.
 
 Competitive differentiator for Aurea:
 
-- Studio-native automation attribution should be the wedge. Competitors offer automations and funnels, but Aurea should make every automation measurable: sent, opened/clicked where available, booked, checked in, intro redeemed, membership purchased, retained, churn risk reduced, revenue generated, and member lifetime value affected.
+- Studio-native automation attribution should be the wedge. Competitors offer lifecycle automations, but Aurea should make every automation measurable: sent, opened/clicked where available, booked, checked in, intro redeemed, membership purchased, retained, churn risk reduced, revenue generated, and member lifetime value affected.
 - The workflow builder should become a guided studio automation system rather than a blank generic node editor. Users should start from proven templates, then customize conditions and actions.
 - The room/spot visualizer can become a differentiator if it accurately models mats, reformers, bikes, strength stations, capacity, spot booking, and studio-like layouts.
 - The product should keep studio owners in their own brand, similar to Arketa/Mariana Tek/Walla, rather than pushing members into an Aurea-branded marketplace unless marketplace/discovery is intentionally added later.
@@ -166,7 +166,7 @@ Marketing and retention:
 - Loyalty programs, rewards, balances, and transactions.
 - Churn risk dashboard.
 - Retention automations including birthday logic.
-- Funnel builder and form builder.
+- Form builder.
 
 Automation:
 
@@ -183,7 +183,6 @@ Reporting:
 - Reports route with visual charts and revenue forecast.
 - Revenue route.
 - Churn risk route.
-- Funnel analytics subtree.
 
 Settings and administration:
 
@@ -197,10 +196,10 @@ Settings and administration:
 
 Public and API surfaces:
 
-- Public landing/schedule/funnel/invoice routes.
+- Public landing, schedule, form, and invoice routes.
 - Embed schedule.
 - API v1 routes for classes, bookings, instructors, members, and memberships.
-- Webhook routes for Inngest, Stripe, Cal.com, Google, Gmail, Outlook, OneDrive, Resend, Telegram, tracking, and unsubscribe.
+- Webhook routes for Inngest, Stripe, Cal.com, Google, Gmail, Outlook, OneDrive, Resend, Telegram, and unsubscribe.
 
 ## 6. Product Requirements
 
@@ -262,7 +261,7 @@ Required member data:
 - Waiver status.
 - Payment status.
 - Automation events and workflow touches.
-- Funnel position: lead captured, intro purchased, first class booked, first class attended, membership purchased, next class booked, inactive/win-back.
+- Lifecycle position: lead captured, intro purchased, first class booked, first class attended, membership purchased, next class booked, inactive/win-back.
 
 ### 6.3 Scheduling and Attendance
 
@@ -514,7 +513,7 @@ QA:
 
 Relationship:
 
-- Launchpad is the setup funnel for `/studio/rooms`, `/studio/class-types`, `/instructors`, `/studio/memberships`, and `/studio/classes`.
+- Launchpad is the setup flow for `/studio/rooms`, `/studio/class-types`, `/instructors`, `/studio/memberships`, and `/studio/classes`.
 
 ### Studio Schedule and Class Operations
 
@@ -650,13 +649,9 @@ Routes:
 - `/referrals`
 - `/loyalty`
 - `/churn`
-- `/funnels`
-- `/funnels/[funnelId]/editor`
 - `/builder/forms`
 - `/builder/forms/[id]/editor`
 - `/builder/forms/[id]/submissions`
-- `/builder/library`
-- `/builder/library/[id]`
 
 QA:
 
@@ -665,7 +660,7 @@ QA:
 - Create intro offers and redeem them for leads/members.
 - Create referral and loyalty programs; verify rewards, balances, and transactions.
 - Trigger churn score calculations and confirm churn dashboard recommendations.
-- Build a form/funnel, publish it, submit it, and confirm the lead/contact is created with source and acquisition stage.
+- Build a form, publish it, submit it, and confirm the lead/contact is created with source and acquisition stage.
 - Confirm all growth routes talk about members, leads, studios, and offers, not clients/agencies.
 
 Relationship:
@@ -705,32 +700,17 @@ Routes:
 - `/reports`
 - `/revenue`
 - `/churn`
-- `/funnels/[funnelId]/analytics`
-- `/funnels/[funnelId]/analytics/ads`
-- `/funnels/[funnelId]/analytics/devices`
-- `/funnels/[funnelId]/analytics/events`
-- `/funnels/[funnelId]/analytics/funnel`
-- `/funnels/[funnelId]/analytics/geography`
-- `/funnels/[funnelId]/analytics/performance`
-- `/funnels/[funnelId]/analytics/realtime`
-- `/funnels/[funnelId]/analytics/sessions`
-- `/funnels/[funnelId]/analytics/sources`
-- `/funnels/[funnelId]/analytics/utm`
-- `/funnels/[funnelId]/analytics/visitors`
-- `/funnels/[funnelId]/analytics/visitors/[anonymousId]`
-- `/funnels/[funnelId]/analytics/web-vitals`
 
 QA:
 
 - Verify each dashboard/report chart has seeded and empty-state behavior.
 - Compare dashboard totals against underlying data tables: classes, check-ins, memberships, and payments.
 - Confirm revenue forecast uses active memberships and renewal dates, not only historical payments.
-- Confirm funnel analytics are clearly separated from studio reporting unless they are being used for acquisition funnels.
 - Confirm analytics copy does not mention agency vs client behavior.
 
 Relationship:
 
-- Reporting pulls from the operational records created across classes, members, payments, campaigns, funnels, automation events, and check-ins.
+- Reporting pulls from the operational records created across classes, members, payments, campaigns, automation events, and check-ins.
 
 ### Settings
 
@@ -776,8 +756,6 @@ Routes:
 - `/schedule/[slug]`
 - `/member-portal/[token]`
 - `/embed/schedule`
-- `/preview/f/[funnelId]/[slug]`
-- `/f/[funnelId]/[slug]`
 - `/[slug]`
 - `/unsubscribe`
 - `/api/v1/classes`
@@ -791,7 +769,7 @@ QA:
 - Open public schedule by studio slug and confirm availability matches internal schedule.
 - Confirm raw widget IDs and organization-only legacy embed inputs fail closed.
 - Confirm unsupported widget types do not show schedule accidentally.
-- Submit a public funnel/form and confirm contact creation, source, acquisition stage, and conversion event.
+- Submit a public form and confirm contact creation, source, acquisition stage, and conversion event.
 - Use API keys to fetch classes, members, instructors, bookings, and memberships; verify scopes are enforced.
 - Confirm public pages never expose internal IDs or admin-only language beyond what is necessary.
 
@@ -814,7 +792,6 @@ Remove or hide:
 Keep but rename/reframe:
 
 - `/acquisition`: rename navigation from Client acquisition to Member acquisition.
-- `/funnels`: keep as acquisition landing pages and conversion funnels, not generic web funnels.
 - `/builder/forms`: keep as lead capture and member forms.
 - `/campaigns`: keep as member campaigns.
 - `/invoices`: keep if studio billing/invoicing is a real workflow.
@@ -990,7 +967,7 @@ Operations:
 ## 15. Open Product Decisions
 
 - Should multi-location management remain? If yes, the route should be `/locations`, not `/clients`.
-- Should deals/pipelines survive as acquisition opportunities, or should acquisition stages on `Contact` be the only sales funnel?
+- Should deals/pipelines survive as acquisition opportunities, or should acquisition stages on `Contact` be the only sales process?
 - Should Cal.com/private appointment bookings remain? If yes, they need studio wording and a clear difference from class bookings.
 - Should rotas remain as instructor shift scheduling, or should all schedules live under `/studio/schedule` plus instructor-specific tabs?
 - Should requests include time-off requests, or should `/studio/substitutions` be the only coverage workflow?
@@ -1009,7 +986,7 @@ Phase 1: Studio OS parity.
 
 Phase 2: Modern growth parity.
 
-- Build Momence-style funnels: lead-to-customer, class intro, appointment intro, referral, win-back, membership lead conversion, and membership renewal.
+- Build Momence-style lifecycle journeys: lead-to-customer, class intro, appointment intro, referral, win-back, membership lead conversion, and membership renewal.
 - Build Arketa-style automations around intro offers, referrals, loyalty, no-shows, late cancels, birthdays, first class, and membership conversion.
 - Add Meta/Google conversion events, lead form ingestion, UTM tracking, and source-level revenue reporting.
 - Make automation conversion stats first-class in `/executions`, `/analytics`, and `/reports`.

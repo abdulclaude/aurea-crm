@@ -29,12 +29,13 @@ export function buildNodeContext(
 ): VariableItem[] {
   // Only expose nodes that execute on every path into the current node.
   const upstreamNodeIds = getGuaranteedUpstreamNodes(currentNodeId, edges);
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   // Build context object from upstream nodes
   const context: Record<string, any> = {};
 
   for (const nodeId of upstreamNodeIds) {
-    const node = nodes.find((n) => n.id === nodeId);
+    const node = nodesById.get(nodeId);
     if (!node) continue;
 
     const nodeData = node.data as any;
@@ -128,6 +129,13 @@ export function getGuaranteedUpstreamNodes(
 ): string[] {
   const memo = new Map<string, Set<string>>();
   const visiting = new Set<string>();
+  const predecessorsByNodeId = new Map<string, string[]>();
+
+  for (const edge of edges) {
+    const predecessors = predecessorsByNodeId.get(edge.target) ?? [];
+    predecessors.push(edge.source);
+    predecessorsByNodeId.set(edge.target, predecessors);
+  }
 
   const visit = (nodeId: string): Set<string> => {
     const cached = memo.get(nodeId);
@@ -135,9 +143,7 @@ export function getGuaranteedUpstreamNodes(
     if (visiting.has(nodeId)) return new Set();
     visiting.add(nodeId);
 
-    const predecessors = edges
-      .filter((edge) => edge.target === nodeId)
-      .map((edge) => edge.source);
+    const predecessors = predecessorsByNodeId.get(nodeId) ?? [];
     if (predecessors.length === 0) {
       visiting.delete(nodeId);
       const empty = new Set<string>();

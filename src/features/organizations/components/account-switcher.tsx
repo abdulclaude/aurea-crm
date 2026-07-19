@@ -84,7 +84,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="w-36 flex " asChild>
+      <DropdownMenuTrigger className="flex min-w-0 flex-1" asChild>
         <Button
           variant="ghost"
           className={cn(
@@ -92,7 +92,7 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
             className,
           )}
         >
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <Avatar className="size-6">
               <AvatarImage
                 src={currentAccountLogo}
@@ -104,13 +104,12 @@ export function AccountSwitcher({ className }: AccountSwitcherProps) {
               </AvatarFallback>
             </Avatar>
 
-            <span className="truncate text-[11px] font-medium tracking-tight">
-              {currentAccountName.slice(0, 14)}
-              {currentAccountName.length > 14 && "..."}
+            <span className="min-w-0 flex-1 truncate text-[11px] font-medium tracking-tight">
+              {currentAccountName}
             </span>
           </div>
 
-          <ChevronDownIcon className="size-3 opacity-50" />
+          <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
 

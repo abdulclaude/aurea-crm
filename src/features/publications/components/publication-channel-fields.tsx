@@ -29,40 +29,6 @@ export function PublicationChannelFields({
   config,
   onChange,
 }: Props): React.JSX.Element {
-  if (config.kind === "FUNNEL") {
-    return (
-      <div>
-        <PublicationSwitchField
-          id="publication-custom-code"
-          label="Allow custom code"
-          description="Permit scripts and custom HTML in the immutable public snapshot."
-          checked={config.allowCustomCode}
-          onCheckedChange={(allowCustomCode) =>
-            onChange({ ...config, allowCustomCode })
-          }
-        />
-        <div className="space-y-2 py-3">
-          <Label htmlFor="publication-analytics">Analytics policy</Label>
-          <Select
-            value={config.analytics}
-            onValueChange={(analytics: typeof config.analytics) =>
-              onChange({ ...config, analytics })
-            }
-          >
-            <SelectTrigger id="publication-analytics" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="DISABLED">Disabled</SelectItem>
-              <SelectItem value="CONSENTED">After consent</SelectItem>
-              <SelectItem value="ALWAYS">Always</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-    );
-  }
-
   if (config.kind === "SCHEDULE") {
     return (
       <div>

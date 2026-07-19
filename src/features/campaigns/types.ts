@@ -78,6 +78,14 @@ export interface EmailDesign {
   linkColor?: string;
   logoUrl?: string;
   fontFamily?: string;
+  headingFontFamily?: string;
+  bodyFontFamily?: string;
+  headerTextColor?: string;
+  bodyTextColor?: string;
+  buttonColor?: string;
+  companyName?: string;
+  companyAddress?: string;
+  website?: string;
   footerText?: string;
   socialLinks?: {
     facebook?: string;
@@ -85,6 +93,7 @@ export interface EmailDesign {
     instagram?: string;
     linkedin?: string;
     youtube?: string;
+    pinterest?: string;
   };
 }
 

@@ -31,7 +31,6 @@ export type PublicationChannelConfig = z.infer<
 >;
 
 export const PUBLICATION_KINDS: PublicationKind[] = [
-  "FUNNEL",
   "SCHEDULE",
   "PRICING",
   "FORM",
@@ -40,7 +39,6 @@ export const PUBLICATION_KINDS: PublicationKind[] = [
 ];
 
 export const KIND_LABELS: Record<PublicationKind, string> = {
-  FUNNEL: "Funnel",
   SCHEDULE: "Schedule",
   PRICING: "Pricing",
   FORM: "Form",
@@ -88,16 +86,6 @@ export function createInputForSource(
     domainHost: null,
   };
   switch (source.kind) {
-    case "FUNNEL":
-      return {
-        ...base,
-        kind: source.kind,
-        channelConfig: {
-          kind: source.kind,
-          allowCustomCode: false,
-          analytics: "CONSENTED",
-        },
-      };
     case "SCHEDULE":
       return {
         ...base,

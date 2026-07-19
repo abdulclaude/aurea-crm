@@ -28,6 +28,14 @@ export const useSuspenseAppProviders = () => {
   return useSuspenseQuery(trpc.apps.getConnectedProviders.queryOptions());
 };
 
+export const useAppProviders = (enabled = true) => {
+  const trpc = useTRPC();
+  return useQuery({
+    ...trpc.apps.getConnectedProviders.queryOptions(),
+    enabled,
+  });
+};
+
 export const useAppsQuery = () => {
   const trpc = useTRPC();
   return useQuery(trpc.apps.getMany.queryOptions());

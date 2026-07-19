@@ -17,7 +17,7 @@ export type MemberLifecycleView =
   | "guest-passes"
   | "inbox";
 
-export const funnelSteps = [
+export const lifecycleSteps = [
   ["leadCaptured", "Lead captured"],
   ["introPurchased", "Intro purchased"],
   ["firstClassBooked", "First class booked"],
